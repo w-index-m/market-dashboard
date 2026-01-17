@@ -1,17 +1,18 @@
-# --- •K—vƒ‰ƒCƒuƒ‰ƒŠiColab—pj---
+# --- å¿…è¦ãƒ©ã‚¤ãƒ–ãƒ©ãƒªï¼ˆColabç”¨ï¼‰---
+# -*- coding: utf-8 -*-
 !pip -q install yfinance pandas matplotlib pytz japanize-matplotlib
 
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 import pytz
-import japanize_matplotlib  # “ú–{ŒêƒtƒHƒ“ƒg“K—piGlyphŒx–h~j
+import japanize_matplotlib  # æ—¥æœ¬èªãƒ•ã‚©ãƒ³ãƒˆé©ç”¨ï¼ˆGlyphè­¦å‘Šé˜²æ­¢ï¼‰
 import logging
 import warnings
 from datetime import datetime, timedelta, timezone
 
 # =========================================================
-# ‚¤‚é‚³‚¢•\¦‚ğ—}~
+# ã†ã‚‹ã•ã„è¡¨ç¤ºã‚’æŠ‘æ­¢
 # =========================================================
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
@@ -19,28 +20,28 @@ warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # =========================================================
-# İ’è
+# è¨­å®š
 # =========================================================
 LOOKBACK_DAYS = 220
 PLOT_LAST_N = 60
 
-# 2—ñƒŒƒCƒAƒEƒgiw”—pj
+# 2åˆ—ãƒ¬ã‚¤ã‚¢ã‚¦ãƒˆï¼ˆæŒ‡æ•°ç”¨ï¼‰
 DASH_FIGSIZE_W = 12
 ROW_HEIGHT = 2.9
 
-# X²“ú•tƒtƒHƒ“ƒgid‚È‚è‘Îôj
+# Xè»¸æ—¥ä»˜ãƒ•ã‚©ãƒ³ãƒˆï¼ˆé‡ãªã‚Šå¯¾ç­–ï¼‰
 X_LABELSIZE = 7
 
 AUTO_ADJUST = False
 
-# “ú–{‚¾‚¯Šñ‚è•t‚«Šî€iæˆøŠÔ’†‚ÉŒÀ‚éj
+# æ—¥æœ¬ã ã‘å¯„ã‚Šä»˜ãåŸºæº–ï¼ˆå–å¼•æ™‚é–“ä¸­ã«é™ã‚‹ï¼‰
 JAPAN_OPEN_BASIS_ONLY = True
 
 JST = pytz.timezone("Asia/Tokyo")
 
 # =========================================================
-# JPXæˆøŠÔiŠÈˆÕj
-# ‘Oê: 09:00-11:30 / Œãê: 12:30-15:30 (JST)
+# JPXå–å¼•æ™‚é–“ï¼ˆç°¡æ˜“ï¼‰
+# å‰å ´: 09:00-11:30 / å¾Œå ´: 12:30-15:30 (JST)
 # =========================================================
 def is_jpx_session_open(now_jst: datetime) -> bool:
     if now_jst.weekday() >= 5:
@@ -51,53 +52,53 @@ def is_jpx_session_open(now_jst: datetime) -> bool:
     return morning or afternoon
 
 # =========================================================
-# •\¦ƒOƒ‹[ƒviF•ª‚¯j
+# è¡¨ç¤ºã‚°ãƒ«ãƒ¼ãƒ—ï¼ˆè‰²åˆ†ã‘ï¼‰
 # =========================================================
 REGION_STYLE = {
-    "JP":   {"edge": "#1f77b4", "title_bg": "#dbe9ff", "label": "“ú–{"},
-    "US":   {"edge": "#ff7f0e", "title_bg": "#ffe7cc", "label": "•Ä‘"},
-    "EU":   {"edge": "#2ca02c", "title_bg": "#ddf5dd", "label": "‰¢B"},
-    "ASIA": {"edge": "#d62728", "title_bg": "#ffd9d9", "label": "ƒAƒWƒA"},
-    "FX":   {"edge": "#9467bd", "title_bg": "#efe1ff", "label": "ˆ×‘Ö"},
+    "JP":   {"edge": "#1f77b4", "title_bg": "#dbe9ff", "label": "æ—¥æœ¬"},
+    "US":   {"edge": "#ff7f0e", "title_bg": "#ffe7cc", "label": "ç±³å›½"},
+    "EU":   {"edge": "#2ca02c", "title_bg": "#ddf5dd", "label": "æ¬§å·"},
+    "ASIA": {"edge": "#d62728", "title_bg": "#ffd9d9", "label": "ã‚¢ã‚¸ã‚¢"},
+    "FX":   {"edge": "#9467bd", "title_bg": "#efe1ff", "label": "ç‚ºæ›¿"},
 }
 
 # =========================================================
-# æ“¾‘ÎÛ
-#  - “úŒoCFD/æ•¨ƒ~ƒj‚ÍŠÂ‹«·‚ª‘å‚«‚¢‚Ì‚ÅŒó•â•¡”Bæ‚ê‚½‚çÌ—pAæ‚ê‚È‚¯‚ê‚Î–Ù‚Á‚ÄƒXƒLƒbƒvB
-#  - CAC100w’è¨æ“¾ˆÀ’è‚Ì‚½‚ßCAC40‚Å‘ã‘Öi–¼Ì‚É–¾‹Lj
-#  - ƒOƒ[ƒX250‚Íw”ƒeƒBƒbƒJ[‚ªˆÀ’è‚µ‚È‚¢‚½‚ßETF(2516.T)‚Å‘ã‘Ö
+# å–å¾—å¯¾è±¡
+#  - æ—¥çµŒCFD/å…ˆç‰©ãƒŸãƒ‹ã¯ç’°å¢ƒå·®ãŒå¤§ãã„ã®ã§å€™è£œè¤‡æ•°ã€‚å–ã‚ŒãŸã‚‰æ¡ç”¨ã€å–ã‚Œãªã‘ã‚Œã°é»™ã£ã¦ã‚¹ã‚­ãƒƒãƒ—ã€‚
+#  - CAC100æŒ‡å®šâ†’å–å¾—å®‰å®šã®ãŸã‚CAC40ã§ä»£æ›¿ï¼ˆåç§°ã«æ˜è¨˜ï¼‰
+#  - ã‚°ãƒ­ãƒ¼ã‚¹250ã¯æŒ‡æ•°ãƒ†ã‚£ãƒƒã‚«ãƒ¼ãŒå®‰å®šã—ãªã„ãŸã‚ETF(2516.T)ã§ä»£æ›¿
 # =========================================================
 TARGETS = [
-    # “ú–{
-    {"name": "“úŒo•½‹Ï", "region": "JP", "candidates": ["^N225"], "type": "INDEX"},
-    {"name": "“úŒo•½‹ÏCFD(Œó•â)", "region": "JP", "candidates": ["JPN225", "JP225", "^JP225"], "type": "INDEX"},
-    {"name": "“úŒo•½‹Ïæ•¨(ƒ~ƒjŠÜ‚ŞŒó•â)", "region": "JP", "candidates": ["MNI=F", "NIY=F", "NKD=F"], "type": "FUT"},
+    # æ—¥æœ¬
+    {"name": "æ—¥çµŒå¹³å‡", "region": "JP", "candidates": ["^N225"], "type": "INDEX"},
+    {"name": "æ—¥çµŒå¹³å‡CFD(å€™è£œ)", "region": "JP", "candidates": ["JPN225", "JP225", "^JP225"], "type": "INDEX"},
+    {"name": "æ—¥çµŒå¹³å‡å…ˆç‰©(ãƒŸãƒ‹å«ã‚€å€™è£œ)", "region": "JP", "candidates": ["MNI=F", "NIY=F", "NKD=F"], "type": "FUT"},
     {"name": "TOPIX", "region": "JP", "candidates": ["998405.T"], "type": "INDEX"},
-    {"name": "“ŒØƒOƒ[ƒX250(ETF‘ã‘Ö)", "region": "JP", "candidates": ["2516.T"], "type": "INDEX"},
+    {"name": "æ±è¨¼ã‚°ãƒ­ãƒ¼ã‚¹250(ETFä»£æ›¿)", "region": "JP", "candidates": ["2516.T"], "type": "INDEX"},
 
-    # •Ä‘
-    {"name": "ƒ_ƒE•½‹Ï", "region": "US", "candidates": ["^DJI"], "type": "INDEX"},
-    {"name": "NASDAQ‘‡", "region": "US", "candidates": ["^IXIC"], "type": "INDEX"},
+    # ç±³å›½
+    {"name": "ãƒ€ã‚¦å¹³å‡", "region": "US", "candidates": ["^DJI"], "type": "INDEX"},
+    {"name": "NASDAQç·åˆ", "region": "US", "candidates": ["^IXIC"], "type": "INDEX"},
     {"name": "S&P500", "region": "US", "candidates": ["^GSPC"], "type": "INDEX"},
-    {"name": "”¼“±‘Ìw”(SOX)", "region": "US", "candidates": ["^SOX"], "type": "INDEX"},
-    {"name": "NYSE FANG+w”", "region": "US", "candidates": ["^NYFANG"], "type": "INDEX"},
+    {"name": "åŠå°ä½“æŒ‡æ•°(SOX)", "region": "US", "candidates": ["^SOX"], "type": "INDEX"},
+    {"name": "NYSE FANG+æŒ‡æ•°", "region": "US", "candidates": ["^NYFANG"], "type": "INDEX"},
 
-    # ‰¢B
-    {"name": "‰pFTSE100", "region": "EU", "candidates": ["^FTSE"], "type": "INDEX"},
-    {"name": "“ÆDAX", "region": "EU", "candidates": ["^GDAXI"], "type": "INDEX"},
-    {"name": "•§CAC40(¦CAC100‘ã‘Ö)", "region": "EU", "candidates": ["^FCHI"], "type": "INDEX"},
+    # æ¬§å·
+    {"name": "è‹±FTSE100", "region": "EU", "candidates": ["^FTSE"], "type": "INDEX"},
+    {"name": "ç‹¬DAX", "region": "EU", "candidates": ["^GDAXI"], "type": "INDEX"},
+    {"name": "ä»CAC40(â€»CAC100ä»£æ›¿)", "region": "EU", "candidates": ["^FCHI"], "type": "INDEX"},
 
-    # ƒAƒWƒA
-    {"name": "`ƒnƒ“ƒZƒ“", "region": "ASIA", "candidates": ["^HSI"], "type": "INDEX"},
-    {"name": "’†‘ ãŠC‘‡", "region": "ASIA", "candidates": ["000001.SS"], "type": "INDEX"},
-    {"name": "ƒCƒ“ƒh NIFTY50", "region": "ASIA", "candidates": ["^NSEI"], "type": "INDEX"},
+    # ã‚¢ã‚¸ã‚¢
+    {"name": "é¦™æ¸¯ãƒãƒ³ã‚»ãƒ³", "region": "ASIA", "candidates": ["^HSI"], "type": "INDEX"},
+    {"name": "ä¸­å›½ ä¸Šæµ·ç·åˆ", "region": "ASIA", "candidates": ["000001.SS"], "type": "INDEX"},
+    {"name": "ã‚¤ãƒ³ãƒ‰ NIFTY50", "region": "ASIA", "candidates": ["^NSEI"], "type": "INDEX"},
 
-    # ˆ×‘Öi•Ê˜gj
-    {"name": "ƒhƒ‹‰~(USD/JPY)", "region": "FX", "candidates": ["USDJPY=X"], "type": "FX"},
+    # ç‚ºæ›¿ï¼ˆåˆ¥æ ï¼‰
+    {"name": "ãƒ‰ãƒ«å††(USD/JPY)", "region": "FX", "candidates": ["USDJPY=X"], "type": "FX"},
 ]
 
 # =========================================================
-# yfinanceæ“¾i—áŠO‚Íˆ¬‚è‚Â‚Ô‚µ‚Ä‹ó‚ğ•Ô‚·j
+# yfinanceå–å¾—ï¼ˆä¾‹å¤–ã¯æ¡ã‚Šã¤ã¶ã—ã¦ç©ºã‚’è¿”ã™ï¼‰
 # =========================================================
 def fetch_daily(symbol: str) -> pd.DataFrame:
     try:
@@ -161,9 +162,9 @@ def choose_symbol(candidates):
     return None, pd.DataFrame()
 
 # =========================================================
-# ŒvZ
-#  - “ú–{FæˆøŠÔ’†‚Ì‚İŠñ‚è•t‚«Šî€iOpen¨Nowj{‘O“ú”ä•¹‹L
-#  - ‚»‚Ì‘¼FŠî–{‚Í‘O“ú”äiPrevClose¨NowjBintradayæ‚ê‚½‚çNow‚ğÅV’l‚É‚·‚é’ö“xB
+# è¨ˆç®—
+#  - æ—¥æœ¬ï¼šå–å¼•æ™‚é–“ä¸­ã®ã¿å¯„ã‚Šä»˜ãåŸºæº–ï¼ˆOpenâ†’Nowï¼‰ï¼‹å‰æ—¥æ¯”ä½µè¨˜
+#  - ãã®ä»–ï¼šåŸºæœ¬ã¯å‰æ—¥æ¯”ï¼ˆPrevCloseâ†’Nowï¼‰ã€‚intradayå–ã‚ŒãŸã‚‰Nowã‚’æœ€æ–°å€¤ã«ã™ã‚‹ç¨‹åº¦ã€‚
 # =========================================================
 def compute_info(symbol: str, daily: pd.DataFrame, region: str):
     close = daily["Close"].dropna()
@@ -173,7 +174,7 @@ def compute_info(symbol: str, daily: pd.DataFrame, region: str):
     now_jst = datetime.now(JST)
     intra = fetch_intraday_1m(symbol)
 
-    # "Now" ‚ğì‚éiintraday‚ªæ‚ê‚ê‚ÎÅVCloseAƒ_ƒ‚È‚çquoteA‚³‚ç‚Éƒ_ƒ‚È‚çlast_closej
+    # "Now" ã‚’ä½œã‚‹ï¼ˆintradayãŒå–ã‚Œã‚Œã°æœ€æ–°Closeã€ãƒ€ãƒ¡ãªã‚‰quoteã€ã•ã‚‰ã«ãƒ€ãƒ¡ãªã‚‰last_closeï¼‰
     now_price = None
     if not intra.empty:
         try:
@@ -187,10 +188,10 @@ def compute_info(symbol: str, daily: pd.DataFrame, region: str):
     if now_price is None:
         now_price = last_close
 
-    # ƒ‚[ƒh”»’èiŒ©‚½–Ú—pj
+    # ãƒ¢ãƒ¼ãƒ‰åˆ¤å®šï¼ˆè¦‹ãŸç›®ç”¨ï¼‰
     mode = "LIVE" if (not intra.empty) else "CLOSE"
 
-    # “ú–{‚¾‚¯Šñ‚è•t‚«Šî€iæˆøŠÔ’†‚©‚Âintraday—L‚èj
+    # æ—¥æœ¬ã ã‘å¯„ã‚Šä»˜ãåŸºæº–ï¼ˆå–å¼•æ™‚é–“ä¸­ã‹ã¤intradayæœ‰ã‚Šï¼‰
     open_price = None
     pct_open = None
 
@@ -216,20 +217,20 @@ def compute_info(symbol: str, daily: pd.DataFrame, region: str):
     }
 
 # =========================================================
-# •`‰æi2—ñƒ_ƒbƒVƒ…ƒ{[ƒhj
-#  - ’nˆæ‚Å˜gü•ƒ^ƒCƒgƒ‹”wŒiF‚ğ•Ï‚¦‚é
+# æç”»ï¼ˆ2åˆ—ãƒ€ãƒƒã‚·ãƒ¥ãƒœãƒ¼ãƒ‰ï¼‰
+#  - åœ°åŸŸã§æ ç·šï¼†ã‚¿ã‚¤ãƒˆãƒ«èƒŒæ™¯è‰²ã‚’å¤‰ãˆã‚‹
 # =========================================================
 def style_axes(ax, region: str):
     st = REGION_STYLE.get(region, {})
     edge = st.get("edge", "#333333")
     title_bg = st.get("title_bg", "#f2f2f2")
 
-    # ˜gü
+    # æ ç·š
     for spine in ax.spines.values():
         spine.set_edgecolor(edge)
         spine.set_linewidth(2.0)
 
-    # ƒ^ƒCƒgƒ‹”wŒiibboxj
+    # ã‚¿ã‚¤ãƒˆãƒ«èƒŒæ™¯ï¼ˆbboxï¼‰
     return title_bg, edge
 
 def plot_dashboard(items, title):
@@ -238,7 +239,7 @@ def plot_dashboard(items, title):
       dict keys: name, symbol, region, daily, info_text
     """
     if not items:
-        print(f"{title}: •\¦‚Å‚«‚éƒf[ƒ^‚ª‚ ‚è‚Ü‚¹‚ñ")
+        print(f"{title}: è¡¨ç¤ºã§ãã‚‹ãƒ‡ãƒ¼ã‚¿ãŒã‚ã‚Šã¾ã›ã‚“")
         return
 
     n = len(items)
@@ -258,7 +259,7 @@ def plot_dashboard(items, title):
 
         ax.plot(close.index, close.values)
 
-        # î•ñƒ{ƒbƒNƒX
+        # æƒ…å ±ãƒœãƒƒã‚¯ã‚¹
         ax.text(
             0.98, 0.98, it["info_text"],
             transform=ax.transAxes,
@@ -267,7 +268,7 @@ def plot_dashboard(items, title):
             bbox=dict(boxstyle="round", alpha=0.85, pad=0.3)
         )
 
-        # ’nˆæ•ÊƒXƒ^ƒCƒ‹
+        # åœ°åŸŸåˆ¥ã‚¹ã‚¿ã‚¤ãƒ«
         title_bg, edge = style_axes(ax, it["region"])
 
         ax.set_title(f'{it["name"]} ({it["symbol"]})', fontsize=10,
@@ -276,13 +277,13 @@ def plot_dashboard(items, title):
         ax.set_xlabel("Date (JST)", fontsize=8)
         ax.set_ylabel("Price / Index", fontsize=8)
 
-        # š “ú•tƒtƒHƒ“ƒg¬‚³‚­id‚È‚è‘Îôj
+        # â˜… æ—¥ä»˜ãƒ•ã‚©ãƒ³ãƒˆå°ã•ãï¼ˆé‡ãªã‚Šå¯¾ç­–ï¼‰
         ax.tick_params(axis="x", labelsize=X_LABELSIZE)
 
         ax.grid(True)
         ax.margins(x=0.03)
 
-    # —]‚Á‚½˜g‚ğÁ‚·
+    # ä½™ã£ãŸæ ã‚’æ¶ˆã™
     for j in range(i + 1, len(axes)):
         axes[j].axis("off")
 
@@ -291,10 +292,10 @@ def plot_dashboard(items, title):
 
 def plot_fx_box(fx_item):
     """
-    ˆ×‘Ö‚ğ•Ê˜g‚Å‘å‚«‚ß‚É•\¦i1–‡‚¾‚¯j
+    ç‚ºæ›¿ã‚’åˆ¥æ ã§å¤§ãã‚ã«è¡¨ç¤ºï¼ˆ1æšã ã‘ï¼‰
     """
     if fx_item is None:
-        print("ˆ×‘Ö: •\¦‚Å‚«‚éƒf[ƒ^‚ª‚ ‚è‚Ü‚¹‚ñ")
+        print("ç‚ºæ›¿: è¡¨ç¤ºã§ãã‚‹ãƒ‡ãƒ¼ã‚¿ãŒã‚ã‚Šã¾ã›ã‚“")
         return
 
     daily = fx_item["daily"]
@@ -324,27 +325,27 @@ def plot_fx_box(fx_item):
     plt.show()
 
 # =========================================================
-# ÀsFæ“¾ ¨ ƒOƒ‹[ƒsƒ“ƒO ¨ •`‰æ
+# å®Ÿè¡Œï¼šå–å¾— â†’ ã‚°ãƒ«ãƒ¼ãƒ”ãƒ³ã‚° â†’ æç”»
 # =========================================================
 print(f"Run at (JST): {datetime.now(JST):%Y-%m-%d %H:%M:%S}")
 
 indices_items = []
 fx_item = None
 
-# ’nˆæ‡˜i“ú–{¨•Ä‘¨‰¢B¨ƒAƒWƒAj
+# åœ°åŸŸé †åºï¼ˆæ—¥æœ¬â†’ç±³å›½â†’æ¬§å·â†’ã‚¢ã‚¸ã‚¢ï¼‰
 region_order = {"JP": 0, "US": 1, "EU": 2, "ASIA": 3, "FX": 99}
 
 for t in TARGETS:
     name, region = t["name"], t["region"]
     sym, daily = choose_symbol(t["candidates"])
 
-    # æ‚ê‚È‚¢‚à‚Ì‚Í–Ù‚Á‚ÄƒXƒLƒbƒvi‰æ–Ê‚ğ‰˜‚³‚È‚¢j
+    # å–ã‚Œãªã„ã‚‚ã®ã¯é»™ã£ã¦ã‚¹ã‚­ãƒƒãƒ—ï¼ˆç”»é¢ã‚’æ±šã•ãªã„ï¼‰
     if sym is None or daily.empty:
         continue
 
     info = compute_info(sym, daily, region)
 
-    # •\¦ƒeƒLƒXƒgi“ú–{‚¾‚¯Šñ‚è•t‚«Šî€‚ªo‚éj
+    # è¡¨ç¤ºãƒ†ã‚­ã‚¹ãƒˆï¼ˆæ—¥æœ¬ã ã‘å¯„ã‚Šä»˜ãåŸºæº–ãŒå‡ºã‚‹ï¼‰
     lines = [f"Mode: {info['mode']}"]
     if (region == "JP") and (info["open"] is not None) and (info["chg_open_pct"] is not None):
         lines.append(f"Open: {info['open']:,.2f}")
@@ -372,12 +373,13 @@ for t in TARGETS:
     else:
         indices_items.append(item)
 
-# “ú–{¨•Ä‘¨‰¢B¨ƒAƒWƒA‚Ì‡‚É•À‚×‚éi“¯’nˆæ“à‚ÍTARGETS‡‚ğˆÛ‚µ‚½‚¢‚Ì‚Å stable sortj
+# æ—¥æœ¬â†’ç±³å›½â†’æ¬§å·â†’ã‚¢ã‚¸ã‚¢ã®é †ã«ä¸¦ã¹ã‚‹ï¼ˆåŒåœ°åŸŸå†…ã¯TARGETSé †ã‚’ç¶­æŒã—ãŸã„ã®ã§ stable sortï¼‰
 indices_items = sorted(indices_items, key=lambda x: x["order"])
 
-# ƒZƒNƒVƒ‡ƒ“ƒ^ƒCƒgƒ‹iF•ª‚¯‚Ì–}—á‚Á‚Û‚­j
+# ã‚»ã‚¯ã‚·ãƒ§ãƒ³ã‚¿ã‚¤ãƒˆãƒ«ï¼ˆè‰²åˆ†ã‘ã®å‡¡ä¾‹ã£ã½ãï¼‰
 legend = " / ".join([f'{REGION_STYLE[k]["label"]}' for k in ["JP","US","EU","ASIA"]])
-plot_dashboard(indices_items, f"Market Dashboardi{legend}j")
+plot_dashboard(indices_items, f"Market Dashboardï¼ˆ{legend}ï¼‰")
 
-# ˆ×‘Ö‚Í•Ê˜g
+# ç‚ºæ›¿ã¯åˆ¥æ 
+
 plot_fx_box(fx_item)
