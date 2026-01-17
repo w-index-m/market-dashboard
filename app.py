@@ -6,7 +6,6 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 import pytz
-import japanize_matplotlib  # 日本語フォント適用（Glyph警告防止）
 import logging
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -383,4 +382,5 @@ plot_dashboard(indices_items, f"Market Dashboard（{legend}）")
 # 為替は別枠
 
 plot_fx_box(fx_item)
+
 
