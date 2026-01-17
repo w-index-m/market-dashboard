@@ -9,6 +9,8 @@ import pytz
 import logging
 import warnings
 from datetime import datetime, timedelta, timezone
+import matplotlib
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
 
 # =========================================================
 # うるさい表示を抑止
@@ -382,5 +384,6 @@ plot_dashboard(indices_items, f"Market Dashboard（{legend}）")
 # 為替は別枠
 
 plot_fx_box(fx_item)
+
 
 
