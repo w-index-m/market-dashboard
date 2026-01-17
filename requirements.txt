@@ -3,4 +3,7 @@ yfinance
 pandas
 matplotlib
 pytz
+
 japanize-matplotlib
+import matplotlib
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
