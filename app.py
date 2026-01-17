@@ -1,6 +1,6 @@
 # --- 必要ライブラリ（Colab用）---
 # -*- coding: utf-8 -*-
-!pip -q install yfinance pandas matplotlib pytz japanize-matplotlib
+
 
 import yfinance as yf
 import pandas as pd
@@ -383,3 +383,4 @@ plot_dashboard(indices_items, f"Market Dashboard（{legend}）")
 # 為替は別枠
 
 plot_fx_box(fx_item)
+
