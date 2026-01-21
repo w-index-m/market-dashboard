@@ -12,31 +12,35 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import streamlit as st
-
-
 import os
 import matplotlib
 import matplotlib.font_manager as fm
 
 def setup_japanese_font():
-    # リポジトリ内のフォントを優先して使う
+    # リポジトリ同梱フォント（優先）
     candidates = [
         os.path.join("fonts", "NotoSansCJKjp-Regular.otf"),
+        os.path.join("fonts", "NotoSansJP-Regular.otf"),
         os.path.join("fonts", "IPAexGothic.ttf"),
         os.path.join("fonts", "ipaexg.ttf"),
     ]
+
     for fp in candidates:
         if os.path.exists(fp):
             fm.fontManager.addfont(fp)
             prop = fm.FontProperties(fname=fp)
-            matplotlib.rcParams["font.family"] = prop.get_name()
-            return True
+            family = prop.get_name()
 
-    # 同梱フォントが無ければ諦めて DejaVu にフォールバック
+            matplotlib.rcParams["font.family"] = family
+            matplotlib.rcParams["axes.unicode_minus"] = False  # マイナス記号文字化け対策
+            return True, fp, family
+
+    # 同梱がなければフォールバック
     matplotlib.rcParams["font.family"] = "DejaVu Sans"
-    return False
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    return False, None, "DejaVu Sans"
 
-setup_japanese_font()
+HAS_JP_FONT, FONT_PATH, FONT_FAMILY = setup_japanese_font()
 
 
 # =========================
