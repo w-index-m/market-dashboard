@@ -11,8 +11,33 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 import streamlit as st
+
+
+import os
+import matplotlib
+import matplotlib.font_manager as fm
+
+def setup_japanese_font():
+    # リポジトリ内のフォントを優先して使う
+    candidates = [
+        os.path.join("fonts", "NotoSansCJKjp-Regular.otf"),
+        os.path.join("fonts", "IPAexGothic.ttf"),
+        os.path.join("fonts", "ipaexg.ttf"),
+    ]
+    for fp in candidates:
+        if os.path.exists(fp):
+            fm.fontManager.addfont(fp)
+            prop = fm.FontProperties(fname=fp)
+            matplotlib.rcParams["font.family"] = prop.get_name()
+            return True
+
+    # 同梱フォントが無ければ諦めて DejaVu にフォールバック
+    matplotlib.rcParams["font.family"] = "DejaVu Sans"
+    return False
+
+setup_japanese_font()
+
 
 # =========================
 # うるさい表示を抑止
