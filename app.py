@@ -47,18 +47,6 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# =========================
-# フォント（可能なら日本語）
-# =========================
-try:
-    import matplotlib.font_manager as fm
-    jp_fonts = [
-        f for f in fm.findSystemFonts()
-        if ("NotoSansCJK" in f or "Noto Sans CJK" in f or "NotoSansJP" in f)
-    ]
-    matplotlib.rcParams["font.family"] = "Noto Sans CJK JP" if jp_fonts else "DejaVu Sans"
-except Exception:
-    matplotlib.rcParams["font.family"] = "DejaVu Sans"
 
 JST = pytz.timezone("Asia/Tokyo")
 
@@ -375,4 +363,3 @@ def run():
         st.warning("為替データが取得できませんでした")
 
 run()
-
