@@ -4,6 +4,7 @@ import os
 import logging
 import warnings
 from datetime import datetime, timezone, timedelta
+import matplotlib.dates as mdates
 
 import pytz
 import yfinance as yf
@@ -190,22 +191,47 @@ def fetch_daily(symbol: str) -> pd.DataFrame:
 # =========================
 # スパークライン（世界株価風：上昇=緑塗り、下落=赤塗り）
 # =========================
-def make_sparkline(close: pd.Series, baseline: float):
-    fig, ax = plt.subplots(figsize=(3.6, 1.35))  # 小さめ固定（カード用）
+def make_sparkline(close: pd.Series, baseline: float, mode: str):
+    """
+    mode: "INTRADAY" or "DAILY"
+    """
+    fig, ax = plt.subplots(figsize=(3.6, 1.35))
     ax.plot(close.index, close.values, linewidth=1.6)
 
-    # 塗り（baseline以上=緑、以下=赤）
     y = close.values
     ax.fill_between(close.index, y, baseline, where=(y >= baseline), alpha=0.20)
     ax.fill_between(close.index, y, baseline, where=(y < baseline), alpha=0.20)
-
-    # ベースライン
     ax.axhline(baseline, linewidth=1.0, alpha=0.5)
 
-    ax.set_xticks([])
+    # --- 横軸：時刻 or 日付を表示（最小限） ---
+    if mode == "INTRADAY":
+        # 例：09:00 / 12:00 / 15:00 みたいに3点だけ出す
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=3))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
+    else:
+        # daily代替のときは日付
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=2, maxticks=2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=JST))
+
+    ax.tick_params(axis="x", labelsize=8, pad=2)
     ax.set_yticks([])
-    for sp in ax.spines.values():
-        sp.set_visible(False)
+
+    # 枠線消し
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+
+    # --- 日付表示（チャート上部に小さく） ---
+    # intradayなら「当日」、dailyなら「最後の日付」
+    if len(close.index) > 0:
+        dt = close.index[-1]
+        date_str = dt.strftime("%Y-%m-%d")
+        ax.text(
+            0.01, 0.98, date_str,
+            transform=ax.transAxes,
+            ha="left", va="top",
+            fontsize=9, alpha=0.70
+        )
 
     fig.tight_layout(pad=0.2)
     return fig
@@ -337,3 +363,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
