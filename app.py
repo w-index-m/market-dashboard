@@ -1,4 +1,14 @@
 # -*- coding: utf-8 -*-
+"""
+Market Dashboard (Streamlit)
+- 長期チャートは表示せず、「当日(動いている) もしくは 最終取引日」だけを一覧表示
+- 日本市場は取引時間中だけ「寄り付き基準 (Open→Now)」に自動切替
+- それ以外は「前日比 (PrevClose→Now)」
+- 地域（日本→米国→欧州→アジア）で色分け、為替は別枠
+
+注意:
+- yfinance は指数/先物/CFDのティッカーが環境差で取れないことがあるため、取れたものだけ表示します。
+"""
 
 import logging
 import warnings
@@ -7,66 +17,31 @@ from datetime import datetime, timedelta, timezone
 import pytz
 import yfinance as yf
 import pandas as pd
-
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import streamlit as st
-import os
-import matplotlib
-import matplotlib.font_manager as fm
-
-def setup_japanese_font():
-    # リポジトリ同梱フォント（優先）
-    candidates = [
-        os.path.join("fonts", "NotoSansCJKjp-Regular.otf"),
-        os.path.join("fonts", "NotoSansJP-Regular.otf"),
-        os.path.join("fonts", "IPAexGothic.ttf"),
-        os.path.join("fonts", "ipaexg.ttf"),
-    ]
-
-    for fp in candidates:
-        if os.path.exists(fp):
-            fm.fontManager.addfont(fp)
-            prop = fm.FontProperties(fname=fp)
-            family = prop.get_name()
-
-            matplotlib.rcParams["font.family"] = family
-            matplotlib.rcParams["axes.unicode_minus"] = False  # マイナス記号文字化け対策
-            return True, fp, family
-
-    # 同梱がなければフォールバック
-    matplotlib.rcParams["font.family"] = "DejaVu Sans"
-    matplotlib.rcParams["axes.unicode_minus"] = False
-    return False, None, "DejaVu Sans"
-
-HAS_JP_FONT, FONT_PATH, FONT_FAMILY = setup_japanese_font()
-
 
 # =========================
 # うるさい表示を抑止
 # =========================
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
-warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
-
 
 JST = pytz.timezone("Asia/Tokyo")
 
 # =========================
-# 設定（sidebarで変更できるように）
+# 自動更新（任意）
+# streamlit-autorefresh を requirements.txt に入れると動きます
 # =========================
-DEFAULT_LOOKBACK_DAYS = 220
-DEFAULT_PLOT_LAST_N = 60
-DASH_FIGSIZE_W = 12
-ROW_HEIGHT = 2.9
-X_LABELSIZE = 7
-AUTO_ADJUST = False
-JAPAN_OPEN_BASIS_ONLY = True
+def try_autorefresh(interval_ms: int):
+    try:
+        from streamlit_autorefresh import st_autorefresh  # type: ignore
+        st_autorefresh(interval=interval_ms, key="market_autorefresh")
+    except Exception:
+        pass
 
 # =========================
 # JPX取引時間（簡易）
+# 前場: 09:00-11:30 / 後場: 12:30-15:30 (JST)
 # =========================
 def is_jpx_session_open(now_jst: datetime) -> bool:
     if now_jst.weekday() >= 5:
@@ -76,14 +51,22 @@ def is_jpx_session_open(now_jst: datetime) -> bool:
     afternoon = (t >= datetime.strptime("12:30", "%H:%M").time()) and (t <= datetime.strptime("15:30", "%H:%M").time())
     return morning or afternoon
 
+# =========================
+# 表示スタイル（地域色）
+# =========================
 REGION_STYLE = {
-    "JP":   {"edge": "#1f77b4", "title_bg": "#dbe9ff", "label": "日本"},
-    "US":   {"edge": "#ff7f0e", "title_bg": "#ffe7cc", "label": "米国"},
-    "EU":   {"edge": "#2ca02c", "title_bg": "#ddf5dd", "label": "欧州"},
-    "ASIA": {"edge": "#d62728", "title_bg": "#ffd9d9", "label": "アジア"},
-    "FX":   {"edge": "#9467bd", "title_bg": "#efe1ff", "label": "為替"},
+    "JP":   {"bg": "#dbe9ff", "label": "日本"},
+    "US":   {"bg": "#ffe7cc", "label": "米国"},
+    "EU":   {"bg": "#ddf5dd", "label": "欧州"},
+    "ASIA": {"bg": "#ffd9d9", "label": "アジア"},
+    "FX":   {"bg": "#efe1ff", "label": "為替"},
 }
 
+# =========================
+# 取得対象
+# - CAC100指定→取得安定のためCAC40で代替（名称に明記）
+# - グロース250は指数ティッカーが安定しないためETF(2516.T)で代替
+# =========================
 TARGETS = [
     # 日本
     {"name": "日経平均", "region": "JP", "candidates": ["^N225"]},
@@ -113,17 +96,17 @@ TARGETS = [
     {"name": "ドル円(USD/JPY)", "region": "FX", "candidates": ["USDJPY=X"]},
 ]
 
+REGION_ORDER = {"JP": 0, "US": 1, "EU": 2, "ASIA": 3, "FX": 99}
+
 # =========================
-# yfinance取得（Streamlit用にキャッシュ）
+# yfinance取得（Streamlitキャッシュ）
 # =========================
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_daily(symbol: str, lookback_days: int) -> pd.DataFrame:
     try:
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - timedelta(days=lookback_days)
-        hist = yf.Ticker(symbol).history(
-            start=start_utc, end=end_utc, interval="1d", auto_adjust=AUTO_ADJUST
-        )
+        hist = yf.Ticker(symbol).history(start=start_utc, end=end_utc, interval="1d", auto_adjust=False)
         if hist is None or hist.empty:
             return pd.DataFrame()
         if hist.index.tz is None:
@@ -150,7 +133,7 @@ def get_quote_fallback(symbol: str):
     tk = yf.Ticker(symbol)
     try:
         fi = tk.fast_info
-        for k in ["last_price", "regular_market_price"]:
+        for k in ("last_price", "regular_market_price"):
             v = fi.get(k)
             if v is not None:
                 return float(v)
@@ -158,7 +141,7 @@ def get_quote_fallback(symbol: str):
         pass
     try:
         info = tk.info
-        for k in ["regularMarketPrice", "currentPrice"]:
+        for k in ("regularMarketPrice", "currentPrice"):
             v = info.get(k)
             if v is not None:
                 return float(v)
@@ -173,198 +156,157 @@ def choose_symbol(candidates, lookback_days):
             return sym, d
     return None, pd.DataFrame()
 
-def compute_info(symbol: str, daily: pd.DataFrame, region: str):
+def compute_latest_row(name: str, region: str, symbol: str, daily: pd.DataFrame, japan_open_basis_only: bool):
+    """当日(動いている) or 最終取引日 の1行データに集約"""
     close = daily["Close"].dropna()
     prev_close = float(close.iloc[-2])
     last_close = float(close.iloc[-1])
+    last_date = close.index[-1]
 
     now_jst = datetime.now(JST)
     intra = fetch_intraday_1m(symbol)
 
+    # Now値
     now_price = None
+    now_time = None
     if not intra.empty:
         try:
             now_price = float(intra["Close"].dropna().iloc[-1])
+            now_time = intra.index[-1]
         except Exception:
             now_price = None
+            now_time = None
+
     if now_price is None:
         q = get_quote_fallback(symbol)
         if q is not None:
             now_price = q
+
     if now_price is None:
         now_price = last_close
 
     mode = "LIVE" if (not intra.empty) else "CLOSE"
+    basis = "前日比"
+    base_price = prev_close
 
-    open_price = None
-    pct_open = None
-    if region == "JP" and JAPAN_OPEN_BASIS_ONLY:
-        if is_jpx_session_open(now_jst) and (not intra.empty):
-            try:
-                open_price = float(intra["Open"].dropna().iloc[0])
-            except Exception:
-                open_price = None
-            if open_price not in (None, 0):
-                pct_open = (now_price / open_price - 1.0) * 100.0
+    # 日本だけ寄り付き基準（取引時間中 & intradayが取れている時）
+    if region == "JP" and japan_open_basis_only and is_jpx_session_open(now_jst) and (not intra.empty):
+        try:
+            open_price = float(intra["Open"].dropna().iloc[0])
+        except Exception:
+            open_price = None
+        if open_price not in (None, 0):
+            basis = "寄り付き比"
+            base_price = open_price
 
-    pct_prev = (now_price / prev_close - 1.0) * 100.0
+    chg_pct = (now_price / base_price - 1.0) * 100.0 if base_price not in (None, 0) else None
+
+    # 表示日付：LIVEなら当日（最終分の時刻）、そうでなければ最終取引日
+    shown_dt = now_time if (mode == "LIVE" and now_time is not None) else last_date
 
     return {
-        "mode": mode,
-        "prev_close": prev_close,
-        "last_close": last_close,
-        "open": open_price,
-        "now": now_price,
-        "chg_open_pct": pct_open,
-        "chg_prev_pct": pct_prev,
+        "地域": REGION_STYLE[region]["label"],
+        "名称": name,
+        "ティッカー": symbol,
+        "日時": shown_dt.strftime("%Y-%m-%d %H:%M") if mode == "LIVE" else shown_dt.strftime("%Y-%m-%d"),
+        "現在値": now_price,
+        "基準": basis,
+        "変化率(%)": chg_pct,
+        "モード": mode,
+        "order": REGION_ORDER.get(region, 99),
+        "region": region,
     }
 
-def style_axes(ax, region: str):
-    stl = REGION_STYLE.get(region, {})
-    edge = stl.get("edge", "#333333")
-    title_bg = stl.get("title_bg", "#f2f2f2")
-    for spine in ax.spines.values():
-        spine.set_edgecolor(edge)
-        spine.set_linewidth(2.0)
-    return title_bg, edge
+def style_table(df: pd.DataFrame):
+    def color_pct(v):
+        try:
+            if pd.isna(v):
+                return ""
+            if float(v) > 0:
+                return "color: #d62728; font-weight: 600;"  # 上げ: 赤
+            if float(v) < 0:
+                return "color: #1f77b4; font-weight: 600;"  # 下げ: 青
+            return "color: #444;"
+        except Exception:
+            return ""
 
-def make_dashboard_figure(items, title, plot_last_n: int):
-    n = len(items)
-    rows = (n + 1) // 2
-    fig, axes = plt.subplots(rows, 2, figsize=(DASH_FIGSIZE_W, rows * ROW_HEIGHT))
-    axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
-    fig.suptitle(title, fontsize=14, y=1.02)
+    # 地域ごとの背景色
+    def bg_region(row):
+        reg = row.get("region", "")
+        bg = REGION_STYLE.get(reg, {}).get("bg", "#ffffff")
+        return [f"background-color: {bg};" for _ in row.index]
 
-    for i, it in enumerate(items):
-        ax = axes[i]
-        close = it["daily"]["Close"].tail(plot_last_n)
-        ax.plot(close.index, close.values)
+    show_cols = ["地域", "名称", "現在値", "変化率(%)", "基準", "日時", "モード", "ティッカー"]
+    view = df[show_cols].copy()
 
-        ax.text(
-            0.98, 0.98, it["info_text"],
-            transform=ax.transAxes,
-            ha="right", va="top",
-            fontsize=8,
-            bbox=dict(boxstyle="round", alpha=0.85, pad=0.3)
-        )
+    sty = view.style.apply(bg_region, axis=1).format({
+        "現在値": "{:,.2f}",
+        "変化率(%)": "{:+.2f}",
+    }).applymap(color_pct, subset=["変化率(%)"])
 
-        title_bg, edge = style_axes(ax, it["region"])
-        ax.set_title(
-            f'{it["name"]} ({it["symbol"]})',
-            fontsize=10,
-            bbox=dict(facecolor=title_bg, edgecolor=edge, boxstyle="round,pad=0.25")
-        )
+    return sty
 
-        ax.set_xlabel("Date (JST)", fontsize=8)
-        ax.set_ylabel("Price / Index", fontsize=8)
-        ax.tick_params(axis="x", labelsize=X_LABELSIZE)
-        ax.grid(True)
-        ax.margins(x=0.03)
-
-    for j in range(n, len(axes)):
-        axes[j].axis("off")
-
-    plt.tight_layout()
-    return fig
-
-def make_fx_figure(fx_item, plot_last_n: int):
-    daily = fx_item["daily"]
-    close = daily["Close"].tail(plot_last_n)
-
-    fig, ax = plt.subplots(figsize=(DASH_FIGSIZE_W, 3.2))
-    ax.plot(close.index, close.values)
-
-    title_bg, edge = style_axes(ax, fx_item["region"])
-    ax.set_title(
-        f'{fx_item["name"]} ({fx_item["symbol"]})',
-        fontsize=12,
-        bbox=dict(facecolor=title_bg, edgecolor=edge, boxstyle="round,pad=0.25")
-    )
-
-    ax.text(
-        0.98, 0.98, fx_item["info_text"],
-        transform=ax.transAxes,
-        ha="right", va="top",
-        fontsize=10,
-        bbox=dict(boxstyle="round", alpha=0.85, pad=0.3)
-    )
-
-    ax.set_xlabel("Date (JST)")
-    ax.set_ylabel("FX Rate")
-    ax.tick_params(axis="x", labelsize=8)
-    ax.grid(True)
-    ax.margins(x=0.03)
-    plt.tight_layout()
-    return fig
-
-def run():
+def main():
     st.set_page_config(page_title="Market Dashboard", layout="wide")
-    st.title("Market Dashboard")
+    st.title("Market Dashboard（当日/最終日のみ）")
     now_jst = datetime.now(JST)
-    st.caption(f"Run at (JST): {now_jst:%Y-%m-%d %H:%M:%S}")
+    st.caption(f"更新時刻 (JST): {now_jst:%Y-%m-%d %H:%M:%S}")
 
     with st.sidebar:
         st.subheader("設定")
-        lookback_days = st.number_input("取得期間（日）", 30, 1000, DEFAULT_LOOKBACK_DAYS, 10)
-        plot_last_n = st.number_input("表示する直近営業日数", 10, 200, DEFAULT_PLOT_LAST_N, 5)
-        if st.button("更新"):
+        lookback_days = st.number_input("取得期間（日）", 30, 1000, 220, 10)
+        japan_open_basis_only = st.toggle("日本市場は取引時間中だけ「寄り付き基準」", value=True)
+        refresh_sec = st.selectbox("自動更新", [0, 30, 60, 120, 300], index=2, format_func=lambda x: "OFF" if x == 0 else f"{x} 秒")
+        st.caption("※ 自動更新を使う場合は requirements.txt に `streamlit-autorefresh` を追加してください。")
+        if st.button("手動更新"):
             st.cache_data.clear()
             st.rerun()
 
-    indices_items = []
-    fx_item = None
-    region_order = {"JP": 0, "US": 1, "EU": 2, "ASIA": 3, "FX": 99}
+    if refresh_sec and refresh_sec > 0:
+        try_autorefresh(refresh_sec * 1000)
 
+    rows = []
     with st.spinner("データ取得中..."):
         for t in TARGETS:
             name, region = t["name"], t["region"]
             sym, daily = choose_symbol(t["candidates"], lookback_days)
             if sym is None or daily.empty:
                 continue
+            rows.append(compute_latest_row(name, region, sym, daily, japan_open_basis_only))
 
-            info = compute_info(sym, daily, region)
+    if not rows:
+        st.error("データが取得できませんでした（ティッカーが取れない or yfinance側の制限の可能性）")
+        st.stop()
 
-            lines = [f"Mode: {info['mode']}"]
-            if (region == "JP") and (info["open"] is not None) and (info["chg_open_pct"] is not None):
-                lines.append(f"Open: {info['open']:,.2f}")
-                lines.append(f"Now : {info['now']:,.2f}")
-                lines.append(f"Chg(Open): {info['chg_open_pct']:+.2f}%")
-                lines.append(f"Chg(Prev): {info['chg_prev_pct']:+.2f}%")
-            else:
-                lines.append(f"Prev: {info['prev_close']:,.2f}")
-                lines.append(f"Now : {info['now']:,.2f}")
-                lines.append(f"Chg(Prev): {info['chg_prev_pct']:+.2f}%")
+    df = pd.DataFrame(rows).sort_values(["order"]).reset_index(drop=True)
 
-            item = {
-                "name": name,
-                "symbol": sym,
-                "region": region,
-                "daily": daily,
-                "info_text": "\n".join(lines),
-                "order": region_order.get(region, 99),
-            }
+    # 2段構成：指数（地域別混在） → 為替別枠
+    df_fx = df[df["region"] == "FX"].copy()
+    df_idx = df[df["region"] != "FX"].copy()
 
-            if region == "FX":
-                fx_item = item
-            else:
-                indices_items.append(item)
+    legend = " → ".join([REGION_STYLE[k]["label"] for k in ("JP", "US", "EU", "ASIA")])
+    st.subheader(f"指数（{legend}）")
 
-    indices_items = sorted(indices_items, key=lambda x: x["order"])
-    legend = " / ".join([f'{REGION_STYLE[k]["label"]}' for k in ["JP", "US", "EU", "ASIA"]])
-
-    if indices_items:
-        fig = make_dashboard_figure(indices_items, f"Market Dashboard（{legend}）", plot_last_n)
-        st.pyplot(fig, clear_figure=True)
-    else:
-        st.warning("指数データが取得できませんでした（ティッカーが取れない可能性あり）")
+    st.dataframe(
+        style_table(df_idx),
+        use_container_width=True,
+        hide_index=True,
+        height=min(36 + 35 * (len(df_idx) + 1), 800),
+    )
 
     st.divider()
+    st.subheader("為替")
 
-    if fx_item is not None:
-        fig_fx = make_fx_figure(fx_item, plot_last_n)
-        st.pyplot(fig_fx, clear_figure=True)
+    if not df_fx.empty:
+        st.dataframe(
+            style_table(df_fx),
+            use_container_width=True,
+            hide_index=True,
+            height=150,
+        )
     else:
-        st.warning("為替データが取得できませんでした")
+        st.info("為替データが取得できませんでした")
 
-run()
+    st.caption("※表示は yfinance の取得結果に依存します。特に CFD / 先物 は取得できない場合があります。")
 
+main()
