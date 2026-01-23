@@ -78,7 +78,6 @@ MARKETS = {
     ],
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US"},
-    　　 {"name": "ダウ平均", "region": "US", "symbol": "^DJI",  "rt_symbol": "YM=F", "chart": "1D"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US"},
         {"name": "S&P500", "symbol": "^GSPC", "flag": "US"},
         {"name": "半導体（SOX）", "symbol": "^SOX", "flag": "US"},
@@ -121,22 +120,27 @@ def _to_jst_index(df: pd.DataFrame) -> pd.DataFrame:
     df.index = df.index.tz_convert(JST)
     return df
 
-@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+@st.cache_data(ttl=180, show_spinner=False)
 def fetch_intraday(symbol: str) -> pd.DataFrame:
-    # 1mが死んでる時があるので段階フォールバック
+    """当日足を最優先。取れない時は5d/5mにフォールバック。落ちない。"""
     tk = yf.Ticker(symbol)
-    for interval in ("1m", "2m", "5m", "15m"):
-        try:
-            df = tk.history(period="1d", interval=interval)
-            df = _to_jst_index(df)
-            if not df.empty and "Close" in df:
-                df = df.dropna(subset=["Close"])
-                if not df.empty:
-                    df.attrs["interval"] = interval
-                    return df
-        except Exception:
-            continue
-    return pd.DataFrame()
+
+    def _get(period: str, interval: str) -> pd.DataFrame:
+        df = tk.history(period=period, interval=interval)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        return df.tz_convert(JST).dropna(subset=["Close"])
+
+    # まず当日1分足（これが理想）
+    df = _get("1d", "1m")
+    if not df.empty:
+        return df
+
+    # 取れない銘柄はここで救う（指数系に多い）
+    df = _get("5d", "5m")
+    return df
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def fetch_daily(symbol: str, days: int = 10) -> pd.DataFrame:
@@ -393,4 +397,5 @@ def main():
         st.divider()
 
 main()
+
 
