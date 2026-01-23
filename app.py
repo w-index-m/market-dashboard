@@ -78,6 +78,7 @@ MARKETS = {
     ],
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US"},
+    　　 {"name": "ダウ平均", "region": "US", "symbol": "^DJI",  "rt_symbol": "YM=F", "chart": "1D"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US"},
         {"name": "S&P500", "symbol": "^GSPC", "flag": "US"},
         {"name": "半導体（SOX）", "symbol": "^SOX", "flag": "US"},
@@ -392,3 +393,4 @@ def main():
         st.divider()
 
 main()
+
