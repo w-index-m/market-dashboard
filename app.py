@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
+
 import os
 import time
 import logging
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pytz
 import pandas as pd
@@ -12,29 +13,32 @@ import yfinance as yf
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
 
 import streamlit as st
+from yfinance.exceptions import YFRateLimitError
 
-# ----------------------------
+
+# =========================================================
 # 基本設定
-# ----------------------------
+# =========================================================
 JST = pytz.timezone("Asia/Tokyo")
 
-# Streamlit Cloud向け：キャッシュ長め（レート制限回避）
-TTL_INTRADAY = 180
-TTL_DAILY = 600
+# Streamlit Cloud向け：呼び出し回数抑制（TTL長め）
+TTL_INTRADAY = 180  # ← 60 → 180
+TTL_DAILY = 180
 
+# ログ/警告を静かに
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# ----------------------------
-# 日本語フォント（fonts/ に同梱したものを優先）
-# ----------------------------
-def setup_japanese_font() -> str:
+# =========================================================
+# 日本語フォント（fonts/ 配下を優先）
+#   fonts/NotoSansCJKjp-Regular.otf などを置く想定
+# =========================================================
+def setup_japanese_font() -> bool:
     candidates = [
         os.path.join("fonts", "NotoSansCJKjp-Regular.otf"),
         os.path.join("fonts", "NotoSansJP-Regular.otf"),
@@ -43,352 +47,318 @@ def setup_japanese_font() -> str:
     ]
     for fp in candidates:
         if os.path.exists(fp):
-            fm.fontManager.addfont(fp)
-            prop = fm.FontProperties(fname=fp)
-            matplotlib.rcParams["font.family"] = prop.get_name()
-            return prop.get_name()
+            try:
+                fm.fontManager.addfont(fp)
+                prop = fm.FontProperties(fname=fp)
+                matplotlib.rcParams["font.family"] = prop.get_name()
+                return True
+            except Exception:
+                pass
 
+    # フォールバック
     matplotlib.rcParams["font.family"] = "DejaVu Sans"
-    return "DejaVu Sans"
+    return False
 
-FONT_NAME = setup_japanese_font()
 
-# ----------------------------
-# 世界株価っぽい色（上げ=緑 / 下げ=赤）
-# ----------------------------
-GREEN = "#008000"
-RED = "#cc0000"
-BG_UP = "#e9f7ea"
-BG_DN = "#fdeaea"
-BG_NEUTRAL = "#f6f6f6"
-LINE = "#1f77b4"
-FILL_UP = "#cfe8d2"
-FILL_DN = "#f6d2cc"
+HAS_JP_FONT = setup_japanese_font()
 
-# ----------------------------
-# 表示したい市場（必要ならここをあなたの希望に合わせて揃える）
-# ※ ここは「ティッカー固定」＝choose_symbol廃止
-# ----------------------------
-MARKETS = {
-    "日本": [
-        {"name": "日経平均", "symbol": "^N225", "flag": "JP"},
-        {"name": "TOPIX", "symbol": "998405.T", "flag": "JP"},
-        {"name": "グロース250（ETF）", "symbol": "2516.T", "flag": "JP"},
-        {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
-    ],
-    "米国": [
-        {"name": "ダウ平均", "symbol": "^DJI", "flag": "US"},
-        {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US"},
-        {"name": "S&P500", "symbol": "^GSPC", "flag": "US"},
-        {"name": "半導体（SOX）", "symbol": "^SOX", "flag": "US"},
-        {"name": "恐怖指数（VIX）", "symbol": "^VIX", "flag": "US"},
-    ],
-    "欧州": [
-        {"name": "英FTSE100", "symbol": "^FTSE", "flag": "UK"},
-        {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
-        {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
-    ],
-    "アジア": [
-        {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
-        {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
-        {"name": "インド NIFTY50", "symbol": "^NSEI", "flag": "IN"},
-        {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
-        {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
-    ],
-    "為替": [
-        {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
-        {"name": "ユーロ円", "symbol": "EURJPY=X", "flag": "FX"},
-    ],
-    "コモディティ": [
-        {"name": "ゴールド", "symbol": "GC=F", "flag": "CMD"},
-        {"name": "原油（WTI）", "symbol": "CL=F", "flag": "CMD"},
-    ],
-    "暗号資産": [
-        {"name": "ビットコイン", "symbol": "BTC-USD", "flag": "CRYPTO"},
-    ],
-}
+# =========================================================
+# 取得対象（候補ティッカーは “1個固定”）
+#   ※ここを増やすと呼び出しが増えてレート制限リスクが上がる
+# =========================================================
+TARGETS = [
+    # 日本
+    {"name": "日経平均", "region": "JP", "symbol": "^N225", "flag": "🇯🇵"},
+    {"name": "TOPIX", "region": "JP", "symbol": "998405.T", "flag": "🇯🇵"},
+    {"name": "グロース250(ETF)", "region": "JP", "symbol": "2516.T", "flag": "🇯🇵"},
 
-# ----------------------------
-# yfinance 取得（例外キャッチで落とさない）
-# ----------------------------
-def _to_jst_index(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame()
-    idx = df.index
-    if getattr(idx, "tz", None) is None:
-        df.index = df.index.tz_localize("UTC")
-    df.index = df.index.tz_convert(JST)
-    return df
+    # 米国
+    {"name": "ダウ平均", "region": "US", "symbol": "^DJI", "flag": "🇺🇸"},
+    {"name": "NASDAQ総合", "region": "US", "symbol": "^IXIC", "flag": "🇺🇸"},
+    {"name": "S&P500", "region": "US", "symbol": "^GSPC", "flag": "🇺🇸"},
+    {"name": "半導体(SOX)", "region": "US", "symbol": "^SOX", "flag": "🇺🇸"},
 
+    # 欧州
+    {"name": "英FTSE100", "region": "EU", "symbol": "^FTSE", "flag": "🇬🇧"},
+    {"name": "独DAX", "region": "EU", "symbol": "^GDAXI", "flag": "🇩🇪"},
+    {"name": "仏CAC40", "region": "EU", "symbol": "^FCHI", "flag": "🇫🇷"},
+
+    # アジア
+    {"name": "香港ハンセン", "region": "ASIA", "symbol": "^HSI", "flag": "🇭🇰"},
+    {"name": "上海総合", "region": "ASIA", "symbol": "000001.SS", "flag": "🇨🇳"},
+    {"name": "インドNIFTY50", "region": "ASIA", "symbol": "^NSEI", "flag": "🇮🇳"},
+
+    # 為替
+    {"name": "ドル円", "region": "FX", "symbol": "USDJPY=X", "flag": "💱"},
+]
+
+
+# =========================================================
+# yfinance取得（レート制限を “落ちずに扱う”）
+# =========================================================
 @st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
 def fetch_intraday(symbol: str) -> pd.DataFrame:
-    # 1mが死んでる時があるので段階フォールバック
+    """
+    できるだけ短期（当日）を取りたい。
+    取れなければ 5d へフォールバック。
+    レート制限時は _RATE_LIMIT 列で返す。
+    """
     tk = yf.Ticker(symbol)
-    for interval in ("1m", "2m", "5m", "15m"):
+
+    def _try(period: str, interval: str) -> pd.DataFrame:
         try:
-            df = tk.history(period="1d", interval=interval)
-            df = _to_jst_index(df)
-            if not df.empty and "Close" in df:
-                df = df.dropna(subset=["Close"])
-                if not df.empty:
-                    df.attrs["interval"] = interval
-                    return df
+            df = tk.history(period=period, interval=interval)
+        except YFRateLimitError:
+            return pd.DataFrame({"_RATE_LIMIT": [1]})
         except Exception:
-            continue
+            return pd.DataFrame()
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        # tz整備
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        df = df.tz_convert(JST)
+
+        # close必須
+        if "Close" not in df.columns:
+            return pd.DataFrame()
+        df = df.dropna(subset=["Close"])
+        return df
+
+    # まずは当日（1d）
+    for interval in ["1m", "2m", "5m"]:
+        df = _try("1d", interval)
+        if "_RATE_LIMIT" in df.columns:
+            return df
+        if not df.empty and len(df) >= 10:
+            return df
+
+    # ダメなら 5日
+    for interval in ["5m", "15m", "30m"]:
+        df = _try("5d", interval)
+        if "_RATE_LIMIT" in df.columns:
+            return df
+        if not df.empty and len(df) >= 10:
+            return df
+
     return pd.DataFrame()
+
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
-def fetch_daily(symbol: str, days: int = 10) -> pd.DataFrame:
+def fetch_daily_last(symbol: str) -> pd.Series:
+    """
+    intraday が死んでる時の保険：
+    直近の終値だけでも出す（1mo/1d）
+    レート制限時は _RATE_LIMIT を返す
+    """
     tk = yf.Ticker(symbol)
     try:
-        end_utc = datetime.now(timezone.utc)
-        start_utc = end_utc - pd.Timedelta(days=days)
-        df = tk.history(start=start_utc, end=end_utc, interval="1d")
-        df = _to_jst_index(df)
-        if not df.empty and "Close" in df:
-            return df.dropna(subset=["Close"])
+        df = tk.history(period="1mo", interval="1d")
+    except YFRateLimitError:
+        return pd.Series({"_RATE_LIMIT": 1})
     except Exception:
-        pass
-    return pd.DataFrame()
+        return pd.Series(dtype=float)
 
-def safe_last_price(df: pd.DataFrame) -> float | None:
-    try:
-        return float(df["Close"].dropna().iloc[-1])
-    except Exception:
+    if df is None or df.empty or "Close" not in df.columns:
+        return pd.Series(dtype=float)
+
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    df = df.tz_convert(JST)
+    s = df["Close"].dropna()
+    return s
+
+
+# =========================================================
+# 当日開始比（PrevCloseを使わない）
+# =========================================================
+def compute_from_start(series_close: pd.Series):
+    """
+    series_close: 時系列のClose
+    - base: 当日の最初（または取得期間の最初）
+    - last: 最新
+    """
+    s = series_close.dropna()
+    if s.empty or len(s) < 2:
         return None
 
-def safe_first_open(df: pd.DataFrame) -> float | None:
-    # 当日開始比（= 寄り付き基準）
-    try:
-        if "Open" in df and df["Open"].dropna().shape[0] > 0:
-            return float(df["Open"].dropna().iloc[0])
-        # Openが無い/欠損ならClose先頭で代用
-        return float(df["Close"].dropna().iloc[0])
-    except Exception:
-        return None
+    base = float(s.iloc[0])
+    last = float(s.iloc[-1])
 
-def compute_card(symbol: str) -> dict:
-    """
-    当日動いているなら intraday を使い「当日開始比」
-    intraday が取れない/市場休みなら daily の最新日を使う
-    """
-    intra = fetch_intraday(symbol)
+    chg = last - base
+    pct = (last / base - 1.0) * 100.0
 
-    if not intra.empty:
-        now = safe_last_price(intra)
-        base = safe_first_open(intra)
-        last_ts = intra.index[-1]
-        mode = "INTRADAY"
-        interval = intra.attrs.get("interval", "1m")
+    return {"base": base, "last": last, "chg": chg, "pct": pct}
 
-        if now is None or base in (None, 0):
-            return {"ok": False, "reason": "intraday値が不完全です"}
 
-        chg = now - base
-        pct = (now / base - 1.0) * 100.0
+# =========================================================
+# 小さいタイル用チャート（短期）
+#   上げ: 緑 / 下げ: 赤
+# =========================================================
+def make_tile_chart(close: pd.Series, pct: float, title: str):
+    fig, ax = plt.subplots(figsize=(3.3, 1.8), dpi=160)
 
-        return {
-            "ok": True,
-            "mode": mode,
-            "interval": interval,
-            "now": now,
-            "base": base,
-            "chg": chg,
-            "pct": pct,
-            "series": intra["Close"].dropna(),
-            "last_ts": last_ts,
-            "date_label": last_ts.strftime("%Y-%m-%d"),
-        }
+    s = close.dropna()
+    x = s.index
+    y = s.values
 
-    # intradayが無いときは daily（最後の日だけ）
-    daily = fetch_daily(symbol, days=15)
-    if daily.empty or daily["Close"].dropna().shape[0] < 2:
-        return {"ok": False, "reason": "取得できませんでした"}
+    ax.plot(x, y, linewidth=1.2)
 
-    closes = daily["Close"].dropna()
-    now = float(closes.iloc[-1])
-    prev = float(closes.iloc[-2])
-    chg = now - prev
-    pct = (now / prev - 1.0) * 100.0
-    last_ts = closes.index[-1]
+    # baseライン
+    base = float(s.iloc[0])
+    ax.axhline(base, linewidth=0.8, alpha=0.5)
 
-    # “短期だけ”なので dailyは2点でもOK（線として最低限）
-    return {
-        "ok": True,
-        "mode": "CLOSE",
-        "interval": "1d",
-        "now": now,
-        "base": prev,
-        "chg": chg,
-        "pct": pct,
-        "series": closes.tail(30),  # CLOSE時も少しだけ見せたいならここ。完全に不要なら tail(2) に。
-        "last_ts": last_ts,
-        "date_label": last_ts.strftime("%Y-%m-%d"),
-    }
-
-# ----------------------------
-# ここが欲しいと言ってた make_sparkline
-# 横軸：時間（intraday） / 日付（close）
-# かつ、各チャートに日付を出す
-# ----------------------------
-def make_sparkline(series: pd.Series, base: float, mode: str):
-    """
-    series: Closeの系列（indexはdatetime）
-    base: 基準値（当日開始 or 前日終値）
-    mode: INTRADAY / CLOSE
-    """
-    fig, ax = plt.subplots(figsize=(4.6, 1.35))
-
-    if series is None or series.empty:
-        ax.text(0.5, 0.5, "N/A", ha="center", va="center")
-        ax.axis("off")
-        return fig
-
-    x = series.index
-    y = series.values
-
-    # 基準線
-    ax.axhline(base, linewidth=1, alpha=0.6)
-
-    # 塗り（上=緑系 / 下=赤系）
-    ax.plot(x, y, linewidth=1.6, color=LINE)
-    ax.fill_between(x, y, base, where=(y >= base), alpha=0.55)
-    ax.fill_between(x, y, base, where=(y < base), alpha=0.55)
-
-    # X軸フォーマット
-    if mode == "INTRADAY":
-        # 時間を表示（JST）
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
+    # ざっくり塗り（baseより上/下）
+    # 連続塗りは面倒なので、全体傾向で色分け
+    if pct >= 0:
+        ax.fill_between(x, y, base, alpha=0.18)
     else:
-        # 日付を表示
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=JST))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
+        ax.fill_between(x, y, base, alpha=0.18)
 
-    ax.tick_params(axis="x", labelsize=8, rotation=0)
-    ax.tick_params(axis="y", labelsize=8)
-    ax.margins(x=0.01)
+    # 余白削る
+    ax.margins(x=0)
+    ax.grid(True, linewidth=0.4, alpha=0.4)
+    ax.set_title(title, fontsize=9, pad=6)
 
-    # 枠・余白をスッキリ
+    # 軸ラベルは省略（タイル密度優先）
+    ax.tick_params(axis="x", labelsize=6)
+    ax.tick_params(axis="y", labelsize=6)
+
+    # y軸の桁が大きいと見づらいので、指数はざっくり
+    ax.yaxis.get_offset_text().set_size(6)
+
+    # 枠色：上げ緑 / 下げ赤
+    edge = "#2ca02c" if pct >= 0 else "#d62728"
     for spine in ax.spines.values():
-        spine.set_alpha(0.2)
-    ax.grid(True, axis="y", alpha=0.15)
+        spine.set_edgecolor(edge)
+        spine.set_linewidth(1.6)
 
     plt.tight_layout()
     return fig
 
-# ----------------------------
-# Streamlit UI（世界株価.com風）
-# ----------------------------
-def card_css(bg: str) -> str:
-    return f"""
-    <style>
-    .wk-card {{
-      border: 1px solid rgba(0,0,0,0.08);
-      border-radius: 10px;
-      padding: 12px 14px;
-      background: {bg};
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-      height: 148px;
-    }}
-    .wk-title {{
-      font-weight: 700;
-      font-size: 14px;
-      margin-bottom: 2px;
-    }}
-    .wk-sub {{
-      color: rgba(0,0,0,0.55);
-      font-size: 11px;
-      margin-bottom: 8px;
-    }}
-    .wk-pct {{
-      font-weight: 800;
-      font-size: 22px;
-      line-height: 1.1;
-      margin: 2px 0 2px 0;
-    }}
-    .wk-now {{
-      font-size: 12px;
-      color: rgba(0,0,0,0.75);
-    }}
-    .wk-foot {{
-      font-size: 11px;
-      color: rgba(0,0,0,0.55);
-      margin-top: 6px;
-    }}
-    </style>
-    """
 
-def render_market_row(items, cols=4):
-    columns = st.columns(cols)
-    for i, it in enumerate(items):
-        col = columns[i % cols]
-        with col:
-            data = compute_card(it["symbol"])
+# =========================================================
+# Streamlit UI
+# =========================================================
+def run():
+    st.set_page_config(page_title="Market Dashboard (Short)", layout="wide")
 
-            if not data.get("ok"):
-                st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
+    st.title("Market Dashboard（短期）")
+    now = datetime.now(JST)
+    st.caption(f"Run at (JST): {now:%Y-%m-%d %H:%M:%S}")
+
+    if not HAS_JP_FONT:
+        st.info("日本語フォントが見つからないため、文字化けする場合は fonts/ に日本語フォントを置いてください。")
+
+    with st.sidebar:
+        st.subheader("表示設定（短期）")
+        cols = st.number_input("横に並べる枚数", min_value=2, max_value=6, value=4, step=1)
+        st.caption("※多くすると取得回数増ではなく“表示密度”が変わるだけです")
+        if st.button("キャッシュクリア & 更新"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # レート制限の時は “落ちずに” メッセージ出して終了
+    # （一回制限来ると連続更新で死ぬので止める）
+    rate_limited = False
+
+    # タイル生成
+    tile_data = []
+
+    with st.spinner("短期データ取得中...（レート制限回避のため頻繁更新は控えめに）"):
+        for t in TARGETS:
+            name = t["name"]
+            symbol = t["symbol"]
+            flag = t.get("flag", "")
+            title = f"{flag} {name} ({symbol})"
+
+            intra = fetch_intraday(symbol)
+
+            if "_RATE_LIMIT" in intra.columns:
+                rate_limited = True
+                break
+
+            if not intra.empty and "Close" in intra.columns:
+                close = intra["Close"].dropna()
+                info = compute_from_start(close)
+                if info is None:
+                    continue
+                tile_data.append((title, close, info))
+                continue
+
+            # intradayが取れない時は daily で代替（直近の日だけでも表示）
+            daily_close = fetch_daily_last(symbol)
+            if isinstance(daily_close, pd.Series) and "_RATE_LIMIT" in daily_close.index:
+                rate_limited = True
+                break
+            if daily_close is None or daily_close.empty:
+                continue
+
+            # dailyは日足なので「最後の2点」でも変化は見せる
+            close = daily_close.tail(10)
+            info = compute_from_start(close)
+            if info is None:
+                continue
+            tile_data.append((title + " (daily)", close, info))
+
+    if rate_limited:
+        st.error("Yahoo Finance 側のレート制限に当たりました。数分待ってから更新してください。")
+        st.stop()
+
+    if not tile_data:
+        st.warning("データが取得できませんでした（ティッカー・通信・レート制限の可能性）")
+        return
+
+    # タイル表示
+    n = len(tile_data)
+    rows = (n + cols - 1) // cols
+
+    idx = 0
+    for r in range(rows):
+        ccols = st.columns(cols)
+        for c in range(cols):
+            if idx >= n:
+                break
+
+            title, close, info = tile_data[idx]
+            pct = info["pct"]
+            chg = info["chg"]
+            last = info["last"]
+
+            # ヘッダ（数値）
+            sign_color = "#2ca02c" if pct >= 0 else "#d62728"
+            pct_text = f"{pct:+.2f}%"
+            chg_text = f"{chg:+,.2f}"
+
+            with ccols[c]:
                 st.markdown(
                     f"""
-                    <div class="wk-card">
-                      <div class="wk-title">{it["name"]}</div>
-                      <div class="wk-sub">{it["symbol"]}</div>
-                      <div class="wk-pct" style="color:#666;">N/A</div>
-                      <div class="wk-now">取得できませんでした</div>
+                    <div style="border:1px solid #eee; border-radius:10px; padding:10px;">
+                      <div style="font-size:13px; font-weight:700; margin-bottom:6px;">{title}</div>
+                      <div style="font-size:22px; font-weight:800; color:{sign_color}; line-height:1.0;">{pct_text}</div>
+                      <div style="font-size:12px; color:#666; margin-top:3px;">
+                        Now: {last:,.2f}　Chg(from start): {chg_text}
+                      </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-                continue
 
-            pct = data["pct"]
-            chg = data["chg"]
-            now = data["now"]
-            mode = data["mode"]
-            date_label = data["date_label"]
-            last_ts = data["last_ts"].strftime("%m/%d %H:%M JST") if mode == "INTRADAY" else data["last_ts"].strftime("%Y-%m-%d")
+                fig = make_tile_chart(close, pct, "")
+                st.pyplot(fig, clear_figure=True)
 
-            up = pct >= 0
-            color = GREEN if up else RED
-            bg = BG_UP if up else BG_DN
+                # 最終時刻
+                try:
+                    last_ts = close.index[-1].to_pydatetime()
+                    st.caption(f"Last tick: {last_ts:%m/%d %H:%M} JST")
+                except Exception:
+                    pass
 
-            st.markdown(card_css(bg), unsafe_allow_html=True)
-            st.markdown(
-                f"""
-                <div class="wk-card">
-                  <div class="wk-title">{it["name"]}</div>
-                  <div class="wk-sub">{it["symbol"]}</div>
-                  <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
-                  <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
-                  <div class="wk-foot">Date: {date_label} / Last tick: {last_ts} / {mode}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            idx += 1
 
-            # チャート（当日 or 最終日）
-            fig = make_sparkline(data["series"], data["base"], data["mode"])
+    st.caption("※短期表示のみ（当日 or 直近）。頻繁に更新するとレート制限に当たりやすいです。")
 
-            # fill_between の色（上/下）を “世界株価風” に寄せるため、最後に面塗り色を調整
-            # ※ matplotlib の fill_between はここで色差し替えが面倒なので、簡易に背景色で雰囲気を作る
-            st.pyplot(fig, clear_figure=True)
 
-def main():
-    st.set_page_config(page_title="Market Dashboard", layout="wide")
-    now_jst = datetime.now(JST)
-    st.title("Market Dashboard")
-    st.caption(f"Run at (JST): {now_jst:%Y-%m-%d %H:%M:%S} / Font: {FONT_NAME}")
-
-    with st.sidebar:
-        st.subheader("操作")
-        st.write("レート制限回避のためキャッシュ長めです。")
-        if st.button("キャッシュ削除して更新"):
-            st.cache_data.clear()
-            st.rerun()
-
-    for section, items in MARKETS.items():
-        st.subheader(section)
-        render_market_row(items, cols=4)
-        st.divider()
-
-main()
+run()
