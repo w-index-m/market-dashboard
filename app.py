@@ -76,8 +76,6 @@ MARKETS = {
         {"name": "三菱重工", "symbol": "7011.T", "flag": "JP"},
         {"name": "三菱商事", "symbol": "8058.T", "flag": "JP"},
         {"name": "ＩＨＩ", "symbol": "7013.T", "flag": "JP"},
-    ],
-        "日本（個別株）": [
         {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
         {"name": "ソニーG", "symbol": "6758.T", "flag": "JP"},
         {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
@@ -283,35 +281,42 @@ def card_css(bg: str) -> str:
     .wk-card {{
       border: 1px solid rgba(0,0,0,0.08);
       border-radius: 10px;
-      padding: 12px 14px;
+      padding: 10px 12px;
       background: {bg};
       box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-      height: 170px;
     }}
-    .wk-title {{
-      font-weight: 800;
-      font-size: 18px;
-      margin-bottom: 2px;
+    .wk-head {{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap: 8px;
+      margin-bottom: 6px;
     }}
-    .wk-sub {{
+    .wk-name {{
+      font-weight: 900;
+      font-size: 16px;
+      line-height: 1.1;
+    }}
+    .wk-sym {{
+      font-weight: 600;
+      font-size: 12px;
       color: rgba(0,0,0,0.55);
-      font-size: 13px;
-      margin-bottom: 8px;
+      margin-left: 6px;
     }}
     .wk-pct {{
       font-weight: 900;
-      font-size: 30px;
-      line-height: 1.1;
-      margin: 2px 0 2px 0;
+      font-size: 22px;
+      line-height: 1;
+      white-space: nowrap;
     }}
     .wk-now {{
-      font-size: 14px;
+      font-size: 13px;
       color: rgba(0,0,0,0.75);
+      margin-bottom: 4px;
     }}
     .wk-foot {{
-      font-size: 13px;
+      font-size: 12px;
       color: rgba(0,0,0,0.55);
-      margin-top: 6px;
     }}
     </style>
     """
@@ -388,6 +393,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
