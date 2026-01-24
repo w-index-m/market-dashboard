@@ -1,4 +1,16 @@
-# -*- coding: utf-8 -*-
+import os, textwrap
+app_path = "/mnt/data/app.py"
+code = r'''# -*- coding: utf-8 -*-
+"""
+Market Dashboard (Streamlit)
+- 世界株価風UI（上昇=緑 / 下落=赤 / 薄い背景）
+- 価格変化は「前日終値比」に統一（証券会社表示に寄せる）
+- 取得は基本 Yahoo Finance（yfinance）
+- 任意で Tiingo を銘柄単位で併用（例: フジクラだけ provider="tiingo"）
+
+Secrets（Streamlit Cloud）:
+TIINGO_API_KEY = "YOUR_KEY"
+"""
 import os
 import logging
 import warnings
@@ -581,7 +593,6 @@ def main():
         st.divider()
 
 main()
-
 
 
 
