@@ -124,17 +124,39 @@ MARKETS = {
         {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
         {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
     ],
+    "欧州": [
+        {"name": "英FTSE100", "symbol": "^FTSE", "flag": "UK"},
+        {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
+        {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
+    ],
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US", "rt_symbol": "YM=F"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US", "rt_symbol": "NQ=F"},
         {"name": "S&P500", "symbol": "^GSPC", "flag": "US", "rt_symbol": "ES=F"},
         {"name": "半導体（SOX）", "symbol": "^SOX", "flag": "US"},
         {"name": "恐怖指数（VIX）", "symbol": "^VIX", "flag": "US"},
+        {"name": "Russell2000", "symbol": "^RUT", "flag": "US"},
+        {"name": "NASDAQ100", "symbol": "^NDX", "flag": "US", "rt_symbol": "NQ=F"},
+        {"name": "FANG+", "symbol": "^NYFANG", "flag": "US"},
     ],
-    "欧州": [
-        {"name": "英FTSE100", "symbol": "^FTSE", "flag": "UK"},
-        {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
-        {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
+    "米国（債券）": [
+        {"name": "米5年金利", "symbol": "^FVX", "flag": "US"},
+        {"name": "米10年金利", "symbol": "^TNX", "flag": "US"},
+        {"name": "米30年金利", "symbol": "^TYX", "flag": "US"},
+        {"name": "米国債先物(30Y) ZB", "symbol": "ZB=F", "flag": "US"},
+    ],
+    "全世界株式": [
+        {"name": "全世界株式(VT)", "symbol": "VT", "flag": "WORLD"},
+        {"name": "全世界株式(ACWI)", "symbol": "ACWI", "flag": "WORLD"},
+    ],
+    "Magnificent 7": [
+        {"name": "Apple", "symbol": "AAPL", "flag": "US"},
+        {"name": "Microsoft", "symbol": "MSFT", "flag": "US"},
+        {"name": "Alphabet", "symbol": "GOOGL", "flag": "US"},
+        {"name": "Amazon", "symbol": "AMZN", "flag": "US"},
+        {"name": "NVIDIA", "symbol": "NVDA", "flag": "US"},
+        {"name": "Meta", "symbol": "META", "flag": "US"},
+        {"name": "Tesla", "symbol": "TSLA", "flag": "US"},
     ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
@@ -528,6 +550,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
