@@ -71,12 +71,18 @@ MARKETS = {
         {"name": "グロース250（ETF）", "symbol": "2516.T", "flag": "JP"},
         {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
     ],
-#     "日本（個別株）": [
-#        {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
-#        {"name": "ソニーG", "symbol": "6758.T", "flag": "JP"},
-#        {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
-#        {"name": "任天堂", "symbol": "7974.T", "flag": "JP"},
-#    ],
+ #     "日本（個別株）": [
+ #       {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
+ #       {"name": "ソニーG", "symbol": "6758.T", "flag": "JP"},
+ #       {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
+ #       {"name": "任天堂", "symbol": "7974.T", "flag": "JP"},
+ #   ],
+    "アジア": [
+        {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
+        {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
+        {"name": "インド NIFTY50", "symbol": "^NSEI", "flag": "IN"},
+        {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
+        {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US", "rt_symbol": "YM=F"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US", "rt_symbol": "NQ=F"},
@@ -89,12 +95,7 @@ MARKETS = {
         {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
         {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
     ],
-    "アジア": [
-        {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
-        {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
-        {"name": "インド NIFTY50", "symbol": "^NSEI", "flag": "IN"},
-        {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
-        {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
+
     ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
@@ -383,5 +384,3 @@ def main():
         st.divider()
 
 main()
-
-
