@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
+import requests
 
 import streamlit as st
 
@@ -72,7 +73,8 @@ MARKETS = {
         {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
     ],
     "日本（個別株）": [
-        {"name": "フジクラ", "symbol": "5803.T", "flag": "JP"},
+#        {"name": "フジクラ", "symbol": "5803.T", "flag": "JP"},
+         {"name": "フジクラ", "symbol": "5803.T", "flag": "JP", "provider": "tiingo"},
         {"name": "三菱重工", "symbol": "7011.T", "flag": "JP"},
         {"name": "三菱商事", "symbol": "8058.T", "flag": "JP"},
         {"name": "ＩＨＩ", "symbol": "7013.T", "flag": "JP"},
@@ -134,24 +136,26 @@ def fetch_daily(symbol: str, days: int = 20) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
-def fetch_intraday(symbol: str) -> pd.DataFrame:
-    # 1mが取れないケースがあるので 1m→2m→5m→15m の順で試す
-    for interval in ("1m", "2m", "5m", "15m"):
-        try:
-            df = yf.Ticker(symbol).history(period="1d", interval=interval, auto_adjust=False)
-            if df is None or df.empty:
-                continue
-            if df.index.tz is None:
-                df.index = df.index.tz_localize("UTC")
-            df = df.tz_convert(JST).dropna(subset=["Close"])
-            if df.empty:
-                continue
-            df.attrs["interval"] = interval
-            return df
-        except Exception:
-            continue
-    return pd.DataFrame()
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def fetch_daily(symbol: str, days: int = 20, provider: str = "yahoo") -> pd.DataFrame:
+    # providerがtiingoなら、まずTiingoを試して、ダメならyfinance
+    if provider == "tiingo":
+        df_t = fetch_daily_tiingo(symbol, days=days)
+        if not df_t.empty and df_t["Close"].dropna().shape[0] >= 2:
+            return df_t
+        # Tiingo失敗 → Yahooへフォールバック
+
+    try:
+        end_utc = datetime.now(timezone.utc)
+        start_utc = end_utc - pd.Timedelta(days=days)
+        df = yf.Ticker(symbol).history(start=start_utc, end=end_utc, interval="1d", auto_adjust=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        return df.tz_convert(JST).dropna(subset=["Close"])
+    except Exception:
+        return pd.DataFrame()
 
 def safe_last_price(df: pd.DataFrame) -> Optional[float]:
     try:
@@ -171,7 +175,8 @@ def safe_first_open(df: pd.DataFrame) -> Optional[float]:
     except Exception:
         return None
 
-def compute_card(symbol: str, rt_symbol: Optional[str] = None) -> dict:
+def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "yahoo") -> dict:
+
     """
     - 当日動いているなら intraday で「当日開始比」
     - intradayが取れない/市場休みなら dailyで「前日比」
@@ -205,9 +210,9 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None) -> dict:
             }
 
     # intradayが無い/不完全 → daily
-    daily = fetch_daily(symbol, days=15)
+    daily = fetch_daily(symbol, days=15, provider=provider)
     if (daily.empty or daily["Close"].dropna().shape[0] < 2) and rt_symbol:
-        daily = fetch_daily(rt_symbol, days=15)
+        daily = fetch_daily(rt_symbol, days=15, provider=provider)
 
     if daily.empty or daily["Close"].dropna().shape[0] < 2:
         return {"ok": False, "reason": "取得できませんでした"}
@@ -232,7 +237,77 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None) -> dict:
         "date_label": last_ts.strftime("%Y-%m-%d"),
         "rt_used": bool(rt_symbol),
     }
+def get_tiingo_key() -> Optional[str]:
+    # Streamlit Secrets → 環境変数の順で探す
+    try:
+        k = st.secrets.get("TIINGO_API_KEY", None)
+        if k:
+            return str(k)
+    except Exception:
+        pass
+    return os.getenv("TIINGO_API_KEY")
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def fetch_daily_tiingo(symbol: str, days: int = 20) -> pd.DataFrame:
+    """
+    Tiingoの日足（EOD）取得。
+    失敗したら空DataFrameを返す（落とさない）。
+    """
+    key = get_tiingo_key()
+    if not key:
+        return pd.DataFrame()
+
+    try:
+        end_utc = datetime.now(timezone.utc)
+        start_utc = end_utc - pd.Timedelta(days=days)
+
+        # Tiingoはティッカー表記が環境で差があることがあるので候補を試す
+        # 例: 5803.T / 5803 / tse:5803 など
+        candidates = [symbol]
+        if symbol.endswith(".T"):
+            code = symbol.replace(".T", "")
+            candidates += [code, f"tse:{code}"]
+
+        for tk in candidates:
+            url = f"https://api.tiingo.com/tiingo/daily/{tk}/prices"
+            params = {
+                "startDate": start_utc.date().isoformat(),
+                "endDate": end_utc.date().isoformat(),
+                "token": key,
+            }
+            r = requests.get(url, params=params, timeout=10)
+            if r.status_code != 200:
+                continue
+
+            js = r.json()
+            if not js:
+                continue
+
+            df = pd.DataFrame(js)
+            # Tiingoは列名が open/high/low/close/volume 等
+            if "date" not in df.columns or "close" not in df.columns:
+                continue
+
+            df["date"] = pd.to_datetime(df["date"], utc=True)
+            df = df.set_index("date").sort_index()
+
+            # yfinance互換の列へ寄せる
+            out = pd.DataFrame(index=df.index)
+            out["Open"] = df.get("open")
+            out["High"] = df.get("high")
+            out["Low"]  = df.get("low")
+            out["Close"]= df.get("close")
+            out["Volume"]= df.get("volume", 0)
+
+            # JSTへ
+            out = out.tz_convert(JST)
+            out = out.dropna(subset=["Close"])
+            return out
+
+    except Exception:
+        return pd.DataFrame()
+
+    return pd.DataFrame()
 # ----------------------------
 # 短期チャート（当日：時間軸 / CLOSE：日付軸）
 # ----------------------------
@@ -326,7 +401,7 @@ def render_market_row(items, cols=4):
     for i, it in enumerate(items):
         col = columns[i % cols]
         with col:
-            data = compute_card(it["symbol"], it.get("rt_symbol"))
+           data = compute_card(it["symbol"], it.get("rt_symbol"), it.get("provider", "yahoo"))
 
             if not data.get("ok"):
                 st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
@@ -394,6 +469,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
