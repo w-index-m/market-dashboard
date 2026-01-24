@@ -47,6 +47,28 @@ def inject_ga():
     )
 
 inject_ga()
+
+#　YahooのチャートURLを自動生成する関数
+import urllib.parse
+
+def yahoo_chart_url(symbol: str, market: str = "US") -> str:
+    """
+    market:
+      "US" -> finance.yahoo.com
+      "JP" -> finance.yahoo.co.jp
+    """
+    base = "https://finance.yahoo.com/chart/" if market == "US" else "https://finance.yahoo.co.jp/quote/"
+    if market == "US":
+        # USは /chart/{SYMBOL}
+        return base + urllib.parse.quote(symbol, safe="-=^.")
+    else:
+        # 日本Yahooは /quote/{SYMBOL}
+        # 例: 7203.T や ^N225 もそのまま通る
+        return base + urllib.parse.quote(symbol, safe="-=^.")  # 末尾に /chart がない点に注意
+    url = yahoo_chart_url(it["symbol"], market=("US" if it["flag"]=="US" else "JP"))
+    st.link_button("Yahooで開く", url)
+    st.markdown(f"[📈 Yahooで開く]({url})")
+    
 # ================================
 
 # ↓↓↓ ここから通常のStreamlit UI ↓↓↓
@@ -559,6 +581,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
