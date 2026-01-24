@@ -57,7 +57,7 @@ RED = "#d1242f"
 BG_UP = "rgba(26,127,55,0.08)"
 BG_DN = "rgba(209,36,47,0.08)"
 BG_NEUTRAL = "rgba(0,0,0,0.03)"
-LINE = "rgba(0,0,0,0.75)"
+LINE = "#1f77b4"
 
 # ----------------------------
 # 取得対象（★US主要3指数は rt_symbol を先物に）
@@ -388,6 +388,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
