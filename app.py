@@ -1,6 +1,7 @@
 import os, textwrap
 app_path = "/mnt/data/app.py"
-code = r'''# -*- coding: utf-8 -*-
+code = r'''
+# -*- coding: utf-8 -*-
 """
 Market Dashboard (Streamlit)
 - 世界株価風UI（上昇=緑 / 下落=赤 / 薄い背景）
@@ -593,6 +594,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
