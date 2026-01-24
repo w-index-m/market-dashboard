@@ -357,18 +357,19 @@ def render_market_row(items, cols=4):
 
             st.markdown(card_css(bg), unsafe_allow_html=True)
             sub = it["symbol"] + (f" / RT:{it.get('rt_symbol')}" if it.get("rt_symbol") else "")
-            st.markdown(
-                f"""
-                <div class="wk-card">
-                  <div class="wk-title">{it["name"]}</div>
-                  <div class="wk-sub">{sub}</div>
-                  <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
-                  <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
-                  <div class="wk-foot">Date: {date_label} / Last tick: {last_ts} / {mode}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+st.markdown(
+    f"""
+    <div class="wk-card">
+      <div class="wk-head">
+        <div class="wk-name">{it["name"]}<span class="wk-sym">{it["symbol"]}</span></div>
+        <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
+      </div>
+      <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
+      <div class="wk-foot">Date: {date_label} / Last: {last_ts} / {mode}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
             fig = make_sparkline(data["series"], data["base"], data["mode"])
             st.pyplot(fig, clear_figure=True)
@@ -393,6 +394,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
