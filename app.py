@@ -262,29 +262,29 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
     """
     intraday_sym = rt_symbol or symbol
     intra = fetch_intraday(intraday_sym)
+    daily = fetch_daily(...)
+#    if not intra.empty:
+#        now = safe_last_price(intra)
+#        base = safe_first_open(intra)
+#        last_ts = intra.index[-1]
+#        interval = intra.attrs.get("interval", "1m")
+#
+#        if now is not None and base not in (None, 0):
+#            chg = now - base
+#            pct = (now / base - 1.0) * 100.0
+#            return {
+#                "ok": True,
+#                "mode": "INTRADAY",
+#                "interval": interval,
+#                "now": now,
+#                "base": base,
+#                "chg": chg,
+#                "pct": pct,
+#                "last_ts": last_ts,
+#                "date_label": last_ts.strftime("%Y-%m-%d"),
+#                "rt_used": bool(rt_symbol),
+#             }
 
-    if not intra.empty:
-        now = safe_last_price(intra)
-        base = safe_first_open(intra)
-        last_ts = intra.index[-1]
-        interval = intra.attrs.get("interval", "1m")
-
-        if now is not None and base not in (None, 0):
-            chg = now - base
-            pct = (now / base - 1.0) * 100.0
-            return {
-                "ok": True,
-                "mode": "INTRADAY",
-                "interval": interval,
-                "now": now,
-                "base": base,
-                "chg": chg,
-                "pct": pct,
-                "series": intra["Close"].dropna(),
-                "last_ts": last_ts,
-                "date_label": last_ts.strftime("%Y-%m-%d"),
-                "rt_used": bool(rt_symbol),
-            }
 
     # intraday無い → daily（短期だけでOKなら days=15 くらいで十分）
     daily = fetch_daily(symbol, days=15, provider=provider)
@@ -493,4 +493,5 @@ def main():
         st.divider()
 
 main()
+
 
