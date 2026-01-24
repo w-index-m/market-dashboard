@@ -57,7 +57,7 @@ RED = "#d1242f"
 BG_UP = "rgba(26,127,55,0.08)"
 BG_DN = "rgba(209,36,47,0.08)"
 BG_NEUTRAL = "rgba(0,0,0,0.03)"
-LINE = "rgba(0,0,0,0.75)"
+LINE = "#1f77b4"
 
 # ----------------------------
 # 取得対象（★US主要3指数は rt_symbol を先物に）
@@ -239,7 +239,7 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
 
     ax.axhline(base, linewidth=1, alpha=0.6)
 
-    ax.plot(x, y, linewidth=1.6, color=LINE)
+    ax.plot(x, y, linewidth=1.6, color=LINE, alpha=0.95)
     ax.fill_between(x, y, base, where=(y >= base), alpha=0.55)
     ax.fill_between(x, y, base, where=(y < base), alpha=0.55)
 
