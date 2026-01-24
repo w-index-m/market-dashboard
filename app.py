@@ -75,7 +75,7 @@ MARKETS = {
     ],
     "日本（個別株）": [
         {"name": "フジクラ", "symbol": "5803.T", "flag": "JP", "provider": "tiingo"},
-        {"name": "三菱重工", "symbol": "7011.T", "flag": "JP"},
+        {"name": "三菱重工", "symbol": "7011.T", "flag": "JP", "provider": "tiingo"},
         {"name": "三菱商事", "symbol": "8058.T", "flag": "JP"},
         {"name": "ＩＨＩ", "symbol": "7013.T", "flag": "JP"},
         {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
@@ -493,3 +493,4 @@ def main():
         st.divider()
 
 main()
+
