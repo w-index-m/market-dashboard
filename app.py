@@ -102,8 +102,6 @@ MARKETS = {
         {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
         {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
     ],
-
-    ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
         {"name": "ユーロ円", "symbol": "EURJPY=X", "flag": "FX"},
@@ -390,5 +388,6 @@ def main():
         st.divider()
 
 main()
+
 
 
