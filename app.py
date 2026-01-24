@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ===== Google Analytics 注入 =====
-GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "G-XXXXXXXXXX")
+GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "G-L4LRKQ582C")
 
 def inject_ga():
     components.html(
@@ -528,6 +528,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
