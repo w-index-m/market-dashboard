@@ -402,20 +402,19 @@ def render_market_row(items, cols=4):
         col = columns[i % cols]
         with col:
            data = compute_card(it["symbol"], it.get("rt_symbol"), it.get("provider", "yahoo"))
-
-            if not data.get("ok"):
-                st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
-                sub = it["symbol"] + (f" / RT:{it.get('rt_symbol')}" if it.get("rt_symbol") else "")
-                st.markdown(
-                    f"""
-                    <div class="wk-card">
-                      <div class="wk-title">{it["name"]}</div>
-                      <div class="wk-sub">{sub}</div>
-                      <div class="wk-pct" style="color:#666;">N/A</div>
-                      <div class="wk-now">取得できませんでした</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+           if not data.get("ok"):
+               st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
+               sub = it["symbol"] + (f" / RT:{it.get('rt_symbol')}" if it.get("rt_symbol") else "")
+               st.markdown(
+                   f"""
+                   <div class="wk-card">
+                   <div class="wk-title">{it["name"]}</div>
+                   <div class="wk-sub">{sub}</div>
+                   <div class="wk-pct" style="color:#666;">N/A</div>
+                   <div class="wk-now">取得できませんでした</div>
+                   </div>
+                   """,
+                   unsafe_allow_html=True,
                 )
                 continue
 
@@ -469,6 +468,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
