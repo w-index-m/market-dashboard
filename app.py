@@ -83,6 +83,7 @@ MARKETS = {
         {"name": "インド NIFTY50", "symbol": "^NSEI", "flag": "IN"},
         {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
         {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
+      ],
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US", "rt_symbol": "YM=F"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US", "rt_symbol": "NQ=F"},
@@ -384,4 +385,5 @@ def main():
         st.divider()
 
 main()
+
 
