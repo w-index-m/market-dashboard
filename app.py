@@ -109,7 +109,7 @@ MARKETS = {
     "暗号資産": [
         {"name": "ビットコイン", "symbol": "BTC-USD", "flag": "CRYPTO"},
     ],
-    ],
+
 }
 
 # ----------------------------
@@ -384,3 +384,4 @@ def main():
         st.divider()
 
 main()
+
