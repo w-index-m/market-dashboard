@@ -162,6 +162,10 @@ MARKETS = {
         {"name": "Netflix", "symbol": "NFLX", "flag": "US"},
         {"name": "Palantir", "symbol": "PLTR", "flag": "US"},
         {"name": "Broadcom", "symbol": "AVGO", "flag": "US"},
+        {"name": "SanDisk", "symbol": "SNDK", "flag": "US"},
+        {"name": "Micron (MU)", "symbol": "MU", "flag": "US"},
+        {"name": "Intel (INTC)", "symbol": "INTC", "flag": "US"},
+        {"name": "Berkshire (BRK-B)", "symbol": "BRK-B", "flag": "US"},
     ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
@@ -555,6 +559,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
