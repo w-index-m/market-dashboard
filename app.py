@@ -17,6 +17,40 @@ import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
 
 import streamlit as st
+#Google解析
+import os
+import streamlit as st
+import streamlit.components.v1 as components
+
+st.set_page_config(
+    page_title="My App",
+    layout="wide"
+)
+
+# ===== Google Analytics 注入 =====
+GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "G-XXXXXXXXXX")
+
+def inject_ga():
+    components.html(
+        f"""
+        <!-- Google tag (gtag.js) -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+        <script>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){{dataLayer.push(arguments);}}
+          gtag('js', new Date());
+          gtag('config', '{GA_MEASUREMENT_ID}', {{'send_page_view': true}});
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+inject_ga()
+# ================================
+
+# ↓↓↓ ここから通常のStreamlit UI ↓↓↓
+#
 
 # ----------------------------
 # 基本設定
@@ -494,6 +528,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
