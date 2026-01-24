@@ -83,8 +83,6 @@ MARKETS = {
         {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
         {"name": "任天堂", "symbol": "7974.T", "flag": "JP"},
     ],
-
-
     "アジア": [
         {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
         {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
@@ -116,7 +114,6 @@ MARKETS = {
     ],
     "暗号資産": [
         {"name": "ビットコイン", "symbol": "BTC-USD", "flag": "CRYPTO"},
-    ],
     ],
 }
 
@@ -392,3 +389,4 @@ def main():
         st.divider()
 
 main()
+
