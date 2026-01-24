@@ -416,7 +416,7 @@ def render_market_row(items, cols=4):
                    """,
                    unsafe_allow_html=True,
                 )
-                continue
+               continue
 
             pct = data["pct"]
             chg = data["chg"]
@@ -468,6 +468,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
