@@ -3,18 +3,18 @@ import os
 import logging
 import warnings
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 
 import pytz
 import pandas as pd
 import yfinance as yf
+import requests
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
-import requests
 
 import streamlit as st
 
@@ -30,7 +30,7 @@ warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # ----------------------------
-# 日本語フォント（リポジトリ内の fonts/ を優先）
+# 日本語フォント（リポジトリ内 fonts/ 優先）
 # ----------------------------
 def setup_japanese_font() -> str:
     candidates = [
@@ -45,6 +45,7 @@ def setup_japanese_font() -> str:
             prop = fm.FontProperties(fname=fp)
             matplotlib.rcParams["font.family"] = prop.get_name()
             return prop.get_name()
+
     matplotlib.rcParams["font.family"] = "DejaVu Sans"
     return "DejaVu Sans"
 
@@ -58,12 +59,12 @@ RED = "#d1242f"
 BG_UP = "rgba(26,127,55,0.08)"
 BG_DN = "rgba(209,36,47,0.08)"
 BG_NEUTRAL = "rgba(0,0,0,0.03)"
-LINE = "#1f77b4"
+LINE_NEUTRAL = "#1f77b4"
 
 # ----------------------------
-# 取得対象（★US主要3指数は rt_symbol を先物に）
-#   symbol: 表示ラベルの“指数”
-#   rt_symbol: 現在値/当日足をより新しくする“代替”（先物）
+# 取得対象
+#  - US主要3指数は先物(rt_symbol)で「現在値」を取りに行く
+#  - 個別株で Tiingo を使うものは provider="tiingo" を付ける
 # ----------------------------
 MARKETS = {
     "日本": [
@@ -73,8 +74,7 @@ MARKETS = {
         {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
     ],
     "日本（個別株）": [
-#        {"name": "フジクラ", "symbol": "5803.T", "flag": "JP"},
-         {"name": "フジクラ", "symbol": "5803.T", "flag": "JP", "provider": "tiingo"},
+        {"name": "フジクラ", "symbol": "5803.T", "flag": "JP", "provider": "tiingo"},
         {"name": "三菱重工", "symbol": "7011.T", "flag": "JP"},
         {"name": "三菱商事", "symbol": "8058.T", "flag": "JP"},
         {"name": "ＩＨＩ", "symbol": "7013.T", "flag": "JP"},
@@ -117,13 +117,81 @@ MARKETS = {
 }
 
 # ----------------------------
-# yfinance取得（例外は握りつぶして空を返す）
+# キャッシュ設定（Cloud向けに長め）
 # ----------------------------
 TTL_DAILY = 180
-TTL_INTRADAY = 180  # Cloud向けに長め
+TTL_INTRADAY = 180
+
+# ----------------------------
+# Tiingo
+# ----------------------------
+def get_tiingo_key() -> Optional[str]:
+    # Streamlit Secrets → 環境変数
+    try:
+        k = st.secrets.get("TIINGO_API_KEY", None)
+        if k:
+            return str(k)
+    except Exception:
+        pass
+    return os.getenv("TIINGO_API_KEY")
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
-def fetch_daily(symbol: str, days: int = 20) -> pd.DataFrame:
+def fetch_daily_tiingo(symbol: str, days: int = 20) -> pd.DataFrame:
+    key = get_tiingo_key()
+    if not key:
+        return pd.DataFrame()
+
+    try:
+        end_utc = datetime.now(timezone.utc)
+        start_utc = end_utc - pd.Timedelta(days=days)
+
+        candidates = [symbol]
+        if symbol.endswith(".T"):
+            code = symbol.replace(".T", "")
+            candidates += [code, f"tse:{code}"]
+
+        for tk in candidates:
+            url = f"https://api.tiingo.com/tiingo/daily/{tk}/prices"
+            params = {
+                "startDate": start_utc.date().isoformat(),
+                "endDate": end_utc.date().isoformat(),
+                "token": key,
+            }
+            r = requests.get(url, params=params, timeout=10)
+            if r.status_code != 200:
+                continue
+
+            js = r.json()
+            if not js:
+                continue
+
+            df = pd.DataFrame(js)
+            if "date" not in df.columns or "close" not in df.columns:
+                continue
+
+            df["date"] = pd.to_datetime(df["date"], utc=True)
+            df = df.set_index("date").sort_index()
+
+            out = pd.DataFrame(index=df.index)
+            out["Open"] = df.get("open")
+            out["High"] = df.get("high")
+            out["Low"] = df.get("low")
+            out["Close"] = df.get("close")
+            out["Volume"] = df.get("volume", 0)
+
+            out = out.tz_convert(JST).dropna(subset=["Close"])
+            return out
+
+    except Exception:
+        return pd.DataFrame()
+
+    return pd.DataFrame()
+
+# ----------------------------
+# Yahoo(yfinance) 日足
+# ----------------------------
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def fetch_daily_yahoo(symbol: str, days: int = 20) -> pd.DataFrame:
     try:
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - pd.Timedelta(days=days)
@@ -136,51 +204,61 @@ def fetch_daily(symbol: str, days: int = 20) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def fetch_daily(symbol: str, days: int = 20, provider: str = "yahoo") -> pd.DataFrame:
-    # providerがtiingoなら、まずTiingoを試して、ダメならyfinance
+    # provider が tiingo のときだけ Tiingo を先に試す（失敗したら Yahoo）
     if provider == "tiingo":
         df_t = fetch_daily_tiingo(symbol, days=days)
         if not df_t.empty and df_t["Close"].dropna().shape[0] >= 2:
             return df_t
-        # Tiingo失敗 → Yahooへフォールバック
+    return fetch_daily_yahoo(symbol, days=days)
 
-    try:
-        end_utc = datetime.now(timezone.utc)
-        start_utc = end_utc - pd.Timedelta(days=days)
-        df = yf.Ticker(symbol).history(start=start_utc, end=end_utc, interval="1d", auto_adjust=False)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-        return df.tz_convert(JST).dropna(subset=["Close"])
-    except Exception:
-        return pd.DataFrame()
+# ----------------------------
+# Yahoo(yfinance) イントラ（1m→2m→5m→15m）
+# ----------------------------
+@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+def fetch_intraday(symbol: str) -> pd.DataFrame:
+    for interval in ("1m", "2m", "5m", "15m"):
+        try:
+            df = yf.Ticker(symbol).history(period="1d", interval=interval, auto_adjust=False)
+            if df is None or df.empty:
+                continue
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC")
+            df = df.tz_convert(JST).dropna(subset=["Close"])
+            if df.empty:
+                continue
+            df.attrs["interval"] = interval
+            return df
+        except Exception:
+            continue
+    return pd.DataFrame()
 
+# ----------------------------
+# 安全な値取り
+# ----------------------------
 def safe_last_price(df: pd.DataFrame) -> Optional[float]:
     try:
         s = df["Close"].dropna()
-        if s.empty:
-            return None
-        return float(s.iloc[-1])
+        return float(s.iloc[-1]) if not s.empty else None
     except Exception:
         return None
 
 def safe_first_open(df: pd.DataFrame) -> Optional[float]:
     try:
         s = df["Open"].dropna()
-        if s.empty:
-            return None
-        return float(s.iloc[0])
+        return float(s.iloc[0]) if not s.empty else None
     except Exception:
         return None
 
-def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "yahoo") -> dict:
-
+# ----------------------------
+# カード用計算
+# ----------------------------
+def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "yahoo") -> Dict[str, Any]:
     """
-    - 当日動いているなら intraday で「当日開始比」
-    - intradayが取れない/市場休みなら dailyで「前日比」
-    - 指数が遅延しやすいので、rt_symbol があれば intradayはそちらで取得
+    - intradayが取れれば「当日開始比」
+    - 取れない/市場休みなら dailyで「前日比」
+    - rt_symbol があれば intraday はそちら（先物）で取得
+    - daily は provider に従う（フジクラだけTiingo等）
     """
     intraday_sym = rt_symbol or symbol
     intra = fetch_intraday(intraday_sym)
@@ -189,7 +267,6 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
         now = safe_last_price(intra)
         base = safe_first_open(intra)
         last_ts = intra.index[-1]
-        mode = "INTRADAY"
         interval = intra.attrs.get("interval", "1m")
 
         if now is not None and base not in (None, 0):
@@ -197,7 +274,7 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
             pct = (now / base - 1.0) * 100.0
             return {
                 "ok": True,
-                "mode": mode,
+                "mode": "INTRADAY",
                 "interval": interval,
                 "now": now,
                 "base": base,
@@ -209,8 +286,9 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
                 "rt_used": bool(rt_symbol),
             }
 
-    # intradayが無い/不完全 → daily
+    # intraday無い → daily（短期だけでOKなら days=15 くらいで十分）
     daily = fetch_daily(symbol, days=15, provider=provider)
+
     if (daily.empty or daily["Close"].dropna().shape[0] < 2) and rt_symbol:
         daily = fetch_daily(rt_symbol, days=15, provider=provider)
 
@@ -237,82 +315,12 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
         "date_label": last_ts.strftime("%Y-%m-%d"),
         "rt_used": bool(rt_symbol),
     }
-def get_tiingo_key() -> Optional[str]:
-    # Streamlit Secrets → 環境変数の順で探す
-    try:
-        k = st.secrets.get("TIINGO_API_KEY", None)
-        if k:
-            return str(k)
-    except Exception:
-        pass
-    return os.getenv("TIINGO_API_KEY")
 
-@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
-def fetch_daily_tiingo(symbol: str, days: int = 20) -> pd.DataFrame:
-    """
-    Tiingoの日足（EOD）取得。
-    失敗したら空DataFrameを返す（落とさない）。
-    """
-    key = get_tiingo_key()
-    if not key:
-        return pd.DataFrame()
-
-    try:
-        end_utc = datetime.now(timezone.utc)
-        start_utc = end_utc - pd.Timedelta(days=days)
-
-        # Tiingoはティッカー表記が環境で差があることがあるので候補を試す
-        # 例: 5803.T / 5803 / tse:5803 など
-        candidates = [symbol]
-        if symbol.endswith(".T"):
-            code = symbol.replace(".T", "")
-            candidates += [code, f"tse:{code}"]
-
-        for tk in candidates:
-            url = f"https://api.tiingo.com/tiingo/daily/{tk}/prices"
-            params = {
-                "startDate": start_utc.date().isoformat(),
-                "endDate": end_utc.date().isoformat(),
-                "token": key,
-            }
-            r = requests.get(url, params=params, timeout=10)
-            if r.status_code != 200:
-                continue
-
-            js = r.json()
-            if not js:
-                continue
-
-            df = pd.DataFrame(js)
-            # Tiingoは列名が open/high/low/close/volume 等
-            if "date" not in df.columns or "close" not in df.columns:
-                continue
-
-            df["date"] = pd.to_datetime(df["date"], utc=True)
-            df = df.set_index("date").sort_index()
-
-            # yfinance互換の列へ寄せる
-            out = pd.DataFrame(index=df.index)
-            out["Open"] = df.get("open")
-            out["High"] = df.get("high")
-            out["Low"]  = df.get("low")
-            out["Close"]= df.get("close")
-            out["Volume"]= df.get("volume", 0)
-
-            # JSTへ
-            out = out.tz_convert(JST)
-            out = out.dropna(subset=["Close"])
-            return out
-
-    except Exception:
-        return pd.DataFrame()
-
-    return pd.DataFrame()
 # ----------------------------
-# 短期チャート（当日：時間軸 / CLOSE：日付軸）
+# 短期チャート（当日: 時間 / CLOSE: 日付）
 # ----------------------------
-def make_sparkline(series: pd.Series, base: float, mode: str):
-    fig, ax = plt.subplots(figsize=(5.2, 1.55))
+def make_sparkline(series: pd.Series, base: float, mode: str, up: bool):
+    fig, ax = plt.subplots(figsize=(5.6, 1.75))
 
     if series is None or series.empty:
         ax.text(0.5, 0.5, "N/A", ha="center", va="center")
@@ -322,11 +330,12 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
     x = series.index
     y = series.values
 
-    ax.axhline(base, linewidth=1, alpha=0.6)
+    ax.axhline(base, linewidth=1, alpha=0.6, color="black")
+    ax.plot(x, y, linewidth=1.8, color=LINE_NEUTRAL, alpha=0.95)
 
-    ax.plot(x, y, linewidth=1.6, color=LINE, alpha=0.95)
-    ax.fill_between(x, y, base, where=(y >= base), alpha=0.55)
-    ax.fill_between(x, y, base, where=(y < base), alpha=0.55)
+    fill_color = GREEN if up else RED
+    ax.fill_between(x, y, base, where=(y >= base), alpha=0.12, color=GREEN)
+    ax.fill_between(x, y, base, where=(y < base), alpha=0.12, color=RED)
 
     if mode == "INTRADAY":
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
@@ -335,7 +344,6 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=JST))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
 
-    # ここも少し大きめに
     ax.tick_params(axis="x", labelsize=10, rotation=0)
     ax.tick_params(axis="y", labelsize=10)
     ax.margins(x=0.01)
@@ -348,7 +356,7 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
     return fig
 
 # ----------------------------
-# カードCSS（★フォントを大きく）
+# カードCSS（フォント大きめ & 1行ヘッダ）
 # ----------------------------
 def card_css(bg: str) -> str:
     return f"""
@@ -364,28 +372,31 @@ def card_css(bg: str) -> str:
       display:flex;
       align-items:baseline;
       justify-content:space-between;
-      gap: 8px;
+      gap: 10px;
       margin-bottom: 6px;
     }}
     .wk-name {{
       font-weight: 900;
-      font-size: 16px;
+      font-size: 18px;
       line-height: 1.1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
     .wk-sym {{
-      font-weight: 600;
+      font-weight: 700;
       font-size: 12px;
       color: rgba(0,0,0,0.55);
-      margin-left: 6px;
+      margin-left: 8px;
     }}
     .wk-pct {{
       font-weight: 900;
-      font-size: 22px;
+      font-size: 26px;
       line-height: 1;
       white-space: nowrap;
     }}
     .wk-now {{
-      font-size: 13px;
+      font-size: 14px;
       color: rgba(0,0,0,0.75);
       margin-bottom: 4px;
     }}
@@ -401,52 +412,61 @@ def render_market_row(items, cols=4):
     for i, it in enumerate(items):
         col = columns[i % cols]
         with col:
-           data = compute_card(it["symbol"], it.get("rt_symbol"), it.get("provider", "yahoo"))
-           if not data.get("ok"):
-               st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
-               sub = it["symbol"] + (f" / RT:{it.get('rt_symbol')}" if it.get("rt_symbol") else "")
-               st.markdown(
-                   f"""
-                   <div class="wk-card">
-                   <div class="wk-title">{it["name"]}</div>
-                   <div class="wk-sub">{sub}</div>
-                   <div class="wk-pct" style="color:#666;">N/A</div>
-                   <div class="wk-now">取得できませんでした</div>
-                   </div>
-                   """,
-                   unsafe_allow_html=True,
+            data = compute_card(
+                it["symbol"],
+                it.get("rt_symbol"),
+                it.get("provider", "yahoo"),
+            )
+
+            if not data.get("ok"):
+                st.markdown(card_css(BG_NEUTRAL), unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="wk-card">
+                      <div class="wk-head">
+                        <div class="wk-name">{it["name"]}<span class="wk-sym">{it["symbol"]}</span></div>
+                        <div class="wk-pct" style="color:#666;">N/A</div>
+                      </div>
+                      <div class="wk-now">取得できませんでした</div>
+                      <div class="wk-foot">Provider: {it.get("provider","yahoo")} / RT: {it.get("rt_symbol","-")}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
-               continue
+                continue
 
-           pct = data["pct"]
-           chg = data["chg"]
-           now = data["now"]
-           mode = data["mode"]
-           date_label = data["date_label"]
-           last_ts = data["last_ts"].strftime("%m/%d %H:%M JST") if mode == "INTRADAY" else data["last_ts"].strftime("%Y-%m-%d")
+            pct = data["pct"]
+            chg = data["chg"]
+            now = data["now"]
+            mode = data["mode"]
+            date_label = data["date_label"]
+            last_ts = (
+                data["last_ts"].strftime("%m/%d %H:%M JST")
+                if mode == "INTRADAY"
+                else data["last_ts"].strftime("%Y-%m-%d")
+            )
 
-           up = pct >= 0
-           color = GREEN if up else RED
-           bg = BG_UP if up else BG_DN
+            up = pct >= 0
+            color = GREEN if up else RED
+            bg = BG_UP if up else BG_DN
 
-           st.markdown(card_css(bg), unsafe_allow_html=True)
-           sub = it["symbol"] + (f" / RT:{it.get('rt_symbol')}" if it.get("rt_symbol") else "")
-           st.markdown(
-               f"""
-               <div class="wk-card">
-               <div class="wk-head">
-               <div class="wk-name">{it["name"]}<span class="wk-sym">{it["symbol"]}</span></div>
-               <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
-               </div>
-               <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
-               <div class="wk-foot">Date: {date_label} / Last: {last_ts} / {mode}</div>
-               </div>
-               """,
-               unsafe_allow_html=True,
-           )
+            st.markdown(card_css(bg), unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class="wk-card">
+                  <div class="wk-head">
+                    <div class="wk-name">{it["name"]}<span class="wk-sym">{it["symbol"]}</span></div>
+                    <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
+                  </div>
+                  <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
+                  <div class="wk-foot">Date: {date_label} / Last: {last_ts} / {mode}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-           fig = make_sparkline(data["series"], data["base"], data["mode"])
-           st.pyplot(fig, clear_figure=True)
+            fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
+            st.pyplot(fig, clear_figure=True)
 
 def main():
     st.set_page_config(page_title="Market Dashboard", layout="wide")
@@ -462,22 +482,14 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
+        st.subheader("Tiingo")
+        key_exists = bool(get_tiingo_key())
+        st.write(f"TIINGO_API_KEY: {'設定あり' if key_exists else '未設定'}")
+        st.caption("Streamlit Cloud の Settings → Secrets に TIINGO_API_KEY を入れる想定です。")
+
     for title, items in MARKETS.items():
         st.subheader(title)
         render_market_row(items, cols=4)
         st.divider()
 
 main()
-
-
-
-
-
-
-
-
-
-
-
-
-
