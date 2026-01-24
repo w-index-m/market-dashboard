@@ -71,6 +71,12 @@ MARKETS = {
         {"name": "グロース250（ETF）", "symbol": "2516.T", "flag": "JP"},
         {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
     ],
+     "日本（個別株）": [
+        {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
+        {"name": "ソニーG", "symbol": "6758.T", "flag": "JP"},
+        {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
+        {"name": "任天堂", "symbol": "7974.T", "flag": "JP"},
+    ],
     "アジア": [
         {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
         {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
@@ -376,3 +382,4 @@ def main():
         st.divider()
 
 main()
+
