@@ -251,7 +251,7 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
 
     ax.axhline(base, linewidth=1, alpha=0.6)
 
-    ax.plot(x, y, linewidth=1.6, color=LINE)
+    ax.plot(x, y, linewidth=1.6, color=LINE, alpha=0.95)
     ax.fill_between(x, y, base, where=(y >= base), alpha=0.55)
     ax.fill_between(x, y, base, where=(y < base), alpha=0.55)
 
@@ -388,6 +388,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
