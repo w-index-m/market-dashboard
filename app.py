@@ -445,8 +445,8 @@ def render_market_row(items, cols=4):
                unsafe_allow_html=True,
            )
 
-            fig = make_sparkline(data["series"], data["base"], data["mode"])
-            st.pyplot(fig, clear_figure=True)
+           fig = make_sparkline(data["series"], data["base"], data["mode"])
+           st.pyplot(fig, clear_figure=True)
 
 def main():
     st.set_page_config(page_title="Market Dashboard", layout="wide")
@@ -468,6 +468,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
