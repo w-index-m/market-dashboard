@@ -69,9 +69,9 @@ LINE_NEUTRAL = "#1f77b4"
 MARKETS = {
     "日本": [
         {"name": "日経平均", "symbol": "^N225", "flag": "JP"},
-        {"name": "TOPIX", "symbol": "998405.T", "flag": "JP"},
+        {"name": "TOPIX（ETF）", "symbol": "1306.T", "flag": "JP"}
         {"name": "グロース250（ETF）", "symbol": "2516.T", "flag": "JP"},
-        {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
+        {"name": "日経225先物", "symbol": "NK=F", "flag": "JP"}
     ],
     "日本（個別株）": [
         {"name": "フジクラ", "symbol": "5803.T", "flag": "JP", "provider": "tiingo"},
@@ -109,6 +109,7 @@ MARKETS = {
     ],
     "コモディティ": [
         {"name": "ゴールド", "symbol": "GC=F", "flag": "CMD"},
+        {"name": "プラチナ（先物）", "symbol": "PL=F", "flag": "CMD"},
         {"name": "原油（WTI）", "symbol": "CL=F", "flag": "CMD"},
     ],
     "暗号資産": [
@@ -493,5 +494,6 @@ def main():
         st.divider()
 
 main()
+
 
 
