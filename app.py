@@ -57,7 +57,7 @@ RED = "#d1242f"
 BG_UP = "rgba(26,127,55,0.08)"
 BG_DN = "rgba(209,36,47,0.08)"
 BG_NEUTRAL = "rgba(0,0,0,0.03)"
-LINE = "#1f77b4"
+LINE = "rgba(0,0,0,0.75)"
 
 # ----------------------------
 # 取得対象（★US主要3指数は rt_symbol を先物に）
@@ -71,19 +71,26 @@ MARKETS = {
         {"name": "グロース250（ETF）", "symbol": "2516.T", "flag": "JP"},
         {"name": "日経VI", "symbol": "^JNIV", "flag": "JP"},
     ],
-     "日本（個別株）": [
+    "日本（個別株）": [
+        {"name": "フジクラ", "symbol": "5803.T", "flag": "JP"},
+        {"name": "三菱重工", "symbol": "7011.T", "flag": "JP"},
+        {"name": "三菱商事", "symbol": "8058.T", "flag": "JP"},
+        {"name": "ＩＨＩ", "symbol": "7013.T", "flag": "JP"},
+    ],
+        "日本（個別株）": [
         {"name": "トヨタ自動車", "symbol": "7203.T", "flag": "JP"},
         {"name": "ソニーG", "symbol": "6758.T", "flag": "JP"},
         {"name": "三菱UFJ", "symbol": "8306.T", "flag": "JP"},
         {"name": "任天堂", "symbol": "7974.T", "flag": "JP"},
     ],
+
+
     "アジア": [
         {"name": "香港ハンセン", "symbol": "^HSI", "flag": "HK"},
         {"name": "中国 上海総合", "symbol": "000001.SS", "flag": "CN"},
         {"name": "インド NIFTY50", "symbol": "^NSEI", "flag": "IN"},
         {"name": "韓国 KOSPI", "symbol": "^KS11", "flag": "KR"},
         {"name": "台湾 加権", "symbol": "^TWII", "flag": "TW"},
-    ],    
     "米国": [
         {"name": "ダウ平均", "symbol": "^DJI", "flag": "US", "rt_symbol": "YM=F"},
         {"name": "NASDAQ", "symbol": "^IXIC", "flag": "US", "rt_symbol": "NQ=F"},
@@ -96,6 +103,8 @@ MARKETS = {
         {"name": "独DAX", "symbol": "^GDAXI", "flag": "DE"},
         {"name": "仏CAC40", "symbol": "^FCHI", "flag": "FR"},
     ],
+
+    ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
         {"name": "ユーロ円", "symbol": "EURJPY=X", "flag": "FX"},
@@ -107,6 +116,7 @@ MARKETS = {
     ],
     "暗号資産": [
         {"name": "ビットコイン", "symbol": "BTC-USD", "flag": "CRYPTO"},
+    ],
     ],
 }
 
@@ -245,7 +255,7 @@ def make_sparkline(series: pd.Series, base: float, mode: str):
 
     ax.axhline(base, linewidth=1, alpha=0.6)
 
-    ax.plot(x, y, linewidth=1.6, color=LINE, alpha=0.95)
+    ax.plot(x, y, linewidth=1.6, color=LINE)
     ax.fill_between(x, y, base, where=(y >= base), alpha=0.55)
     ax.fill_between(x, y, base, where=(y < base), alpha=0.55)
 
@@ -382,4 +392,3 @@ def main():
         st.divider()
 
 main()
-
