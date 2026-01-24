@@ -158,6 +158,11 @@ MARKETS = {
         {"name": "Meta", "symbol": "META", "flag": "US"},
         {"name": "Tesla", "symbol": "TSLA", "flag": "US"},
     ],
+    "米国（個別株）": [
+        {"name": "Netflix", "symbol": "NFLX", "flag": "US"},
+        {"name": "Palantir", "symbol": "PLTR", "flag": "US"},
+        {"name": "Broadcom", "symbol": "AVGO", "flag": "US"},
+    ],
     "為替": [
         {"name": "ドル円", "symbol": "USDJPY=X", "flag": "FX"},
         {"name": "ユーロ円", "symbol": "EURJPY=X", "flag": "FX"},
@@ -550,6 +555,7 @@ def main():
         st.divider()
 
 main()
+
 
 
 
