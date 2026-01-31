@@ -57,26 +57,14 @@ def inject_ga():
 
 inject_ga()
 
+
 #　YahooのチャートURLを自動生成する関数
 import urllib.parse
-
 def yahoo_chart_url(symbol: str, market: str = "US") -> str:
-    """
-    market:
-      "US" -> finance.yahoo.com
-      "JP" -> finance.yahoo.co.jp
-    """
-    base = "https://finance.yahoo.com/chart/" if market == "US" else "https://finance.yahoo.co.jp/quote/"
     if market == "US":
-        # USは /chart/{SYMBOL}
-        return base + urllib.parse.quote(symbol, safe="-=^.")
+        return "https://finance.yahoo.com/chart/" + urllib.parse.quote(symbol, safe="-=^.")
     else:
-        # 日本Yahooは /quote/{SYMBOL}
-        # 例: 7203.T や ^N225 もそのまま通る
-        return base + urllib.parse.quote(symbol, safe="-=^.")  # 末尾に /chart がない点に注意
-    url = yahoo_chart_url(it["symbol"], market=("US" if it["flag"]=="US" else "JP"))
-    st.link_button("Yahooで開く", url)
-    st.markdown(f"[📈 Yahooで開く]({url})")
+        return "https://finance.yahoo.co.jp/quote/" + urllib.parse.quote(symbol, safe="-=^.")
     
 # ================================
 
@@ -556,9 +544,27 @@ def render_market_row(items, cols=4):
                 """,
                 unsafe_allow_html=True,
             )
+url = yahoo_chart_url(
+    it["symbol"],
+    market=("US" if it["flag"] == "US" else "JP")
+)
 
-            fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
-            st.pyplot(fig, clear_figure=True)
+# 「チャートをクリック」の代わりになるリンク表示
+st.markdown(
+    f"""
+    <div style="text-align:right; margin-bottom:4px;">
+      <a href="{url}" target="_blank" style="font-size:12px;">
+        📈 Yahoo Financeで開く
+      </a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+fig = make_sparkline(data["series"
+
+#            fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
+#            st.pyplot(fig, clear_figure=True)
 
 def main():
     st.set_page_config(page_title="Market Dashboard", layout="wide")
@@ -585,3 +591,4 @@ def main():
         st.divider()
 
 main()
+
