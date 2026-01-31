@@ -5,7 +5,6 @@ Market Dashboard (Streamlit)
 - 価格変化は「前日終値比」に統一（証券会社表示に寄せる）
 - 取得は基本 Yahoo Finance（yfinance）
 - 任意で Tiingo を銘柄単位で併用（例: フジクラだけ provider="tiingo"）
-
 Secrets（Streamlit Cloud）:
 TIINGO_API_KEY = "YOUR_KEY"
 """
@@ -23,16 +22,6 @@ import requests
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import io
-import base64
-
-def fig_to_data_uri(fig) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    buf.seek(0)
-    b64 = base64.b64encode(buf.read()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
-
 import matplotlib.dates as mdates
 import matplotlib.font_manager as fm
 
@@ -244,8 +233,7 @@ def get_tiingo_key() -> Optional[str]:
     return os.getenv("TIINGO_API_KEY")
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
-def fetch_daily_tiingo(symbol: str, days: int = 20, cache_bust: int = 0) -> pd.DataFrame:
-    _ = cache_bust  # cache key
+def fetch_daily_tiingo(symbol: str, days: int = 20) -> pd.DataFrame:
     key = get_tiingo_key()
     if not key:
         return pd.DataFrame()
@@ -300,9 +288,7 @@ def fetch_daily_tiingo(symbol: str, days: int = 20, cache_bust: int = 0) -> pd.D
 # Yahoo(yfinance) 日足
 # ----------------------------
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
-def fetch_daily_yahoo(symbol: str, days: int = 20, cache_bust: int = 0) -> pd.DataFrame:
-    """日足（UTC indexで返す）"""
-    _ = cache_bust  # cache key
+def fetch_daily_yahoo(symbol: str, days: int = 20) -> pd.DataFrame:
     try:
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - pd.Timedelta(days=days)
@@ -311,28 +297,23 @@ def fetch_daily_yahoo(symbol: str, days: int = 20, cache_bust: int = 0) -> pd.Da
             return pd.DataFrame()
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
-        else:
-            df = df.tz_convert("UTC")
-        return df.dropna(subset=["Close"])
+        return df.tz_convert(JST).dropna(subset=["Close"])
     except Exception:
         return pd.DataFrame()
 
-
-def fetch_daily(symbol: str, days: int = 20, provider: str = "yahoo", cache_bust: int = 0) -> pd.DataFrame:
+def fetch_daily(symbol: str, days: int = 20, provider: str = "yahoo") -> pd.DataFrame:
     # provider が tiingo のときだけ Tiingo を先に試す（失敗したら Yahoo）
     if provider == "tiingo":
-        df_t = fetch_daily_tiingo(symbol, days=days, cache_bust=cache_bust)
+        df_t = fetch_daily_tiingo(symbol, days=days)
         if not df_t.empty and df_t["Close"].dropna().shape[0] >= 2:
             return df_t
-    return fetch_daily_yahoo(symbol, days=days, cache_bust=cache_bust)
+    return fetch_daily_yahoo(symbol, days=days)
 
 # ----------------------------
 # Yahoo(yfinance) イントラ（1m→2m→5m→15m）
 # ----------------------------
 @st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
-def fetch_intraday(symbol: str, cache_bust: int = 0) -> pd.DataFrame:
-    """イントラ（UTC indexで返す）"""
-    _ = cache_bust  # cache key
+def fetch_intraday(symbol: str) -> pd.DataFrame:
     for interval in ("1m", "2m", "5m", "15m"):
         try:
             df = yf.Ticker(symbol).history(period="1d", interval=interval, auto_adjust=False)
@@ -340,9 +321,7 @@ def fetch_intraday(symbol: str, cache_bust: int = 0) -> pd.DataFrame:
                 continue
             if df.index.tz is None:
                 df.index = df.index.tz_localize("UTC")
-            else:
-                df = df.tz_convert("UTC")
-            df = df.dropna(subset=["Close"])
+            df = df.tz_convert(JST).dropna(subset=["Close"])
             if df.empty:
                 continue
             df.attrs["interval"] = interval
@@ -350,7 +329,6 @@ def fetch_intraday(symbol: str, cache_bust: int = 0) -> pd.DataFrame:
         except Exception:
             continue
     return pd.DataFrame()
-
 
 # ----------------------------
 # 安全な値取り
@@ -372,118 +350,68 @@ def safe_first_open(df: pd.DataFrame) -> Optional[float]:
 # ----------------------------
 # カード用計算
 # ----------------------------
-def _exchange_tz_for(symbol: str) -> pytz.BaseTzInfo:
-    # シンプル判定: 日本株(.T)はJST、その他は米国(ET)
-    try:
-        if symbol.endswith(".T"):
-            return JST
-    except Exception:
-        pass
-    return pytz.timezone("America/New_York")
-
-
-def _is_live(intra_utc: pd.DataFrame, exchange_tz: pytz.BaseTzInfo) -> Tuple[bool, Optional[pd.Timestamp], str]:
-    if intra_utc is None or intra_utc.empty:
-        return False, None, "no_intra"
-    interval = intra_utc.attrs.get("interval", "1m")
-    mins = int(str(interval).replace("m", "")) if str(interval).endswith("m") else 1
-
-    last_utc = intra_utc.index[-1]
-    last_ex = last_utc.tz_convert(exchange_tz)
-
-    now_ex = datetime.now(exchange_tz)
-    # 「更新が新しい」＝LIVE。クローズ後は last_ts が古くなるのでCLOSEに倒れる。
-    threshold = max(6, min(20, mins * 2 + 2))  # minutes
-    delta_min = (now_ex - last_ex.to_pydatetime()).total_seconds() / 60.0
-
-    if last_ex.date() != now_ex.date():
-        return False, last_ex, "different_day"
-    if delta_min <= threshold:
-        return True, last_ex, f"fresh({delta_min:.1f}m)"
-    return False, last_ex, f"stale({delta_min:.1f}m)"
-
-
-def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "yahoo", cache_bust: int = 0) -> Dict[str, Any]:
+def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "yahoo") -> Dict[str, Any]:
     """
-    表示ロジック（誤解しにくい版）
-    - まず intraday を取得し、タイムスタンプの鮮度で LIVE/CLOSE を判定
-    - 変化率は常に「前日終値比」（米国の一般的な表示に寄せる）
-    - intraday が取れない/鮮度がない → 日足CLOSE表示
+    - intradayが取れれば「当日開始比」
+    - 取れない/市場休みなら dailyで「前日比」
+    - rt_symbol があれば intraday はそちら（先物）で取得
+    - daily は provider に従う（フジクラだけTiingo等）
     """
     intraday_sym = rt_symbol or symbol
-    exchange_tz = _exchange_tz_for(symbol)
+    intra = fetch_intraday(intraday_sym)
+    daily = fetch_daily(...)
+#    if not intra.empty:
+#        now = safe_last_price(intra)
+#        base = safe_first_open(intra)
+#        last_ts = intra.index[-1]
+#        interval = intra.attrs.get("interval", "1m")
+#
+#        if now is not None and base not in (None, 0):
+#            chg = now - base
+#            pct = (now / base - 1.0) * 100.0
+#            return {
+#                "ok": True,
+#                "mode": "INTRADAY",
+#                "interval": interval,
+#                "now": now,
+#                "base": base,
+#                "chg": chg,
+#                "pct": pct,
+#                "last_ts": last_ts,
+#                "date_label": last_ts.strftime("%Y-%m-%d"),
+#                "rt_used": bool(rt_symbol),
+#             }
 
-    intra_utc = fetch_intraday(intraday_sym, cache_bust=cache_bust)
-    is_live, last_ex, live_reason = _is_live(intra_utc, exchange_tz)
 
-    # 前日終値を取るために日足は必ず引く（Tiingo指定はここに効く）
-    daily_utc = fetch_daily(symbol, days=20, provider=provider, cache_bust=cache_bust)
-    if (daily_utc.empty or daily_utc["Close"].dropna().shape[0] < 2) and rt_symbol:
-        daily_utc = fetch_daily(rt_symbol, days=20, provider=provider, cache_bust=cache_bust)
+    # intraday無い → daily（短期だけでOKなら days=15 くらいで十分）
+    daily = fetch_daily(symbol, days=15, provider=provider)
 
-    if daily_utc.empty or daily_utc["Close"].dropna().shape[0] < 2:
-        return {"ok": False, "reason": "日足が取得できませんでした"}
+    if (daily.empty or daily["Close"].dropna().shape[0] < 2) and rt_symbol:
+        daily = fetch_daily(rt_symbol, days=15, provider=provider)
 
-    closes = daily_utc["Close"].dropna()
-    daily_ex = closes.tz_convert(exchange_tz)
+    if daily.empty or daily["Close"].dropna().shape[0] < 2:
+        return {"ok": False, "reason": "取得できませんでした"}
 
-    now_ex_date = datetime.now(exchange_tz).date()
-    if is_live and daily_ex.index[-1].date() == now_ex_date and daily_ex.shape[0] >= 2:
-        prev_close = float(daily_ex.iloc[-2])
-    else:
-        prev_close = float(daily_ex.iloc[-1]) if is_live else float(daily_ex.iloc[-2])
-
-    if is_live and intra_utc is not None and not intra_utc.empty:
-        now_px = safe_last_price(intra_utc)
-        if now_px is not None and prev_close not in (None, 0):
-            chg = float(now_px) - prev_close
-            pct = (float(now_px) / prev_close - 1.0) * 100.0
-            intra_jst = intra_utc["Close"].tz_convert(JST)
-            last_jst = intra_utc.index[-1].tz_convert(JST)
-            date_label_ex = (last_ex.strftime("%Y-%m-%d") if last_ex is not None else "-")
-            return {
-                "ok": True,
-                "mode": "LIVE",
-                "interval": intra_utc.attrs.get("interval", "1m"),
-                "now": float(now_px),
-                "base": float(prev_close),
-                "base_label": "Prev Close",
-                "chg": float(chg),
-                "pct": float(pct),
-                "series": intra_jst.tail(390),
-                "last_ts_jst": last_jst,
-                "last_ts_ex": last_ex,
-                "date_label": date_label_ex,
-                "rt_used": bool(rt_symbol),
-                "live_reason": live_reason,
-            }
-
-    # CLOSE 表示：直近終値 vs その前の終値
-    now_close = float(closes.iloc[-1])
+    closes = daily["Close"].dropna()
+    now = float(closes.iloc[-1])
     prev = float(closes.iloc[-2])
-    chg = now_close - prev
-    pct = (now_close / prev - 1.0) * 100.0
-    closes_jst = closes.tz_convert(JST)
-    last_ts_jst = closes_jst.index[-1]
-    last_ts_ex2 = closes.tz_convert(exchange_tz).index[-1]
+    chg = now - prev
+    pct = (now / prev - 1.0) * 100.0
+    last_ts = closes.index[-1]
 
     return {
         "ok": True,
         "mode": "CLOSE",
         "interval": "1d",
-        "now": now_close,
+        "now": now,
         "base": prev,
-        "base_label": "Prev Close",
         "chg": chg,
         "pct": pct,
-        "series": closes_jst.tail(30),
-        "last_ts_jst": last_ts_jst,
-        "last_ts_ex": last_ts_ex2,
-        "date_label": last_ts_ex2.strftime("%Y-%m-%d"),
+        "series": closes.tail(30),
+        "last_ts": last_ts,
+        "date_label": last_ts.strftime("%Y-%m-%d"),
         "rt_used": bool(rt_symbol),
-        "live_reason": live_reason,
     }
-
 
 # ----------------------------
 # 短期チャート（当日: 時間 / CLOSE: 日付）
@@ -506,7 +434,7 @@ def make_sparkline(series: pd.Series, base: float, mode: str, up: bool):
     ax.fill_between(x, y, base, where=(y >= base), alpha=0.12, color=GREEN)
     ax.fill_between(x, y, base, where=(y < base), alpha=0.12, color=RED)
 
-    if mode == "LIVE":
+    if mode == "INTRADAY":
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
     else:
@@ -628,16 +556,14 @@ def render_market_row(items, cols=4):
                     <div class="wk-pct" style="color:{color};">{pct:+.2f}%</div>
                   </div>
                   <div class="wk-now">Now: {now:,.2f} &nbsp;&nbsp; Chg: {chg:+,.2f}</div>
-                  <div class="wk-foot">Status: {mode}（基準: 前日終値） / Exchange: {date_label} / 更新: {last_ts_jst:%m/%d %H:%M} JST（現地 {last_ts_ex:%m/%d %H:%M}）</div>
+                  <div class="wk-foot">Date: {date_label} / Last: {last_ts} / {mode}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
             fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
-            uri = fig_to_data_uri(fig)
-            yahoo_url = f"https://finance.yahoo.com/quote/{it['symbol']}"
-            st.markdown(f'<a href="{yahoo_url}" target="_blank" rel="noopener noreferrer"><img src="{uri}" style="width:100%; border-radius:8px;" /></a>', unsafe_allow_html=True)
+            st.pyplot(fig, clear_figure=True)
 
 def main():
     st.set_page_config(page_title="Market Dashboard", layout="wide")
@@ -649,13 +575,7 @@ def main():
     with st.sidebar:
         st.subheader("操作")
         st.write("レート制限回避のためキャッシュ長めです。")
-        if "cache_bust" not in st.session_state:
-            st.session_state["cache_bust"] = 0
-        if st.button("更新（キャッシュ地雷回避）"):
-            st.session_state["cache_bust"] += 1
-            st.rerun()
-        st.caption("※API制限回避のため、通常はTTLキャッシュが効きます。上の更新はキャッシュキーを切り替えて最新取得します。")
-        if st.button("（最終手段）全キャッシュ削除"):
+        if st.button("キャッシュ削除して更新"):
             st.cache_data.clear()
             st.rerun()
 
@@ -670,15 +590,4 @@ def main():
         st.divider()
 
 main()
-
-
-
-
-
-
-
-
-
-
-
 
