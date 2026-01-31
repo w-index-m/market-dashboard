@@ -561,7 +561,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-fig = make_sparkline(data["series"
+fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
+st.pyplot(fig, clear_figure=True)
 
 #            fig = make_sparkline(data["series"], data["base"], data["mode"], up=up)
 #            st.pyplot(fig, clear_figure=True)
@@ -591,4 +592,5 @@ def main():
         st.divider()
 
 main()
+
 
