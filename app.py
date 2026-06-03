@@ -1751,21 +1751,27 @@ def fetch_fg_components() -> Dict[str, Any]:
             msi    = mco.cumsum()         # Summation Index
 
             msi_norm = float(msi.iloc[-1])
-            # ±5 → 0〜100 に変換（感度調整済み）
-            score_b = float(np.clip(50 + msi_norm * 10, 0, 100))
+            # MSIはcumsumで値域が不定なため、過去レンジのパーセンタイルで正規化
+            msi_min, msi_max = float(msi.min()), float(msi.max())
+            if msi_max > msi_min:
+                score_b = float(np.clip((msi_norm - msi_min) / (msi_max - msi_min) * 100, 0, 100))
+                hist_scores_b = np.clip((msi.values - msi_min) / (msi_max - msi_min) * 100, 0, 100)
+            else:
+                score_b = 50.0
+                hist_scores_b = np.full(len(msi), 50.0)
 
             hist_msi = pd.DataFrame({
                 "date":  pd.to_datetime(msi.index).tz_localize(None)
                          if msi.index.tz is not None
                          else pd.to_datetime(msi.index),
-                "score": np.clip(50 + msi.values * 10, 0, 100),
+                "score": hist_scores_b,
                 "msi":   msi.values,
             })
             result["breadth"] = {
                 "score": score_b,
                 "msi":   msi_norm,
                 "hist_df": hist_msi,
-                "label": "Breadth Strong (Greed)" if msi_norm > 0 else "Breadth Weak (Fear)",
+                "label": "Breadth Strong (Greed)" if score_b > 50 else "Breadth Weak (Fear)",
             }
         else:
             # フォールバック: S&P500 単体
@@ -1773,27 +1779,30 @@ def fetch_fg_components() -> Dict[str, Any]:
             if not sp3.empty and len(sp3) >= 40:
                 close3 = sp3["Close"].dropna()
                 ret    = close3.pct_change().dropna()
-                adv = (ret > 0).astype(float)
-                dec = (ret < 0).astype(float)
-                net_adv = (adv - dec)
+                net_adv = (ret > 0).astype(float) - (ret < 0).astype(float)
                 ema19  = net_adv.ewm(span=19, adjust=False).mean()
                 ema39  = net_adv.ewm(span=39, adjust=False).mean()
                 mco    = ema19 - ema39
                 msi    = mco.cumsum()
                 msi_norm = float(msi.iloc[-1])
-                score_b  = float(np.clip(50 + msi_norm / 20, 0, 100))
+                msi_min2, msi_max2 = float(msi.min()), float(msi.max())
+                if msi_max2 > msi_min2:
+                    score_b  = float(np.clip((msi_norm - msi_min2) / (msi_max2 - msi_min2) * 100, 0, 100))
+                    hist_sc2 = np.clip((msi.values - msi_min2) / (msi_max2 - msi_min2) * 100, 0, 100)
+                else:
+                    score_b, hist_sc2 = 50.0, np.full(len(msi), 50.0)
                 hist_msi = pd.DataFrame({
                     "date":  pd.to_datetime(msi.index).tz_localize(None)
                              if msi.index.tz is not None
                              else pd.to_datetime(msi.index),
-                    "score": np.clip(50 + msi.values / 20, 0, 100),
+                    "score": hist_sc2,
                     "msi":   msi.values,
                 })
                 result["breadth"] = {
                     "score": score_b,
                     "msi":   msi_norm,
                     "hist_df": hist_msi,
-                    "label": "Breadth Strong (Greed)" if msi_norm > 0 else "Breadth Weak (Fear)",
+                    "label": "Breadth Strong (Greed)" if score_b > 50 else "Breadth Weak (Fear)",
                 }
     except Exception as e:
         logger.warning(f"FG breadth error: {e}")
@@ -5770,7 +5779,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
 
         components = {}
 
-        # ── 共通価格を一括取得 ──────────────────────────────────
+        # ── 共通価格を一括取得（全指標分、リアルタイム・履歴で共有）──
         vix_c    = _c("^VIX")
         vix3m_c  = _c("^VIX3M")
         sp_c     = _c("^GSPC")
@@ -5782,6 +5791,15 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         n225_c   = _c("^N225")
         usdjpy_c = _c("USDJPY=X")
         vxx_c    = _c("VXX")
+        # ブレッドス用ETF（二重取得防止）
+        spy_c    = _c("SPY")
+        qqq_c    = _c("QQQ")
+        iwm_c    = _c("IWM")
+        dia_c    = _c("DIA")
+        mdy_c    = _c("MDY")
+        # Put/Call比率（二重取得防止）
+        cpc_c    = _c("^CPC")
+        cpce_c   = _c("^CPCE")
 
         # ① F&G Index (CNN実データ + 履歴も同時取得)
         fg_hist_series = pd.Series(dtype=float)
@@ -5799,18 +5817,24 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     fg_values = [float(d["y"]) for d in hist_raw]
                     fg_hist_series = pd.Series(fg_values, index=fg_dates).sort_index()
                     fg_hist_series = fg_hist_series[~fg_hist_series.index.duplicated(keep="last")]
+                # normalized にパーセンタイルランクを使用（他指標と統一）
+                fg_pct = _pct_rank(fg_hist_series)
+                fg_normalized = _score_clip(float(fg_pct.iloc[-1])) if (
+                    not fg_pct.empty and not pd.isna(fg_pct.iloc[-1])
+                ) else fg_score
+                fg_zone = (
+                    "Extreme Greed" if fg_score > 75 else
+                    "Greed"         if fg_score > 55 else
+                    "Neutral"       if fg_score > 45 else
+                    "Fear"          if fg_score > 25 else
+                    "Extreme Fear"
+                )
                 components["F&G Index"] = {
-                    "score": fg_score,
-                    "normalized": fg_score,
+                    "score": fg_normalized,
+                    "normalized": fg_normalized,
                     "weight": 0.12,
-                    "label": (
-                        "Extreme Greed" if fg_score > 75 else
-                        "Greed"         if fg_score > 55 else
-                        "Neutral"       if fg_score > 45 else
-                        "Fear"          if fg_score > 25 else
-                        "Extreme Fear"
-                    ),
-                    "color": "#1a7f37" if fg_score > 55 else ("#d1242f" if fg_score < 45 else "#888"),
+                    "label": f"{fg_zone} (raw:{fg_score:.0f} PctRank:{fg_normalized:.0f}%)",
+                    "color": "#1a7f37" if fg_normalized > 55 else ("#d1242f" if fg_normalized < 45 else "#888"),
                 }
         except Exception:
             pass
@@ -5840,10 +5864,9 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                         "color": "#1a7f37" if term_score > 55 else ("#d1242f" if term_score < 45 else "#888"),
                     }
 
-        # ④ Put/Call比率 (^CPC → ^CPCE → VXX代替, パーセンタイルランク, 逆転)
+        # ④ Put/Call比率 (事前取得: cpc_c → cpce_c → VXX代替, パーセンタイルランク, 逆転)
         pc_loaded = False
-        for pc_sym, pc_lbl in [("^CPC", "P/C(全体)"), ("^CPCE", "P/C(株式)")]:
-            pc_s = _c(pc_sym)
+        for pc_s, pc_lbl in [(cpc_c, "P/C(全体)"), (cpce_c, "P/C(株式)")]:
             if not pc_s.empty and len(pc_s) >= 20:
                 pc_pct = _pct_rank(pc_s)
                 if not pc_pct.empty and not pd.isna(pc_pct.iloc[-1]):
@@ -5919,12 +5942,11 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                         "color": "#1a7f37" if crd_score > 55 else ("#d1242f" if crd_score < 45 else "#888"),
                     }
 
-        # ⑨ ブレッドス (改善: ETF5本の平均リターン強度をパーセンタイルランク)
+        # ⑨ ブレッドス (事前取得ETF5本の平均リターン強度をパーセンタイルランク)
         breadth_parts = []
-        for sym in ["SPY", "QQQ", "IWM", "DIA", "MDY"]:
-            s = _c(sym)
+        for s in [spy_c, qqq_c, iwm_c, dia_c, mdy_c]:
             if not s.empty and len(s) >= 15:
-                breadth_parts.append((s.pct_change(10) * 100))
+                breadth_parts.append(s.pct_change(10) * 100)
         if len(breadth_parts) >= 2:
             avg_br   = pd.concat(breadth_parts, axis=1).dropna().mean(axis=1)
             br_pct   = _pct_rank(avg_br)
@@ -6012,11 +6034,11 @@ def compute_composite_sentiment() -> Dict[str, Any]:
             hist_debug_info["sp_c_len"]  = len(sp_n)
             hist_debug_info["vix_c_len"] = len(vix_n)
 
-            # ① F&G 実データ（取得できた場合はそのまま使用、なければ合成プロキシ）
+            # ① F&G 実データ（パーセンタイルランク、リアルタイムと同じ手法で統一）
             if not fg_hist_series.empty:
                 fg_n = _to_naive(fg_hist_series)
-                if len(fg_n) >= 10:
-                    series_map["fg_actual"] = (fg_n.clip(0, 100), 0.12)
+                if len(fg_n) >= 20:
+                    series_map["fg_actual"] = (_pr(fg_n).clip(0, 100), 0.12)
                     hist_debug_info["fg_actual_len"] = len(fg_n)
             else:
                 # VIX逆転 × モメンタム合成（F&Gと相関が高く、純粋モメンタムと差別化）
@@ -6039,8 +6061,16 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     ratio_n = (vix3m_n.loc[common] / vix_n.loc[common].replace(0, np.nan)).dropna()
                     series_map["vix_term"] = (_pr(ratio_n).clip(0, 100), 0.10)
 
-            # ④ VXX代替 Put/Call (パーセンタイルランク, 逆転)
-            if len(vxx_n) >= 20:
+            # ④ Put/Call (リアルタイムと同データ優先, 逆転)
+            cpc_n  = _to_naive(cpc_c)
+            cpce_n = _to_naive(cpce_c)
+            pc_hist_set = False
+            for pc_hn in [cpc_n, cpce_n]:
+                if len(pc_hn) >= 20:
+                    series_map["put_call"] = ((100 - _pr(pc_hn)).clip(0, 100), 0.08)
+                    pc_hist_set = True
+                    break
+            if not pc_hist_set and len(vxx_n) >= 20:
                 series_map["put_call"] = ((100 - _pr(vxx_n)).clip(0, 100), 0.08)
 
             # ⑤ SP500モメンタム (パーセンタイルランク)
@@ -6068,8 +6098,8 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     credit_n = ((hyg_n.loc[common].pct_change(20) - lqd_n.loc[common].pct_change(20)) * 100).dropna()
                     series_map["credit"] = (_pr(credit_n).clip(0, 100), 0.08)
 
-            # ⑨ ブレッドス (改善版, パーセンタイルランク)
-            br_parts_n = [_to_naive(_c(sym)) for sym in ["SPY", "QQQ", "IWM", "DIA", "MDY"]]
+            # ⑨ ブレッドス (事前取得ETFを再利用、二重取得なし)
+            br_parts_n = [_to_naive(s) for s in [spy_c, qqq_c, iwm_c, dia_c, mdy_c]]
             br_parts_n = [s.pct_change(10) * 100 for s in br_parts_n if len(s) >= 15]
             if len(br_parts_n) >= 2:
                 avg_br_n = pd.concat(br_parts_n, axis=1).dropna().mean(axis=1)
@@ -6132,6 +6162,10 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     hist_debug_info["hist_df_len"] = len(hist_df)
             except Exception:
                 pass
+
+        # 履歴最終値をcompositeとして使用 → チャートの最終点と表示スコアが必ず一致
+        if not hist_df.empty:
+            composite = float(hist_df["score"].iloc[-1])
 
         sentiment_label = (
             "Extreme Greed 🤑" if composite > 75 else
@@ -11417,6 +11451,7 @@ WATCHLIST_STOCKS = {
     "5901.T": {"name": "住友電工",               "sector": "光通信", "flag": "🇯🇵"},
     "6857.T": {"name": "アドバンテスト",         "sector": "半導体", "flag": "🇯🇵"},
     "8035.T": {"name": "東京エレクトロン",       "sector": "半導体", "flag": "🇯🇵"},
+    "4063.T": {"name": "東京応化工業",           "sector": "半導体", "flag": "🇯🇵"},
 }
 
 SECTOR_COLORS = {
@@ -13341,7 +13376,7 @@ OPENROUTER_API_KEY = "sk-or-..."
                 st.caption("75-100: Extreme Greed")
 
             if hist_df is not None and not hist_df.empty:
-                with st.expander("📈 履歴トレンド", expanded=False):
+                with st.expander("📈 履歴トレンド", expanded=True):
                     draw_trend_chart(
                         hist_df,
                         title="米国 Fear & Greed Index 推移",
@@ -13610,7 +13645,7 @@ OPENROUTER_API_KEY = "sk-or-..."
 
             # ★ 日本版も4期間タブで表示
             if hist_df is not None and not hist_df.empty:
-                with st.expander("📈 履歴トレンド", expanded=False):
+                with st.expander("📈 履歴トレンド", expanded=True):
                     draw_trend_chart(
                         hist_df,
                         title="日本版 Fear & Greed Index 推移",
@@ -13659,7 +13694,7 @@ OPENROUTER_API_KEY = "sk-or-..."
         if source_label:
             st.caption(f"データソース: {source_label}")
 
-        with st.expander("📈 日経VI 履歴トレンド", expanded=False):
+        with st.expander("📈 日経VI 履歴トレンド", expanded=True):
             y_max_vi = max(60.0, float(nk_vi_df["score"].max()) * 1.1)
             draw_trend_chart(
                 nk_vi_df,
@@ -13707,7 +13742,7 @@ OPENROUTER_API_KEY = "sk-or-..."
             st.caption("30以上: 恐怖状態")
             st.caption("40以上: 極度の恐怖（危機レベル）")
 
-        with st.expander("📈 VIX 履歴トレンド", expanded=False):
+        with st.expander("📈 VIX 履歴トレンド", expanded=True):
             # ★ tz-naive正規化
             vix_plot_df = vix_hist_df.copy()
             vix_plot_df['date'] = pd.to_datetime(vix_plot_df['date'])
