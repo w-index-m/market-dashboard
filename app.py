@@ -6003,6 +6003,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         # ── 過去履歴：全指標をパーセンタイルランクで日次再計算 ────
         hist_df = pd.DataFrame()
         hist_debug_info = {}
+        series_map = {}  # try外で初期化しスコープ問題を防ぐ
         try:
             def _to_naive(ser: pd.Series) -> pd.Series:
                 if ser.empty:
@@ -6019,7 +6020,6 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     return pd.Series(dtype=float)
                 return series.rolling(window, min_periods=20).rank(pct=True) * 100
 
-            series_map = {}
             sp_n      = _to_naive(sp_c)
             vix_n     = _to_naive(vix_c)
             vix3m_n   = _to_naive(vix3m_c)
@@ -6210,36 +6210,30 @@ def compute_composite_sentiment() -> Dict[str, Any]:
             except Exception as _sub_e:
                 logger.warning(f"sub-hist error: {_sub_e}")
 
-        def _slabel(s):
-            if s > 75: return "Extreme Greed 🤑"
-            if s > 55: return "Greed 😊"
-            if s > 45: return "Neutral 😐"
-            if s > 25: return "Fear 😟"
-            return "Extreme Fear 😱"
-
-        def _scolor(s):
-            return "#1a7f37" if s > 55 else ("#d1242f" if s < 45 else "#888")
-
-        sentiment_label = _slabel(composite)
-        sentiment_color = _scolor(composite)
+        sentiment_label = (
+            "Extreme Greed 🤑" if composite > 75 else
+            "Greed 😊"          if composite > 55 else
+            "Neutral 😐"        if composite > 45 else
+            "Fear 😟"           if composite > 25 else
+            "Extreme Fear 😱"
+        )
+        sentiment_color = "#1a7f37" if composite > 55 else ("#d1242f" if composite < 45 else "#888")
 
         return {
-            "ok":           True,
-            "composite":    round(float(composite), 1),
-            "label":        sentiment_label,
-            "color":        sentiment_color,
-            "components":   components,
-            "us_composite": round(float(us_composite), 1),
-            "jp_composite": round(float(jp_composite), 1),
+            "ok":            True,
+            "composite":     round(float(composite), 1),
+            "label":         sentiment_label,
+            "color":         sentiment_color,
+            "components":    components,
+            "us_composite":  round(float(us_composite), 1),
+            "jp_composite":  round(float(jp_composite), 1),
             "us_components": us_comps,
             "jp_components": jp_comps,
-            "hist_df":      hist_df,
-            "us_hist_df":   us_hist_df,
-            "jp_hist_df":   jp_hist_df,
-            "hist_debug":   hist_debug_info,
-            "updated_at":   datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
-            "_slabel":      _slabel,
-            "_scolor":      _scolor,
+            "hist_df":       hist_df,
+            "us_hist_df":    us_hist_df,
+            "jp_hist_df":    jp_hist_df,
+            "hist_debug":    hist_debug_info,
+            "updated_at":    datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
         }
 
     except Exception as e:
@@ -7128,8 +7122,16 @@ def render_composite_sentiment():
     jp_comps     = sent_data.get("jp_components", {})
     us_hist_df   = sent_data.get("us_hist_df", pd.DataFrame())
     jp_hist_df   = sent_data.get("jp_hist_df", pd.DataFrame())
-    _slabel      = sent_data.get("_slabel", lambda s: "N/A")
-    _scolor      = sent_data.get("_scolor", lambda s: "#888")
+
+    def _slabel(s):
+        if s > 75: return "Extreme Greed 🤑"
+        if s > 55: return "Greed 😊"
+        if s > 45: return "Neutral 😐"
+        if s > 25: return "Fear 😟"
+        return "Extreme Fear 😱"
+
+    def _scolor(s):
+        return "#1a7f37" if s > 55 else ("#d1242f" if s < 45 else "#888")
 
     # ── デバッグ情報（折りたたみ・通常時は非表示） ────────
     with st.expander("🔧 センチメント履歴デバッグ", expanded=False):
