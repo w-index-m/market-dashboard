@@ -6167,27 +6167,79 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         if not hist_df.empty:
             composite = float(hist_df["score"].iloc[-1])
 
-        sentiment_label = (
-            "Extreme Greed 🤑" if composite > 75 else
-            "Greed 😊"          if composite > 55 else
-            "Neutral 😐"        if composite > 45 else
-            "Fear 😟"           if composite > 25 else
-            "Extreme Fear 😱"
+        # ── 米国 / 日本 サブスコア分離計算 ──────────────────────
+        _US_KEYS = {"F&G Index", "VIX水準", "VIX期間構造", "Put/Call比率",
+                    "Put/Call(VXX代替)", "価格モメンタム", "Safe Haven需要",
+                    "セクター配分", "信用リスク選好", "ブレッドス"}
+        _JP_KEYS = {"日経225モメンタム", "ドル円リスク", "日本実現VIX"}
+
+        us_comps = {k: v for k, v in components.items() if k in _US_KEYS}
+        jp_comps = {k: v for k, v in components.items() if k in _JP_KEYS}
+
+        _us_tw = sum(c["weight"] for c in us_comps.values())
+        _jp_tw = sum(c["weight"] for c in jp_comps.values())
+        us_composite = (
+            sum(c["normalized"] * c["weight"] for c in us_comps.values()) / _us_tw
+            if _us_tw > 0 else 50.0
         )
-        sentiment_color = (
-            "#1a7f37" if composite > 55 else
-            "#d1242f" if composite < 45 else "#888"
+        jp_composite = (
+            sum(c["normalized"] * c["weight"] for c in jp_comps.values()) / _jp_tw
+            if _jp_tw > 0 else 50.0
         )
 
+        # ── 米国 / 日本 サブ履歴 ─────────────────────────────────
+        _US_HIST = {"fg_actual", "fg_proxy", "vix", "vix_term", "put_call",
+                    "momentum", "safe_haven", "sector", "credit", "breadth"}
+        _JP_HIST = {"nikkei_mom", "usdjpy", "jp_rvol"}
+        us_hist_df = pd.DataFrame()
+        jp_hist_df = pd.DataFrame()
+        if hist_df.empty is False:  # series_map が構築済みの場合のみ
+            try:
+                us_map = {k: v for k, v in series_map.items() if k in _US_HIST}
+                jp_map = {k: v for k, v in series_map.items() if k in _JP_HIST}
+                if us_map:
+                    _uw = sum(w for _, w in us_map.values())
+                    _ud = pd.DataFrame({n: s * (w / _uw) for n, (s, w) in us_map.items()})
+                    _us = _ud.ffill().bfill().dropna(how="all").sum(axis=1).clip(0, 100)
+                    us_hist_df = pd.DataFrame({"date": pd.to_datetime(_us.index), "score": _us.values}).tail(1100).reset_index(drop=True)
+                if jp_map:
+                    _jw = sum(w for _, w in jp_map.values())
+                    _jd = pd.DataFrame({n: s * (w / _jw) for n, (s, w) in jp_map.items()})
+                    _js = _jd.ffill().bfill().dropna(how="all").sum(axis=1).clip(0, 100)
+                    jp_hist_df = pd.DataFrame({"date": pd.to_datetime(_js.index), "score": _js.values}).tail(1100).reset_index(drop=True)
+            except Exception as _sub_e:
+                logger.warning(f"sub-hist error: {_sub_e}")
+
+        def _slabel(s):
+            if s > 75: return "Extreme Greed 🤑"
+            if s > 55: return "Greed 😊"
+            if s > 45: return "Neutral 😐"
+            if s > 25: return "Fear 😟"
+            return "Extreme Fear 😱"
+
+        def _scolor(s):
+            return "#1a7f37" if s > 55 else ("#d1242f" if s < 45 else "#888")
+
+        sentiment_label = _slabel(composite)
+        sentiment_color = _scolor(composite)
+
         return {
-            "ok":         True,
-            "composite":  round(float(composite), 1),
-            "label":      sentiment_label,
-            "color":      sentiment_color,
-            "components": components,
-            "hist_df":    hist_df,
-            "hist_debug": hist_debug_info,
-            "updated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
+            "ok":           True,
+            "composite":    round(float(composite), 1),
+            "label":        sentiment_label,
+            "color":        sentiment_color,
+            "components":   components,
+            "us_composite": round(float(us_composite), 1),
+            "jp_composite": round(float(jp_composite), 1),
+            "us_components": us_comps,
+            "jp_components": jp_comps,
+            "hist_df":      hist_df,
+            "us_hist_df":   us_hist_df,
+            "jp_hist_df":   jp_hist_df,
+            "hist_debug":   hist_debug_info,
+            "updated_at":   datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
+            "_slabel":      _slabel,
+            "_scolor":      _scolor,
         }
 
     except Exception as e:
@@ -7065,11 +7117,19 @@ def render_composite_sentiment():
         st.error(f"取得失敗: {sent_data.get('reason')}")
         return
 
-    composite  = sent_data["composite"]
-    label      = sent_data["label"]
-    color      = sent_data["color"]
-    components = sent_data["components"]
-    hist_df    = sent_data["hist_df"]
+    composite    = sent_data["composite"]
+    label        = sent_data["label"]
+    color        = sent_data["color"]
+    components   = sent_data["components"]
+    hist_df      = sent_data["hist_df"]
+    us_composite = sent_data.get("us_composite", 50.0)
+    jp_composite = sent_data.get("jp_composite", 50.0)
+    us_comps     = sent_data.get("us_components", {})
+    jp_comps     = sent_data.get("jp_components", {})
+    us_hist_df   = sent_data.get("us_hist_df", pd.DataFrame())
+    jp_hist_df   = sent_data.get("jp_hist_df", pd.DataFrame())
+    _slabel      = sent_data.get("_slabel", lambda s: "N/A")
+    _scolor      = sent_data.get("_scolor", lambda s: "#888")
 
     # ── デバッグ情報（折りたたみ・通常時は非表示） ────────
     with st.expander("🔧 センチメント履歴デバッグ", expanded=False):
@@ -7184,9 +7244,92 @@ def render_composite_sentiment():
             unsafe_allow_html=True,
         )
 
-    # ── 履歴チャート ──────────────────────────────────
+    # ── 米国 / 日本 センチメント分離表示 ──────────────────
+    st.markdown("---")
+    st.markdown("#### 🌐 米国 / 日本 センチメント内訳")
+
+    def _render_region_panel(r_composite, r_comps, r_hist_df, region_label, flag):
+        r_color  = _scolor(r_composite)
+        r_label  = _slabel(r_composite)
+        r_txt, r_bg, _ = (
+            ("#14532d", "#dcfce7", "") if r_composite > 75 else
+            ("#166534", "#f0fdf4", "") if r_composite > 55 else
+            ("#78350f", "#fffbeb", "") if r_composite > 45 else
+            ("#991b1b", "#fef2f2", "") if r_composite > 25 else
+            ("#7f1d1d", "#fecaca", "")
+        )
+        st.markdown(
+            f'<div style="background:{r_bg};border:1px solid {r_color}33;'
+            f'border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;'
+            f'align-items:center;gap:14px;">'
+            f'<div style="font-size:36px;font-weight:900;color:{r_color};line-height:1;">'
+            f'{flag} {r_composite:.0f}'
+            f'<span style="font-size:16px;color:#9ca3af;font-weight:400;">/100</span></div>'
+            f'<div style="font-size:15px;font-weight:700;color:{r_color};">{r_label}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        for name, comp in r_comps.items():
+            bw  = max(1, int(comp["normalized"]))
+            bc  = comp["color"]
+            sv  = comp["score"]
+            row_bg = "rgba(34,197,94,0.05)" if sv > 55 else ("rgba(239,68,68,0.05)" if sv < 45 else "transparent")
+            st.markdown(
+                f'<div style="margin:4px 0;padding:4px 8px;border-radius:5px;background:{row_bg};">'
+                f'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">'
+                f'<span style="color:#374151;font-weight:500;">{name}</span>'
+                f'<span style="color:{bc};font-weight:700;">{sv:.0f}'
+                f'<span style="color:#9ca3af;font-weight:400;font-size:10px;"> ({comp["label"]})</span>'
+                f'</span></div>'
+                f'<div style="background:#e5e7eb;border-radius:4px;height:5px;">'
+                f'<div style="width:{bw}%;height:100%;background:{bc};border-radius:4px;"></div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        if not r_hist_df.empty and PLOTLY_AVAILABLE:
+            import plotly.graph_objects as go
+            rdf = r_hist_df.copy()
+            rdf["date"] = pd.to_datetime(rdf["date"])
+            latest_r = rdf["date"].max()
+            tab_r3y, tab_r1y, tab_r3m = st.tabs(["3年", "1年", "3か月"])
+            for tab_r, days_r, ttl_r in [
+                (tab_r3y, 1095, f"{region_label} センチメント推移 — 3年"),
+                (tab_r1y,  365, f"{region_label} センチメント推移 — 1年"),
+                (tab_r3m,   92, f"{region_label} センチメント推移 — 3か月"),
+            ]:
+                with tab_r:
+                    df_r = rdf[rdf["date"] >= (latest_r - pd.Timedelta(days=days_r))]
+                    if df_r.empty:
+                        st.info("データ不足")
+                        continue
+                    fig_r = go.Figure()
+                    fig_r.add_trace(go.Scatter(
+                        x=df_r["date"], y=df_r["score"],
+                        name=region_label, line=dict(color=r_color, width=2),
+                        fill="tozeroy", fillcolor=f"rgba(59,130,246,0.08)",
+                    ))
+                    for yv, lc in [(75, "rgba(22,163,74,0.15)"), (25, "rgba(220,38,38,0.15)")]:
+                        fig_r.add_hline(y=yv, line_dash="dot", line_color=lc)
+                    fig_r.update_layout(
+                        title=dict(text=ttl_r, font=dict(size=12)),
+                        height=260, margin=dict(l=0, r=0, t=30, b=0),
+                        hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        yaxis=dict(range=[0, 100], title="Score"),
+                    )
+                    st.plotly_chart(fig_r, use_container_width=True)
+
+    tab_us_sent, tab_jp_sent = st.tabs(["🇺🇸 米国センチメント", "🇯🇵 日本センチメント"])
+    with tab_us_sent:
+        st.caption("SP500モメンタム · VIX · Put/Call · Safe Haven · 信用リスク等 | 参照: FOMC, 利上げ, 関税, 雇用統計")
+        _render_region_panel(us_composite, us_comps, us_hist_df, "米国", "🇺🇸")
+    with tab_jp_sent:
+        st.caption("日経225モメンタム · ドル円リスク · 日本実現VIX | 参照: 日銀, BOJ, 円安, 日経")
+        _render_region_panel(jp_composite, jp_comps, jp_hist_df, "日本", "🇯🇵")
+
+    # ── 総合履歴チャート ──────────────────────────────────
     if not hist_df.empty:
-        st.markdown("#### 📈 センチメントスコア推移")
+        st.markdown("#### 📈 総合センチメントスコア推移")
 
         tab_3y, tab_1y, tab_3m = st.tabs(["3年", "1年", "3か月"])
 
@@ -7462,74 +7605,66 @@ def render_composite_sentiment():
     st.caption("関税・経済ニュースとセンチメントスコアの時系列相関を分析します")
 
     with st.expander("🔍 ニュース×センチメント相関を表示", expanded=False):
-        TARIFF_KEYWORDS = [
-            "関税", "tariff", "trade war", "貿易戦争", "輸入関税",
-            "通商", "制裁", "sanctions", "USMCA", "TPP", "WTO"
-        ]
-        ECON_KEYWORDS = [
-            "利上げ", "利下げ", "金利", "インフレ", "CPI", "雇用",
-            "GDP", "recession", "景気後退", "fed", "FOMC", "BOJ", "日銀"
-        ]
+        # 米国 / 日本 で異なるキーワード・センチメント系列を使用
+        US_THEMES = {
+            "関税・通商":     ["tariff", "trade war", "関税", "輸入関税", "制裁", "sanctions", "USMCA", "WTO"],
+            "FOMC・金融政策": ["FOMC", "fed", "利上げ", "利下げ", "interest rate", "インフレ", "CPI", "QT"],
+            "雇用・景気":     ["jobs", "payroll", "雇用統計", "unemployment", "GDP", "recession", "PMI", "ISM"],
+        }
+        JP_THEMES = {
+            "日銀・金融政策": ["日銀", "BOJ", "植田", "利上げ", "金融政策決定会合", "YCC", "国債"],
+            "円安・為替":     ["円安", "円高", "ドル円", "USDJPY", "為替介入", "外為"],
+            "日経・景気":     ["日経", "日経平均", "景気", "GDP", "貿易収支", "インフレ", "CPI"],
+        }
 
-        if not hist_df.empty:
-            hist_kw = hist_df.copy()
+        nws_col1, nws_col2 = st.columns(2)
+        with nws_col1:
+            nws_region = st.selectbox("市場", ["🇺🇸 米国", "🇯🇵 日本"], key="news_region_sel")
+        with nws_col2:
+            kw_period = st.selectbox("期間", ["3か月", "1年", "3年"], key="news_sentiment_period")
+
+        is_us_news = nws_region.startswith("🇺🇸")
+        theme_opts = list(US_THEMES.keys()) if is_us_news else list(JP_THEMES.keys())
+        kw_theme = st.selectbox("テーマ", theme_opts, key="news_sentiment_theme")
+
+        active_hist = us_hist_df if is_us_news else jp_hist_df
+        if active_hist.empty:
+            active_hist = hist_df  # フォールバック
+        active_themes = US_THEMES if is_us_news else JP_THEMES
+        keywords = active_themes.get(kw_theme, [])
+
+        if not active_hist.empty:
+            hist_kw = active_hist.copy()
             hist_kw["date"] = pd.to_datetime(hist_kw["date"])
-
-            # RSSから関税・経済ニュースを取得してスコアと重ねる
-            col_kw1, col_kw2 = st.columns(2)
-            with col_kw1:
-                kw_theme = st.selectbox(
-                    "テーマ",
-                    ["関税・通商", "金融政策・金利", "雇用・景気"],
-                    key="news_sentiment_theme"
-                )
-            with col_kw2:
-                kw_period = st.selectbox(
-                    "期間",
-                    ["3か月", "1年", "3年"],
-                    key="news_sentiment_period"
-                )
-
             period_days = {"3か月": 92, "1年": 365, "3年": 1095}[kw_period]
             latest_d = hist_kw["date"].max()
             df_kw = hist_kw[hist_kw["date"] >= (latest_d - pd.Timedelta(days=period_days))].copy()
 
-            keywords = {
-                "関税・通商": TARIFF_KEYWORDS,
-                "金融政策・金利": ECON_KEYWORDS,
-                "雇用・景気": ["雇用", "失業", "GDP", "景気", "recession", "PMI", "ISM"],
-            }[kw_theme]
+            st.markdown(f"**参照センチメント:** {'米国' if is_us_news else '日本'} &nbsp;|&nbsp; **キーワード:** `{'` `'.join(keywords[:5])}`...")
 
-            st.markdown(f"**キーワード:** `{'` `'.join(keywords[:5])}`...")
-
+            line_c = "#3b82f6" if is_us_news else "#e91e63"
+            sent_name = "🇺🇸 米国センチメント" if is_us_news else "🇯🇵 日本センチメント"
             if PLOTLY_AVAILABLE and not df_kw.empty:
                 import plotly.graph_objects as go
                 fig_kw = go.Figure()
                 fig_kw.add_trace(go.Scatter(
                     x=df_kw["date"], y=df_kw["score"],
-                    name="AI Sentiment", line=dict(color="#3b82f6", width=2),
-                    fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
+                    name=sent_name, line=dict(color=line_c, width=2),
+                    fill="tozeroy", fillcolor=f"rgba(59,130,246,0.08)",
                 ))
-                # ゾーン帯
                 for y_val, col_z in [(75, "rgba(22,163,74,0.12)"), (25, "rgba(220,38,38,0.12)")]:
                     fig_kw.add_hline(y=y_val, line_dash="dot", line_color=col_z)
                 fig_kw.update_layout(
-                    height=300,
-                    margin=dict(l=0, r=0, t=10, b=0),
-                    hovermode="x unified",
-                    plot_bgcolor="rgba(0,0,0,0)",
+                    height=300, margin=dict(l=0, r=0, t=10, b=0),
+                    hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)",
                     paper_bgcolor="rgba(0,0,0,0)",
                     yaxis=dict(range=[0, 100], title="Sentiment"),
                 )
                 st.plotly_chart(fig_kw, use_container_width=True)
 
-            st.markdown(
-                "💡 **使い方:** 関税発表・FOMC会合・重要経済指標の発表日と"
-                "センチメントスコアの変化を見比べることで、マーケットへの影響を把握できます。"
-            )
-            st.markdown(
-                "🔗 関連ニュースは上部の **経済ニュース・調査報道** セクションで確認できます。"
-            )
+            hint = ("FOMC・利上げ・雇用統計・関税発表" if is_us_news else "日銀会合・円安・貿易収支発表")
+            st.markdown(f"💡 **使い方:** {hint}の日とセンチメントスコアの変化を見比べることで、マーケットへの影響を把握できます。")
+            st.markdown("🔗 関連ニュースは上部の **経済ニュース・調査報道** セクションで確認できます。")
         else:
             st.info("センチメント履歴が取得できれば相関を表示します")
 
