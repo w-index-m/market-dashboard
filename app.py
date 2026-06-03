@@ -3231,14 +3231,16 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
                 if len(nk_c) >= window:
                     ma_val  = float(nk_c.rolling(window).mean().iloc[-1])
                     ma_diff = (float(nk_c.iloc[-1]) / ma_val - 1) * 100
-                    # 乖離大きすぎ→平均回帰（逆張り）、適度な乖離→トレンド追随
-                    if abs(ma_diff) > 10:
-                        sig = np.tanh(-ma_diff / 10)  # 大乖離は逆張り
+                    # MA上方=トレンド強気、過大乖離（>15%）は過熱として減衰
+                    if ma_diff > 15:
+                        sig = np.tanh((30 - ma_diff) / 10)
+                    elif ma_diff < -15:
+                        sig = np.tanh((-30 - ma_diff) / -10)
                     else:
-                        sig = np.tanh(ma_diff / 5)     # 小乖離はトレンド追随
+                        sig = np.tanh(ma_diff / 8)
                     add_signal(cat, f"{label}乖離",
                                sig, weight,
-                               f"現値vs{label}、±10%超で逆張り化",
+                               f"現値vs{label}（±15%超で過熱/過売り判定）",
                                f"{ma_diff:+.2f}%")
 
             # 5日モメンタム（テクニカル補強）
@@ -3305,9 +3307,9 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
         composite = score_sum / weight_sum  # -1.0 〜 +1.0
 
         # シグモイド変換
-        prob_up_tomorrow = float(1 / (1 + np.exp(-composite * 2.8)) * 100)
+        prob_up_tomorrow = float(1 / (1 + np.exp(-composite * 1.5)) * 100)
         prob_down_tomorrow = 100 - prob_up_tomorrow
-        prob_up_week = float(1 / (1 + np.exp(-composite * 1.6)) * 100)
+        prob_up_week = float(1 / (1 + np.exp(-composite * 1.0)) * 100)
         prob_down_week = 100 - prob_up_week
 
         n_signals = len(all_details)
@@ -4481,12 +4483,12 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
             if not irx_df.empty:
                 irx_c = irx_df["Close"].dropna()
                 irx_val = float(irx_c.iloc[-1])
-                spread_2_10 = tnx_val - irx_val / 10  # 近似
-                # 逆イールド（spread<0）= 景気後退リスク
+                # ^IRX・^TNX はともに同単位（例: 5.25 = 5.25%）なので割り算不要
+                spread_2_10 = tnx_val - irx_val
                 add_signal(cat, "イールドカーブ(10Y-2Y近似)",
                            np.tanh(spread_2_10 / 1.0), 2.0,
-                           "逆イールド深化=景気後退懸念→弱気",
-                           f"10Y:{tnx_val:.3f}% 2Y近似:{irx_val/10:.3f}%")
+                           "逆イールド（spread<0）=景気後退懸念→弱気",
+                           f"10Y:{tnx_val:.3f}% 短期:{irx_val:.3f}% spread:{spread_2_10:+.3f}%")
 
             # 10年金利の5日変化
             if len(tnx_c) >= 6:
@@ -4637,10 +4639,12 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
             ema39 = combined.ewm(span=39, adjust=False).mean()
             msi   = (ema19 - ema39).cumsum()
             msi_v = float(msi.iloc[-1])
+            # 累積和は値域が不定なためパーセンタイルランクで正規化（±1に張り付き防止）
+            msi_pct = float((msi <= msi_v).mean()) * 2 - 1  # -1〜+1
             add_signal(cat, "McClellan Summation Index",
-                       np.tanh(msi_v * 10), 2.0,
-                       "市場全体の上昇幅/下落幅の累積",
-                       f"MSI={msi_v:.3f}")
+                       np.tanh(msi_pct * 1.5), 2.0,
+                       "市場全体の騰落広がり（過去データ内パーセンタイル）",
+                       f"MSI={msi_v:.3f} PctRank={((msi<=msi_v).mean()*100):.0f}%")
 
         # SPY vs IWM（大型 vs 小型）
         spy_df = _h("SPY"); iwm_df = _h("IWM")
@@ -4720,13 +4724,17 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
                 if len(main_c) >= window:
                     ma_val  = float(main_c.rolling(window).mean().iloc[-1])
                     ma_diff = (main_val / ma_val - 1) * 100
-                    if abs(ma_diff) > 10:
-                        sig = np.tanh(-ma_diff / 10)
+                    # MA上方 = トレンドフォロー強気、ただし乖離過大（>15%）は過熱として減衰
+                    if ma_diff > 15:
+                        sig = np.tanh((30 - ma_diff) / 10)   # 過熱域：乖離拡大で弱まる
+                    elif ma_diff < -15:
+                        sig = np.tanh((-30 - ma_diff) / -10) # 売られすぎ：逆張り強気
                     else:
-                        sig = np.tanh(ma_diff / 5)
+                        sig = np.tanh(ma_diff / 8)            # 通常域：トレンド方向に線形
                     add_signal(cat, f"{label}乖離",
                                sig, weight,
-                               f"現値vs{label}", f"{ma_diff:+.2f}%")
+                               f"現値vs{label}（±15%超で過熱/過売り判定）",
+                               f"{ma_diff:+.2f}%")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # ⑨ センチメント
@@ -4776,8 +4784,9 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
             return {"ok": False, "reason": "シグナル不足"}
 
         composite = score_sum / weight_sum
-        prob_up_t = float(1 / (1 + np.exp(-composite * 2.8)) * 100)
-        prob_up_w = float(1 / (1 + np.exp(-composite * 1.6)) * 100)
+        # scale 2.8→1.5 / 1.6→1.0 に調整（composite=±1 で 82%/73% 程度に抑制）
+        prob_up_t = float(1 / (1 + np.exp(-composite * 1.5)) * 100)
+        prob_up_w = float(1 / (1 + np.exp(-composite * 1.0)) * 100)
 
         # カテゴリ別スコア
         cat_scores: Dict[str, float] = {}
