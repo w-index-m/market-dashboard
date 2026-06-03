@@ -5727,17 +5727,20 @@ def render_correlation_heatmap():
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def compute_composite_sentiment() -> Dict[str, Any]:
     """
-    2026年版マルチアセット・センチメントスコア
+    2026年版 改善マルチアセット・センチメントスコア（パーセンタイルランク正規化）
 
-    ① F&G Index                     重み 15%
-    ② VIX水準                       重み 12%
-    ③ VIX期間構造(VIX3M / VIX)      重み 13%
-    ④ Put/Call比率                  重み 10%
-    ⑤ 価格モメンタム（SP500）       重み 15%
-    ⑥ Safe Haven需要                重み 10%
-    ⑦ セクター配分                  重み 10%
-    ⑧ 信用リスク選好(HYG vs LQD)    重み 10%
-    ⑨ ブレッドス                    重み  5%
+    ① F&G Index (CNN実データ)           重み 12%
+    ② VIX水準 (パーセンタイルランク)    重み 10%
+    ③ VIX期間構造 (VIX3M/VIX)          重み 10%
+    ④ Put/Call比率 (改善フォールバック)  重み  8%
+    ⑤ SP500価格モメンタム               重み 10%
+    ⑥ Safe Haven需要 (株vs債券)         重み  8%
+    ⑦ セクター配分                      重み  8%
+    ⑧ 信用リスク選好 (HYG/LQD)         重み  8%
+    ⑨ ブレッドス (改善版)               重み  6%
+    ⑩ 日経225モメンタム (新規)          重み  8%
+    ⑪ ドル円リスク (新規)               重み  6%
+    ⑫ 日本実現VIX (新規)                重み  6%
     """
     try:
         end   = datetime.now(timezone.utc)
@@ -5759,187 +5762,215 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         def _score_clip(x):
             return float(np.clip(x, 0, 100))
 
+        def _pct_rank(series: pd.Series, window: int = 252) -> pd.Series:
+            """ローリングパーセンタイルランク (0-100)。固定レンジより市場レジーム変化に強い。"""
+            if len(series) < 20:
+                return pd.Series(dtype=float)
+            return series.rolling(window, min_periods=20).rank(pct=True) * 100
+
         components = {}
 
-        # ① Fear & Greed Index
+        # ── 共通価格を一括取得 ──────────────────────────────────
+        vix_c    = _c("^VIX")
+        vix3m_c  = _c("^VIX3M")
+        sp_c     = _c("^GSPC")
+        tlt_c    = _c("TLT")
+        hyg_c    = _c("HYG")
+        lqd_c    = _c("LQD")
+        xlk_c    = _c("XLK")
+        xlu_c    = _c("XLU")
+        n225_c   = _c("^N225")
+        usdjpy_c = _c("USDJPY=X")
+        vxx_c    = _c("VXX")
+
+        # ① F&G Index (CNN実データ + 履歴も同時取得)
+        fg_hist_series = pd.Series(dtype=float)
         try:
             r = requests.get(
-                "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/2024-01-01",
+                "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/2023-01-01",
                 timeout=6, headers={"User-Agent": "Mozilla/5.0"}
             )
             if r.status_code == 200:
-                fg_score = float(r.json()["fear_and_greed"]["score"])
+                data = r.json()
+                fg_score = float(data["fear_and_greed"]["score"])
+                hist_raw = data.get("fear_and_greed_historical", {}).get("data", [])
+                if hist_raw:
+                    fg_dates  = [pd.Timestamp(d["x"], unit="ms", tz="UTC").tz_convert(JST).normalize() for d in hist_raw]
+                    fg_values = [float(d["y"]) for d in hist_raw]
+                    fg_hist_series = pd.Series(fg_values, index=fg_dates).sort_index()
+                    fg_hist_series = fg_hist_series[~fg_hist_series.index.duplicated(keep="last")]
                 components["F&G Index"] = {
                     "score": fg_score,
                     "normalized": fg_score,
-                    "weight": 0.15,
+                    "weight": 0.12,
                     "label": (
                         "Extreme Greed" if fg_score > 75 else
-                        "Greed" if fg_score > 55 else
-                        "Neutral" if fg_score > 45 else
-                        "Fear" if fg_score > 25 else
+                        "Greed"         if fg_score > 55 else
+                        "Neutral"       if fg_score > 45 else
+                        "Fear"          if fg_score > 25 else
                         "Extreme Fear"
                     ),
-                    "color": (
-                        "#1a7f37" if fg_score > 55 else
-                        "#d1242f" if fg_score < 45 else "#888"
-                    ),
+                    "color": "#1a7f37" if fg_score > 55 else ("#d1242f" if fg_score < 45 else "#888"),
                 }
         except Exception:
             pass
 
-        # 共通価格
-        vix_c  = _c("^VIX")
-        vix3m_c = _c("^VIX3M")
-        sp_c   = _c("^GSPC")
-        tlt_c  = _c("TLT")
-        hyg_c  = _c("HYG")
-        lqd_c  = _c("LQD")
-        pc_c   = _c("^CPC")
-
-        # ② VIX水準
-        if not vix_c.empty:
-            vix_val = float(vix_c.iloc[-1])
-            vix_score = _score_clip((35 - vix_val) / (35 - 12) * 100)
+        # ② VIX水準 (パーセンタイルランク, 逆転: 高VIX=恐怖=低スコア)
+        if not vix_c.empty and len(vix_c) >= 20:
+            vix_pct   = _pct_rank(vix_c)
+            vix_score = _score_clip(100 - float(vix_pct.iloc[-1]))
+            vix_val   = float(vix_c.iloc[-1])
             components["VIX水準"] = {
-                "score": vix_score,
-                "normalized": vix_score,
-                "weight": 0.12,
-                "label": f"VIX={vix_val:.1f}",
+                "score": vix_score, "normalized": vix_score, "weight": 0.10,
+                "label": f"VIX={vix_val:.1f} (PctRank:{100-vix_score:.0f}%)",
                 "color": "#1a7f37" if vix_score > 55 else ("#d1242f" if vix_score < 45 else "#888"),
             }
 
-        # ③ VIX期間構造（VIX3M / VIX）
+        # ③ VIX期間構造 (VIX3M/VIX, パーセンタイルランク)
         if not vix_c.empty and not vix3m_c.empty:
             common = vix_c.index.intersection(vix3m_c.index)
-            if len(common) >= 2:
-                vix_now = float(vix_c.loc[common].iloc[-1])
-                vix3m_now = float(vix3m_c.loc[common].iloc[-1])
-                ratio = vix3m_now / vix_now if vix_now > 0 else 1.0
-                # 0.95=弱い, 1.15=強い くらいのイメージ
-                term_score = _score_clip((ratio - 0.95) / 0.20 * 100)
-                components["VIX期間構造"] = {
-                    "score": term_score,
-                    "normalized": term_score,
-                    "weight": 0.13,
-                    "label": f"VIX3M/VIX={ratio:.2f}",
-                    "color": "#1a7f37" if term_score > 55 else ("#d1242f" if term_score < 45 else "#888"),
-                }
+            if len(common) >= 20:
+                ratio_s   = (vix3m_c.loc[common] / vix_c.loc[common].replace(0, np.nan)).dropna()
+                ratio_pct = _pct_rank(ratio_s)
+                if not ratio_pct.empty and not pd.isna(ratio_pct.iloc[-1]):
+                    term_score = _score_clip(float(ratio_pct.iloc[-1]))
+                    components["VIX期間構造"] = {
+                        "score": term_score, "normalized": term_score, "weight": 0.10,
+                        "label": f"VIX3M/VIX={float(ratio_s.iloc[-1]):.2f} (PctRank:{term_score:.0f}%)",
+                        "color": "#1a7f37" if term_score > 55 else ("#d1242f" if term_score < 45 else "#888"),
+                    }
 
-        # ④ Put/Call
-        if pc_c.empty:
-            vxx_c = _c("VXX")
-            if not vxx_c.empty and len(vxx_c) >= 20:
-                pc_ma20 = float(vxx_c.rolling(20).mean().iloc[-1])
-                pc_val  = float(vxx_c.iloc[-1])
-                pc_ratio = pc_val / pc_ma20 if pc_ma20 > 0 else 1.0
-                pc_score = _score_clip((1.15 - pc_ratio) / 0.30 * 100)
+        # ④ Put/Call比率 (^CPC → ^CPCE → VXX代替, パーセンタイルランク, 逆転)
+        pc_loaded = False
+        for pc_sym, pc_lbl in [("^CPC", "P/C(全体)"), ("^CPCE", "P/C(株式)")]:
+            pc_s = _c(pc_sym)
+            if not pc_s.empty and len(pc_s) >= 20:
+                pc_pct = _pct_rank(pc_s)
+                if not pc_pct.empty and not pd.isna(pc_pct.iloc[-1]):
+                    pc_score = _score_clip(100 - float(pc_pct.iloc[-1]))
+                    components["Put/Call比率"] = {
+                        "score": pc_score, "normalized": pc_score, "weight": 0.08,
+                        "label": f"{pc_lbl}={float(pc_s.iloc[-1]):.2f} (PctRank:{100-pc_score:.0f}%)",
+                        "color": "#1a7f37" if pc_score > 55 else ("#d1242f" if pc_score < 45 else "#888"),
+                    }
+                    pc_loaded = True
+                    break
+        if not pc_loaded and not vxx_c.empty and len(vxx_c) >= 20:
+            vxx_pct  = _pct_rank(vxx_c)
+            if not vxx_pct.empty and not pd.isna(vxx_pct.iloc[-1]):
+                pc_score = _score_clip(100 - float(vxx_pct.iloc[-1]))
                 components["Put/Call(VXX代替)"] = {
-                    "score": pc_score,
-                    "normalized": pc_score,
-                    "weight": 0.10,
-                    "label": f"VXX/MA20={pc_ratio:.3f}",
+                    "score": pc_score, "normalized": pc_score, "weight": 0.08,
+                    "label": f"VXX PctRank:{100-pc_score:.0f}%",
                     "color": "#1a7f37" if pc_score > 55 else ("#d1242f" if pc_score < 45 else "#888"),
                 }
-        else:
-            pc_val = float(pc_c.iloc[-1])
-            pc_score = _score_clip((1.10 - pc_val) / 0.50 * 100)
-            components["Put/Call比率"] = {
-                "score": pc_score,
-                "normalized": pc_score,
-                "weight": 0.10,
-                "label": f"P/C={pc_val:.2f}",
-                "color": "#1a7f37" if pc_score > 55 else ("#d1242f" if pc_score < 45 else "#888"),
-            }
 
-        # ⑤ 価格モメンタム（SP500）
-        if not sp_c.empty and len(sp_c) >= 22:
-            sp_ret20 = (float(sp_c.iloc[-1]) / float(sp_c.iloc[-21]) - 1) * 100
-            sp_ret5  = (float(sp_c.iloc[-1]) / float(sp_c.iloc[-6])  - 1) * 100
-            mom_score = _score_clip((sp_ret20 + 10) / 20 * 100)
-            components["価格モメンタム"] = {
-                "score": mom_score,
-                "normalized": mom_score,
-                "weight": 0.15,
-                "label": f"20日:{sp_ret20:+.2f}% 5日:{sp_ret5:+.2f}%",
-                "color": "#1a7f37" if mom_score > 55 else ("#d1242f" if mom_score < 45 else "#888"),
-            }
+        # ⑤ SP500価格モメンタム (パーセンタイルランク)
+        if not sp_c.empty and len(sp_c) >= 25:
+            mom20     = (sp_c.pct_change(20) * 100).dropna()
+            mom_pct   = _pct_rank(mom20)
+            if not mom_pct.empty and not pd.isna(mom_pct.iloc[-1]):
+                mom_score = _score_clip(float(mom_pct.iloc[-1]))
+                components["価格モメンタム"] = {
+                    "score": mom_score, "normalized": mom_score, "weight": 0.10,
+                    "label": f"20日:{float(mom20.iloc[-1]):+.2f}% (PctRank:{mom_score:.0f}%)",
+                    "color": "#1a7f37" if mom_score > 55 else ("#d1242f" if mom_score < 45 else "#888"),
+                }
 
-        # ⑥ Safe Haven需要（株 vs 債券）
+        # ⑥ Safe Haven需要 (SP500 vs TLT, パーセンタイルランク)
         if not sp_c.empty and not tlt_c.empty:
             common = sp_c.index.intersection(tlt_c.index)
-            if len(common) >= 22:
-                spy_r = (float(sp_c.loc[common].iloc[-1]) / float(sp_c.loc[common].iloc[-21]) - 1) * 100
-                tlt_r = (float(tlt_c.loc[common].iloc[-1]) / float(tlt_c.loc[common].iloc[-21]) - 1) * 100
-                spread = spy_r - tlt_r
-                sh_score = _score_clip((spread + 10) / 20 * 100)
-                components["Safe Haven需要"] = {
-                    "score": sh_score,
-                    "normalized": sh_score,
-                    "weight": 0.10,
-                    "label": f"株-債券:{spread:+.2f}%pt",
-                    "color": "#1a7f37" if sh_score > 55 else ("#d1242f" if sh_score < 45 else "#888"),
-                }
+            if len(common) >= 25:
+                spread    = ((sp_c.loc[common].pct_change(20) - tlt_c.loc[common].pct_change(20)) * 100).dropna()
+                sh_pct    = _pct_rank(spread)
+                if not sh_pct.empty and not pd.isna(sh_pct.iloc[-1]):
+                    sh_score = _score_clip(float(sh_pct.iloc[-1]))
+                    components["Safe Haven需要"] = {
+                        "score": sh_score, "normalized": sh_score, "weight": 0.08,
+                        "label": f"株-債券:{float(spread.iloc[-1]):+.2f}%pt (PctRank:{sh_score:.0f}%)",
+                        "color": "#1a7f37" if sh_score > 55 else ("#d1242f" if sh_score < 45 else "#888"),
+                    }
 
-        # ⑦ セクター配分（Risk-On vs Defensive）
-        xlk_c = _c("XLK"); xly_c = _c("XLY")
-        xlu_c = _c("XLU"); xlp_c = _c("XLP")
-        risk_rets, def_rets = [], []
+        # ⑦ セクター配分 (XLK vs XLU, パーセンタイルランク)
+        if not xlk_c.empty and not xlu_c.empty:
+            common = xlk_c.index.intersection(xlu_c.index)
+            if len(common) >= 15:
+                sec_spread = ((xlk_c.loc[common].pct_change(10) - xlu_c.loc[common].pct_change(10)) * 100).dropna()
+                sec_pct    = _pct_rank(sec_spread)
+                if not sec_pct.empty and not pd.isna(sec_pct.iloc[-1]):
+                    sec_score = _score_clip(float(sec_pct.iloc[-1]))
+                    components["セクター配分"] = {
+                        "score": sec_score, "normalized": sec_score, "weight": 0.08,
+                        "label": f"IT-公益:{float(sec_spread.iloc[-1]):+.2f}% (PctRank:{sec_score:.0f}%)",
+                        "color": "#1a7f37" if sec_score > 55 else ("#d1242f" if sec_score < 45 else "#888"),
+                    }
 
-        for c in [xlk_c, xly_c]:
-            if not c.empty and len(c) >= 11:
-                risk_rets.append((float(c.iloc[-1]) / float(c.iloc[-11]) - 1) * 100)
-        for c in [xlu_c, xlp_c]:
-            if not c.empty and len(c) >= 11:
-                def_rets.append((float(c.iloc[-1]) / float(c.iloc[-11]) - 1) * 100)
-
-        if risk_rets and def_rets:
-            risk_avg = float(np.mean(risk_rets))
-            def_avg  = float(np.mean(def_rets))
-            sec_spread = risk_avg - def_avg
-            sec_score  = _score_clip((sec_spread + 5) / 10 * 100)
-            components["セクター配分"] = {
-                "score": sec_score,
-                "normalized": sec_score,
-                "weight": 0.10,
-                "label": f"成長-ディフェンシブ:{sec_spread:+.2f}%",
-                "color": "#1a7f37" if sec_score > 55 else ("#d1242f" if sec_score < 45 else "#888"),
-            }
-
-        # ⑧ 信用リスク選好（HYG vs LQD）
+        # ⑧ 信用リスク選好 (HYG vs LQD, パーセンタイルランク)
         if not hyg_c.empty and not lqd_c.empty:
             common = hyg_c.index.intersection(lqd_c.index)
-            if len(common) >= 22:
-                hyg_r = (float(hyg_c.loc[common].iloc[-1]) / float(hyg_c.loc[common].iloc[-21]) - 1) * 100
-                lqd_r = (float(lqd_c.loc[common].iloc[-1]) / float(lqd_c.loc[common].iloc[-21]) - 1) * 100
-                credit_spread = hyg_r - lqd_r
-                credit_score = _score_clip((credit_spread + 5) / 10 * 100)
-                components["信用リスク選好"] = {
-                    "score": credit_score,
-                    "normalized": credit_score,
-                    "weight": 0.10,
-                    "label": f"HYG-LQD:{credit_spread:+.2f}%",
-                    "color": "#1a7f37" if credit_score > 55 else ("#d1242f" if credit_score < 45 else "#888"),
+            if len(common) >= 25:
+                credit    = ((hyg_c.loc[common].pct_change(20) - lqd_c.loc[common].pct_change(20)) * 100).dropna()
+                crd_pct   = _pct_rank(credit)
+                if not crd_pct.empty and not pd.isna(crd_pct.iloc[-1]):
+                    crd_score = _score_clip(float(crd_pct.iloc[-1]))
+                    components["信用リスク選好"] = {
+                        "score": crd_score, "normalized": crd_score, "weight": 0.08,
+                        "label": f"HYG-LQD:{float(credit.iloc[-1]):+.2f}% (PctRank:{crd_score:.0f}%)",
+                        "color": "#1a7f37" if crd_score > 55 else ("#d1242f" if crd_score < 45 else "#888"),
+                    }
+
+        # ⑨ ブレッドス (改善: ETF5本の平均リターン強度をパーセンタイルランク)
+        breadth_parts = []
+        for sym in ["SPY", "QQQ", "IWM", "DIA", "MDY"]:
+            s = _c(sym)
+            if not s.empty and len(s) >= 15:
+                breadth_parts.append((s.pct_change(10) * 100))
+        if len(breadth_parts) >= 2:
+            avg_br   = pd.concat(breadth_parts, axis=1).dropna().mean(axis=1)
+            br_pct   = _pct_rank(avg_br)
+            if not br_pct.empty and not pd.isna(br_pct.iloc[-1]):
+                br_score = _score_clip(float(br_pct.iloc[-1]))
+                components["ブレッドス"] = {
+                    "score": br_score, "normalized": br_score, "weight": 0.06,
+                    "label": f"5ETF平均10日:{float(avg_br.iloc[-1]):+.2f}% (PctRank:{br_score:.0f}%)",
+                    "color": "#1a7f37" if br_score > 55 else ("#d1242f" if br_score < 45 else "#888"),
                 }
 
-        # ⑨ ブレッドス（主要ETFの10日騰落広がり）
-        breadth_syms = ["SPY", "QQQ", "IWM", "DIA", "MDY"]
-        breadth_vals = []
-        for sym in breadth_syms:
-            s = _c(sym)
-            if not s.empty and len(s) >= 11:
-                r10 = float(s.iloc[-1] / s.iloc[-11] - 1) * 100
-                breadth_vals.append(1 if r10 > 0 else (-1 if r10 < 0 else 0))
-        if breadth_vals:
-            breadth_raw = float(np.mean(breadth_vals))   # -1〜+1
-            breadth_score = _score_clip((breadth_raw + 1) / 2 * 100)
-            components["ブレッドス"] = {
-                "score": breadth_score,
-                "normalized": breadth_score,
-                "weight": 0.05,
-                "label": f"広がり={breadth_raw:+.2f}",
-                "color": "#1a7f37" if breadth_score > 55 else ("#d1242f" if breadth_score < 45 else "#888"),
-            }
+        # ⑩ 日経225モメンタム (新規, パーセンタイルランク)
+        if not n225_c.empty and len(n225_c) >= 25:
+            n225_mom  = (n225_c.pct_change(20) * 100).dropna()
+            n225_pct  = _pct_rank(n225_mom)
+            if not n225_pct.empty and not pd.isna(n225_pct.iloc[-1]):
+                n225_score = _score_clip(float(n225_pct.iloc[-1]))
+                components["日経225モメンタム"] = {
+                    "score": n225_score, "normalized": n225_score, "weight": 0.08,
+                    "label": f"20日:{float(n225_mom.iloc[-1]):+.2f}% (PctRank:{n225_score:.0f}%)",
+                    "color": "#1a7f37" if n225_score > 55 else ("#d1242f" if n225_score < 45 else "#888"),
+                }
+
+        # ⑪ ドル円リスク (新規: 円高=リスクオフ=低スコア, パーセンタイルランク)
+        if not usdjpy_c.empty and len(usdjpy_c) >= 20:
+            usdjpy_mom = (usdjpy_c.pct_change(10) * 100).dropna()
+            usdjpy_pct = _pct_rank(usdjpy_mom)
+            if not usdjpy_pct.empty and not pd.isna(usdjpy_pct.iloc[-1]):
+                usdjpy_score = _score_clip(float(usdjpy_pct.iloc[-1]))
+                components["ドル円リスク"] = {
+                    "score": usdjpy_score, "normalized": usdjpy_score, "weight": 0.06,
+                    "label": f"USD/JPY={float(usdjpy_c.iloc[-1]):.2f} 10日変化 PctRank:{usdjpy_score:.0f}%",
+                    "color": "#1a7f37" if usdjpy_score > 55 else ("#d1242f" if usdjpy_score < 45 else "#888"),
+                }
+
+        # ⑫ 日本実現VIX (新規: N225の20日実現ボラティリティ, 逆転)
+        if not n225_c.empty and len(n225_c) >= 25:
+            n225_rvol  = (n225_c.pct_change() * 100).rolling(20).std() * np.sqrt(252)
+            rvol_pct   = _pct_rank(n225_rvol.dropna())
+            if not rvol_pct.empty and not pd.isna(rvol_pct.iloc[-1]):
+                rvol_score = _score_clip(100 - float(rvol_pct.iloc[-1]))
+                components["日本実現VIX"] = {
+                    "score": rvol_score, "normalized": rvol_score, "weight": 0.06,
+                    "label": f"実現Vol={float(n225_rvol.iloc[-1]):.1f}% (PctRank:{100-rvol_score:.0f}%)",
+                    "color": "#1a7f37" if rvol_score > 55 else ("#d1242f" if rvol_score < 45 else "#888"),
+                }
 
         if not components:
             return {"ok": False, "reason": "コンポーネントデータ取得失敗"}
@@ -5947,11 +5978,10 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         total_weight = sum(c["weight"] for c in components.values())
         composite = sum(c["normalized"] * c["weight"] for c in components.values()) / total_weight
 
-        # ── 過去履歴：実際の指標を使って日次再計算 ──────────────
+        # ── 過去履歴：全指標をパーセンタイルランクで日次再計算 ────
         hist_df = pd.DataFrame()
         hist_debug_info = {}
         try:
-            # tz-aware → tz-naive に正規化するヘルパー
             def _to_naive(ser: pd.Series) -> pd.Series:
                 if ser.empty:
                     return ser
@@ -5962,95 +5992,112 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 ser.index = pd.to_datetime(idx).normalize()
                 return ser[~ser.index.duplicated(keep="last")]
 
+            def _pr(series: pd.Series, window: int = 252) -> pd.Series:
+                if len(series) < 20:
+                    return pd.Series(dtype=float)
+                return series.rolling(window, min_periods=20).rank(pct=True) * 100
+
             series_map = {}
-            sp_n   = _to_naive(sp_c)
-            vix_n  = _to_naive(vix_c)
+            sp_n      = _to_naive(sp_c)
+            vix_n     = _to_naive(vix_c)
+            vix3m_n   = _to_naive(vix3m_c)
+            tlt_n     = _to_naive(tlt_c)
+            hyg_n     = _to_naive(hyg_c)
+            lqd_n     = _to_naive(lqd_c)
+            xlk_n     = _to_naive(xlk_c)
+            xlu_n     = _to_naive(xlu_c)
+            n225_n    = _to_naive(n225_c)
+            usdjpy_n  = _to_naive(usdjpy_c)
+            vxx_n     = _to_naive(vxx_c)
             hist_debug_info["sp_c_len"]  = len(sp_n)
             hist_debug_info["vix_c_len"] = len(vix_n)
 
-            # ① SP500 20日モメンタム → F&G代替
-            if len(sp_n) >= 25:
-                s = np.clip((sp_n.pct_change(20) * 100 + 10) / 20 * 100, 0, 100)
-                series_map["fg_proxy"] = (s, 0.15)
+            # ① F&G 実データ（取得できた場合はそのまま使用、なければ合成プロキシ）
+            if not fg_hist_series.empty:
+                fg_n = _to_naive(fg_hist_series)
+                if len(fg_n) >= 10:
+                    series_map["fg_actual"] = (fg_n.clip(0, 100), 0.12)
+                    hist_debug_info["fg_actual_len"] = len(fg_n)
+            else:
+                # VIX逆転 × モメンタム合成（F&Gと相関が高く、純粋モメンタムと差別化）
+                if len(sp_n) >= 25 and len(vix_n) >= 20:
+                    common_fg = sp_n.index.intersection(vix_n.index)
+                    if len(common_fg) >= 20:
+                        sp_m  = np.clip((sp_n.loc[common_fg].pct_change(20) * 100 + 10) / 20 * 100, 0, 100)
+                        vix_i = np.clip((35 - vix_n.loc[common_fg]) / (35 - 12) * 100, 0, 100)
+                        fg_proxy = (sp_m * 0.6 + vix_i * 0.4).dropna()
+                        series_map["fg_proxy"] = (fg_proxy, 0.12)
 
-            # ② VIX水準
-            if len(vix_n) >= 5:
-                s = np.clip((35 - vix_n) / (35 - 12) * 100, 0, 100)
-                series_map["vix"] = (s, 0.12)
+            # ② VIX水準 (パーセンタイルランク, 逆転)
+            if len(vix_n) >= 20:
+                series_map["vix"] = ((100 - _pr(vix_n)).clip(0, 100), 0.10)
 
-            # ③ VIX期間構造
-            vix3m_n = _to_naive(_c("^VIX3M"))
-            if len(vix_n) >= 10 and len(vix3m_n) >= 10:
-                ratio = vix3m_n / vix_n.reindex(vix3m_n.index, method="ffill").replace(0, np.nan)
-                s = np.clip((ratio - 0.95) / 0.20 * 100, 0, 100).dropna()
-                if len(s) >= 10:
-                    series_map["vix_term"] = (s, 0.13)
+            # ③ VIX期間構造 (パーセンタイルランク)
+            if len(vix_n) >= 20 and len(vix3m_n) >= 20:
+                common = vix_n.index.intersection(vix3m_n.index)
+                if len(common) >= 20:
+                    ratio_n = (vix3m_n.loc[common] / vix_n.loc[common].replace(0, np.nan)).dropna()
+                    series_map["vix_term"] = (_pr(ratio_n).clip(0, 100), 0.10)
 
-            # ④ VXX/MA20 → Put/Call代替
-            vxx_n = _to_naive(_c("VXX"))
+            # ④ VXX代替 Put/Call (パーセンタイルランク, 逆転)
             if len(vxx_n) >= 20:
-                ma20  = vxx_n.rolling(20).mean()
-                ratio = vxx_n / ma20.replace(0, np.nan)
-                s = np.clip((1.15 - ratio) / 0.30 * 100, 0, 100)
-                series_map["put_call"] = (s, 0.10)
+                series_map["put_call"] = ((100 - _pr(vxx_n)).clip(0, 100), 0.08)
 
-            # ⑤ 価格モメンタム
+            # ⑤ SP500モメンタム (パーセンタイルランク)
             if len(sp_n) >= 25:
-                s = np.clip((sp_n.pct_change(20) * 100 + 10) / 20 * 100, 0, 100)
-                series_map["momentum"] = (s, 0.15)
+                series_map["momentum"] = (_pr((sp_n.pct_change(20) * 100).dropna()).clip(0, 100), 0.10)
 
-            # ⑥ Safe Haven: SPY vs TLT
-            tlt_n = _to_naive(_c("TLT"))
+            # ⑥ Safe Haven (パーセンタイルランク)
             if len(sp_n) >= 25 and len(tlt_n) >= 25:
                 common = sp_n.index.intersection(tlt_n.index)
                 if len(common) >= 25:
-                    spread = (sp_n.loc[common].pct_change(20) * 100
-                              - tlt_n.loc[common].pct_change(20) * 100)
-                    s = np.clip((spread + 10) / 20 * 100, 0, 100)
-                    series_map["safe_haven"] = (s, 0.10)
+                    spread_n = ((sp_n.loc[common].pct_change(20) - tlt_n.loc[common].pct_change(20)) * 100).dropna()
+                    series_map["safe_haven"] = (_pr(spread_n).clip(0, 100), 0.08)
 
-            # ⑦ セクター: XLK - XLU
-            xlk_n = _to_naive(_c("XLK"))
-            xlu_n = _to_naive(_c("XLU"))
+            # ⑦ セクター (XLK vs XLU, パーセンタイルランク)
             if len(xlk_n) >= 15 and len(xlu_n) >= 15:
                 common = xlk_n.index.intersection(xlu_n.index)
                 if len(common) >= 15:
-                    spread = (xlk_n.loc[common].pct_change(10) * 100
-                              - xlu_n.loc[common].pct_change(10) * 100)
-                    s = np.clip((spread + 5) / 10 * 100, 0, 100)
-                    series_map["sector"] = (s, 0.10)
+                    sec_n = ((xlk_n.loc[common].pct_change(10) - xlu_n.loc[common].pct_change(10)) * 100).dropna()
+                    series_map["sector"] = (_pr(sec_n).clip(0, 100), 0.08)
 
-            # ⑧ 信用リスク: HYG vs LQD
-            hyg_n = _to_naive(_c("HYG"))
-            lqd_n = _to_naive(_c("LQD"))
+            # ⑧ 信用リスク (パーセンタイルランク)
             if len(hyg_n) >= 25 and len(lqd_n) >= 25:
                 common = hyg_n.index.intersection(lqd_n.index)
                 if len(common) >= 25:
-                    spread = (hyg_n.loc[common].pct_change(20) * 100
-                              - lqd_n.loc[common].pct_change(20) * 100)
-                    s = np.clip((spread + 5) / 10 * 100, 0, 100)
-                    series_map["credit"] = (s, 0.10)
+                    credit_n = ((hyg_n.loc[common].pct_change(20) - lqd_n.loc[common].pct_change(20)) * 100).dropna()
+                    series_map["credit"] = (_pr(credit_n).clip(0, 100), 0.08)
 
-            # ⑨ ブレッドス
-            if len(sp_n) >= 15:
-                s = np.clip((sp_n.pct_change(10) * 100 + 5) / 10 * 100, 0, 100)
-                series_map["breadth"] = (s, 0.05)
+            # ⑨ ブレッドス (改善版, パーセンタイルランク)
+            br_parts_n = [_to_naive(_c(sym)) for sym in ["SPY", "QQQ", "IWM", "DIA", "MDY"]]
+            br_parts_n = [s.pct_change(10) * 100 for s in br_parts_n if len(s) >= 15]
+            if len(br_parts_n) >= 2:
+                avg_br_n = pd.concat(br_parts_n, axis=1).dropna().mean(axis=1)
+                series_map["breadth"] = (_pr(avg_br_n).clip(0, 100), 0.06)
+
+            # ⑩ 日経225モメンタム (パーセンタイルランク)
+            if len(n225_n) >= 25:
+                series_map["nikkei_mom"] = (_pr((n225_n.pct_change(20) * 100).dropna()).clip(0, 100), 0.08)
+
+            # ⑪ ドル円リスク (パーセンタイルランク)
+            if len(usdjpy_n) >= 20:
+                series_map["usdjpy"] = (_pr((usdjpy_n.pct_change(10) * 100).dropna()).clip(0, 100), 0.06)
+
+            # ⑫ 日本実現VIX (パーセンタイルランク, 逆転)
+            if len(n225_n) >= 25:
+                n225_rv_n = (n225_n.pct_change() * 100).rolling(20).std() * np.sqrt(252)
+                series_map["jp_rvol"] = ((100 - _pr(n225_rv_n.dropna())).clip(0, 100), 0.06)
 
             hist_debug_info["series_map_keys"] = list(series_map.keys())
 
             if series_map:
                 total_w = sum(w for _, w in series_map.values())
-                # 全シリーズをtz-naiveインデックスのDataFrameに結合
                 df_parts = {
                     name: ser * (w / total_w)
                     for name, (ser, w) in series_map.items()
                 }
-                hist_combined = pd.DataFrame(df_parts)
-                # outer joinで全日付を確保しffillで補完
-                hist_combined = hist_combined.ffill().bfill()
-                hist_combined = hist_combined.dropna(how="all")
+                hist_combined = pd.DataFrame(df_parts).ffill().bfill().dropna(how="all")
                 hist_score    = hist_combined.sum(axis=1).clip(0, 100)
-
                 hist_df = pd.DataFrame({
                     "date":  pd.to_datetime(hist_score.index),
                     "score": hist_score.values,
@@ -6062,19 +6109,29 @@ def compute_composite_sentiment() -> Dict[str, Any]:
         except Exception as _hist_e:
             hist_debug_info["error"] = str(_hist_e)
             logger.warning(f"sentiment hist error: {_hist_e}")
-            # フォールバック: SP500 + VIX 簡易2指標
-            # フォールバック: SP500 + VIX 簡易2指標
-            if len(sp_n) >= 30 and len(vix_n) >= 30:
-                common_h = sp_n.index.intersection(vix_n.index)
-                sp_mom   = np.clip((sp_n.loc[common_h].pct_change(20) * 100 + 10) / 20 * 100, 0, 100)
-                vx_norm  = np.clip((35 - vix_n.loc[common_h]) / (35 - 12) * 100, 0, 100)
-                hist_score = (sp_mom * 0.55 + vx_norm * 0.45).clip(0, 100)
-                hist_df = pd.DataFrame({
-                    "date":  pd.to_datetime(common_h),
-                    "score": hist_score.values,
-                }).tail(1100).reset_index(drop=True)
-                hist_debug_info["fallback"] = True
-                hist_debug_info["hist_df_len"] = len(hist_df)
+            try:
+                def _tz_naive_fb(ser):
+                    if ser.empty: return ser
+                    idx = ser.index
+                    if hasattr(idx, "tz") and idx.tz is not None:
+                        idx = idx.tz_localize(None)
+                    s = ser.copy(); s.index = pd.to_datetime(idx).normalize()
+                    return s[~s.index.duplicated(keep="last")]
+                sp_fb  = _tz_naive_fb(sp_c)  if not sp_c.empty  else pd.Series(dtype=float)
+                vix_fb = _tz_naive_fb(vix_c) if not vix_c.empty else pd.Series(dtype=float)
+                if len(sp_fb) >= 30 and len(vix_fb) >= 30:
+                    common_h = sp_fb.index.intersection(vix_fb.index)
+                    sp_mom   = np.clip((sp_fb.loc[common_h].pct_change(20) * 100 + 10) / 20 * 100, 0, 100)
+                    vx_norm  = np.clip((35 - vix_fb.loc[common_h]) / (35 - 12) * 100, 0, 100)
+                    hist_score = (sp_mom * 0.55 + vx_norm * 0.45).clip(0, 100)
+                    hist_df = pd.DataFrame({
+                        "date":  pd.to_datetime(common_h),
+                        "score": hist_score.values,
+                    }).tail(1100).reset_index(drop=True)
+                    hist_debug_info["fallback"] = True
+                    hist_debug_info["hist_df_len"] = len(hist_df)
+            except Exception:
+                pass
 
         sentiment_label = (
             "Extreme Greed 🤑" if composite > 75 else
@@ -6951,9 +7008,10 @@ def render_composite_sentiment():
         '<div style="background:linear-gradient(135deg,#eff6ff,#f5f3ff);'
         'border-left:4px solid #3b82f6;border-radius:6px;padding:10px 16px;'
         'font-size:13px;color:#374151;margin-bottom:14px;">'
-        '9指標を加重合成した総合センチメントスコア（0〜100）。'
-        'F&amp;G Index · VIX · VIX期間構造 · Put/Call · 価格モメンタム · '
-        'Safe Haven需要 · セクター配分 · 信用リスク選好 · ブレッドスを統合。'
+        '12指標を加重合成した総合センチメントスコア（0〜100）。全指標をパーセンタイルランクで正規化。'
+        'F&amp;G Index · VIX · VIX期間構造 · Put/Call · SP500モメンタム · '
+        'Safe Haven需要 · セクター配分 · 信用リスク選好 · ブレッドス · '
+        '日経225モメンタム · ドル円リスク · 日本実現VIXを統合。'
         '</div>',
         unsafe_allow_html=True,
     )
