@@ -170,14 +170,8 @@ def _get_client_ip() -> Tuple[str, str]:
                         global_ip = ip
                         break
 
-        # ③ それでも取れない場合は x-forwarded-for の先頭をそのまま使用
-        #    （Google プロキシ経由でも記録はする）
-        if not global_ip:
-            xff = headers.get("x-forwarded-for", "").strip()
-            if xff:
-                first_ip = xff.split(",")[0].strip()
-                if first_ip and not _is_private_ip(first_ip):
-                    global_ip = first_ip
+        # ③ フォールバックなし: GCPプロキシIPを global_ip として記録しない
+        #    （Streamlit Cloud のアーキテクチャ上、実クライアントIPが取れない場合は空欄とする）
 
     except Exception:
         pass
@@ -318,10 +312,22 @@ def inject_client_info_collector():
     if not st.session_state.get("_anl_local_ip"):
         st.session_state["_anl_local_ip"] = local_ip
 
-    # 国・都市情報をIPから取得
+    # 国・都市情報（GCPプロキシIPはgeo lookup対象外）
     if not st.session_state.get("_anl_country"):
-        primary_ip = global_ip if global_ip else local_ip
-        country, city, _ = _get_geo(primary_ip)
+        primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
+        if primary_ip:
+            country, city, _ = _get_geo(primary_ip)
+        else:
+            country, city = "??", "??"
+        # Accept-Language フォールバック
+        if country in ("??", "", "Local"):
+            try:
+                headers = st.context.headers
+                lang_country = _country_from_accept_language(headers)
+                if lang_country:
+                    country = lang_country
+            except Exception:
+                pass
         st.session_state["_anl_country"] = country
         st.session_state["_anl_city"]    = city
 
@@ -339,22 +345,23 @@ def track_pageview(page: str = "market_dashboard"):
     sid  = _session_id()
     ua   = _get_client_ua()
     global_ip, local_ip = _get_client_ip()
-    primary_ip = global_ip if global_ip else local_ip
-    country, city, org = _get_geo(primary_ip)
-    device, browser    = _parse_ua(ua)
+    device, browser = _parse_ua(ua)
 
-    # IPからの地域取得に失敗した場合、Accept-Languageで国を補完
+    # GCPプロキシIPはgeo lookupに使わない
+    primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
+    if primary_ip:
+        country, city, org = _get_geo(primary_ip)
+    else:
+        country, city, org = "??", "??", ""
+
+    # Accept-Language から国を推定（IPが取れない場合・GCPプロキシの場合）
     try:
         headers = st.context.headers
-        if country in ("??", "", "Local") and not _is_google_proxy_ip(primary_ip):
+        if country in ("??", "", "Local"):
             lang_country = _country_from_accept_language(headers)
             if lang_country:
-                country = f"{lang_country}(lang)"
-                city    = "N/A"
-        elif not country or country in ("??",):
-            lang_country = _country_from_accept_language(headers)
-            if lang_country:
-                country = f"{lang_country}(lang)"
+                country = lang_country
+                city    = city if city not in ("??", "") else "N/A"
     except Exception:
         pass
 
