@@ -5004,17 +5004,17 @@ def _draw_us_radar(cat_scores: Dict[str, float]) -> bytes:
 
 # ── セクター定義 ─────────────────────────────────────
 SECTORS = {
-    "XLK":  {"name": "Technology",      "jp": "Technology",    "color": "#1565c0"},
-    "XLF":  {"name": "Financials",      "jp": "Financials",    "color": "#2e7d32"},
-    "XLV":  {"name": "Health Care",     "jp": "Health Care",   "color": "#c62828"},
-    "XLY":  {"name": "Cons.Discret.",   "jp": "Cons.Discret.", "color": "#f57f17"},
-    "XLP":  {"name": "Cons.Staples",    "jp": "Cons.Staples",  "color": "#6a1b9a"},
-    "XLE":  {"name": "Energy",          "jp": "Energy",        "color": "#4e342e"},
-    "XLI":  {"name": "Industrials",     "jp": "Industrials",   "color": "#00695c"},
-    "XLB":  {"name": "Materials",       "jp": "Materials",     "color": "#827717"},
-    "XLRE": {"name": "Real Estate",     "jp": "Real Estate",   "color": "#ad1457"},
-    "XLU":  {"name": "Utilities",       "jp": "Utilities",     "color": "#37474f"},
-    "XLC":  {"name": "Comm.Services",   "jp": "Comm.Services", "color": "#0277bd"},
+    "XLK":  {"name": "Technology",      "jp": "IT・テクノロジー",  "color": "#1565c0"},
+    "XLF":  {"name": "Financials",      "jp": "金融",              "color": "#2e7d32"},
+    "XLV":  {"name": "Health Care",     "jp": "ヘルスケア",        "color": "#c62828"},
+    "XLY":  {"name": "Cons.Discret.",   "jp": "一般消費財",        "color": "#f57f17"},
+    "XLP":  {"name": "Cons.Staples",    "jp": "生活必需品",        "color": "#6a1b9a"},
+    "XLE":  {"name": "Energy",          "jp": "エネルギー",        "color": "#4e342e"},
+    "XLI":  {"name": "Industrials",     "jp": "資本財・産業",      "color": "#00695c"},
+    "XLB":  {"name": "Materials",       "jp": "素材",              "color": "#827717"},
+    "XLRE": {"name": "Real Estate",     "jp": "不動産",            "color": "#ad1457"},
+    "XLU":  {"name": "Utilities",       "jp": "公益事業",          "color": "#37474f"},
+    "XLC":  {"name": "Comm.Services",   "jp": "通信サービス",      "color": "#0277bd"},
 }
 
 # ── マクロレジーム定義 ────────────────────────────────
@@ -5855,7 +5855,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
             vix_val   = float(vix_c.iloc[-1])
             components["VIX水準"] = {
                 "score": vix_score, "normalized": vix_score, "weight": 0.10,
-                "label": f"VIX={vix_val:.1f} (PctRank:{100-vix_score:.0f}%)",
+                "label": f"VIX={vix_val:.1f} (過去1年比:{100-vix_score:.0f}%ile低水準)",
                 "color": "#1a7f37" if vix_score > 55 else ("#d1242f" if vix_score < 45 else "#888"),
             }
 
@@ -5869,7 +5869,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     term_score = _score_clip(float(ratio_pct.iloc[-1]))
                     components["VIX期間構造"] = {
                         "score": term_score, "normalized": term_score, "weight": 0.10,
-                        "label": f"VIX3M/VIX={float(ratio_s.iloc[-1]):.2f} (PctRank:{term_score:.0f}%)",
+                        "label": f"VIX3M/VIX={float(ratio_s.iloc[-1]):.2f} (順順鞘={term_score:.0f}%ile)",
                         "color": "#1a7f37" if term_score > 55 else ("#d1242f" if term_score < 45 else "#888"),
                     }
 
@@ -5882,7 +5882,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     pc_score = _score_clip(100 - float(pc_pct.iloc[-1]))
                     components["Put/Call比率"] = {
                         "score": pc_score, "normalized": pc_score, "weight": 0.08,
-                        "label": f"{pc_lbl}={float(pc_s.iloc[-1]):.2f} (PctRank:{100-pc_score:.0f}%)",
+                        "label": f"{pc_lbl}={float(pc_s.iloc[-1]):.2f} (恐怖度:{100-pc_score:.0f}%ile)",
                         "color": "#1a7f37" if pc_score > 55 else ("#d1242f" if pc_score < 45 else "#888"),
                     }
                     pc_loaded = True
@@ -5893,7 +5893,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 pc_score = _score_clip(100 - float(vxx_pct.iloc[-1]))
                 components["Put/Call(VXX代替)"] = {
                     "score": pc_score, "normalized": pc_score, "weight": 0.08,
-                    "label": f"VXX PctRank:{100-pc_score:.0f}%",
+                    "label": f"VXX恐怖度:{100-pc_score:.0f}%ile（低=安心感強い）",
                     "color": "#1a7f37" if pc_score > 55 else ("#d1242f" if pc_score < 45 else "#888"),
                 }
 
@@ -5905,7 +5905,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 mom_score = _score_clip(float(mom_pct.iloc[-1]))
                 components["価格モメンタム"] = {
                     "score": mom_score, "normalized": mom_score, "weight": 0.10,
-                    "label": f"20日:{float(mom20.iloc[-1]):+.2f}% (PctRank:{mom_score:.0f}%)",
+                    "label": f"S&P500 20日:{float(mom20.iloc[-1]):+.2f}% (強さ上位{mom_score:.0f}%)",
                     "color": "#1a7f37" if mom_score > 55 else ("#d1242f" if mom_score < 45 else "#888"),
                 }
 
@@ -5919,7 +5919,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     sh_score = _score_clip(float(sh_pct.iloc[-1]))
                     components["Safe Haven需要"] = {
                         "score": sh_score, "normalized": sh_score, "weight": 0.08,
-                        "label": f"株-債券:{float(spread.iloc[-1]):+.2f}%pt (PctRank:{sh_score:.0f}%)",
+                        "label": f"株>債券 差:{float(spread.iloc[-1]):+.2f}%pt（株選好度:{sh_score:.0f}%ile）",
                         "color": "#1a7f37" if sh_score > 55 else ("#d1242f" if sh_score < 45 else "#888"),
                     }
 
@@ -5933,7 +5933,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     sec_score = _score_clip(float(sec_pct.iloc[-1]))
                     components["セクター配分"] = {
                         "score": sec_score, "normalized": sec_score, "weight": 0.08,
-                        "label": f"IT-公益:{float(sec_spread.iloc[-1]):+.2f}% (PctRank:{sec_score:.0f}%)",
+                        "label": f"IT vs 公益:{float(sec_spread.iloc[-1]):+.2f}%（攻め度:{sec_score:.0f}%ile）",
                         "color": "#1a7f37" if sec_score > 55 else ("#d1242f" if sec_score < 45 else "#888"),
                     }
 
@@ -5947,7 +5947,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                     crd_score = _score_clip(float(crd_pct.iloc[-1]))
                     components["信用リスク選好"] = {
                         "score": crd_score, "normalized": crd_score, "weight": 0.08,
-                        "label": f"HYG-LQD:{float(credit.iloc[-1]):+.2f}% (PctRank:{crd_score:.0f}%)",
+                        "label": f"HY債>IG債:{float(credit.iloc[-1]):+.2f}%（リスク選好度:{crd_score:.0f}%ile）",
                         "color": "#1a7f37" if crd_score > 55 else ("#d1242f" if crd_score < 45 else "#888"),
                     }
 
@@ -5963,7 +5963,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 br_score = _score_clip(float(br_pct.iloc[-1]))
                 components["ブレッドス"] = {
                     "score": br_score, "normalized": br_score, "weight": 0.06,
-                    "label": f"5ETF平均10日:{float(avg_br.iloc[-1]):+.2f}% (PctRank:{br_score:.0f}%)",
+                    "label": f"主要ETF平均10日:{float(avg_br.iloc[-1]):+.2f}%（市場全体の広がり:{br_score:.0f}%ile）",
                     "color": "#1a7f37" if br_score > 55 else ("#d1242f" if br_score < 45 else "#888"),
                 }
 
@@ -5975,7 +5975,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 n225_score = _score_clip(float(n225_pct.iloc[-1]))
                 components["日経225モメンタム"] = {
                     "score": n225_score, "normalized": n225_score, "weight": 0.08,
-                    "label": f"20日:{float(n225_mom.iloc[-1]):+.2f}% (PctRank:{n225_score:.0f}%)",
+                    "label": f"日経225 20日:{float(n225_mom.iloc[-1]):+.2f}%（強さ:{n225_score:.0f}%ile）",
                     "color": "#1a7f37" if n225_score > 55 else ("#d1242f" if n225_score < 45 else "#888"),
                 }
 
@@ -5987,7 +5987,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 usdjpy_score = _score_clip(float(usdjpy_pct.iloc[-1]))
                 components["ドル円リスク"] = {
                     "score": usdjpy_score, "normalized": usdjpy_score, "weight": 0.06,
-                    "label": f"USD/JPY={float(usdjpy_c.iloc[-1]):.2f} 10日変化 PctRank:{usdjpy_score:.0f}%",
+                    "label": f"USD/JPY={float(usdjpy_c.iloc[-1]):.2f}（円安方向の強さ:{usdjpy_score:.0f}%ile）",
                     "color": "#1a7f37" if usdjpy_score > 55 else ("#d1242f" if usdjpy_score < 45 else "#888"),
                 }
 
@@ -5999,7 +5999,7 @@ def compute_composite_sentiment() -> Dict[str, Any]:
                 rvol_score = _score_clip(100 - float(rvol_pct.iloc[-1]))
                 components["日本実現VIX"] = {
                     "score": rvol_score, "normalized": rvol_score, "weight": 0.06,
-                    "label": f"実現Vol={float(n225_rvol.iloc[-1]):.1f}% (PctRank:{100-rvol_score:.0f}%)",
+                    "label": f"日経ボラ={float(n225_rvol.iloc[-1]):.1f}%（低いほど安定・強気）",
                     "color": "#1a7f37" if rvol_score > 55 else ("#d1242f" if rvol_score < 45 else "#888"),
                 }
 
@@ -7170,14 +7170,15 @@ def render_market_summary():
                 )
 
     with col_vix:
-        st.markdown("**😰 VIX / 米10年金利**")
+        st.markdown("**😰 VIX（市場の恐怖指数）/ 米10年金利**")
+        st.caption("VIX＝投資家の不安度。低いほど市場が落ち着いている。")
         vix = prices.get("vix")
         if vix:
-            if vix < 15:   vc, vl = "#16a34a", "低 → 安定・強気"
-            elif vix < 20: vc, vl = "#22c55e", "やや低 → 安定"
-            elif vix < 25: vc, vl = "#f59e0b", "中 → 注意"
-            elif vix < 30: vc, vl = "#ef4444", "高 → 警戒"
-            else:           vc, vl = "#dc2626", "極高 → 恐怖"
+            if vix < 15:   vc, vl = "#16a34a", "低水準 → 市場落ち着き・強気"
+            elif vix < 20: vc, vl = "#22c55e", "やや低 → 概ね安定"
+            elif vix < 25: vc, vl = "#f59e0b", "中程度 → 注意が必要"
+            elif vix < 30: vc, vl = "#ef4444", "高水準 → 警戒域"
+            else:           vc, vl = "#dc2626", "極めて高い → 恐怖・パニック域"
             vchg = prices.get("vix_chg1", 0)
             st.markdown(
                 f'<span style="font-size:26px;font-weight:900;color:{vc}">{vix:.1f}</span>'
@@ -7189,16 +7190,23 @@ def render_market_summary():
         tnx = prices.get("tnx")
         if tnx:
             tc = "#ef4444" if tnx > 4.5 else ("#f59e0b" if tnx > 4.0 else "#22c55e")
+            tl = "高め→株に逆風" if tnx > 4.5 else ("やや高め" if tnx > 4.0 else "低め→株に追い風")
             st.markdown(
-                f'米10年金利: <b style="color:{tc}">{tnx:.3f}%</b>',
+                f'米10年金利: <b style="color:{tc}">{tnx:.3f}%</b>'
+                f' <span style="font-size:11px;color:{tc}">({tl})</span>',
                 unsafe_allow_html=True,
             )
 
     with col_prob:
-        st.markdown("**🎯 翌日上昇確率**")
+        st.markdown("**🎯 翌日・今週の上昇確率**")
+        st.caption("9カテゴリのシグナルを合成して算出。50%超で上昇優位。")
         if us_pred.get("ok"):
             p_t = us_pred.get("prob_up_tomorrow", 50)
             p_w = us_pred.get("prob_up_week",     50)
+            # 主要シグナルをひとこと要因として表示
+            cat_scores = us_pred.get("cat_scores", {})
+            top_bull = [(k,v) for k,v in sorted(cat_scores.items(), key=lambda x:-x[1]) if v > 0.1]
+            top_bear = [(k,v) for k,v in sorted(cat_scores.items(), key=lambda x: x[1]) if v < -0.1]
             for label, prob in [("翌日", p_t), ("今週", p_w)]:
                 pc = "#16a34a" if prob >= 57 else ("#dc2626" if prob < 43 else "#f59e0b")
                 bar = int(prob)
@@ -7211,6 +7219,13 @@ def render_market_summary():
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
+            # 主要要因を表示
+            if top_bull:
+                b_name = top_bull[0][0].replace("① ","").replace("② ","").replace("③ ","").replace("④ ","").replace("⑤ ","").replace("⑥ ","").replace("⑦ ","").replace("⑧ ","").replace("⑨ ","")
+                st.caption(f"▲ 主な押し上げ: {b_name}")
+            if top_bear:
+                r_name = top_bear[0][0].replace("① ","").replace("② ","").replace("③ ","").replace("④ ","").replace("⑤ ","").replace("⑥ ","").replace("⑦ ","").replace("⑧ ","").replace("⑨ ","")
+                st.caption(f"▼ 主な押し下げ: {r_name}")
 
     # ── セクター: 買われている / 売られている ─────────────
     if sector.get("ok") and sector.get("sectors"):
@@ -7229,7 +7244,7 @@ def render_market_summary():
             for sym, d in leading:
                 cc = "#16a34a" if d["ret_1d"] >= 0 else "#ef4444"
                 st.markdown(
-                    f'🟢 **{d["name"]}** `{sym}` '
+                    f'🟢 **{d.get("jp", d["name"])}** `{sym}` '
                     f'<span style="color:{cc}">今日 {d["ret_1d"]:+.2f}%</span> '
                     f'<span style="color:#9ca3af;font-size:11px">1ヶ月 {d["ret_1m"]:+.1f}%</span>',
                     unsafe_allow_html=True,
@@ -7239,14 +7254,14 @@ def render_market_summary():
             for sym, d in lagging:
                 cc = "#ef4444" if d["ret_1d"] < 0 else "#16a34a"
                 st.markdown(
-                    f'🔴 **{d["name"]}** `{sym}` '
+                    f'🔴 **{d.get("jp", d["name"])}** `{sym}` '
                     f'<span style="color:{cc}">今日 {d["ret_1d"]:+.2f}%</span> '
                     f'<span style="color:#9ca3af;font-size:11px">1ヶ月 {d["ret_1m"]:+.1f}%</span>',
                     unsafe_allow_html=True,
                 )
             for sym, d in weakening:
                 st.markdown(
-                    f'🟡 **{d["name"]}** `{sym}` '
+                    f'🟡 **{d.get("jp", d["name"])}** `{sym}` '
                     f'<span style="color:#f59e0b">失速中 今日 {d["ret_1d"]:+.2f}%</span>',
                     unsafe_allow_html=True,
                 )
