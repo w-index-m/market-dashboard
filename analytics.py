@@ -340,8 +340,8 @@ def _parse_ua_rich(ua: str) -> dict:
 def _get_js_geo() -> dict:
     """
     ブラウザ側 JS で実クライアントIPと地域情報を取得。
-    streamlit-javascript パッケージを使用。
-    1セッションに1回だけ実行し、結果を session_state にキャッシュ。
+    IPINFO_TOKEN が設定されている場合はトークン付きで呼び出す。
+    1セッションに1回だけ実行し session_state にキャッシュ。
     """
     _KEY = "_anl_js_geo"
     if st.session_state.get(_KEY) is not None:
@@ -351,30 +351,31 @@ def _get_js_geo() -> dict:
         from streamlit_javascript import st_javascript
         import json as _json
 
-        result = st_javascript("""
-            await fetch('https://ipinfo.io/json', {cache: 'no-store'})
+        token       = _secret("IPINFO_TOKEN", "")
+        token_param = f"?token={token}" if token else ""
+
+        result = st_javascript(f"""
+            await fetch('https://ipinfo.io/json{token_param}', {{cache: 'no-store'}})
                 .then(r => r.json())
-                .then(d => JSON.stringify({
-                    ip:      d.ip      || '',
-                    city:    d.city    || '',
-                    region:  d.region  || '',
-                    country: d.country || '',
-                    org:     d.org     || '',
-                    tz:      d.timezone|| ''
-                }))
-                .catch(() => '{}')
+                .then(d => JSON.stringify({{
+                    ip:      d.ip       || '',
+                    city:    d.city     || '',
+                    region:  d.region   || '',
+                    country: d.country  || '',
+                    org:     d.org      || '',
+                    tz:      d.timezone || ''
+                }}))
+                .catch(() => '{{}}')
         """)
 
-        # result が 0 の場合は JS 未実行（初回レンダリング）
         if result and isinstance(result, str) and result.startswith("{"):
             data = _json.loads(result)
-            st.session_state[_KEY] = data
-            return data
+            if data.get("ip"):
+                st.session_state[_KEY] = data
+                return data
     except Exception as _e:
         logger.debug(f"_get_js_geo error: {_e}")
 
-    # まだ結果が来ていない場合は None を返さず空を返す
-    # （None だとキャッシュ判定が壊れるため）
     return {}
 
 
@@ -833,16 +834,30 @@ def render_analytics_dashboard():
             "- `GOOGLE_SERVICE_ACCOUNT_JSON`"
         )
 
-    country = st.session_state.get("_anl_country", "取得中...")
-    city    = st.session_state.get("_anl_city",    "取得中...")
     ua      = st.session_state.get("_anl_ua", "")
     ua_info = _parse_ua_rich(ua)
     device  = ua_info["device_type"]
     browser = ua_info["browser_full"]
     os_name = ua_info["os"]
-    isp     = st.session_state.get("_anl_isp",  "")
     lang    = st.session_state.get("_anl_lang", "")
-    rt = _load_realtime()
+    rt      = _load_realtime()
+
+    # JS geo をダッシュボード表示のタイミングで取得（ログとは別）
+    js_geo  = _get_js_geo()
+    if js_geo.get("ip"):
+        country  = js_geo.get("country", st.session_state.get("_anl_country", "??"))
+        city     = js_geo.get("city",    "")
+        region   = js_geo.get("region",  "")
+        isp      = js_geo.get("org",     "")
+        city_str = f"{city}, {region}" if region and region != city else city
+        # session_state も更新しておく
+        st.session_state["_anl_country"] = country
+        st.session_state["_anl_city"]    = city_str
+        st.session_state["_anl_isp"]     = isp
+    else:
+        country  = st.session_state.get("_anl_country", "取得中...")
+        city_str = st.session_state.get("_anl_city",    "取得中...")
+        isp      = st.session_state.get("_anl_isp",  "")
 
     info1, info2 = st.columns([3, 1])
     isp_disp  = f" &nbsp;|&nbsp; 📡 {isp}" if isp else ""
@@ -851,7 +866,7 @@ def render_analytics_dashboard():
     info1.markdown(
         f'<div style="background:rgba(27,160,215,.08);border:1px solid rgba(27,160,215,.2);'
         f'border-radius:4px;padding:8px 14px;font-family:monospace;font-size:10px;color:#7a86a8">'
-        f'🌍 <b style="color:#dde2f5">{country}</b> / {city}'
+        f'🌍 <b style="color:#dde2f5">{country}</b> / {city_str}'
         f'{isp_disp} &nbsp;|&nbsp; '
         f'💻 {device}{os_disp} / {browser}'
         f'{lang_disp}</div>',
