@@ -7295,6 +7295,104 @@ def render_market_summary():
                         unsafe_allow_html=True,
                     )
 
+    # ── 歴史的暴落との VIX 比較 ─────────────────────────────
+    st.markdown("---")
+    st.markdown("**📚 現在のVIXを歴史的暴落と比較**")
+    st.caption("VIXが高いほど市場の恐怖が強い。過去の危機との比較で現在の緊張度を把握できます。")
+
+    current_vix = prices.get("vix", 0)
+
+    # 歴史的参照値（VIX ピーク・概要）
+    HISTORY = [
+        {"label": "コロナショック",      "year": "2020/3",  "vix": 82.7,  "sp_dd": -33.9, "days": 33,
+         "desc": "パンデミック宣言。過去最速の急落。わずか33日でS&P500が34%下落。"},
+        {"label": "リーマンショック",    "year": "2008/10", "vix": 80.9,  "sp_dd": -56.8, "days": 517,
+         "desc": "リーマン破綻で金融システム崩壊危機。18ヶ月かけてS&P500が半値以下に。"},
+        {"label": "ITバブル崩壊",        "year": "2001/9",  "vix": 43.7,  "sp_dd": -49.1, "days": 929,
+         "desc": "9.11同時多発テロが追い打ち。ハイテク株中心に3年かけて半値に。"},
+        {"label": "欧州債務危機",        "year": "2011/8",  "year2": "欧州",  "vix": 48.0,  "sp_dd": -19.4, "days": 157,
+         "desc": "ギリシャ危機が欧州全体に波及。米国も格下げされVIXが急騰。"},
+        {"label": "コロナ前高値 (平常)",  "year": "2020/1",  "vix": 12.1,  "sp_dd": 0,    "days": 0,
+         "desc": "市場が最も楽観的だった時期。VIXは歴史的低水準。"},
+        {"label": "金利上昇ショック",    "year": "2022/6",  "vix": 36.5,  "sp_dd": -24.5, "days": 282,
+         "desc": "FRBの急激な利上げでS&P500が24%下落。現代版スタグフレーション懸念。"},
+    ]
+
+    # VIXスケールの最大値（比較用）
+    MAX_VIX = 90.0
+
+    # 現在VIXのバー
+    cur_pct = min(int(current_vix / MAX_VIX * 100), 100)
+    if current_vix < 20:
+        cur_color = "#16a34a"
+        cur_status = "安定域"
+    elif current_vix < 30:
+        cur_color = "#f59e0b"
+        cur_status = "注意域"
+    elif current_vix < 40:
+        cur_color = "#ef4444"
+        cur_status = "警戒域"
+    else:
+        cur_color = "#dc2626"
+        cur_status = "危機域"
+
+    st.markdown(
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:10px">'
+        f'<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">'
+        f'現在のVIX: <span style="color:{cur_color};font-size:22px">{current_vix:.1f}</span>'
+        f' <span style="color:{cur_color}">({cur_status})</span></div>'
+        f'<div style="background:#e2e8f0;border-radius:4px;height:10px;margin-bottom:4px">'
+        f'<div style="width:{cur_pct}%;height:100%;background:{cur_color};border-radius:4px;'
+        f'transition:width 1s;position:relative">'
+        f'<div style="position:absolute;right:2px;top:-18px;font-size:10px;color:{cur_color};font-weight:700">'
+        f'▼ 現在</div></div></div>'
+        f'<div style="font-size:10px;color:#94a3b8;text-align:right">← 低（安心） 　 高（恐怖） →</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # 歴史的比較テーブル
+    rows_html = ""
+    for h in sorted(HISTORY, key=lambda x: -x["vix"]):
+        pct = min(int(h["vix"] / MAX_VIX * 100), 100)
+        if h["vix"] >= 60:   hc = "#dc2626"
+        elif h["vix"] >= 40: hc = "#ef4444"
+        elif h["vix"] >= 25: hc = "#f59e0b"
+        else:                 hc = "#16a34a"
+
+        # 現在VIXとの比較
+        ratio = current_vix / h["vix"] * 100 if h["vix"] > 0 else 0
+        if ratio >= 100:
+            cmp_txt = f'<span style="color:#dc2626">⚠ 現在≥当時</span>'
+        elif ratio >= 70:
+            cmp_txt = f'<span style="color:#f59e0b">現在は当時の{ratio:.0f}%水準</span>'
+        else:
+            cmp_txt = f'<span style="color:#16a34a">現在は当時の{ratio:.0f}%水準</span>'
+
+        dd_txt = f'S&P500 {h["sp_dd"]:+.1f}%' if h["sp_dd"] != 0 else "影響軽微"
+
+        rows_html += (
+            f'<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;margin-bottom:8px;background:white">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+            f'<div>'
+            f'<span style="font-size:13px;font-weight:700;color:#1e293b">{h["label"]}</span>'
+            f' <span style="font-size:11px;color:#94a3b8">({h["year"]})</span>'
+            f'</div>'
+            f'<div style="text-align:right">'
+            f'<span style="font-size:16px;font-weight:900;color:{hc}">VIX {h["vix"]:.1f}</span>'
+            f' <span style="font-size:11px;color:#64748b">{dd_txt}</span>'
+            f'</div></div>'
+            f'<div style="background:#f1f5f9;border-radius:3px;height:7px;margin-bottom:6px">'
+            f'<div style="width:{pct}%;height:100%;background:{hc};border-radius:3px"></div></div>'
+            f'<div style="font-size:11px;color:#475569">{h["desc"]}</div>'
+            f'<div style="font-size:11px;margin-top:4px">{cmp_txt}</div>'
+            f'</div>'
+        )
+
+    with st.expander("📊 歴史的暴落との詳細比較を見る", expanded=True):
+        st.markdown(rows_html, unsafe_allow_html=True)
+        st.caption(f"現在VIX {current_vix:.1f} は、リーマン時({80.9:.0f})の{current_vix/80.9*100:.0f}%水準、コロナ時({82.7:.0f})の{current_vix/82.7*100:.0f}%水準です。")
+
     st.caption("⚠️ 投資判断はご自身の責任で。本サマリーは参考情報です。")
     st.markdown("---")
 
