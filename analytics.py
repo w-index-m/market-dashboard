@@ -223,24 +223,160 @@ def _get_geo(ip: str) -> Tuple[str, str, str]:
 
 
 def _parse_ua(ua: str) -> Tuple[str, str]:
+    """後方互換用。内部で _parse_ua_rich を呼ぶ。"""
+    r = _parse_ua_rich(ua)
+    return r["device_type"], r["browser_full"]
+
+
+def _parse_ua_rich(ua: str) -> dict:
+    """User-Agent から OS・ブラウザ・デバイス・ボットを詳細抽出"""
+    empty = {"device_type": "Unknown", "os": "Unknown",
+             "browser": "Unknown", "browser_ver": "", "browser_full": "Unknown",
+             "is_bot": False, "bot_name": ""}
     if not ua:
-        return "Unknown", "Unknown"
+        return empty
+
+    # ── Bot 検出 ─────────────────────────────────────────
+    BOT_PATTERNS = [
+        (r"Googlebot",             "Googlebot"),
+        (r"bingbot",               "Bingbot"),
+        (r"Twitterbot",            "Twitterbot"),
+        (r"facebookexternalhit",   "Facebook Bot"),
+        (r"Slackbot",              "Slackbot"),
+        (r"DuckDuckBot",           "DuckDuckBot"),
+        (r"YandexBot",             "YandexBot"),
+        (r"Baiduspider",           "Baidu Spider"),
+        (r"AhrefsBot",             "AhrefsBot"),
+        (r"SemrushBot",            "SemrushBot"),
+        (r"\bbot\b|\bspider\b|\bcrawler\b|\bscraper\b", "Bot"),
+    ]
+    for pat, name in BOT_PATTERNS:
+        if re.search(pat, ua, re.IGNORECASE):
+            return {**empty, "device_type": "Bot", "os": "Server",
+                    "browser": name, "browser_full": name,
+                    "is_bot": True, "bot_name": name}
+
     ua_l = ua.lower()
-    device = (
-        "Mobile" if any(k in ua_l for k in ["iphone", "android", "mobile"]) else
-        "Tablet" if any(k in ua_l for k in ["ipad", "tablet"]) else
-        "PC"
-    )
-    for b, pat in [
-        ("Edge",    r"Edg/"),
-        ("Chrome",  r"Chrome/"),
-        ("Firefox", r"Firefox/"),
-        ("Safari",  r"Safari/"),
-        ("Opera",   r"OPR/"),
-    ]:
-        if re.search(pat, ua):
-            return device, b
-    return device, "Other"
+
+    # ── デバイスタイプ ────────────────────────────────────
+    if re.search(r"iphone|android.*mobile|windows phone|blackberry", ua_l):
+        device_type = "Mobile"
+    elif re.search(r"ipad|tablet|kindle|silk", ua_l):
+        device_type = "Tablet"
+    else:
+        device_type = "PC"
+
+    # ── OS 判定 ───────────────────────────────────────────
+    MACOS_NICK = {
+        "10.15": "Catalina", "11": "Big Sur",  "12": "Monterey",
+        "13": "Ventura",     "14": "Sonoma",   "15": "Sequoia",
+    }
+    os_name = "Unknown"
+
+    m = re.search(r"iPhone OS (\d+)[._](\d+)", ua)
+    if m:
+        os_name = f"iOS {m.group(1)}.{m.group(2)}"
+
+    if os_name == "Unknown":
+        m = re.search(r"iPad.*OS (\d+)[._](\d+)", ua)
+        if m:
+            os_name = f"iPadOS {m.group(1)}.{m.group(2)}"
+
+    if os_name == "Unknown":
+        m = re.search(r"Android (\d+\.?\d*)", ua)
+        if m:
+            os_name = f"Android {m.group(1)}"
+
+    if os_name == "Unknown" and re.search(r"Windows NT", ua):
+        os_name = "Windows 10/11"
+
+    if os_name == "Unknown":
+        m = re.search(r"Mac OS X (\d+)[._](\d+)", ua)
+        if m:
+            ver = f"{m.group(1)}.{m.group(2)}"
+            nick = MACOS_NICK.get(ver, MACOS_NICK.get(m.group(1), ""))
+            os_name = f"macOS {nick}" if nick else f"macOS {ver}"
+
+    if os_name == "Unknown" and "cros" in ua_l:
+        os_name = "ChromeOS"
+
+    if os_name == "Unknown" and "linux" in ua_l:
+        os_name = "Linux"
+
+    # ── ブラウザ判定（順序重要） ──────────────────────────
+    browser_name = "Other"
+    browser_ver  = ""
+    BROWSER_PATTERNS = [
+        (r"SamsungBrowser/(\d+)", "Samsung Browser"),
+        (r"Edg/(\d+)",            "Edge"),
+        (r"OPR/(\d+)",            "Opera"),
+        (r"Whale/(\d+)",          "Whale"),
+        (r"YaBrowser/(\d+)",      "Yandex"),
+        (r"Chrome/(\d+)",         "Chrome"),
+        (r"Firefox/(\d+)",        "Firefox"),
+        (r"Version/(\d+).*Safari","Safari"),
+        (r"Safari/(\d+)",         "Safari"),
+    ]
+    for pat, name in BROWSER_PATTERNS:
+        m = re.search(pat, ua)
+        if m:
+            browser_name = name
+            browser_ver  = m.group(1)
+            break
+
+    browser_full = f"{browser_name} {browser_ver}" if browser_ver else browser_name
+
+    return {
+        "device_type":  device_type,
+        "os":           os_name,
+        "browser":      browser_name,
+        "browser_ver":  browser_ver,
+        "browser_full": browser_full,
+        "is_bot":       False,
+        "bot_name":     "",
+    }
+
+
+def _get_js_geo() -> dict:
+    """
+    ブラウザ側 JS で実クライアントIPと地域情報を取得。
+    streamlit-javascript パッケージを使用。
+    1セッションに1回だけ実行し、結果を session_state にキャッシュ。
+    """
+    _KEY = "_anl_js_geo"
+    if st.session_state.get(_KEY) is not None:
+        return st.session_state[_KEY]
+
+    try:
+        from streamlit_javascript import st_javascript
+        import json as _json
+
+        result = st_javascript("""
+            await fetch('https://ipinfo.io/json', {cache: 'no-store'})
+                .then(r => r.json())
+                .then(d => JSON.stringify({
+                    ip:      d.ip      || '',
+                    city:    d.city    || '',
+                    region:  d.region  || '',
+                    country: d.country || '',
+                    org:     d.org     || '',
+                    tz:      d.timezone|| ''
+                }))
+                .catch(() => '{}')
+        """)
+
+        # result が 0 の場合は JS 未実行（初回レンダリング）
+        if result and isinstance(result, str) and result.startswith("{"):
+            data = _json.loads(result)
+            st.session_state[_KEY] = data
+            return data
+    except Exception as _e:
+        logger.debug(f"_get_js_geo error: {_e}")
+
+    # まだ結果が来ていない場合は None を返さず空を返す
+    # （None だとキャッシュ判定が壊れるため）
+    return {}
+
 
 
 # ══════════════════════════════════════
@@ -341,35 +477,67 @@ def track_pageview(page: str = "market_dashboard"):
         return
     st.session_state[_TRACKED_KEY] = True
 
-    now  = datetime.datetime.now(JST)
-    sid  = _session_id()
-    ua   = _get_client_ua()
-    global_ip, local_ip = _get_client_ip()
-    device, browser = _parse_ua(ua)
+    now = datetime.datetime.now(JST)
+    sid = _session_id()
+    ua  = _get_client_ua()
 
-    # GCPプロキシIPはgeo lookupに使わない
-    primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
-    if primary_ip:
-        country, city, org = _get_geo(primary_ip)
-    else:
-        country, city, org = "??", "??", ""
+    # ── UA 詳細解析 ──────────────────────────────────────
+    ua_info  = _parse_ua_rich(ua)
+    device   = ua_info["device_type"]
+    browser  = ua_info["browser_full"]   # "Chrome 124"
+    os_name  = ua_info["os"]             # "iOS 17.2"
 
-    # Accept-Language から国を推定（IPが取れない場合・GCPプロキシの場合）
+    # ── Accept-Language ───────────────────────────────────
+    lang_code = ""
     try:
-        headers = st.context.headers
-        if country in ("??", "", "Local"):
-            lang_country = _country_from_accept_language(headers)
-            if lang_country:
-                country = lang_country
-                city    = city if city not in ("??", "") else "N/A"
+        _h = st.context.headers
+        lang_code = _h.get("accept-language", "").split(",")[0].split(";")[0].strip()
     except Exception:
         pass
 
+    # ── JS geo（ブラウザ側で取得した実IP・ISP・地域） ────
+    js_geo = _get_js_geo()
+
+    # ── IP / 地域解決 ─────────────────────────────────────
+    global_ip, local_ip = _get_client_ip()
+
+    if js_geo.get("ip"):
+        # JS で実 IP が取れた場合はそちらを優先
+        real_ip = js_geo["ip"]
+        country = js_geo.get("country", "??")
+        city    = js_geo.get("city",    "??")
+        region  = js_geo.get("region",  "")
+        org     = js_geo.get("org",     "")
+        # 表示用: "Tokyo, JP" の形式
+        city_disp = f"{city}, {region}" if region and region != city else city
+    else:
+        real_ip  = global_ip
+        region   = ""
+        city_disp = "??"
+        primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
+        if primary_ip:
+            country, city, org = _get_geo(primary_ip)
+            city_disp = city
+        else:
+            country, city, org = "??", "??", ""
+
+    # Accept-Language フォールバック（IP でも JS でも国が取れない場合）
+    if country in ("??", "", "Local"):
+        try:
+            ac = _country_from_accept_language(st.context.headers)
+            if ac:
+                country = ac
+        except Exception:
+            pass
+
     st.session_state["_anl_country"]   = country
-    st.session_state["_anl_city"]      = city
+    st.session_state["_anl_city"]      = city_disp
     st.session_state["_anl_ua"]        = ua
-    st.session_state["_anl_global_ip"] = global_ip
+    st.session_state["_anl_global_ip"] = real_ip or global_ip
     st.session_state["_anl_local_ip"]  = local_ip
+    st.session_state["_anl_os"]        = os_name
+    st.session_state["_anl_isp"]       = org
+    st.session_state["_anl_lang"]      = lang_code
 
     row = {
         "ts":         now.isoformat(),
@@ -378,12 +546,14 @@ def track_pageview(page: str = "market_dashboard"):
         "session_id": sid,
         "page":       page,
         "country":    country,
-        "city":       city,
-        "org":        org[:50] if org else "",
-        "global_ip":  global_ip[:40] if global_ip else "",
-        "local_ip":   local_ip[:40]  if local_ip  else "",
+        "city":       city_disp,
+        "org":        org[:60] if org else "",
+        "global_ip":  (real_ip or global_ip)[:40] if (real_ip or global_ip) else "",
+        "local_ip":   local_ip[:40] if local_ip else "",
         "device":     device,
         "browser":    browser,
+        "os":         os_name,
+        "lang":       lang_code[:20] if lang_code else "",
     }
 
     if _PV_LOG_KEY not in st.session_state:
@@ -453,7 +623,7 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
         headers = [
             "ts", "date", "hour", "weekday", "session_id", "page",
             "country", "city", "org", "global_ip", "device", "browser",
-            "referrer",
+            "os", "lang", "referrer",
         ]
         try:
             ws = sp.worksheet(ACCESS_LOG_TAB)
@@ -473,7 +643,7 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
             row.get("ts",        ""),
             row.get("date",      ""),
             row.get("hour",      ""),
-            now_jst.strftime("%A"),            # 曜日
+            now_jst.strftime("%A"),
             sid,
             row.get("page",      "market_dashboard"),
             row.get("country",   ""),
@@ -482,6 +652,8 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
             row.get("global_ip", ""),
             row.get("device",    ""),
             row.get("browser",   ""),
+            row.get("os",        ""),
+            row.get("lang",      ""),
             "",                                # referrer（将来用）
         ]
         ws.insert_row(data_row, index=2, value_input_option="USER_ENTERED")
@@ -681,15 +853,25 @@ def render_analytics_dashboard():
     country = st.session_state.get("_anl_country", "取得中...")
     city    = st.session_state.get("_anl_city",    "取得中...")
     ua      = st.session_state.get("_anl_ua", "")
-    device, browser = _parse_ua(ua)
+    ua_info = _parse_ua_rich(ua)
+    device  = ua_info["device_type"]
+    browser = ua_info["browser_full"]
+    os_name = ua_info["os"]
+    isp     = st.session_state.get("_anl_isp",  "")
+    lang    = st.session_state.get("_anl_lang", "")
     rt = _load_realtime()
 
     info1, info2 = st.columns([3, 1])
+    isp_disp  = f" &nbsp;|&nbsp; 📡 {isp}" if isp else ""
+    os_disp   = f" / {os_name}" if os_name and os_name != "Unknown" else ""
+    lang_disp = f" &nbsp;|&nbsp; 🌐 {lang}" if lang else ""
     info1.markdown(
         f'<div style="background:rgba(27,160,215,.08);border:1px solid rgba(27,160,215,.2);'
         f'border-radius:4px;padding:8px 14px;font-family:monospace;font-size:10px;color:#7a86a8">'
-        f'🌍 <b style="color:#dde2f5">{country}</b> / {city} &nbsp;|&nbsp; '
-        f'💻 {device} / {browser}</div>',
+        f'🌍 <b style="color:#dde2f5">{country}</b> / {city}'
+        f'{isp_disp} &nbsp;|&nbsp; '
+        f'💻 {device}{os_disp} / {browser}'
+        f'{lang_disp}</div>',
         unsafe_allow_html=True,
     )
     info2.markdown(

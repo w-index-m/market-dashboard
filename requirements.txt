@@ -15,3 +15,4 @@ gspread>=6.0.0
 google-auth>=2.28.0
 lxml>=4.9.0
 streamlit-analytics2>=0.5.0
+streamlit-javascript>=0.1.5
