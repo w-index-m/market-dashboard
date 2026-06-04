@@ -7070,6 +7070,220 @@ def render_4indicator_correlation():
         st.dataframe(corr_disp2, use_container_width=True)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_summary_prices() -> Dict[str, Any]:
+    """サマリー用の主要価格データを取得（キャッシュ30分）"""
+    out = {}
+    try:
+        end   = datetime.now(timezone.utc)
+        start = end - timedelta(days=10)
+        for sym, key in [("^GSPC","sp"), ("^N225","nk"), ("^VIX","vix"),
+                          ("^TNX","tnx"), ("DX=F","dxy")]:
+            try:
+                df = yf.Ticker(sym).history(start=start, end=end, interval="1d", auto_adjust=False)
+                if df is not None and not df.empty:
+                    c = df["Close"].dropna()
+                    if len(c) >= 2:
+                        out[key]          = float(c.iloc[-1])
+                        out[f"{key}_chg1"] = (float(c.iloc[-1]) / float(c.iloc[-2]) - 1) * 100
+                    if len(c) >= 6:
+                        out[f"{key}_chg5"] = (float(c.iloc[-1]) / float(c.iloc[-6]) - 1) * 100
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return out
+
+
+def render_market_summary():
+    """📊 Today's Market Snapshot — Fear & Greed より前に表示する全体概要"""
+
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0f172a,#1e293b);'
+        'border-radius:12px;padding:16px 22px;margin-bottom:6px;">'
+        '<div style="font-size:22px;font-weight:900;color:#f8fafc;letter-spacing:-0.5px;">'
+        '📊 Today\'s Market Snapshot</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">'
+        '主要指標を自動集計した今日の概要。詳細は各セクションで確認できます。</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("データ取得中..."):
+        prices   = _fetch_summary_prices()
+        sent     = compute_composite_sentiment()
+        us_pred  = compute_us_prediction("SP500")
+        sector   = compute_sector_rotation()
+
+    # ── 総合判断 ─────────────────────────────────────────
+    composite    = sent.get("composite",    50) if sent.get("ok") else 50
+    us_composite = sent.get("us_composite", 50) if sent.get("ok") else 50
+    jp_composite = sent.get("jp_composite", 50) if sent.get("ok") else 50
+
+    if composite >= 68:
+        oc, ol, oe = "#16a34a", "強気 Bullish",    "🟢"
+    elif composite >= 55:
+        oc, ol, oe = "#22c55e", "やや強気",         "🟡"
+    elif composite >= 45:
+        oc, ol, oe = "#f59e0b", "中立 Neutral",    "🟡"
+    elif composite >= 32:
+        oc, ol, oe = "#ef4444", "やや弱気",         "🟠"
+    else:
+        oc, ol, oe = "#dc2626", "弱気 Bearish",    "🔴"
+
+    st.markdown(
+        f'<div style="background:{oc}12;border:2px solid {oc}50;'
+        f'border-radius:10px;padding:14px 18px;margin-bottom:14px;'
+        f'display:flex;align-items:center;gap:14px;">'
+        f'<div style="font-size:40px;line-height:1">{oe}</div>'
+        f'<div>'
+        f'<div style="font-size:20px;font-weight:900;color:{oc};">'
+        f'総合判断: {ol}</div>'
+        f'<div style="font-size:12px;color:#6b7280;margin-top:3px;">'
+        f'AI Sentiment Score <b style="color:{oc}">{composite:.0f}/100</b>'
+        f' &nbsp;|&nbsp; 🇺🇸 米国 {us_composite:.0f}'
+        f' &nbsp;|&nbsp; 🇯🇵 日本 {jp_composite:.0f}'
+        f'</div></div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 3列: 指数 / VIX / 予測確率 ───────────────────────
+    col_idx, col_vix, col_prob = st.columns(3)
+
+    with col_idx:
+        st.markdown("**📈 主要指数（前日比）**")
+        for key, flag, name in [("sp","🇺🇸","S&P500"), ("nk","🇯🇵","日経225")]:
+            val  = prices.get(key)
+            chg1 = prices.get(f"{key}_chg1", 0)
+            chg5 = prices.get(f"{key}_chg5")
+            if val:
+                cc = "#16a34a" if chg1 >= 0 else "#dc2626"
+                arrow = "▲" if chg1 >= 0 else "▼"
+                w5 = f" / 5日 {chg5:+.1f}%" if chg5 is not None else ""
+                st.markdown(
+                    f'{flag} **{name}**<br>'
+                    f'<span style="font-size:17px;font-weight:700">'
+                    f'{val:,.0f}</span> '
+                    f'<span style="color:{cc};font-size:13px">'
+                    f'{arrow}{abs(chg1):.2f}%{w5}</span>',
+                    unsafe_allow_html=True,
+                )
+
+    with col_vix:
+        st.markdown("**😰 VIX / 米10年金利**")
+        vix = prices.get("vix")
+        if vix:
+            if vix < 15:   vc, vl = "#16a34a", "低 → 安定・強気"
+            elif vix < 20: vc, vl = "#22c55e", "やや低 → 安定"
+            elif vix < 25: vc, vl = "#f59e0b", "中 → 注意"
+            elif vix < 30: vc, vl = "#ef4444", "高 → 警戒"
+            else:           vc, vl = "#dc2626", "極高 → 恐怖"
+            vchg = prices.get("vix_chg1", 0)
+            st.markdown(
+                f'<span style="font-size:26px;font-weight:900;color:{vc}">{vix:.1f}</span>'
+                f' <span style="font-size:12px;color:{vc}">{vl}</span><br>'
+                f'<span style="font-size:11px;color:#6b7280">'
+                f'前日比 {vchg:+.2f}%</span>',
+                unsafe_allow_html=True,
+            )
+        tnx = prices.get("tnx")
+        if tnx:
+            tc = "#ef4444" if tnx > 4.5 else ("#f59e0b" if tnx > 4.0 else "#22c55e")
+            st.markdown(
+                f'米10年金利: <b style="color:{tc}">{tnx:.3f}%</b>',
+                unsafe_allow_html=True,
+            )
+
+    with col_prob:
+        st.markdown("**🎯 翌日上昇確率**")
+        if us_pred.get("ok"):
+            p_t = us_pred.get("prob_up_tomorrow", 50)
+            p_w = us_pred.get("prob_up_week",     50)
+            for label, prob in [("翌日", p_t), ("今週", p_w)]:
+                pc = "#16a34a" if prob >= 57 else ("#dc2626" if prob < 43 else "#f59e0b")
+                bar = int(prob)
+                st.markdown(
+                    f'<div style="margin-bottom:6px">'
+                    f'<span style="font-size:12px;color:#6b7280">{label}</span> '
+                    f'<b style="font-size:18px;color:{pc}">{prob:.0f}%</b>'
+                    f'<div style="background:#e5e7eb;border-radius:4px;height:5px;margin-top:2px">'
+                    f'<div style="width:{bar}%;height:100%;background:{pc};border-radius:4px"></div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── セクター: 買われている / 売られている ─────────────
+    if sector.get("ok") and sector.get("sectors"):
+        secs     = sector["sectors"]
+        leading  = sorted([(s,d) for s,d in secs.items() if d["quadrant"]=="Leading"],
+                          key=lambda x: x[1]["rs_ratio"], reverse=True)[:3]
+        lagging  = sorted([(s,d) for s,d in secs.items() if d["quadrant"]=="Lagging"],
+                          key=lambda x: x[1]["rs_ratio"])[:3]
+        weakening = sorted([(s,d) for s,d in secs.items() if d["quadrant"]=="Weakening"],
+                            key=lambda x: x[1]["ret_1d"])[:2]
+
+        st.markdown("---")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.markdown("**📈 買われているセクター**")
+            for sym, d in leading:
+                cc = "#16a34a" if d["ret_1d"] >= 0 else "#ef4444"
+                st.markdown(
+                    f'🟢 **{d["name"]}** `{sym}` '
+                    f'<span style="color:{cc}">今日 {d["ret_1d"]:+.2f}%</span> '
+                    f'<span style="color:#9ca3af;font-size:11px">1ヶ月 {d["ret_1m"]:+.1f}%</span>',
+                    unsafe_allow_html=True,
+                )
+        with sc2:
+            st.markdown("**📉 売られているセクター**")
+            for sym, d in lagging:
+                cc = "#ef4444" if d["ret_1d"] < 0 else "#16a34a"
+                st.markdown(
+                    f'🔴 **{d["name"]}** `{sym}` '
+                    f'<span style="color:{cc}">今日 {d["ret_1d"]:+.2f}%</span> '
+                    f'<span style="color:#9ca3af;font-size:11px">1ヶ月 {d["ret_1m"]:+.1f}%</span>',
+                    unsafe_allow_html=True,
+                )
+            for sym, d in weakening:
+                st.markdown(
+                    f'🟡 **{d["name"]}** `{sym}` '
+                    f'<span style="color:#f59e0b">失速中 今日 {d["ret_1d"]:+.2f}%</span>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── 注目シグナル ──────────────────────────────────────
+    if sent.get("ok"):
+        bull_sigs, bear_sigs = [], []
+        for name, c in sent.get("components", {}).items():
+            sc = c["score"]
+            if sc >= 70:
+                bull_sigs.append((name, c["label"]))
+            elif sc <= 30:
+                bear_sigs.append((name, c["label"]))
+
+        if bull_sigs or bear_sigs:
+            st.markdown("---")
+            st.markdown("**⚡ 注目シグナル**")
+            sig_col1, sig_col2 = st.columns(2)
+            with sig_col1:
+                for name, detail in bull_sigs[:4]:
+                    st.markdown(
+                        f'✅ **{name}** — '
+                        f'<span style="color:#16a34a">{detail}</span>',
+                        unsafe_allow_html=True,
+                    )
+            with sig_col2:
+                for name, detail in bear_sigs[:4]:
+                    st.markdown(
+                        f'⚠️ **{name}** — '
+                        f'<span style="color:#dc2626">{detail}</span>',
+                        unsafe_allow_html=True,
+                    )
+
+    st.caption("⚠️ 投資判断はご自身の責任で。本サマリーは参考情報です。")
+    st.markdown("---")
+
+
 def render_composite_sentiment():
     """AI Sentiment Index (Claude Edition) 描画"""
 
@@ -13483,6 +13697,11 @@ OPENROUTER_API_KEY = "sk-or-..."
                     st.error(f"モデル一覧取得エラー: {e}")
             else:
                 st.warning("Gemini APIキーが設定されていません")
+
+    # ===================================================
+    # ★ Today's Market Snapshot（全体概要 — 最初に表示）
+    # ===================================================
+    render_market_summary()
 
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
