@@ -472,9 +472,10 @@ def inject_client_info_collector():
 # PV 記録
 # ══════════════════════════════════════
 def track_pageview(page: str = "market_dashboard"):
-    """アプリ起動時に呼び出す。JS geo データが取得できてから記録（最大3回待機）。"""
+    """アプリ起動時に呼び出す。セッション内で1回だけ記録。"""
     if st.session_state.get(_TRACKED_KEY):
         return
+    st.session_state[_TRACKED_KEY] = True
 
     now = datetime.datetime.now(JST)
     sid = _session_id()
@@ -483,8 +484,8 @@ def track_pageview(page: str = "market_dashboard"):
     # ── UA 詳細解析 ──────────────────────────────────────
     ua_info  = _parse_ua_rich(ua)
     device   = ua_info["device_type"]
-    browser  = ua_info["browser_full"]   # "Chrome 124"
-    os_name  = ua_info["os"]             # "iOS 17.2"
+    browser  = ua_info["browser_full"]
+    os_name  = ua_info["os"]
 
     # ── Accept-Language ───────────────────────────────────
     lang_code = ""
@@ -494,42 +495,15 @@ def track_pageview(page: str = "market_dashboard"):
     except Exception:
         pass
 
-    # ── JS geo（ブラウザ側で取得した実IP・ISP・地域） ────
-    # st_javascript は初回 0 を返し、JS 実行後の rerun で実データを返す。
-    # 最大 2 回まで待機してからシートへ書き込む（無限ループ防止）。
-    _ATT_KEY = "_anl_track_attempts"
-    js_geo   = _get_js_geo()
-    if not js_geo.get("city"):
-        attempts = st.session_state.get(_ATT_KEY, 0)
-        if attempts < 2:
-            st.session_state[_ATT_KEY] = attempts + 1
-            return  # 次の rerun で再試行（st_javascript が自動的にトリガー）
-    st.session_state[_ATT_KEY] = 0  # リセット
-
-    # ── IP / 地域解決 ─────────────────────────────────────
+    # ── IP / 地域解決（サーバーサイド） ─────────────────
     global_ip, local_ip = _get_client_ip()
-
-    if js_geo.get("ip"):
-        # JS で実 IP が取れた場合はそちらを優先
-        real_ip = js_geo["ip"]
-        country = js_geo.get("country", "??")
-        city    = js_geo.get("city",    "??")
-        region  = js_geo.get("region",  "")
-        org     = js_geo.get("org",     "")
-        # 表示用: "Tokyo, JP" の形式
-        city_disp = f"{city}, {region}" if region and region != city else city
+    primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
+    if primary_ip:
+        country, city, org = _get_geo(primary_ip)
     else:
-        real_ip  = global_ip
-        region   = ""
-        city_disp = "??"
-        primary_ip = global_ip if (global_ip and not _is_google_proxy_ip(global_ip)) else ""
-        if primary_ip:
-            country, city, org = _get_geo(primary_ip)
-            city_disp = city
-        else:
-            country, city, org = "??", "??", ""
+        country, city, org = "??", "??", ""
 
-    # Accept-Language フォールバック（IP でも JS でも国が取れない場合）
+    # Accept-Language フォールバック（IPから国が取れない場合）
     if country in ("??", "", "Local"):
         try:
             ac = _country_from_accept_language(st.context.headers)
@@ -538,17 +512,15 @@ def track_pageview(page: str = "market_dashboard"):
         except Exception:
             pass
 
+    city_disp = city if city not in ("??", "") else "N/A"
+
     st.session_state["_anl_country"]   = country
     st.session_state["_anl_city"]      = city_disp
     st.session_state["_anl_ua"]        = ua
-    st.session_state["_anl_global_ip"] = real_ip or global_ip
+    st.session_state["_anl_global_ip"] = global_ip
     st.session_state["_anl_local_ip"]  = local_ip
     st.session_state["_anl_os"]        = os_name
-    st.session_state["_anl_isp"]       = org
     st.session_state["_anl_lang"]      = lang_code
-
-    # JS geo 取得完了またはタイムアウト後に記録確定
-    st.session_state[_TRACKED_KEY] = True
 
     row = {
         "ts":         now.isoformat(),
@@ -559,7 +531,7 @@ def track_pageview(page: str = "market_dashboard"):
         "country":    country,
         "city":       city_disp,
         "org":        org[:60] if org else "",
-        "global_ip":  (real_ip or global_ip)[:40] if (real_ip or global_ip) else "",
+        "global_ip":  global_ip[:40] if global_ip else "",
         "local_ip":   local_ip[:40] if local_ip else "",
         "device":     device,
         "browser":    browser,
