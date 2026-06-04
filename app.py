@@ -7406,6 +7406,94 @@ def render_market_summary():
         unsafe_allow_html=True,
     )
 
+    # ── スコアの内訳と判断理由（透明性セクション） ──────────
+    if sent.get("ok") and sent.get("components"):
+        _EXPLAIN = {
+            "F&G Index":      ("CNNの投資家心理指数。",      "高い=市場が強欲(Greed)＝強気。低い=恐怖(Fear)＝弱気。"),
+            "VIX水準":        ("S&P500の予想変動率。",       "低い(15以下)=市場が落ち着いている=強気。高い(30超)=投資家が怯えている=弱気。"),
+            "VIX期間構造":    ("近い将来vs遠い将来の恐怖度。","長期>短期(順イールド)=正常=強気。逆転=パニック売り懸念=弱気。"),
+            "Put/Call比率":   ("プット(売り保険)の需要。",   "低い=投資家が安心して保険を買っていない=強気。高い=守りに入っている=弱気。"),
+            "Put/Call(VXX代替)": ("ボラETF需要で代替計測。","低水準=市場の安心感が高い=強気。"),
+            "価格モメンタム": ("S&P500の20日リターン。",     "上昇が続いている=トレンドが強い=強気。下落中=弱気。"),
+            "Safe Haven需要": ("株vs国債の相対パフォーマンス。","国債より株が強い=リスクオン=強気。国債に資金が逃げている=弱気。"),
+            "セクター配分":   ("テック株(攻め)vs公益株(守り)。","テックが公益を上回っている=リスクオン=強気。公益優位=守り型=弱気。"),
+            "信用リスク選好": ("高リスク社債vs投資適格債。", "高リスク債が強い=信用環境良好=強気。逆転=信用収縮懸念=弱気。"),
+            "ブレッドス":     ("主要ETFの騰落の広がり。",    "幅広く上昇している=健全な相場=強気。一部だけ上昇=偏り=中立。"),
+            "日経225モメンタム":("日本株の20日リターン。",   "上昇が続いている=日本市場も強い=強気。"),
+            "ドル円リスク":   ("ドル円の方向性。",            "円安(ドル高)=リスクオン=日本株に追い風=強気。円高=リスクオフ=弱気。"),
+            "日本実現VIX":    ("日経の実際の変動率。",        "低い=市場が安定=強気。高い=乱高下=弱気。"),
+        }
+
+        with st.expander("🔍 なぜこのスコアか？ — 指標ごとの判断理由を見る", expanded=False):
+            st.caption("各指標が今どの方向を指しているか。自分の判断と照らし合わせてください。")
+
+            comps = sent["components"]
+            # スコア順にソート
+            sorted_comps = sorted(comps.items(), key=lambda x: -x[1]["score"])
+
+            for name, comp in sorted_comps:
+                sc   = comp["score"]
+                lbl  = comp["label"]
+                wt   = comp.get("weight", 0)
+
+                if sc >= 68:   dc, di, dt = "#16a34a", "↑", "強気"
+                elif sc >= 55: dc, di, dt = "#22c55e", "↑", "やや強気"
+                elif sc >= 45: dc, di, dt = "#f59e0b", "→", "中立"
+                elif sc >= 32: dc, di, dt = "#ef4444", "↓", "やや弱気"
+                else:           dc, di, dt = "#dc2626", "↓", "弱気"
+
+                intro, reason = _EXPLAIN.get(name, ("", ""))
+                bar_w = int(sc)
+
+                st.markdown(
+                    f'<div style="border:1px solid #e2e8f0;border-radius:8px;'
+                    f'padding:10px 14px;margin-bottom:8px;background:white;">'
+                    # ヘッダ行
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+                    f'<span style="font-size:13px;font-weight:700;color:#1e293b">{name}</span>'
+                    f'<span style="font-size:13px;font-weight:900;color:{dc}">'
+                    f'{di} {dt} &nbsp;<b style="font-size:16px">{sc:.0f}</b>/100'
+                    f'&nbsp;<span style="font-size:10px;color:#94a3b8">重み {wt*100:.0f}%</span>'
+                    f'</span></div>'
+                    # スコアバー
+                    f'<div style="background:#f1f5f9;border-radius:3px;height:6px;margin-bottom:6px">'
+                    f'<div style="width:{bar_w}%;height:100%;background:{dc};border-radius:3px"></div></div>'
+                    # 現在値
+                    f'<div style="font-size:11px;color:#475569;margin-bottom:3px">'
+                    f'📊 現在値: <b>{lbl}</b></div>'
+                    # 説明
+                    f'<div style="font-size:11px;color:#64748b">'
+                    f'<b>この指標は？</b> {intro}<br>'
+                    f'<b>今の読み方:</b> {reason}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # 米国・日本の内訳
+            us_comps = sent.get("us_components", {})
+            jp_comps = sent.get("jp_components", {})
+            if us_comps and jp_comps:
+                st.markdown("---")
+                uc1, uc2 = st.columns(2)
+                with uc1:
+                    st.markdown(f"**🇺🇸 米国スコア {us_composite:.0f}/100 の内訳**")
+                    for n, c in sorted(us_comps.items(), key=lambda x: -x[1]["score"]):
+                        cc = "#16a34a" if c["score"] >= 55 else ("#dc2626" if c["score"] < 45 else "#f59e0b")
+                        st.markdown(
+                            f'<span style="font-size:11px">'
+                            f'{n}: <b style="color:{cc}">{c["score"]:.0f}</b></span>',
+                            unsafe_allow_html=True,
+                        )
+                with uc2:
+                    st.markdown(f"**🇯🇵 日本スコア {jp_composite:.0f}/100 の内訳**")
+                    for n, c in sorted(jp_comps.items(), key=lambda x: -x[1]["score"]):
+                        cc = "#16a34a" if c["score"] >= 55 else ("#dc2626" if c["score"] < 45 else "#f59e0b")
+                        st.markdown(
+                            f'<span style="font-size:11px">'
+                            f'{n}: <b style="color:{cc}">{c["score"]:.0f}</b></span>',
+                            unsafe_allow_html=True,
+                        )
+
     # ── 3列: 指数 / VIX / 予測確率 ───────────────────────
     col_idx, col_vix, col_prob = st.columns(3)
 
