@@ -98,11 +98,45 @@ def _is_private_ip(ip: str) -> bool:
     return False
 
 
+def _is_google_proxy_ip(ip: str) -> bool:
+    """Google Cloud / Streamlit Cloud のプロキシIPかどうか判定"""
+    if not ip:
+        return False
+    # GCPのパブリックIP帯（主要レンジ）
+    gcp_prefixes = ("34.", "35.", "130.211.", "104.154.", "104.196.")
+    return any(ip.startswith(p) for p in gcp_prefixes)
+
+
+def _country_from_accept_language(headers) -> str:
+    """
+    Accept-Language ヘッダーから国コードを推定する。
+    IPが取れない場合のフォールバック。
+    """
+    try:
+        lang = headers.get("accept-language", "").lower()
+        if not lang:
+            return ""
+        first = lang.split(",")[0].split(";")[0].strip()
+        lang_map = {
+            "ja": "JP", "ko": "KR",
+            "zh-cn": "CN", "zh-tw": "TW", "zh-hk": "HK",
+            "en-us": "US", "en-gb": "GB", "en-au": "AU", "en-ca": "CA",
+            "de": "DE", "de-de": "DE", "de-at": "AT",
+            "fr": "FR", "fr-fr": "FR",
+            "es": "ES", "es-mx": "MX", "pt-br": "BR",
+            "it": "IT", "ru": "RU", "ar": "AR",
+            "hi": "IN", "th": "TH", "vi": "VN", "id": "ID",
+        }
+        return lang_map.get(first, lang_map.get(first.split("-")[0], ""))
+    except Exception:
+        return ""
+
+
 def _get_client_ip() -> Tuple[str, str]:
     """
-    グローバルIPとローカルIPを取得。
-    Streamlit Cloud(GCP)環境では通常のX-Forwarded-Forが
-    プロキシIPになるため、複数ヘッダーを試みる。
+    クライアントIPを取得する。
+    Streamlit Cloud (GCP) では x-forwarded-for の先頭IPが実クライアントIP。
+    ipify等のサーバー側フォールバックはサーバー自身のIPを返すため使用しない。
     戻り値: (global_ip, local_ip)
     """
     global_ip = ""
@@ -110,48 +144,43 @@ def _get_client_ip() -> Tuple[str, str]:
     try:
         headers = st.context.headers
 
-        # 試みるヘッダーを優先順に並べる
-        candidate_headers = [
-            "cf-connecting-ip",        # Cloudflare経由
-            "x-real-ip",               # Nginx等
-            "x-forwarded-for",         # 標準プロキシ
-            "x-client-ip",             # 一部CDN
-            "true-client-ip",          # Akamai/Cloudflare
-            "x-cluster-client-ip",     # クラスタ環境
-        ]
-
-        all_ips = []
-        for h in candidate_headers:
+        # ① 単一IP系ヘッダーを優先（最も信頼性が高い）
+        for h in ("cf-connecting-ip", "x-real-ip", "true-client-ip", "x-client-ip"):
             val = headers.get(h, "").strip()
-            if val:
-                for ip in val.split(","):
-                    ip = ip.strip()
-                    if ip and ip not in all_ips:
-                        all_ips.append(ip)
+            if val and not _is_private_ip(val) and not _is_google_proxy_ip(val):
+                global_ip = val
+                break
 
-        for ip in all_ips:
-            if not _is_private_ip(ip) and not global_ip:
-                global_ip = ip
-            elif _is_private_ip(ip) and not local_ip:
-                local_ip = ip
+        # ② x-forwarded-for: GCP LB形式は「実クライアントIP, GCP_LB_IP」
+        #    先頭のIPが実クライアントIP
+        if not global_ip:
+            xff = headers.get("x-forwarded-for", "").strip()
+            if xff:
+                for ip in xff.split(","):
+                    ip = ip.strip()
+                    if not ip:
+                        continue
+                    if _is_private_ip(ip):
+                        if not local_ip:
+                            local_ip = ip
+                    elif _is_google_proxy_ip(ip):
+                        # GCPプロキシIPはスキップ（実クライアントIPではない）
+                        continue
+                    else:
+                        global_ip = ip
+                        break
+
+        # ③ それでも取れない場合は x-forwarded-for の先頭をそのまま使用
+        #    （Google プロキシ経由でも記録はする）
+        if not global_ip:
+            xff = headers.get("x-forwarded-for", "").strip()
+            if xff:
+                first_ip = xff.split(",")[0].strip()
+                if first_ip and not _is_private_ip(first_ip):
+                    global_ip = first_ip
 
     except Exception:
         pass
-
-    # フォールバック: 外部サービスでサーバー側からIPを取得
-    if not global_ip:
-        try:
-            r = requests.get(
-                "https://api.ipify.org?format=json",
-                timeout=3,
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            if r.status_code == 200:
-                ip = r.json().get("ip", "")
-                if ip and not _is_private_ip(ip):
-                    global_ip = ip
-        except Exception:
-            pass
 
     return global_ip, local_ip
 
@@ -313,6 +342,21 @@ def track_pageview(page: str = "market_dashboard"):
     primary_ip = global_ip if global_ip else local_ip
     country, city, org = _get_geo(primary_ip)
     device, browser    = _parse_ua(ua)
+
+    # IPからの地域取得に失敗した場合、Accept-Languageで国を補完
+    try:
+        headers = st.context.headers
+        if country in ("??", "", "Local") and not _is_google_proxy_ip(primary_ip):
+            lang_country = _country_from_accept_language(headers)
+            if lang_country:
+                country = f"{lang_country}(lang)"
+                city    = "N/A"
+        elif not country or country in ("??",):
+            lang_country = _country_from_accept_language(headers)
+            if lang_country:
+                country = f"{lang_country}(lang)"
+    except Exception:
+        pass
 
     st.session_state["_anl_country"]   = country
     st.session_state["_anl_city"]      = city
