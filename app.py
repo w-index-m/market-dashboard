@@ -7070,6 +7070,264 @@ def render_4indicator_correlation():
         st.dataframe(corr_disp2, use_container_width=True)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def compute_crisis_pattern_similarity() -> Dict[str, Any]:
+    """
+    現在の市場状態を複数指標で評価し、過去の暴落パターンと比較する。
+    VIX単体ではなく:
+      ・VIXの上がり方（速度・加速度）
+      ・セクターローテーションの方向性
+      ・為替（ドル円）の動き
+      ・信用スプレッド（HYG vs LQD）
+      ・債券 vs 株式のパフォーマンス
+      ・10年金利の動向
+    を複合的にスコアリングして類似度を算出。
+    """
+    try:
+        end   = datetime.now(timezone.utc)
+        start = end - timedelta(days=100)
+
+        def _g(sym):
+            try:
+                df = yf.Ticker(sym).history(start=start, end=end, interval="1d", auto_adjust=False)
+                if df is None or df.empty: return pd.Series(dtype=float)
+                if df.index.tz is None: df.index = df.index.tz_localize("UTC")
+                return df.tz_convert(JST)["Close"].dropna()
+            except: return pd.Series(dtype=float)
+
+        vix    = _g("^VIX");    vix3m  = _g("^VIX3M")
+        sp     = _g("^GSPC");   tlt    = _g("TLT")
+        hyg    = _g("HYG");     lqd    = _g("LQD")
+        usdjpy = _g("USDJPY=X"); tnx   = _g("^TNX")
+        xlk    = _g("XLK");     xlu    = _g("XLU")
+        xlf    = _g("XLF");     xlp    = _g("XLP")
+
+        def _ret(s, n):
+            if len(s) >= n + 1:
+                return (float(s.iloc[-1]) / float(s.iloc[-(n+1)]) - 1) * 100
+            return None
+
+        # 現在の市場状態ベクトル
+        S = {}
+        if len(vix) >= 21:
+            S["vix_level"]   = float(vix.iloc[-1])
+            S["vix_vel_20"]  = _ret(vix, 20)   # 20日でのVIX上昇率
+            S["vix_vel_5"]   = _ret(vix, 5)    # 5日でのVIX上昇率（急騰感）
+        if len(vix) >= 2 and len(vix3m) >= 2:
+            c = vix.index.intersection(vix3m.index)
+            if len(c) >= 2:
+                S["vix_term"] = float(vix3m.loc[c[-1]]) / float(vix.loc[c[-1]])
+                # >1.0=順イールド(安定), <1.0=逆イールド(パニック)
+        if len(sp) >= 21:
+            S["sp_20d"] = _ret(sp, 20)
+            S["sp_5d"]  = _ret(sp, 5)
+        if len(tlt) >= 21 and len(sp) >= 21:
+            t = _ret(tlt, 20); s = _ret(sp, 20)
+            if t is not None and s is not None:
+                S["bond_vs_eq"] = t - s   # 正=債券逃避(リスクオフ)
+        if len(hyg) >= 21 and len(lqd) >= 21:
+            h = _ret(hyg, 20); l = _ret(lqd, 20)
+            if h is not None and l is not None:
+                S["credit_stress"] = l - h   # 正=信用収縮(LQD > HYG)
+        if len(usdjpy) >= 21:
+            S["usdjpy_20d"] = _ret(usdjpy, 20)   # 負=円高(リスクオフ)
+        if len(tnx) >= 21:
+            S["tnx_chg"] = float(tnx.iloc[-1]) - float(tnx.iloc[-21])
+            S["tnx_level"] = float(tnx.iloc[-1])
+        if len(xlk) >= 21 and len(xlu) >= 21:
+            k = _ret(xlk, 20); u = _ret(xlu, 20)
+            if k is not None and u is not None:
+                S["growth_vs_def"] = k - u   # 負=ディフェンシブ優位
+        if len(xlf) >= 21 and len(xlp) >= 21:
+            f = _ret(xlf, 20); p = _ret(xlp, 20)
+            if f is not None and p is not None:
+                S["fin_vs_stap"] = f - p   # 負=生活必需品優位(金融弱い)
+
+        # 過去の危機パターン定義
+        # (expected_value, neutral_value, weight, label)
+        # neutral=平常時の値, expected=その危機の典型値
+        PATTERNS = {
+            "リーマンショック\n2008-09": {
+                "color": "#dc2626", "emoji": "🏦",
+                "period": "2008年9月〜2009年3月",
+                "sp_peak_loss": -56.8,
+                "description": "金融機関が連鎖破綻。信用市場が完全機能停止。VIXは数ヶ月かけ段階的に上昇→急騰。",
+                "key_signals": [
+                    "信用スプレッドの急拡大（最重要）",
+                    "金融株が市場に先行して崩壊",
+                    "VIXは急騰ではなく段階的上昇（数ヶ月）",
+                    "円が急騰（ドル円が90円台に）",
+                    "公益・生活必需品が相対的に堅調",
+                ],
+                "sig": {
+                    # factor: (expected, neutral, weight)
+                    "vix_level":    (55,  15,   2.0),
+                    "vix_vel_20":   (80,  0,    2.0),   # 段階的上昇
+                    "vix_vel_5":    (15,  0,    1.0),   # 週次は穏やか
+                    "vix_term":     (0.75, 1.15, 2.0),  # 逆イールド
+                    "sp_20d":       (-18, 1,    3.0),
+                    "bond_vs_eq":   (15,  -2,   2.0),   # 国債逃避
+                    "credit_stress":(12,  -1,   4.0),   # ★最重要
+                    "usdjpy_20d":   (-8,  0,    3.0),   # 円高
+                    "growth_vs_def":(-15, 0,    2.0),
+                    "fin_vs_stap":  (-20, 0,    3.0),   # 金融崩壊
+                },
+            },
+            "コロナショック\n2020年2-3月": {
+                "color": "#7c3aed", "emoji": "🦠",
+                "period": "2020年2月〜4月",
+                "sp_peak_loss": -33.9,
+                "description": "全資産同時暴落。VIXが史上最速で1ヶ月に5倍。FRBの無制限QEでV字回復。",
+                "key_signals": [
+                    "VIXが数週間で急騰（コロナ最大の特徴）",
+                    "全セクターが同時下落（逃げ場なし）",
+                    "最初はドル高→その後ドル安",
+                    "国債も一時売られた（流動性危機）",
+                    "V字回復した唯一の危機",
+                ],
+                "sig": {
+                    "vix_level":    (65,  15,   2.0),
+                    "vix_vel_20":   (300, 0,    5.0),   # ★超急騰が最大の特徴
+                    "vix_vel_5":    (80,  0,    4.0),   # 数日単位でも急騰
+                    "vix_term":     (0.6, 1.15, 3.0),
+                    "sp_20d":       (-30, 1,    3.0),
+                    "credit_stress":(8,   -1,   2.0),
+                    "usdjpy_20d":   (-4,  0,    1.0),
+                    "growth_vs_def":(-3,  0,    1.0),   # 全面安で差が小さい
+                },
+            },
+            "ITバブル崩壊\n2001-02": {
+                "color": "#0284c7", "emoji": "💻",
+                "period": "2001年〜2002年",
+                "sp_peak_loss": -49.1,
+                "description": "テック株先行崩壊。バリュー・ディフェンシブは堅調。VIXはゆっくり上昇。長期低迷。",
+                "key_signals": [
+                    "ITテック株の先行下落（成長株崩壊）",
+                    "バリュー株・高配当株が相対的に強い",
+                    "VIXはゆっくり上昇（急騰なし）",
+                    "生活必需品・ヘルスケアが強い",
+                    "下落が2年以上続く長期低迷",
+                ],
+                "sig": {
+                    "vix_level":    (35,  15,   1.5),
+                    "vix_vel_20":   (25,  0,    1.0),   # ゆっくり
+                    "vix_vel_5":    (3,   0,    0.5),   # 週次は穏やか
+                    "vix_term":     (0.9, 1.15, 1.0),
+                    "sp_20d":       (-8,  1,    2.0),
+                    "bond_vs_eq":   (10,  -2,   2.0),
+                    "credit_stress":(3,   -1,   1.5),
+                    "usdjpy_20d":   (-2,  0,    1.0),
+                    "growth_vs_def":(-22, 0,    5.0),   # ★グロース崩壊が最大の特徴
+                    "fin_vs_stap":  (-5,  0,    2.0),
+                },
+            },
+            "金利上昇ショック\n2022年": {
+                "color": "#b45309", "emoji": "📈",
+                "period": "2022年",
+                "sp_peak_loss": -24.5,
+                "description": "FRBの急利上げで株も国債も同時下落。ドル高・円安急進。エネルギーが独り勝ち。",
+                "key_signals": [
+                    "株と国債が同時下落（両方に逃げ場なし）",
+                    "ドル高・円安が急進（ドル円150円台）",
+                    "10年金利が急上昇（1%→4%超）",
+                    "VIXは中程度（30-40）で急騰なし",
+                    "エネルギー・素材株がアウトパフォーム",
+                ],
+                "sig": {
+                    "vix_level":    (30,  15,   1.5),
+                    "vix_vel_20":   (20,  0,    1.0),
+                    "vix_term":     (0.92,1.15, 1.0),
+                    "sp_20d":       (-8,  1,    2.0),
+                    "bond_vs_eq":   (-8,  -2,   4.0),   # ★国債も下落（逆転）
+                    "credit_stress":(4,   -1,   1.5),
+                    "usdjpy_20d":   (7,   0,    4.0),   # ★円安ドル高
+                    "tnx_chg":      (0.6, 0,    4.0),   # ★金利上昇
+                    "growth_vs_def":(-10, 0,    2.0),
+                },
+            },
+            "強気相場\n（平常）": {
+                "color": "#15803d", "emoji": "🚀",
+                "period": "上昇トレンド期",
+                "sp_peak_loss": 0,
+                "description": "低VIX・信用安定・グロース優位の典型的な強気相場。",
+                "key_signals": [
+                    "VIXが低水準かつ低下傾向",
+                    "グロース・テック株がリード",
+                    "信用スプレッドが安定・縮小",
+                    "株式 > 債券のリターン",
+                    "ドル安・円安が穏やかに推移",
+                ],
+                "sig": {
+                    "vix_level":    (15,  30,   2.0),   # 低VIXが平常
+                    "vix_vel_20":   (-15, 5,    2.0),   # VIX低下
+                    "vix_term":     (1.2, 0.9,  2.0),   # 順イールド
+                    "sp_20d":       (8,   -2,   3.0),
+                    "bond_vs_eq":   (-8,  2,    2.0),   # 株>債券
+                    "credit_stress":(-3,  1,    2.0),   # 信用良好
+                    "growth_vs_def":(10,  -2,   3.0),   # グロース優位
+                },
+            },
+        }
+
+        def _match(current, expected, neutral, weight):
+            """0-1のマッチスコアを計算"""
+            if current is None: return None
+            span = expected - neutral
+            if abs(span) < 0.001: return 1.0 if abs(current - expected) < 0.001 else 0.0
+            score = (current - neutral) / span
+            return float(np.clip(score, 0.0, 1.0)), weight
+
+        # 類似度計算
+        similarities = {}
+        for name, pat in PATTERNS.items():
+            weighted_sum = 0.0
+            total_w = 0.0
+            matched_factors = []
+            mismatched_factors = []
+
+            for factor, (exp, neu, w) in pat["sig"].items():
+                if factor not in S or S[factor] is None: continue
+                span = exp - neu
+                if abs(span) < 0.001: continue
+                score = float(np.clip((S[factor] - neu) / span, 0.0, 1.0))
+                weighted_sum += score * w
+                total_w += w
+                factor_jp = {
+                    "vix_level": "VIX水準", "vix_vel_20": "VIX上昇速度(20日)",
+                    "vix_vel_5": "VIX急騰感(5日)", "vix_term": "VIX期間構造",
+                    "sp_20d": "S&P500下落率", "sp_5d": "S&P500短期",
+                    "bond_vs_eq": "債券vs株式", "credit_stress": "信用スプレッド",
+                    "usdjpy_20d": "ドル円方向", "tnx_chg": "10年金利変化",
+                    "tnx_level": "金利水準", "growth_vs_def": "グロースvsディフェンシブ",
+                    "fin_vs_stap": "金融vs生活必需品",
+                }.get(factor, factor)
+                if score >= 0.6:
+                    matched_factors.append(f"✅ {factor_jp}({score:.0%}一致)")
+                elif score <= 0.2:
+                    mismatched_factors.append(f"❌ {factor_jp}(不一致)")
+
+            sim = (weighted_sum / total_w * 100) if total_w > 0 else 0
+            similarities[name] = {
+                **{k: v for k, v in pat.items() if k != "sig"},
+                "score": round(sim, 1),
+                "matched": matched_factors[:4],
+                "mismatched": mismatched_factors[:2],
+            }
+
+        ranked = sorted(similarities.items(), key=lambda x: -x[1]["score"])
+
+        return {
+            "ok": True,
+            "state": S,
+            "ranked": ranked,
+            "updated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
+        }
+
+    except Exception as e:
+        logger.error(f"compute_crisis_pattern_similarity: {e}")
+        return {"ok": False, "reason": str(e)[:200]}
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_summary_prices() -> Dict[str, Any]:
     """サマリー用の主要価格データを取得（キャッシュ30分）"""
@@ -7114,6 +7372,7 @@ def render_market_summary():
         sent     = compute_composite_sentiment()
         us_pred  = compute_us_prediction("SP500")
         sector   = compute_sector_rotation()
+        crisis   = compute_crisis_pattern_similarity()
 
     # ── 総合判断 ─────────────────────────────────────────
     composite    = sent.get("composite",    50) if sent.get("ok") else 50
@@ -7295,10 +7554,10 @@ def render_market_summary():
                         unsafe_allow_html=True,
                     )
 
-    # ── 歴史的暴落との VIX 比較 ─────────────────────────────
+    # ── 複合指標による歴史的パターンマッチング ─────────────
     st.markdown("---")
-    st.markdown("**📚 現在のVIXを歴史的暴落と比較**")
-    st.caption("VIXが高いほど市場の恐怖が強い。過去の危機との比較で現在の緊張度を把握できます。")
+    st.markdown("**📚 現在の市場は過去のどの局面に似ているか？**")
+    st.caption("VIXの上がり方・セクターローテーション・為替・信用スプレッド・金利など複数指標を総合評価")
 
     current_vix = prices.get("vix", 0)
 
@@ -7318,80 +7577,90 @@ def render_market_summary():
          "desc": "FRBの急激な利上げでS&P500が24%下落。現代版スタグフレーション懸念。"},
     ]
 
-    # VIXスケールの最大値（比較用）
-    MAX_VIX = 90.0
-
-    # 現在VIXのバー
-    cur_pct = min(int(current_vix / MAX_VIX * 100), 100)
-    if current_vix < 20:
-        cur_color = "#16a34a"
-        cur_status = "安定域"
-    elif current_vix < 30:
-        cur_color = "#f59e0b"
-        cur_status = "注意域"
-    elif current_vix < 40:
-        cur_color = "#ef4444"
-        cur_status = "警戒域"
-    else:
-        cur_color = "#dc2626"
-        cur_status = "危機域"
+    # 現在VIX表示
+    if current_vix < 20:   vc, vs = "#16a34a", "安定域"
+    elif current_vix < 30: vc, vs = "#f59e0b", "注意域"
+    elif current_vix < 40: vc, vs = "#ef4444", "警戒域"
+    else:                   vc, vs = "#dc2626", "危機域"
 
     st.markdown(
-        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:10px">'
-        f'<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px">'
-        f'現在のVIX: <span style="color:{cur_color};font-size:22px">{current_vix:.1f}</span>'
-        f' <span style="color:{cur_color}">({cur_status})</span></div>'
-        f'<div style="background:#e2e8f0;border-radius:4px;height:10px;margin-bottom:4px">'
-        f'<div style="width:{cur_pct}%;height:100%;background:{cur_color};border-radius:4px;'
-        f'transition:width 1s;position:relative">'
-        f'<div style="position:absolute;right:2px;top:-18px;font-size:10px;color:{cur_color};font-weight:700">'
-        f'▼ 現在</div></div></div>'
-        f'<div style="font-size:10px;color:#94a3b8;text-align:right">← 低（安心） 　 高（恐怖） →</div>'
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+        f'border-radius:8px;padding:10px 16px;margin-bottom:12px;">'
+        f'現在のVIX: <b style="color:{vc};font-size:20px">{current_vix:.1f}</b>'
+        f' <span style="color:{vc}">({vs})</span> &nbsp;|&nbsp;'
+        f' <span style="font-size:12px;color:#64748b">'
+        f'VIX単体ではなく以下の複合指標でパターンを判定しています</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # 歴史的比較テーブル
-    rows_html = ""
-    for h in sorted(HISTORY, key=lambda x: -x["vix"]):
-        pct = min(int(h["vix"] / MAX_VIX * 100), 100)
-        if h["vix"] >= 60:   hc = "#dc2626"
-        elif h["vix"] >= 40: hc = "#ef4444"
-        elif h["vix"] >= 25: hc = "#f59e0b"
-        else:                 hc = "#16a34a"
+    # パターンマッチング結果
+    if crisis.get("ok") and crisis.get("ranked"):
+        ranked = crisis["ranked"]
+        top_name, top_data = ranked[0]
 
-        # 現在VIXとの比較
-        ratio = current_vix / h["vix"] * 100 if h["vix"] > 0 else 0
-        if ratio >= 100:
-            cmp_txt = f'<span style="color:#dc2626">⚠ 現在≥当時</span>'
-        elif ratio >= 70:
-            cmp_txt = f'<span style="color:#f59e0b">現在は当時の{ratio:.0f}%水準</span>'
-        else:
-            cmp_txt = f'<span style="color:#16a34a">現在は当時の{ratio:.0f}%水準</span>'
-
-        dd_txt = f'S&P500 {h["sp_dd"]:+.1f}%' if h["sp_dd"] != 0 else "影響軽微"
-
-        rows_html += (
-            f'<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;margin-bottom:8px;background:white">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+        # 1位の結果をハイライト
+        tc = top_data["color"]
+        st.markdown(
+            f'<div style="background:{tc}12;border:2px solid {tc}50;'
+            f'border-radius:10px;padding:14px 18px;margin-bottom:12px;">'
+            f'<div style="font-size:12px;color:#64748b;margin-bottom:4px">現在の市場が最も似ている過去の局面</div>'
+            f'<div style="display:flex;align-items:center;gap:12px;">'
+            f'<div style="font-size:36px">{top_data["emoji"]}</div>'
             f'<div>'
-            f'<span style="font-size:13px;font-weight:700;color:#1e293b">{h["label"]}</span>'
-            f' <span style="font-size:11px;color:#94a3b8">({h["year"]})</span>'
+            f'<div style="font-size:18px;font-weight:900;color:{tc};">'
+            f'{top_name.replace(chr(10)," ")} '
+            f'<span style="font-size:14px;background:{tc};color:white;'
+            f'padding:2px 8px;border-radius:12px;">{top_data["score"]:.0f}%一致</span>'
             f'</div>'
-            f'<div style="text-align:right">'
-            f'<span style="font-size:16px;font-weight:900;color:{hc}">VIX {h["vix"]:.1f}</span>'
-            f' <span style="font-size:11px;color:#64748b">{dd_txt}</span>'
-            f'</div></div>'
-            f'<div style="background:#f1f5f9;border-radius:3px;height:7px;margin-bottom:6px">'
-            f'<div style="width:{pct}%;height:100%;background:{hc};border-radius:3px"></div></div>'
-            f'<div style="font-size:11px;color:#475569">{h["desc"]}</div>'
-            f'<div style="font-size:11px;margin-top:4px">{cmp_txt}</div>'
-            f'</div>'
+            f'<div style="font-size:12px;color:#475569;margin-top:4px">'
+            f'{top_data["period"]} | S&P500最大 {top_data["sp_peak_loss"]:+.1f}%</div>'
+            f'<div style="font-size:12px;color:#334155;margin-top:4px">'
+            f'{top_data["description"]}</div>'
+            f'</div></div></div>',
+            unsafe_allow_html=True,
         )
 
-    with st.expander("📊 歴史的暴落との詳細比較を見る", expanded=True):
-        st.markdown(rows_html, unsafe_allow_html=True)
-        st.caption(f"現在VIX {current_vix:.1f} は、リーマン時({80.9:.0f})の{current_vix/80.9*100:.0f}%水準、コロナ時({82.7:.0f})の{current_vix/82.7*100:.0f}%水準です。")
+        # 判定に使った指標の一致状況
+        if top_data.get("matched") or top_data.get("mismatched"):
+            st.markdown("**🔍 判定根拠（一致した指標・一致しなかった指標）**")
+            m_col, mm_col = st.columns(2)
+            with m_col:
+                for m in top_data.get("matched", []):
+                    st.markdown(f'<span style="font-size:12px">{m}</span>', unsafe_allow_html=True)
+            with mm_col:
+                for mm in top_data.get("mismatched", []):
+                    st.markdown(f'<span style="font-size:12px">{mm}</span>', unsafe_allow_html=True)
+
+        # 当時に気をつけるべきシグナル
+        st.markdown("**⚡ このパターンで注意すべきシグナル**")
+        for sig in top_data.get("key_signals", []):
+            st.markdown(f"- {sig}")
+
+        # 全パターンのスコア一覧
+        with st.expander("📊 全パターンとの類似度スコアを見る", expanded=False):
+            st.markdown("**複合指標による類似度（VIX上昇速度・セクター・為替・信用・金利を総合判定）**")
+            for name, data in ranked:
+                sc = data["score"]
+                bc = data["color"]
+                bar_w = int(sc)
+                st.markdown(
+                    f'<div style="margin-bottom:8px">'
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'font-size:12px;margin-bottom:3px;">'
+                    f'<span>{data["emoji"]} {name.replace(chr(10)," ")}</span>'
+                    f'<b style="color:{bc}">{sc:.0f}%</b></div>'
+                    f'<div style="background:#e5e7eb;border-radius:4px;height:8px">'
+                    f'<div style="width:{bar_w}%;height:100%;background:{bc};border-radius:4px"></div>'
+                    f'</div>'
+                    f'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'
+                    f'{data["period"]} | {data["description"][:50]}...</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            st.caption(f"判定時刻: {crisis.get('updated_at','')}")
+    else:
+        st.info("パターン分析データを取得できませんでした")
 
     st.caption("⚠️ 投資判断はご自身の責任で。本サマリーは参考情報です。")
     st.markdown("---")
