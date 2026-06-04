@@ -472,10 +472,9 @@ def inject_client_info_collector():
 # PV 記録
 # ══════════════════════════════════════
 def track_pageview(page: str = "market_dashboard"):
-    """アプリ起動時に呼び出す。セッション内で1回だけ記録。"""
+    """アプリ起動時に呼び出す。JS geo データが取得できてから記録（最大3回待機）。"""
     if st.session_state.get(_TRACKED_KEY):
         return
-    st.session_state[_TRACKED_KEY] = True
 
     now = datetime.datetime.now(JST)
     sid = _session_id()
@@ -496,7 +495,16 @@ def track_pageview(page: str = "market_dashboard"):
         pass
 
     # ── JS geo（ブラウザ側で取得した実IP・ISP・地域） ────
-    js_geo = _get_js_geo()
+    # st_javascript は初回 0 を返し、JS 実行後の rerun で実データを返す。
+    # 最大 2 回まで待機してからシートへ書き込む（無限ループ防止）。
+    _ATT_KEY = "_anl_track_attempts"
+    js_geo   = _get_js_geo()
+    if not js_geo.get("city"):
+        attempts = st.session_state.get(_ATT_KEY, 0)
+        if attempts < 2:
+            st.session_state[_ATT_KEY] = attempts + 1
+            return  # 次の rerun で再試行（st_javascript が自動的にトリガー）
+    st.session_state[_ATT_KEY] = 0  # リセット
 
     # ── IP / 地域解決 ─────────────────────────────────────
     global_ip, local_ip = _get_client_ip()
@@ -538,6 +546,9 @@ def track_pageview(page: str = "market_dashboard"):
     st.session_state["_anl_os"]        = os_name
     st.session_state["_anl_isp"]       = org
     st.session_state["_anl_lang"]      = lang_code
+
+    # JS geo 取得完了またはタイムアウト後に記録確定
+    st.session_state[_TRACKED_KEY] = True
 
     row = {
         "ts":         now.isoformat(),
