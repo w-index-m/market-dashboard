@@ -7917,9 +7917,9 @@ def render_market_summary():
             unsafe_allow_html=True,
         )
         for key, flag, name, fmt in [
-            ("dow_f",  "🇺🇸", "ダウ先物",      ",0f"),
-            ("ndx_f",  "🇺🇸", "ナスダック100先物", ",0f"),
-            ("nk_f",   "🇯🇵", "日経225先物(ドル建)", ".2f"),
+            ("dow_f",  "🇺🇸", "ダウ先物",           ",.0f"),
+            ("ndx_f",  "🇺🇸", "ナスダック100先物",   ",.0f"),
+            ("nk_f",   "🇯🇵", "日経225先物(ドル建)", ",.2f"),
         ]:
             val  = prices.get(key)
             chg1 = prices.get(f"{key}_chg1", 0)
