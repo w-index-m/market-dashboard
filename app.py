@@ -7498,11 +7498,11 @@ def render_momentum_ranking():
             r20s = f" | 20日 {r20:+.1f}%" if r20 is not None else ""
             col.markdown(
                 f'<div style="border-left:3px solid {cc};padding:7px 11px;'
-                f'margin-bottom:5px;background:rgba(255,255,255,0.03);'
+                f'margin-bottom:5px;background:#1e293b;'
                 f'border-radius:0 6px 6px 0;">'
-                f'<div style="font-size:13px;font-weight:700;color:#f0f4f8">'
+                f'<div style="font-size:13px;font-weight:700;color:#f1f5f9">'
                 f'{row["name"]}'
-                f'<span style="font-size:10px;color:#64748b;margin-left:4px">'
+                f'<span style="font-size:10px;color:#94a3b8;margin-left:4px">'
                 f'{row["ticker"]}</span></div>'
                 f'<div style="font-size:12px;margin-top:2px">'
                 f'<span style="color:{cc};font-weight:700">今日 {r1:+.2f}%</span>'
@@ -7653,6 +7653,56 @@ def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
     return dt_et.astimezone(JST)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_event_market_reactions() -> Dict[str, float]:
+    """
+    過去の経済イベント日ごとのS&P500当日リターン（%）を返す。
+    {date_str: return_pct} の辞書。
+    """
+    try:
+        end_dt   = datetime.now()
+        start_dt = end_dt - timedelta(days=760)
+        raw = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
+        if raw.empty:
+            return {}
+        if isinstance(raw.columns, pd.MultiIndex):
+            try:
+                sp = raw[("Close", "^GSPC")]
+            except KeyError:
+                sp = raw["Close"].iloc[:, 0]
+        else:
+            sp = raw["Close"]
+        if isinstance(sp, pd.DataFrame):
+            sp = sp.iloc[:, 0]
+        sp   = sp.dropna().astype(float)
+        rets = sp.pct_change().dropna()
+        close_dates = [d.date() if hasattr(d, "date") else d for d in sp.index]
+
+        reactions: Dict[str, float] = {}
+        now_date = datetime.now().date()
+        for date_str, _time_et, _name, _icon, _impact, _note in _US_ECO_CALENDAR:
+            ev_date = dt.date(*map(int, date_str.split("-")))
+            if ev_date >= now_date:
+                continue
+            for offset in range(3):
+                check = ev_date + timedelta(days=offset)
+                if check not in close_dates:
+                    continue
+                idx = close_dates.index(check)
+                if idx >= len(rets):
+                    break
+                val = rets.iloc[idx]
+                if isinstance(val, pd.Series):
+                    val = val.iloc[0]
+                r = float(val)
+                if not pd.isna(r):
+                    reactions[date_str] = round(r * 100, 2)
+                break
+        return reactions
+    except Exception:
+        return {}
+
+
 def _get_upcoming_us_eco_events(days_back: int = 3, days_ahead: int = 30) -> List[Dict]:
     """直近〜今後のイベントを返す（過去3日分も含む）"""
     now_jst = datetime.now(JST)
@@ -7668,6 +7718,7 @@ def _get_upcoming_us_eco_events(days_back: int = 3, days_ahead: int = 30) -> Lis
         if cutoff_past <= jst_dt <= cutoff_future:
             delta_h = (jst_dt - now_jst).total_seconds() / 3600
             result.append({
+                "date_str": date_str,
                 "jst_dt":   jst_dt,
                 "name":     name,
                 "icon":     icon,
@@ -7772,7 +7823,10 @@ def render_economic_events_section():
     # ── タブ①: カレンダー ──────────────────────────────────
     with tab_cal:
         days_ahead = st.slider("今後何日分を表示", 7, 60, 30, key="eco_days_ahead")
-        events = _get_upcoming_us_eco_events(days_back=3, days_ahead=days_ahead)
+        events = _get_upcoming_us_eco_events(days_back=180, days_ahead=days_ahead)
+
+        # 過去イベントの株価反応データ（S&P500当日リターン）
+        reactions = _fetch_event_market_reactions()
 
         now_jst = datetime.now(JST)
         impact_color = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
@@ -7783,20 +7837,42 @@ def render_economic_events_section():
         else:
             rows_html = ""
             for ev in events:
-                jst_str   = ev["jst_dt"].strftime("%m/%d(%a) %H:%M JST")
-                delta_h   = ev["delta_h"]
-                is_past   = ev["is_past"]
+                jst_str     = ev["jst_dt"].strftime("%m/%d(%a) %H:%M JST")
+                delta_h     = ev["delta_h"]
+                is_past     = ev["is_past"]
+                ev_date_str = ev.get("date_str")
 
+                # 過去イベント: 株価反応を表示
                 if is_past:
-                    timing = f"<span style='color:#6b7280'>✅ {abs(delta_h):.0f}時間前</span>"
+                    timing = f"<span style='color:#6b7280'>✅ {abs(delta_h/24):.0f}日前</span>"
+                    sp_ret = reactions.get(ev_date_str) if ev_date_str else None
+                    if sp_ret is not None:
+                        if sp_ret >= 0:
+                            react_html = (
+                                f"<span style='color:#22c55e;font-weight:700;font-size:13px'>"
+                                f"▲ +{sp_ret:.2f}%</span>"
+                                f"<span style='color:#6b7280;font-size:10px'> S&P500</span>"
+                            )
+                        else:
+                            react_html = (
+                                f"<span style='color:#ef4444;font-weight:700;font-size:13px'>"
+                                f"▼ {sp_ret:.2f}%</span>"
+                                f"<span style='color:#6b7280;font-size:10px'> S&P500</span>"
+                            )
+                    else:
+                        react_html = "<span style='color:#475569;font-size:11px'>—</span>"
                 elif delta_h < 2:
                     timing = f"<span style='color:#ef4444;font-weight:bold'>🔴 まもなく ({delta_h*60:.0f}分後)</span>"
+                    react_html = "<span style='color:#f59e0b;font-size:11px'>発表待ち</span>"
                 elif delta_h < 24:
                     timing = f"<span style='color:#f59e0b;font-weight:bold'>🟡 本日 ({delta_h:.1f}時間後)</span>"
+                    react_html = "<span style='color:#94a3b8;font-size:11px'>—</span>"
                 elif delta_h < 48:
                     timing = f"<span style='color:#fbbf24'>🟠 明日 ({delta_h:.0f}時間後)</span>"
+                    react_html = "<span style='color:#94a3b8;font-size:11px'>—</span>"
                 else:
                     timing = f"<span style='color:#94a3b8'>⚪ {delta_h/24:.0f}日後</span>"
+                    react_html = "<span style='color:#94a3b8;font-size:11px'>—</span>"
 
                 note_badge = (f"<span style='background:#1e3a5f;color:#93c5fd;"
                               f"padding:1px 6px;border-radius:8px;font-size:11px'>"
@@ -7804,12 +7880,16 @@ def render_economic_events_section():
                 imp_col = impact_color.get(ev["impact"], "#6b7280")
                 imp_lbl = impact_label.get(ev["impact"], "")
 
+                # 過去行は薄く表示
+                row_style = "opacity:0.7;" if is_past else ""
+
                 rows_html += (
-                    f"<tr style='border-bottom:1px solid #1e293b'>"
+                    f"<tr style='border-bottom:1px solid #1e293b;{row_style}'>"
                     f"<td style='padding:7px 8px;white-space:nowrap'>{jst_str}</td>"
                     f"<td style='padding:7px 8px'>{ev['icon']} <b>{ev['name']}</b> {note_badge}</td>"
                     f"<td style='padding:7px 8px;color:{imp_col};white-space:nowrap'>{imp_lbl}</td>"
                     f"<td style='padding:7px 8px'>{timing}</td>"
+                    f"<td style='padding:7px 8px;white-space:nowrap'>{react_html}</td>"
                     f"</tr>"
                 )
 
@@ -7820,9 +7900,11 @@ def render_economic_events_section():
                 f"<th style='padding:6px 8px;text-align:left'>指標名</th>"
                 f"<th style='padding:6px 8px;text-align:left'>影響度</th>"
                 f"<th style='padding:6px 8px;text-align:left'>タイミング</th>"
+                f"<th style='padding:6px 8px;text-align:left'>株価反応（当日）</th>"
                 f"</tr></thead><tbody>{rows_html}</tbody></table>",
                 unsafe_allow_html=True,
             )
+            st.caption("📌 株価反応はS&P500の発表日当日の終値騰落率。発表後の当日反応を示します。")
         st.caption(
             "⏰ 8:30 AM ET = 夏時間21:30 JST / 冬時間22:30 JST　"
             "| 10:00 AM ET = 夏時間23:00 JST / 冬時間00:00 JST(翌日)　"
