@@ -7330,11 +7330,12 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_summary_prices() -> Dict[str, Any]:
-    """サマリー用の主要価格データを取得（キャッシュ30分）"""
+    """サマリー用の主要価格データを取得（キャッシュ30分）。直近15営業日の履歴も含む。"""
     out = {}
+    TREND_DAYS = 15  # トレンドチャート用営業日数
     try:
         end   = datetime.now(timezone.utc)
-        start = end - timedelta(days=10)
+        start = end - timedelta(days=30)  # 休場考慮で多めに取得
         for sym, key in [
             ("^GSPC","sp"), ("^N225","nk"), ("^VIX","vix"),
             ("^TNX","tnx"), ("DX=F","dxy"),
@@ -7345,10 +7346,14 @@ def _fetch_summary_prices() -> Dict[str, Any]:
                 if df is not None and not df.empty:
                     c = df["Close"].dropna()
                     if len(c) >= 2:
-                        out[key]          = float(c.iloc[-1])
+                        out[key]           = float(c.iloc[-1])
                         out[f"{key}_chg1"] = (float(c.iloc[-1]) / float(c.iloc[-2]) - 1) * 100
                     if len(c) >= 6:
                         out[f"{key}_chg5"] = (float(c.iloc[-1]) / float(c.iloc[-6]) - 1) * 100
+                    # 直近 TREND_DAYS 日分の履歴を保存
+                    c_tail = c.iloc[-TREND_DAYS:]
+                    out[f"{key}_dates"]  = [str(d.date()) for d in c_tail.index]
+                    out[f"{key}_series"] = [float(v) for v in c_tail.values]
             except Exception:
                 pass
     except Exception:
@@ -7991,6 +7996,63 @@ def render_market_summary():
             if top_bear:
                 r_name = top_bear[0][0].replace("① ","").replace("② ","").replace("③ ","").replace("④ ","").replace("⑤ ","").replace("⑥ ","").replace("⑦ ","").replace("⑧ ","").replace("⑨ ","")
                 st.caption(f"▼ 主な押し下げ: {r_name}")
+
+    # ── 主要指数・先物 直近トレンドチャート ─────────────
+    if PLOTLY_AVAILABLE:
+        trend_items = [
+            ("sp",    "🇺🇸 S&P500",          "#60a5fa"),
+            ("nk",    "🇯🇵 日経225",          "#f472b6"),
+            ("dow_f", "🇺🇸 ダウ先物",         "#34d399"),
+            ("ndx_f", "🇺🇸 ナスダック先物",    "#fbbf24"),
+        ]
+        fig_trend = go.Figure()
+        has_any = False
+        for key, label, color in trend_items:
+            dates  = prices.get(f"{key}_dates",  [])
+            series = prices.get(f"{key}_series", [])
+            if len(series) >= 2:
+                base = series[0]
+                norm = [(v / base - 1) * 100 for v in series]  # 起点を0%に正規化
+                fig_trend.add_trace(go.Scatter(
+                    x=dates, y=norm,
+                    mode="lines+markers",
+                    name=label,
+                    line=dict(color=color, width=2),
+                    marker=dict(size=4),
+                    hovertemplate=f"<b>{label}</b><br>%{{x}}<br>起点比: %{{y:+.2f}}%<extra></extra>",
+                ))
+                has_any = True
+        if has_any:
+            # 直近のイベントマーカーを重ねる
+            now_jst = datetime.now(JST)
+            eco_events = _get_upcoming_us_eco_events(days_back=15, days_ahead=3)
+            for ev in eco_events:
+                ev_date_str = ev["jst_dt"].strftime("%Y-%m-%d")
+                imp_col = "#ef4444" if ev["impact"] == "high" else "#f59e0b"
+                fig_trend.add_vline(
+                    x=ev_date_str,
+                    line_dash="dot", line_color=imp_col, line_width=1, opacity=0.6,
+                    annotation_text=f"{ev['icon']} {ev['name'].split('（')[0][:8]}",
+                    annotation_position="top",
+                    annotation_font_size=9,
+                    annotation_font_color=imp_col,
+                )
+            fig_trend.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)", line_width=1)
+            fig_trend.update_layout(
+                title=dict(text="📈 直近15営業日のトレンド（起点=0%に正規化）", font=dict(size=13)),
+                yaxis_title="起点比（%）",
+                height=260,
+                margin=dict(l=10, r=10, t=40, b=20),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white", size=11),
+                legend=dict(orientation="h", y=-0.15, x=0, font=dict(size=11)),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.08)", tickangle=-30),
+                yaxis=dict(gridcolor="rgba(255,255,255,0.08)", zeroline=False,
+                           ticksuffix="%"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
 
     # ── セクター: 買われている / 売られている ─────────────
     if sector.get("ok") and sector.get("sectors"):
