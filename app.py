@@ -2899,7 +2899,7 @@ def _calc_bb_pct(series: pd.Series, window: int = 20) -> float:
     return float(np.clip(bb_pct, 0, 1))
 
 
-@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def compute_nikkei_prediction() -> Dict[str, Any]:
     """
     9カテゴリ・25シグナル の重み付き合成で
@@ -4411,7 +4411,7 @@ US_SIGNAL_CATEGORIES = {
 }
 
 
-@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
     """
     米国株（S&P500 / NASDAQ100 / ダウ）の翌日・今週方向性予測。
@@ -5043,24 +5043,36 @@ def compute_sector_rotation() -> Dict[str, Any]:
         end   = datetime.now(timezone.utc)
         start = end - timedelta(days=365)
 
-        spy_df = yf.Ticker("SPY").history(
-            start=start, end=end, interval="1d", auto_adjust=False)
-        if spy_df is None or spy_df.empty:
+        # SPY + 11セクターETFをバッチ一括ダウンロード（個別Ticker×12回 → 1回）
+        _sr_syms = ["SPY"] + list(SECTORS.keys())
+        _sr_raw  = yf.download(
+            _sr_syms, start=start, end=end,
+            progress=False, auto_adjust=False, group_by="ticker"
+        )
+
+        def _sr_close(sym):
+            try:
+                if isinstance(_sr_raw.columns, pd.MultiIndex):
+                    s = _sr_raw[sym]["Close"] if sym in _sr_raw.columns.get_level_values(0) else pd.Series(dtype=float)
+                else:
+                    s = _sr_raw["Close"] if len(_sr_syms) == 1 else pd.Series(dtype=float)
+                s = s.dropna()
+                if s.index.tz is None:
+                    s.index = s.index.tz_localize("UTC")
+                return s.tz_convert(JST)
+            except Exception:
+                return pd.Series(dtype=float)
+
+        spy_c = _sr_close("SPY")
+        if spy_c.empty:
             return {"ok": False, "reason": "SPYデータ取得失敗"}
-        if spy_df.index.tz is None:
-            spy_df.index = spy_df.index.tz_localize("UTC")
-        spy_c = spy_df.tz_convert(JST)["Close"].dropna()
 
         results = {}
         for sym, meta in SECTORS.items():
             try:
-                df = yf.Ticker(sym).history(
-                    start=start, end=end, interval="1d", auto_adjust=False)
-                if df is None or df.empty:
+                sec_c = _sr_close(sym)
+                if sec_c.empty:
                     continue
-                if df.index.tz is None:
-                    df.index = df.index.tz_localize("UTC")
-                sec_c = df.tz_convert(JST)["Close"].dropna()
 
                 # 共通日付
                 common = sec_c.index.intersection(spy_c.index)
@@ -5788,27 +5800,34 @@ def compute_composite_sentiment() -> Dict[str, Any]:
 
         components = {}
 
-        # ── 共通価格を一括取得（全指標分、リアルタイム・履歴で共有）──
-        vix_c    = _c("^VIX")
-        vix3m_c  = _c("^VIX3M")
-        sp_c     = _c("^GSPC")
-        tlt_c    = _c("TLT")
-        hyg_c    = _c("HYG")
-        lqd_c    = _c("LQD")
-        xlk_c    = _c("XLK")
-        xlu_c    = _c("XLU")
-        n225_c   = _c("^N225")
-        usdjpy_c = _c("USDJPY=X")
-        vxx_c    = _c("VXX")
-        # ブレッドス用ETF（二重取得防止）
-        spy_c    = _c("SPY")
-        qqq_c    = _c("QQQ")
-        iwm_c    = _c("IWM")
-        dia_c    = _c("DIA")
-        mdy_c    = _c("MDY")
-        # Put/Call比率（二重取得防止）
-        cpc_c    = _c("^CPC")
-        cpce_c   = _c("^CPCE")
+        # ── 共通価格を並列一括取得 ──────────────────────────────
+        _sym_keys = [
+            "^VIX", "^VIX3M", "^GSPC", "TLT", "HYG", "LQD",
+            "XLK", "XLU", "^N225", "USDJPY=X", "VXX",
+            "SPY", "QQQ", "IWM", "DIA", "MDY", "^CPC", "^CPCE",
+        ]
+        with ThreadPoolExecutor(max_workers=8) as _p:
+            _futs = {s: _p.submit(_c, s) for s in _sym_keys}
+        _cd = {s: _futs[s].result() for s in _sym_keys}
+
+        vix_c    = _cd["^VIX"]
+        vix3m_c  = _cd["^VIX3M"]
+        sp_c     = _cd["^GSPC"]
+        tlt_c    = _cd["TLT"]
+        hyg_c    = _cd["HYG"]
+        lqd_c    = _cd["LQD"]
+        xlk_c    = _cd["XLK"]
+        xlu_c    = _cd["XLU"]
+        n225_c   = _cd["^N225"]
+        usdjpy_c = _cd["USDJPY=X"]
+        vxx_c    = _cd["VXX"]
+        spy_c    = _cd["SPY"]
+        qqq_c    = _cd["QQQ"]
+        iwm_c    = _cd["IWM"]
+        dia_c    = _cd["DIA"]
+        mdy_c    = _cd["MDY"]
+        cpc_c    = _cd["^CPC"]
+        cpce_c   = _cd["^CPCE"]
 
         # ① F&G Index (CNN実データ + 履歴も同時取得)
         fg_hist_series = pd.Series(dtype=float)
@@ -7095,12 +7114,17 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
                 return df.tz_convert(JST)["Close"].dropna()
             except: return pd.Series(dtype=float)
 
-        vix    = _g("^VIX");    vix3m  = _g("^VIX3M")
-        sp     = _g("^GSPC");   tlt    = _g("TLT")
-        hyg    = _g("HYG");     lqd    = _g("LQD")
-        usdjpy = _g("USDJPY=X"); tnx   = _g("^TNX")
-        xlk    = _g("XLK");     xlu    = _g("XLU")
-        xlf    = _g("XLF");     xlp    = _g("XLP")
+        _cps_keys = ["^VIX", "^VIX3M", "^GSPC", "TLT", "HYG", "LQD",
+                     "USDJPY=X", "^TNX", "XLK", "XLU", "XLF", "XLP"]
+        with ThreadPoolExecutor(max_workers=6) as _p:
+            _cf = {s: _p.submit(_g, s) for s in _cps_keys}
+        _cg = {s: _cf[s].result() for s in _cps_keys}
+        vix    = _cg["^VIX"];   vix3m  = _cg["^VIX3M"]
+        sp     = _cg["^GSPC"];  tlt    = _cg["TLT"]
+        hyg    = _cg["HYG"];    lqd    = _cg["LQD"]
+        usdjpy = _cg["USDJPY=X"]; tnx  = _cg["^TNX"]
+        xlk    = _cg["XLK"];    xlu    = _cg["XLU"]
+        xlf    = _cg["XLF"];    xlp    = _cg["XLP"]
 
         def _ret(s, n):
             if len(s) >= n + 1:
@@ -7654,17 +7678,18 @@ def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_event_market_reactions() -> Dict[str, float]:
-    """
-    過去の経済イベント日ごとのS&P500当日リターン（%）を返す。
-    {date_str: return_pct} の辞書。
-    """
+def _fetch_gspc_760d() -> Tuple[pd.Series, pd.Series, list]:
+    """^GSPC 760日分の終値・日次リターン・日付リストを共有キャッシュで返す。
+    _fetch_event_market_reactions / _fetch_sp500_event_volatility の共通基盤。"""
     try:
-        end_dt   = datetime.now()
-        start_dt = end_dt - timedelta(days=760)
-        raw = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
+        raw = yf.download(
+            "^GSPC",
+            start=datetime.now() - timedelta(days=760),
+            end=datetime.now(),
+            progress=False, auto_adjust=True,
+        )
         if raw.empty:
-            return {}
+            return pd.Series(dtype=float), pd.Series(dtype=float), []
         if isinstance(raw.columns, pd.MultiIndex):
             try:
                 sp = raw[("Close", "^GSPC")]
@@ -7677,30 +7702,38 @@ def _fetch_event_market_reactions() -> Dict[str, float]:
         sp   = sp.dropna().astype(float)
         rets = sp.pct_change().dropna()
         close_dates = [d.date() if hasattr(d, "date") else d for d in sp.index]
-
-        reactions: Dict[str, float] = {}
-        now_date = datetime.now().date()
-        for date_str, _time_et, _name, _icon, _impact, _note in _US_ECO_CALENDAR:
-            ev_date = dt.date(*map(int, date_str.split("-")))
-            if ev_date >= now_date:
-                continue
-            for offset in range(3):
-                check = ev_date + timedelta(days=offset)
-                if check not in close_dates:
-                    continue
-                idx = close_dates.index(check)
-                if idx >= len(rets):
-                    break
-                val = rets.iloc[idx]
-                if isinstance(val, pd.Series):
-                    val = val.iloc[0]
-                r = float(val)
-                if not pd.isna(r):
-                    reactions[date_str] = round(r * 100, 2)
-                break
-        return reactions
+        return sp, rets, close_dates
     except Exception:
+        return pd.Series(dtype=float), pd.Series(dtype=float), []
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_event_market_reactions() -> Dict[str, float]:
+    """過去の経済イベント日ごとのS&P500当日リターン（%）を返す。"""
+    _sp, rets, close_dates = _fetch_gspc_760d()
+    if rets.empty:
         return {}
+    reactions: Dict[str, float] = {}
+    now_date = datetime.now().date()
+    for date_str, _time_et, _name, _icon, _impact, _note in _US_ECO_CALENDAR:
+        ev_date = dt.date(*map(int, date_str.split("-")))
+        if ev_date >= now_date:
+            continue
+        for offset in range(3):
+            check = ev_date + timedelta(days=offset)
+            if check not in close_dates:
+                continue
+            idx = close_dates.index(check)
+            if idx >= len(rets):
+                break
+            val = rets.iloc[idx]
+            if isinstance(val, pd.Series):
+                val = val.iloc[0]
+            r = float(val)
+            if not pd.isna(r):
+                reactions[date_str] = round(r * 100, 2)
+            break
+    return reactions
 
 
 def _get_upcoming_us_eco_events(days_back: int = 3, days_ahead: int = 30) -> List[Dict]:
@@ -7737,27 +7770,8 @@ def _fetch_sp500_event_volatility() -> Dict[str, Any]:
     過去2年分のS&P500データから、主要経済指標発表日の
     当日・翌日・前後3日ボラティリティを計算して返す
     """
-    try:
-        end_dt = datetime.now()
-        start_dt = end_dt - timedelta(days=760)
-        raw = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
-        if raw.empty:
-            return {}
-        # MultiIndex（yfinance新仕様）と旧仕様の両方に対応してSeriesを取り出す
-        if isinstance(raw.columns, pd.MultiIndex):
-            try:
-                sp = raw[("Close", "^GSPC")]
-            except KeyError:
-                sp = raw["Close"].iloc[:, 0]
-        else:
-            sp = raw["Close"]
-        # DataFrameが返ってきた場合（まれ）にも対応
-        if isinstance(sp, pd.DataFrame):
-            sp = sp.iloc[:, 0]
-        sp   = sp.dropna().astype(float)
-        rets = sp.pct_change().dropna()
-        close_dates = [d.date() if hasattr(d, "date") else d for d in sp.index]
-    except Exception:
+    _sp, rets, close_dates = _fetch_gspc_760d()
+    if rets.empty:
         return {}
 
     # イベント種別ごとに集計
