@@ -7471,7 +7471,13 @@ def render_momentum_ranking():
         unsafe_allow_html=True,
     )
 
-    tab_nk, tab_ndx = st.tabs(["🇯🇵 日経225 構成銘柄", "🇺🇸 ナスダック100 構成銘柄"])
+    market_sel = st.radio(
+        "市場を選択",
+        ["🇯🇵 日経225 構成銘柄", "🇺🇸 ナスダック100 構成銘柄"],
+        horizontal=True,
+        key="momentum_market_sel",
+    )
+    active_market = "nk225" if "日経" in market_sel else "nasdaq"
 
     def _render_cards(df: pd.DataFrame):
         if df.empty:
@@ -7521,15 +7527,9 @@ def render_momentum_ranking():
             disp.columns = ["銘柄名", "コード", "株価", "今日%", "5日%", "20日%", "スコア"]
             st.dataframe(disp, use_container_width=True, hide_index=True)
 
-    with tab_nk:
-        with st.spinner("日経225構成銘柄を分析中..."):
-            df_nk = _fetch_momentum_ranking("nk225")
-        _render_cards(df_nk)
-
-    with tab_ndx:
-        with st.spinner("ナスダック100構成銘柄を分析中..."):
-            df_ndx = _fetch_momentum_ranking("nasdaq")
-        _render_cards(df_ndx)
+    with st.spinner("銘柄データを取得中..."):
+        df_active = _fetch_momentum_ranking(active_market)
+    _render_cards(df_active)
 
 
 # =====================================================
@@ -7832,6 +7832,13 @@ def render_economic_events_section():
 
     # ── タブ②: ボラティリティ実績 ──────────────────────────
     with tab_vol:
+        if not st.session_state.get("_vol_loaded"):
+            st.info("「ボラティリティを分析」ボタンを押すと過去のS&P500変動データを取得します（初回のみ時間がかかります）。")
+            if st.button("📊 ボラティリティを分析", key="vol_load_btn", type="primary"):
+                st.session_state["_vol_loaded"] = True
+                st.rerun()
+            return
+
         with st.spinner("過去のS&P500ボラティリティを分析中..."):
             vol = _fetch_sp500_event_volatility()
 
@@ -7949,11 +7956,17 @@ def render_market_summary():
     )
 
     with st.spinner("データ取得中..."):
-        prices   = _fetch_summary_prices()
-        sent     = compute_composite_sentiment()
-        us_pred  = compute_us_prediction("SP500")
-        sector   = compute_sector_rotation()
-        crisis   = compute_crisis_pattern_similarity()
+        with ThreadPoolExecutor(max_workers=5) as _pool:
+            _f_prices = _pool.submit(_fetch_summary_prices)
+            _f_sent   = _pool.submit(compute_composite_sentiment)
+            _f_pred   = _pool.submit(compute_us_prediction, "SP500")
+            _f_sector = _pool.submit(compute_sector_rotation)
+            _f_crisis = _pool.submit(compute_crisis_pattern_similarity)
+        prices  = _f_prices.result()
+        sent    = _f_sent.result()
+        us_pred = _f_pred.result()
+        sector  = _f_sector.result()
+        crisis  = _f_crisis.result()
 
     # ── 総合判断 ─────────────────────────────────────────
     composite    = sent.get("composite",    50) if sent.get("ok") else 50
