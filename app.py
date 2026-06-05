@@ -7362,6 +7362,177 @@ def _fetch_summary_prices() -> Dict[str, Any]:
 
 
 # =====================================================
+# モメンタムランキング（日経225 / ナスダック）
+# =====================================================
+
+_NK225_STOCKS = {
+    "7203.T": "トヨタ自動車",    "6758.T": "ソニーグループ",
+    "8306.T": "三菱UFJ FG",      "9432.T": "NTT",
+    "6367.T": "ダイキン工業",    "8035.T": "東京エレクトロン",
+    "6857.T": "アドバンテスト",  "6861.T": "キーエンス",
+    "6954.T": "ファナック",      "7974.T": "任天堂",
+    "9984.T": "ソフトバンクG",   "4063.T": "東京応化工業",
+    "6501.T": "日立製作所",      "4502.T": "武田薬品",
+    "9433.T": "KDDI",            "7267.T": "ホンダ",
+    "4519.T": "中外製薬",        "8058.T": "三菱商事",
+    "8031.T": "三井物産",        "6702.T": "富士通",
+    "4568.T": "第一三共",        "6098.T": "リクルートHD",
+    "7011.T": "三菱重工業",      "4543.T": "テルモ",
+    "7751.T": "キヤノン",        "8801.T": "三井不動産",
+    "6971.T": "京セラ",          "4661.T": "オリエンタルランド",
+    "7733.T": "オリンパス",      "2413.T": "エムスリー",
+}
+
+_NDX_STOCKS = {
+    "AAPL": "Apple",        "MSFT": "Microsoft",
+    "NVDA": "NVIDIA",       "AMZN": "Amazon",
+    "META": "Meta",         "GOOGL": "Alphabet",
+    "TSLA": "Tesla",        "AVGO": "Broadcom",
+    "COST": "Costco",       "NFLX": "Netflix",
+    "AMD":  "AMD",          "ADBE": "Adobe",
+    "QCOM": "Qualcomm",     "INTU": "Intuit",
+    "CSCO": "Cisco",        "AMGN": "Amgen",
+    "ISRG": "Intuitive",    "BKNG": "Booking",
+    "PANW": "Palo Alto",    "LRCX": "Lam Research",
+    "SNPS": "Synopsys",     "CDNS": "Cadence",
+    "MELI": "MercadoLibre", "REGN": "Regeneron",
+    "VRTX": "Vertex",       "ADP":  "ADP",
+    "CRWD": "CrowdStrike",  "MRVL": "Marvell",
+    "ABNB": "Airbnb",       "DXCM": "DexCom",
+}
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
+    """日経225 or ナスダック100 構成銘柄のモメンタムスコアを計算"""
+    stocks = _NK225_STOCKS if market == "nk225" else _NDX_STOCKS
+    tickers = list(stocks.keys())
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=35)
+        raw   = yf.download(tickers, start=start, end=end,
+                             progress=False, auto_adjust=True, group_by="ticker")
+        if raw.empty:
+            return pd.DataFrame()
+
+        rows = []
+        for ticker, name in stocks.items():
+            try:
+                # group_by="ticker" → raw[ticker]["Close"]
+                if isinstance(raw.columns, pd.MultiIndex):
+                    s = raw[ticker]["Close"].dropna()
+                else:
+                    s = raw["Close"].dropna()
+                if len(s) < 2:
+                    continue
+
+                ret_1d  = float(s.iloc[-1] / s.iloc[-2]  - 1) * 100 if len(s) >= 2  else None
+                ret_5d  = float(s.iloc[-1] / s.iloc[-6]  - 1) * 100 if len(s) >= 6  else None
+                ret_20d = float(s.iloc[-1] / s.iloc[-21] - 1) * 100 if len(s) >= 21 else None
+
+                if ret_1d is None:
+                    continue
+
+                score = ret_1d * 0.5
+                if ret_5d  is not None: score += ret_5d  * 0.3
+                if ret_20d is not None: score += ret_20d * 0.2
+
+                rows.append({
+                    "ticker": ticker, "name": name,
+                    "price":  round(float(s.iloc[-1]), 2),
+                    "1日":    round(ret_1d,  2),
+                    "5日":    round(ret_5d,  2) if ret_5d  is not None else None,
+                    "20日":   round(ret_20d, 2) if ret_20d is not None else None,
+                    "score":  round(score, 3),
+                })
+            except Exception:
+                continue
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+        return df
+    except Exception as e:
+        logger.error(f"_fetch_momentum_ranking({market}): {e}")
+        return pd.DataFrame()
+
+
+def render_momentum_ranking():
+    """🚀 モメンタム上位 / 下位 銘柄ランキング"""
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0d1117,#161b22,#1f2937);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
+        '<div style="font-size:20px;font-weight:800;color:#f0f4f8">'
+        '🚀 モメンタムランキング</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        '当日・5日・20日リターンの加重平均スコアで上昇力の強い銘柄を表示します。</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    tab_nk, tab_ndx = st.tabs(["🇯🇵 日経225 構成銘柄", "🇺🇸 ナスダック100 構成銘柄"])
+
+    def _render_cards(df: pd.DataFrame):
+        if df.empty:
+            st.warning("データを取得できませんでした。")
+            return
+
+        top5  = df.head(5)
+        bot5  = df.tail(5).iloc[::-1]
+
+        col_up, col_dn = st.columns(2)
+
+        def _card(row, col):
+            r1  = row["1日"]
+            r5  = row["5日"]
+            r20 = row["20日"]
+            cc  = "#16a34a" if r1 >= 0 else "#dc2626"
+            r5s  = f" | 5日 {r5:+.1f}%"  if r5  is not None else ""
+            r20s = f" | 20日 {r20:+.1f}%" if r20 is not None else ""
+            col.markdown(
+                f'<div style="border-left:3px solid {cc};padding:7px 11px;'
+                f'margin-bottom:5px;background:rgba(255,255,255,0.03);'
+                f'border-radius:0 6px 6px 0;">'
+                f'<div style="font-size:13px;font-weight:700;color:#f0f4f8">'
+                f'{row["name"]}'
+                f'<span style="font-size:10px;color:#64748b;margin-left:4px">'
+                f'{row["ticker"]}</span></div>'
+                f'<div style="font-size:12px;margin-top:2px">'
+                f'<span style="color:{cc};font-weight:700">今日 {r1:+.2f}%</span>'
+                f'<span style="color:#94a3b8">{r5s}{r20s}</span></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_up:
+            st.markdown("**▲ 上昇モメンタム TOP5**")
+            for _, row in top5.iterrows():
+                _card(row, col_up)
+
+        with col_dn:
+            st.markdown("**▼ 下落モメンタム TOP5**")
+            for _, row in bot5.iterrows():
+                _card(row, col_dn)
+
+        # 全銘柄テーブル（折り畳み）
+        with st.expander("📋 全銘柄スコア一覧"):
+            disp = df[["name", "ticker", "price", "1日", "5日", "20日", "score"]].copy()
+            disp.columns = ["銘柄名", "コード", "株価", "今日%", "5日%", "20日%", "スコア"]
+            st.dataframe(disp, use_container_width=True, hide_index=True)
+
+    with tab_nk:
+        with st.spinner("日経225構成銘柄を分析中..."):
+            df_nk = _fetch_momentum_ranking("nk225")
+        _render_cards(df_nk)
+
+    with tab_ndx:
+        with st.spinner("ナスダック100構成銘柄を分析中..."):
+            df_ndx = _fetch_momentum_ranking("nasdaq")
+        _render_cards(df_ndx)
+
+
+# =====================================================
 # 米国経済イベント × ボラティリティ分析
 # =====================================================
 
@@ -14678,6 +14849,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ 米国経済イベントカレンダー × ボラティリティ
     # ===================================================
     render_economic_events_section()
+
+    # ===================================================
+    # ★ モメンタムランキング（日経225 / ナスダック）
+    # ===================================================
+    render_momentum_ranking()
 
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
