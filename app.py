@@ -303,6 +303,7 @@ GROQ_API_KEY       = get_env_var("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = get_env_var("OPENROUTER_API_KEY", "")
 FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
+FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
 
 # Gemini設定
 if GENAI_AVAILABLE and GEMINI_API_KEY:
@@ -7677,6 +7678,121 @@ def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
     return dt_et.astimezone(JST)
 
 
+# FMP イベント名 → カレンダー表示名 + beat判定の向き（True = actual > estimate が良い）
+_FMP_EVENT_MAP: List[Tuple[str, str, bool]] = [
+    ("Nonfarm Payrolls",          "非農業部門雇用者数(NFP) / 失業率",  True),   # 多いほど良い
+    ("Unemployment Rate",         "非農業部門雇用者数(NFP) / 失業率",  False),  # 低いほど良い
+    ("CPI",                       "CPI（消費者物価指数）",             False),  # 低いほど良い
+    ("Consumer Price Index",      "CPI（消費者物価指数）",             False),
+    ("ISM Manufacturing",         "ISM製造業景気指数",                 True),   # 高いほど良い
+    ("ISM Non-Manufacturing",     "ISM非製造業景気指数",               True),
+    ("ISM Services",              "ISM非製造業景気指数",               True),
+    ("Fed Interest Rate",         "FOMC（連邦公開市場委員会）",        False),  # 利下げ=緩和
+    ("Federal Funds",             "FOMC（連邦公開市場委員会）",        False),
+]
+
+# 実績値の単位フォーマット: FMPイベント名一部 → (単位文字列, 小数桁)
+_FMP_UNIT_MAP: List[Tuple[str, str, int]] = [
+    ("Nonfarm Payrolls",    "K",   0),   # 256K jobs
+    ("Unemployment",        "%",   1),
+    ("CPI",                 "%",   1),
+    ("Consumer Price",      "%",   1),
+    ("ISM",                 "",    1),   # index value
+    ("Fed Interest",        "%",   2),
+    ("Federal Funds",       "%",   2),
+]
+
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
+    """
+    Financial Modeling Prep から米国経済イベントの実績値・予想値・前回値を取得。
+    {date_str: {"name": str, "actual": float, "estimate": float|None,
+                "previous": float|None, "beat": bool|None, "unit": str}}
+    FMP_API_KEY が未設定の場合は空辞書を返す。
+    """
+    if not FMP_API_KEY:
+        return {}
+    try:
+        from_d = (datetime.now() - timedelta(days=560)).strftime("%Y-%m-%d")
+        to_d   = datetime.now().strftime("%Y-%m-%d")
+        r = requests.get(
+            "https://financialmodelingprep.com/api/v3/economic_calendar",
+            params={"from": from_d, "to": to_d, "apikey": FMP_API_KEY},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return {}
+        items = r.json()
+        if not isinstance(items, list):
+            return {}
+
+        results: Dict[str, Dict] = {}
+        for item in items:
+            country = (item.get("country") or "").upper()
+            if country != "US":
+                continue
+            raw_event = item.get("event") or ""
+            date_raw  = (item.get("date") or "")[:10]   # "2025-12-10"
+            if not date_raw:
+                continue
+
+            actual_raw   = item.get("actual")
+            estimate_raw = item.get("estimate")
+            previous_raw = item.get("previous")
+            if actual_raw is None:
+                continue
+
+            # イベント名マッピング
+            matched_name: Optional[str] = None
+            beat_higher: Optional[bool] = None
+            for fmp_kw, jp_name, higher_is_good in _FMP_EVENT_MAP:
+                if fmp_kw.lower() in raw_event.lower():
+                    matched_name  = jp_name
+                    beat_higher   = higher_is_good
+                    break
+            if matched_name is None:
+                continue
+
+            try:
+                actual   = float(actual_raw)
+                estimate = float(estimate_raw) if estimate_raw is not None else None
+                previous = float(previous_raw) if previous_raw is not None else None
+            except (TypeError, ValueError):
+                continue
+
+            # beat判定
+            beat: Optional[bool] = None
+            if estimate is not None and beat_higher is not None:
+                if beat_higher:
+                    beat = actual > estimate
+                else:
+                    beat = actual < estimate
+
+            # 単位
+            unit = ""
+            for kw, u, _dp in _FMP_UNIT_MAP:
+                if kw.lower() in raw_event.lower():
+                    unit = u
+                    break
+
+            # 同日に複数イベントが来る場合は優先度順で最初のもの（NFP優先）
+            if date_raw not in results:
+                results[date_raw] = {
+                    "name":     matched_name,
+                    "actual":   actual,
+                    "estimate": estimate,
+                    "previous": previous,
+                    "beat":     beat,
+                    "unit":     unit,
+                    "raw_event": raw_event,
+                }
+        return results
+    except Exception as e:
+        logger.debug(f"[fmp_eco] {e}")
+        return {}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_gspc_760d() -> Tuple[pd.Series, pd.Series, list]:
     """^GSPC 760日分の終値・日次リターン・日付リストを共有キャッシュで返す。
@@ -7841,6 +7957,9 @@ def render_economic_events_section():
 
         # 過去イベントの株価反応データ（S&P500当日リターン）
         reactions = _fetch_event_market_reactions()
+        # 経済指標実績・予想データ（FMP）
+        eco_actuals = _fetch_eco_actuals_fmp()
+        has_fmp = bool(eco_actuals)
 
         now_jst = datetime.now(JST)
         impact_color = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
@@ -7856,23 +7975,65 @@ def render_economic_events_section():
                 is_past     = ev["is_past"]
                 ev_date_str = ev.get("date_str")
 
-                # 過去イベント: 株価反応を表示
+                # FMP 実績データ
+                fmp = eco_actuals.get(ev_date_str) if ev_date_str else None
+
+                # ── 実績/予想セル ──────────────────────────────────
+                if is_past and fmp and fmp.get("actual") is not None:
+                    actual   = fmp["actual"]
+                    estimate = fmp.get("estimate")
+                    previous = fmp.get("previous")
+                    unit     = fmp.get("unit", "")
+                    beat     = fmp.get("beat")
+
+                    # 単位変換・フォーマット
+                    def _fmt(v, u):
+                        if v is None:
+                            return "—"
+                        if u == "K":
+                            return f"{v:,.0f}K"
+                        elif u == "%":
+                            return f"{v:.2f}%"
+                        else:
+                            return f"{v:.1f}"
+
+                    act_str  = _fmt(actual, unit)
+                    est_str  = _fmt(estimate, unit) if estimate is not None else None
+                    prev_str = _fmt(previous, unit) if previous is not None else None
+
+                    if beat is True:
+                        beat_badge = "<span style='background:#166534;color:#86efac;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700'>👍 予想上回り</span>"
+                    elif beat is False:
+                        beat_badge = "<span style='background:#7f1d1d;color:#fca5a5;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700'>👎 予想下回り</span>"
+                    else:
+                        beat_badge = ""
+
+                    actual_html = f"<span style='font-weight:700;color:#f1f5f9'>{act_str}</span>"
+                    if est_str:
+                        actual_html += f"<span style='color:#94a3b8;font-size:10px'> 予想:{est_str}</span>"
+                    if prev_str:
+                        actual_html += f"<span style='color:#64748b;font-size:10px'> 前回:{prev_str}</span>"
+                    if beat_badge:
+                        actual_html += f"<br>{beat_badge}"
+                    actual_cell = actual_html
+                elif not is_past:
+                    actual_cell = "<span style='color:#64748b;font-size:11px'>未発表</span>"
+                else:
+                    actual_cell = "<span style='color:#475569;font-size:11px'>—</span>"
+
+                # ── 株価反応セル ───────────────────────────────────
                 if is_past:
                     timing = f"<span style='color:#6b7280'>✅ {abs(delta_h/24):.0f}日前</span>"
                     sp_ret = reactions.get(ev_date_str) if ev_date_str else None
                     if sp_ret is not None:
-                        if sp_ret >= 0:
-                            react_html = (
-                                f"<span style='color:#22c55e;font-weight:700;font-size:13px'>"
-                                f"▲ +{sp_ret:.2f}%</span>"
-                                f"<span style='color:#6b7280;font-size:10px'> S&P500</span>"
-                            )
-                        else:
-                            react_html = (
-                                f"<span style='color:#ef4444;font-weight:700;font-size:13px'>"
-                                f"▼ {sp_ret:.2f}%</span>"
-                                f"<span style='color:#6b7280;font-size:10px'> S&P500</span>"
-                            )
+                        react_color = "#22c55e" if sp_ret >= 0 else "#ef4444"
+                        react_arrow = "▲" if sp_ret >= 0 else "▼"
+                        react_sign  = "+" if sp_ret >= 0 else ""
+                        react_html  = (
+                            f"<span style='color:{react_color};font-weight:700;font-size:13px'>"
+                            f"{react_arrow} {react_sign}{sp_ret:.2f}%</span>"
+                            f"<span style='color:#6b7280;font-size:10px'> S&P500</span>"
+                        )
                     else:
                         react_html = "<span style='color:#475569;font-size:11px'>—</span>"
                 elif delta_h < 2:
@@ -7893,9 +8054,7 @@ def render_economic_events_section():
                               f"{ev['note']}</span> " if ev["note"] else "")
                 imp_col = impact_color.get(ev["impact"], "#6b7280")
                 imp_lbl = impact_label.get(ev["impact"], "")
-
-                # 過去行は薄く表示
-                row_style = "opacity:0.7;" if is_past else ""
+                row_style = "opacity:0.75;" if is_past else ""
 
                 rows_html += (
                     f"<tr style='border-bottom:1px solid #1e293b;{row_style}'>"
@@ -7903,10 +8062,17 @@ def render_economic_events_section():
                     f"<td style='padding:7px 8px'>{ev['icon']} <b>{ev['name']}</b> {note_badge}</td>"
                     f"<td style='padding:7px 8px;color:{imp_col};white-space:nowrap'>{imp_lbl}</td>"
                     f"<td style='padding:7px 8px'>{timing}</td>"
+                    f"<td style='padding:7px 8px'>{actual_cell}</td>"
                     f"<td style='padding:7px 8px;white-space:nowrap'>{react_html}</td>"
                     f"</tr>"
                 )
 
+            # ヘッダー行（FMPキーあり/なしで列変更）
+            actual_th = (
+                "<th style='padding:6px 8px;text-align:left'>実績 / 予想</th>"
+                if has_fmp else
+                "<th style='padding:6px 8px;text-align:left'>実績</th>"
+            )
             st.markdown(
                 f"<table style='width:100%;border-collapse:collapse;font-size:13px'>"
                 f"<thead><tr style='color:#64748b;border-bottom:2px solid #334155'>"
@@ -7914,11 +8080,14 @@ def render_economic_events_section():
                 f"<th style='padding:6px 8px;text-align:left'>指標名</th>"
                 f"<th style='padding:6px 8px;text-align:left'>影響度</th>"
                 f"<th style='padding:6px 8px;text-align:left'>タイミング</th>"
+                f"{actual_th}"
                 f"<th style='padding:6px 8px;text-align:left'>株価反応（当日）</th>"
                 f"</tr></thead><tbody>{rows_html}</tbody></table>",
                 unsafe_allow_html=True,
             )
-            st.caption("📌 株価反応はS&P500の発表日当日の終値騰落率。発表後の当日反応を示します。")
+            if not has_fmp:
+                st.caption("💡 `FMP_API_KEY` を secrets.toml に設定すると「実績 vs 予想（予想上回り/下回り）」が表示されます。無料登録: financialmodelingprep.com")
+            st.caption("📌 株価反応はS&P500の発表日当日の終値騰落率。")
         st.caption(
             "⏰ 8:30 AM ET = 夏時間21:30 JST / 冬時間22:30 JST　"
             "| 10:00 AM ET = 夏時間23:00 JST / 冬時間00:00 JST(翌日)　"
@@ -14887,6 +15056,7 @@ def main():
             "Gemini": "✅" if GEMINI_API_KEY else "❌",
             "Groq": "✅" if GROQ_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
+            "FMP (経済指標実績)": "✅" if FMP_API_KEY else "❌ 未設定（無料登録可）",
         }
         for name, status in api_status.items():
             st.write(f"**{name}:** {status}")
