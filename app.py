@@ -7518,16 +7518,23 @@ def _fetch_sp500_event_volatility() -> Dict[str, Any]:
     try:
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=760)
-        sp = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
-        if sp.empty:
+        raw = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
+        if raw.empty:
             return {}
-        if isinstance(sp.columns, pd.MultiIndex):
-            sp = sp["Close"] if isinstance(sp["Close"], pd.Series) else sp.xs("^GSPC", axis=1, level=1)
+        # MultiIndex（yfinance新仕様）と旧仕様の両方に対応してSeriesを取り出す
+        if isinstance(raw.columns, pd.MultiIndex):
+            try:
+                sp = raw[("Close", "^GSPC")]
+            except KeyError:
+                sp = raw["Close"].iloc[:, 0]
         else:
-            sp = sp["Close"]
-        sp = sp.dropna()
+            sp = raw["Close"]
+        # DataFrameが返ってきた場合（まれ）にも対応
+        if isinstance(sp, pd.DataFrame):
+            sp = sp.iloc[:, 0]
+        sp   = sp.dropna().astype(float)
         rets = sp.pct_change().dropna()
-        close_dates = [d.date() for d in sp.index]
+        close_dates = [d.date() if hasattr(d, "date") else d for d in sp.index]
     except Exception:
         return {}
 
@@ -7543,7 +7550,11 @@ def _fetch_sp500_event_volatility() -> Dict[str, Any]:
             idx = close_dates.index(check)
             if idx >= len(rets):
                 break
-            r = float(rets.iloc[idx])
+            val = rets.iloc[idx]
+            # Series が返ってきた場合（MultiIndex残骸）にも対応
+            if isinstance(val, pd.Series):
+                val = val.iloc[0]
+            r = float(val)
             if pd.isna(r):
                 break
             groups.setdefault(name, []).append(r * 100)
@@ -8026,17 +8037,27 @@ def render_market_summary():
             # 直近のイベントマーカーを重ねる
             now_jst = datetime.now(JST)
             eco_events = _get_upcoming_us_eco_events(days_back=15, days_ahead=3)
+            seen_dates = set()
             for ev in eco_events:
                 ev_date_str = ev["jst_dt"].strftime("%Y-%m-%d")
+                if ev_date_str in seen_dates:
+                    continue
+                seen_dates.add(ev_date_str)
                 imp_col = "#ef4444" if ev["impact"] == "high" else "#f59e0b"
-                fig_trend.add_vline(
-                    x=ev_date_str,
-                    line_dash="dot", line_color=imp_col, line_width=1, opacity=0.6,
-                    annotation_text=f"{ev['icon']} {ev['name'].split('（')[0][:8]}",
-                    annotation_position="top",
-                    annotation_font_size=9,
-                    annotation_font_color=imp_col,
-                )
+                short_name = ev["name"].split("（")[0].split("/")[0][:10]
+                try:
+                    fig_trend.add_vline(
+                        x=ev_date_str,
+                        line_dash="dot", line_color=imp_col, line_width=1, opacity=0.6,
+                        annotation_text=f"{ev['icon']} {short_name}",
+                        annotation_position="top left",
+                        annotation=dict(font=dict(size=9, color=imp_col)),
+                    )
+                except Exception:
+                    fig_trend.add_vline(
+                        x=ev_date_str,
+                        line_dash="dot", line_color=imp_col, line_width=1, opacity=0.5,
+                    )
             fig_trend.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)", line_width=1)
             fig_trend.update_layout(
                 title=dict(text="📈 直近15営業日のトレンド（起点=0%に正規化）", font=dict(size=13)),
