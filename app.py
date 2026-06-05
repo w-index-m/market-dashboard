@@ -7335,8 +7335,11 @@ def _fetch_summary_prices() -> Dict[str, Any]:
     try:
         end   = datetime.now(timezone.utc)
         start = end - timedelta(days=10)
-        for sym, key in [("^GSPC","sp"), ("^N225","nk"), ("^VIX","vix"),
-                          ("^TNX","tnx"), ("DX=F","dxy")]:
+        for sym, key in [
+            ("^GSPC","sp"), ("^N225","nk"), ("^VIX","vix"),
+            ("^TNX","tnx"), ("DX=F","dxy"),
+            ("YM=F","dow_f"), ("NQ=F","ndx_f"), ("NKD=F","nk_f"),
+        ]:
             try:
                 df = yf.Ticker(sym).history(start=start, end=end, interval="1d", auto_adjust=False)
                 if df is not None and not df.empty:
@@ -7351,6 +7354,397 @@ def _fetch_summary_prices() -> Dict[str, Any]:
     except Exception:
         pass
     return out
+
+
+# =====================================================
+# 米国経済イベント × ボラティリティ分析
+# =====================================================
+
+# 2025-2026 主要経済指標の発表日（ET日付）と発表時刻（ET 24h）
+_US_ECO_CALENDAR = [
+    # ── 雇用統計 / NFP / 失業率（毎月第1金曜 8:30 AM ET）──
+    ("2025-01-10", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "12月分"),
+    ("2025-02-07", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "1月分"),
+    ("2025-03-07", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "2月分"),
+    ("2025-04-04", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "3月分"),
+    ("2025-05-02", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "4月分"),
+    ("2025-06-06", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "5月分"),
+    ("2025-07-03", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "6月分"),
+    ("2025-08-01", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "7月分"),
+    ("2025-09-05", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "8月分"),
+    ("2025-10-03", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "9月分"),
+    ("2025-11-07", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "10月分"),
+    ("2025-12-05", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "11月分"),
+    ("2026-01-09", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "12月分"),
+    ("2026-02-06", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "1月分"),
+    ("2026-03-06", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "2月分"),
+    ("2026-04-03", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "3月分"),
+    ("2026-05-01", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "4月分"),
+    ("2026-06-05", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "5月分"),
+    ("2026-07-02", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "6月分"),
+    ("2026-08-07", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "7月分"),
+    ("2026-09-04", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "8月分"),
+    ("2026-10-02", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "9月分"),
+    ("2026-11-06", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "10月分"),
+    ("2026-12-04", "08:30", "非農業部門雇用者数(NFP) / 失業率",     "👷", "high",  "11月分"),
+    # ── ISM製造業景気指数（毎月第1営業日 10:00 AM ET）──
+    ("2025-02-03", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "1月分"),
+    ("2025-03-03", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "2月分"),
+    ("2025-04-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "3月分"),
+    ("2025-05-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "4月分"),
+    ("2025-06-02", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "5月分"),
+    ("2025-07-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "6月分"),
+    ("2025-08-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "7月分"),
+    ("2025-09-02", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "8月分"),
+    ("2025-10-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "9月分"),
+    ("2025-11-03", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "10月分"),
+    ("2025-12-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "11月分"),
+    ("2026-01-05", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "12月分"),
+    ("2026-02-03", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "1月分"),
+    ("2026-03-02", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "2月分"),
+    ("2026-04-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "3月分"),
+    ("2026-05-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "4月分"),
+    ("2026-06-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "5月分"),
+    ("2026-07-01", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "6月分"),
+    ("2026-08-03", "10:00", "ISM製造業景気指数",                    "🏗️", "medium", "7月分"),
+    # ── ISM非製造業景気指数（毎月第3〜4営業日 10:00 AM ET）──
+    ("2025-02-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "1月分"),
+    ("2025-03-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "2月分"),
+    ("2025-04-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "3月分"),
+    ("2025-05-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "4月分"),
+    ("2025-06-04", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "5月分"),
+    ("2025-07-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "6月分"),
+    ("2025-08-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "7月分"),
+    ("2025-09-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "8月分"),
+    ("2025-10-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "9月分"),
+    ("2025-11-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "10月分"),
+    ("2025-12-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "11月分"),
+    ("2026-01-07", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "12月分"),
+    ("2026-02-04", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "1月分"),
+    ("2026-03-04", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "2月分"),
+    ("2026-04-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "3月分"),
+    ("2026-05-06", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "4月分"),
+    ("2026-06-03", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "5月分"),
+    ("2026-07-08", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "6月分"),
+    ("2026-08-05", "10:00", "ISM非製造業景気指数(サービス業PMI)",    "🏢", "medium", "7月分"),
+    # ── CPI（毎月10〜15日頃 8:30 AM ET）──
+    ("2025-01-15", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "12月分"),
+    ("2025-02-12", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "1月分"),
+    ("2025-03-12", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "2月分"),
+    ("2025-04-10", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "3月分"),
+    ("2025-05-13", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "4月分"),
+    ("2025-06-11", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "5月分"),
+    ("2025-07-15", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "6月分"),
+    ("2025-08-12", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "7月分"),
+    ("2025-09-10", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "8月分"),
+    ("2025-10-15", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "9月分"),
+    ("2025-11-12", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "10月分"),
+    ("2025-12-10", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "11月分"),
+    ("2026-01-14", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "12月分"),
+    ("2026-02-11", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "1月分"),
+    ("2026-03-11", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "2月分"),
+    ("2026-04-09", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "3月分"),
+    ("2026-05-13", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "4月分"),
+    ("2026-06-10", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "5月分"),
+    ("2026-07-14", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "6月分"),
+    ("2026-08-12", "08:30", "CPI（消費者物価指数）",                 "💹", "high",   "7月分"),
+    # ── FOMC政策金利発表（年8回 2:00 PM ET）──
+    ("2025-01-29", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-03-19", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-05-07", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-06-18", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-07-30", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-09-17", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-11-05", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2025-12-17", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-01-28", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-03-18", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-04-29", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-06-10", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-07-28", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-09-15", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-11-03", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+    ("2026-12-15", "14:00", "FOMC政策金利発表",                      "🏦", "high",   ""),
+]
+
+_ET_TZ = pytz.timezone("America/New_York")
+
+def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
+    """ET日付+時刻文字列 → JST datetime に変換（サマータイム自動対応）"""
+    h, m = map(int, time_et_str.split(":"))
+    y, mo, d = map(int, date_str.split("-"))
+    dt_et = _ET_TZ.localize(datetime(y, mo, d, h, m))
+    return dt_et.astimezone(JST)
+
+
+def _get_upcoming_us_eco_events(days_back: int = 3, days_ahead: int = 30) -> List[Dict]:
+    """直近〜今後のイベントを返す（過去3日分も含む）"""
+    now_jst = datetime.now(JST)
+    cutoff_past  = now_jst - timedelta(days=days_back)
+    cutoff_future = now_jst + timedelta(days=days_ahead)
+
+    result = []
+    for date_str, time_et, name, icon, impact, note in _US_ECO_CALENDAR:
+        try:
+            jst_dt = _eco_event_to_jst(date_str, time_et)
+        except Exception:
+            continue
+        if cutoff_past <= jst_dt <= cutoff_future:
+            delta_h = (jst_dt - now_jst).total_seconds() / 3600
+            result.append({
+                "jst_dt":   jst_dt,
+                "name":     name,
+                "icon":     icon,
+                "impact":   impact,
+                "note":     note,
+                "delta_h":  delta_h,
+                "is_past":  jst_dt < now_jst,
+            })
+    result.sort(key=lambda x: x["jst_dt"])
+    return result
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_sp500_event_volatility() -> Dict[str, Any]:
+    """
+    過去2年分のS&P500データから、主要経済指標発表日の
+    当日・翌日・前後3日ボラティリティを計算して返す
+    """
+    try:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=760)
+        sp = yf.download("^GSPC", start=start_dt, end=end_dt, progress=False, auto_adjust=True)
+        if sp.empty:
+            return {}
+        if isinstance(sp.columns, pd.MultiIndex):
+            sp = sp["Close"] if isinstance(sp["Close"], pd.Series) else sp.xs("^GSPC", axis=1, level=1)
+        else:
+            sp = sp["Close"]
+        sp = sp.dropna()
+        rets = sp.pct_change().dropna()
+        close_dates = [d.date() for d in sp.index]
+    except Exception:
+        return {}
+
+    # イベント種別ごとに集計
+    groups: Dict[str, List[float]] = {}
+    for date_str, time_et, name, icon, impact, note in _US_ECO_CALENDAR:
+        ev_date = dt.date(*map(int, date_str.split("-")))
+        # 当日もしくは翌営業日を探す（最大2営業日の余裕）
+        for offset in range(3):
+            check = ev_date + timedelta(days=offset)
+            if check not in close_dates:
+                continue
+            idx = close_dates.index(check)
+            if idx >= len(rets):
+                break
+            r = float(rets.iloc[idx])
+            if pd.isna(r):
+                break
+            groups.setdefault(name, []).append(r * 100)
+            break
+
+    # 各種別の統計を計算
+    result: Dict[str, Dict] = {}
+    icon_map   = {row[2]: row[3] for row in _US_ECO_CALENDAR}
+    impact_map = {row[2]: row[4] for row in _US_ECO_CALENDAR}
+    for name, vals in groups.items():
+        if len(vals) < 2:
+            continue
+        arr = np.array(vals)
+        result[name] = {
+            "icon":         icon_map.get(name, "📊"),
+            "impact":       impact_map.get(name, "medium"),
+            "n":            len(arr),
+            "avg_abs":      float(np.mean(np.abs(arr))),
+            "avg_ret":      float(np.mean(arr)),
+            "up_rate":      float(np.mean(arr > 0) * 100),
+            "max_up":       float(np.max(arr)),
+            "max_dn":       float(np.min(arr)),
+            "std":          float(np.std(arr)),
+            "returns":      arr.tolist(),
+        }
+    return result
+
+
+def render_economic_events_section():
+    """📅 米国経済イベントカレンダー × ボラティリティ分析セクション"""
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
+        '<div style="font-size:20px;font-weight:800;color:#f0f4f8;">'
+        '📅 米国経済イベントカレンダー</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">'
+        '主要指標の発表日時（日本時間）と、過去の株価ボラティリティ（S&amp;P500）を表示します。'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    tab_cal, tab_vol = st.tabs(["📆 発表スケジュール（日本時間）", "📊 過去の株価変動実績"])
+
+    # ── タブ①: カレンダー ──────────────────────────────────
+    with tab_cal:
+        days_ahead = st.slider("今後何日分を表示", 7, 60, 30, key="eco_days_ahead")
+        events = _get_upcoming_us_eco_events(days_back=3, days_ahead=days_ahead)
+
+        now_jst = datetime.now(JST)
+        impact_color = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
+        impact_label = {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}
+
+        if not events:
+            st.info(f"今後{days_ahead}日間に主要イベントはありません。")
+        else:
+            rows_html = ""
+            for ev in events:
+                jst_str   = ev["jst_dt"].strftime("%m/%d(%a) %H:%M JST")
+                delta_h   = ev["delta_h"]
+                is_past   = ev["is_past"]
+
+                if is_past:
+                    timing = f"<span style='color:#6b7280'>✅ {abs(delta_h):.0f}時間前</span>"
+                elif delta_h < 2:
+                    timing = f"<span style='color:#ef4444;font-weight:bold'>🔴 まもなく ({delta_h*60:.0f}分後)</span>"
+                elif delta_h < 24:
+                    timing = f"<span style='color:#f59e0b;font-weight:bold'>🟡 本日 ({delta_h:.1f}時間後)</span>"
+                elif delta_h < 48:
+                    timing = f"<span style='color:#fbbf24'>🟠 明日 ({delta_h:.0f}時間後)</span>"
+                else:
+                    timing = f"<span style='color:#94a3b8'>⚪ {delta_h/24:.0f}日後</span>"
+
+                note_badge = (f"<span style='background:#1e3a5f;color:#93c5fd;"
+                              f"padding:1px 6px;border-radius:8px;font-size:11px'>"
+                              f"{ev['note']}</span> " if ev["note"] else "")
+                imp_col = impact_color.get(ev["impact"], "#6b7280")
+                imp_lbl = impact_label.get(ev["impact"], "")
+
+                rows_html += (
+                    f"<tr style='border-bottom:1px solid #1e293b'>"
+                    f"<td style='padding:7px 8px;white-space:nowrap'>{jst_str}</td>"
+                    f"<td style='padding:7px 8px'>{ev['icon']} <b>{ev['name']}</b> {note_badge}</td>"
+                    f"<td style='padding:7px 8px;color:{imp_col};white-space:nowrap'>{imp_lbl}</td>"
+                    f"<td style='padding:7px 8px'>{timing}</td>"
+                    f"</tr>"
+                )
+
+            st.markdown(
+                f"<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+                f"<thead><tr style='color:#64748b;border-bottom:2px solid #334155'>"
+                f"<th style='padding:6px 8px;text-align:left'>発表日時（JST）</th>"
+                f"<th style='padding:6px 8px;text-align:left'>指標名</th>"
+                f"<th style='padding:6px 8px;text-align:left'>影響度</th>"
+                f"<th style='padding:6px 8px;text-align:left'>タイミング</th>"
+                f"</tr></thead><tbody>{rows_html}</tbody></table>",
+                unsafe_allow_html=True,
+            )
+        st.caption(
+            "⏰ 8:30 AM ET = 夏時間21:30 JST / 冬時間22:30 JST　"
+            "| 10:00 AM ET = 夏時間23:00 JST / 冬時間00:00 JST(翌日)　"
+            "| FOMC 2:00 PM ET = 夏時間3:00 JST(翌日) / 冬時間4:00 JST(翌日)　"
+            "※ 日程は近似値。investing.com等でご確認ください。"
+        )
+
+    # ── タブ②: ボラティリティ実績 ──────────────────────────
+    with tab_vol:
+        with st.spinner("過去のS&P500ボラティリティを分析中..."):
+            vol = _fetch_sp500_event_volatility()
+
+        if not vol:
+            st.warning("データを取得できませんでした。しばらく待ってから再読み込みしてください。")
+            return
+
+        st.markdown("#### 📈 イベント別 S&P500 当日平均変動幅（過去2年）")
+        st.caption(
+            "各経済指標の発表日当日のS&P500リターン（実績値）を集計しています。"
+            "予想との乖離が大きいほど株価が動きやすい傾向があります。"
+        )
+
+        # ソート & バーチャート
+        sorted_v = sorted(vol.items(), key=lambda x: -x[1]["avg_abs"])
+
+        if PLOTLY_AVAILABLE:
+            names  = [f"{v['icon']} {k}" for k, v in sorted_v]
+            avgs   = [v["avg_abs"] for _, v in sorted_v]
+            colors = ["#ef4444" if v["impact"] == "high" else "#f59e0b" for _, v in sorted_v]
+
+            fig_bar = go.Figure(go.Bar(
+                x=avgs, y=names, orientation="h",
+                marker_color=colors,
+                text=[f"{a:.2f}%" for a in avgs],
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>平均変動幅: %{x:.2f}%<extra></extra>",
+            ))
+            fig_bar.update_layout(
+                xaxis_title="当日平均変動幅（絶対値, %）",
+                height=max(250, len(sorted_v) * 42),
+                margin=dict(l=10, r=70, t=10, b=30),
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # 統計テーブル
+        st.markdown("#### 📋 詳細統計")
+        rows = []
+        for name, v in sorted_v:
+            rows.append({
+                "指標":       f"{v['icon']} {name}",
+                "平均変動幅": f"{v['avg_abs']:.2f}%",
+                "平均ﾘﾀｰﾝ":  f"{v['avg_ret']:+.2f}%",
+                "上昇確率":   f"{v['up_rate']:.0f}%",
+                "最大上昇":   f"{v['max_up']:+.2f}%",
+                "最大下落":   f"{v['max_dn']:+.2f}%",
+                "σ(標準偏差)": f"{v['std']:.2f}%",
+                "サンプル":   f"{v['n']}回",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # 個別イベント詳細
+        st.markdown("#### 🔍 個別イベントのリターン分布")
+        sel = st.selectbox(
+            "イベントを選択",
+            options=list(vol.keys()),
+            format_func=lambda k: f"{vol[k]['icon']} {k}",
+            key="eco_vol_sel",
+        )
+        if sel and sel in vol:
+            ev_data = vol[sel]
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("平均変動幅", f"{ev_data['avg_abs']:.2f}%",
+                      help="当日の絶対リターン平均（予想外れ時はこれ以上動く可能性あり）")
+            c2.metric("上昇確率",   f"{ev_data['up_rate']:.0f}%",
+                      help="発表日にS&P500が上昇した割合（過去2年）")
+            c3.metric("最大上昇",   f"{ev_data['max_up']:+.2f}%")
+            c4.metric("最大下落",   f"{ev_data['max_dn']:+.2f}%")
+
+            if PLOTLY_AVAILABLE and ev_data["returns"]:
+                rets_arr = ev_data["returns"]
+                fig_hist = go.Figure()
+                fig_hist.add_trace(go.Histogram(
+                    x=rets_arr, nbinsx=12,
+                    marker_color="#3b82f6", opacity=0.8,
+                    name="当日リターン",
+                    hovertemplate="リターン: %{x:.2f}%<br>回数: %{y}回<extra></extra>",
+                ))
+                fig_hist.add_vline(x=0, line_dash="dash", line_color="white", opacity=0.5)
+                fig_hist.update_layout(
+                    title=f"{sel} — 当日リターン分布（{ev_data['n']}回, 過去2年）",
+                    xaxis_title="S&P500 当日リターン（%）",
+                    yaxis_title="回数",
+                    height=300,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    xaxis=dict(gridcolor="rgba(255,255,255,0.1)", zeroline=True,
+                               zerolinecolor="rgba(255,255,255,0.4)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+                    margin=dict(t=40, b=30),
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
+
+        st.caption(
+            "※ データはYahoo Finance (^GSPC) から取得。"
+            "発表日の特定はFOMCを除き近似値のため、実際と1〜2日ずれることがあります。"
+        )
 
 
 def render_market_summary():
@@ -7498,7 +7892,8 @@ def render_market_summary():
     col_idx, col_vix, col_prob = st.columns(3)
 
     with col_idx:
-        st.markdown("**📈 主要指数（前日比）**")
+        st.markdown("**📈 主要指数・先物CFD（前日比）**")
+        # 現物指数
         for key, flag, name in [("sp","🇺🇸","S&P500"), ("nk","🇯🇵","日経225")]:
             val  = prices.get(key)
             chg1 = prices.get(f"{key}_chg1", 0)
@@ -7513,6 +7908,29 @@ def render_market_summary():
                     f'{val:,.0f}</span> '
                     f'<span style="color:{cc};font-size:13px">'
                     f'{arrow}{abs(chg1):.2f}%{w5}</span>',
+                    unsafe_allow_html=True,
+                )
+        # 先物・CFD（時間外価格）
+        st.markdown(
+            '<div style="font-size:11px;color:#64748b;margin-top:6px;margin-bottom:2px">'
+            '📊 先物・CFD（時間外価格）</div>',
+            unsafe_allow_html=True,
+        )
+        for key, flag, name, fmt in [
+            ("dow_f",  "🇺🇸", "ダウ先物",      ",0f"),
+            ("ndx_f",  "🇺🇸", "ナスダック100先物", ",0f"),
+            ("nk_f",   "🇯🇵", "日経225先物(ドル建)", ".2f"),
+        ]:
+            val  = prices.get(key)
+            chg1 = prices.get(f"{key}_chg1", 0)
+            if val:
+                cc    = "#16a34a" if chg1 >= 0 else "#dc2626"
+                arrow = "▲" if chg1 >= 0 else "▼"
+                val_str = f"{val:{fmt}}"
+                st.markdown(
+                    f'<span style="font-size:12px;color:#94a3b8">{flag} {name}</span><br>'
+                    f'<span style="font-size:15px;font-weight:700">{val_str}</span> '
+                    f'<span style="color:{cc};font-size:12px">{arrow}{abs(chg1):.2f}%</span>',
                     unsafe_allow_html=True,
                 )
 
@@ -14172,6 +14590,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）
     # ===================================================
     render_market_summary()
+
+    # ===================================================
+    # ★ 米国経済イベントカレンダー × ボラティリティ
+    # ===================================================
+    render_economic_events_section()
 
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
