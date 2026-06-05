@@ -7703,29 +7703,52 @@ _FMP_UNIT_MAP: List[Tuple[str, str, int]] = [
 ]
 
 
-@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
     """
     Financial Modeling Prep から米国経済イベントの実績値・予想値・前回値を取得。
     {date_str: {"name": str, "actual": float, "estimate": float|None,
-                "previous": float|None, "beat": bool|None, "unit": str}}
+                "previous": float|None, "beat": bool|None, "unit": str,
+                "_debug_count": int, "_debug_sample": list}}
     FMP_API_KEY が未設定の場合は空辞書を返す。
     """
     if not FMP_API_KEY:
         return {}
     try:
-        from_d = (datetime.now() - timedelta(days=560)).strftime("%Y-%m-%d")
+        from_d = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")
         to_d   = datetime.now().strftime("%Y-%m-%d")
-        r = requests.get(
+
+        items = None
+        # v4 → v3 の順で試す
+        for endpoint in [
+            "https://financialmodelingprep.com/api/v4/economic_calendar",
             "https://financialmodelingprep.com/api/v3/economic_calendar",
-            params={"from": from_d, "to": to_d, "apikey": FMP_API_KEY},
-            timeout=12,
-        )
-        if r.status_code != 200:
-            return {}
-        items = r.json()
-        if not isinstance(items, list):
-            return {}
+        ]:
+            try:
+                r = requests.get(
+                    endpoint,
+                    params={"from": from_d, "to": to_d, "apikey": FMP_API_KEY},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        items = data
+                        logger.info(f"[fmp] {endpoint} → {len(items)}件取得")
+                        break
+                    elif isinstance(data, dict):
+                        logger.warning(f"[fmp] {endpoint} error: {data}")
+            except Exception as e:
+                logger.debug(f"[fmp] {endpoint} 失敗: {e}")
+
+        if not items:
+            return {"_debug_count": 0, "_debug_sample": [], "_debug_error": "APIからデータが取得できませんでした"}
+
+        # デバッグ用: 最初の5件のevent/country/dateを記録
+        _sample = [
+            {"event": x.get("event"), "country": x.get("country"), "date": x.get("date")}
+            for x in items[:5]
+        ]
 
         results: Dict[str, Dict] = {}
         for item in items:
@@ -7787,10 +7810,12 @@ def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
                     "unit":     unit,
                     "raw_event": raw_event,
                 }
+        results["_debug_count"]  = len(items)
+        results["_debug_sample"] = _sample
         return results
     except Exception as e:
-        logger.debug(f"[fmp_eco] {e}")
-        return {}
+        logger.warning(f"[fmp_eco] {e}")
+        return {"_debug_error": str(e)[:200]}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -8088,6 +8113,24 @@ def render_economic_events_section():
             if not has_fmp:
                 st.caption("💡 `FMP_API_KEY` を secrets.toml に設定すると「実績 vs 予想（予想上回り/下回り）」が表示されます。無料登録: financialmodelingprep.com")
             st.caption("📌 株価反応はS&P500の発表日当日の終値騰落率。")
+
+        # FMP 診断パネル（FMPキー設定済みの場合のみ表示）
+        if FMP_API_KEY:
+            _dbg_count  = eco_actuals.get("_debug_count", "キャッシュ済み")
+            _dbg_sample = eco_actuals.get("_debug_sample", [])
+            _dbg_err    = eco_actuals.get("_debug_error")
+            _matched    = sum(1 for k, v in eco_actuals.items()
+                              if not k.startswith("_") and isinstance(v, dict))
+            with st.expander("🔧 FMP診断（デバッグ）", expanded=False):
+                if _dbg_err:
+                    st.error(f"FMP APIエラー: {_dbg_err}")
+                else:
+                    st.write(f"**FMP取得件数:** {_dbg_count}件　**カレンダー一致:** {_matched}件")
+                    if _dbg_sample:
+                        st.write("**FMPサンプル（最初の5件）:**")
+                        st.json(_dbg_sample)
+                    else:
+                        st.warning("FMPからデータが取得できていません。キャッシュクリアを試してください。")
         st.caption(
             "⏰ 8:30 AM ET = 夏時間21:30 JST / 冬時間22:30 JST　"
             "| 10:00 AM ET = 夏時間23:00 JST / 冬時間00:00 JST(翌日)　"
