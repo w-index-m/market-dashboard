@@ -873,25 +873,26 @@ DASHBOARD_LINKS_HTML = """
 DASHBOARD_LINKS_TOP_HTML = """
 <style>
 .nav-btn {
-    display:inline-flex;align-items:center;gap:5px;
-    padding:5px 12px;border-radius:6px;text-decoration:none;
+    display:inline-flex !important;align-items:center;gap:5px;
+    padding:5px 12px;border-radius:6px;text-decoration:none !important;
     font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;
-    border:1px solid rgba(255,255,255,0.15);
-    background:rgba(255,255,255,0.08);color:#cbd5e1;
+    border:1px solid #444;
+    background:#2a2a2a !important;color:#ffffff !important;
     transition:background 0.15s;
 }
-.nav-btn:hover { background:rgba(255,255,255,0.18);color:#f1f5f9; }
+.nav-btn:hover { background:#3d3d3d !important;color:#ffffff !important; }
+.nav-btn:visited { color:#ffffff !important; }
 .ext-btn {
     display:inline-flex;align-items:center;gap:6px;
-    padding:6px 14px;border-radius:7px;text-decoration:none;
+    padding:6px 14px;border-radius:7px;text-decoration:none !important;
     font-size:12px;font-weight:700;white-space:nowrap;
 }
 </style>
 <!-- ページ内ナビ -->
-<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;
+<div style="background:#111111;border:1px solid #333;border-radius:10px;
      padding:10px 16px;margin-bottom:8px;">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <span style="font-size:11px;color:#475569;font-weight:700;white-space:nowrap;">📍 このページ内</span>
+    <span style="font-size:11px;color:#888;font-weight:700;white-space:nowrap;">📍 このページ内</span>
     <a class="nav-btn" href="#market-snapshot">📊 マーケット</a>
     <a class="nav-btn" href="#eco-calendar">📅 経済イベント</a>
     <a class="nav-btn" href="#bear-risk">🐻 弱気判定</a>
@@ -903,13 +904,13 @@ DASHBOARD_LINKS_TOP_HTML = """
     <span style="flex:1"></span>
     <a href="https://usstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer"
        class="ext-btn"
-       style="background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;
+       style="background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff !important;
               box-shadow:0 2px 6px rgba(21,101,192,0.4);">
       🇺🇸&nbsp;USStockMetrics
     </a>
     <a href="https://jstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer"
        class="ext-btn"
-       style="background:linear-gradient(135deg,#c62828,#e53935);color:#fff;
+       style="background:linear-gradient(135deg,#c62828,#e53935);color:#fff !important;
               box-shadow:0 2px 6px rgba(198,40,40,0.4);">
       🇯🇵&nbsp;JStockMetrics
     </a>
@@ -8626,6 +8627,40 @@ def render_market_summary():
         f'</div></div></div>',
         unsafe_allow_html=True,
     )
+
+    # ── AIコメント（なぜこの判断か） ──────────────────────
+    if sent.get("ok") and sent.get("components"):
+        ai_comment_key = "sentiment_ai_comment"
+        _, col_ai_btn = st.columns([3, 1])
+        with col_ai_btn:
+            if st.button("🤖 AIに理由を聞く", key="btn_sentiment_ai", use_container_width=True):
+                comps_for_prompt = sent["components"]
+                lines_data = [
+                    f"  - {n}: {c['score']:.0f}/100 ({c['label']})"
+                    for n, c in sorted(comps_for_prompt.items(), key=lambda x: x[1]["score"])
+                ]
+                comp_text = "\n".join(lines_data)
+                prompt = (
+                    "あなたは市場アナリストです。以下の市場センチメント指標データをもとに、"
+                    f"なぜ総合スコアが{composite:.0f}/100（{ol}）になったのか、"
+                    f"米国{us_composite:.0f}・日本{jp_composite:.0f}の地域差も含め、"
+                    "投資家向けに200字以内で簡潔に日本語で説明してください。\n\n"
+                    f"指標スコア一覧（低い順）:\n{comp_text}"
+                )
+                with st.spinner("AI分析中..."):
+                    comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=400, temperature=0.4)
+                st.session_state[ai_comment_key] = (comment, used_model)
+
+        if ai_comment_key in st.session_state:
+            ai_txt, ai_model = st.session_state[ai_comment_key]
+            st.markdown(
+                f'<div style="background:#f0f9ff;border-left:4px solid #3b82f6;'
+                f'padding:12px 16px;border-radius:6px;margin-bottom:12px;">'
+                f'<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">🤖 AI解説 ({ai_model})</div>'
+                f'<div style="font-size:14px;color:#1e293b;line-height:1.6;">{ai_txt}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     # ── スコアの内訳と判断理由（透明性セクション） ──────────
     if sent.get("ok") and sent.get("components"):
