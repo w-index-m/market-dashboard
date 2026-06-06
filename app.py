@@ -7775,8 +7775,11 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"CAPE fetch: {e}")
 
-    # ② Conference Board LEI — FRED USSLIND
-    lei_obs = _fred("USSLIND", limit=24)
+    # ② OECD Composite Leading Indicator (CLI) — FRED USALOLITONOSTSAM
+    # ※ Conference Board LEI (USSLIND) は2023年にFREDから廃止済みのため OECD CLIで代替
+    lei_obs = _fred("USALOLITONOSTSAM", limit=24)
+    if not lei_obs:
+        lei_obs = _fred("USSLIND", limit=24)  # 旧シリーズのフォールバック
     if lei_obs:
         latest_v = lei_obs[0][1]
         prev_v = lei_obs[1][1] if len(lei_obs) > 1 else None
@@ -7798,12 +7801,14 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     # ③ PCE — FRED PCEPI / PCEPILFE
     for sid, key in [("PCEPI", "pce"), ("PCEPILFE", "core_pce")]:
         obs = _fred(sid, limit=14)
-        if len(obs) >= 13:
+        if len(obs) >= 2:
             latest = obs[0][1]
-            yr_ago = obs[12][1]
-            yoy = (latest - yr_ago) / yr_ago * 100
-            prev = obs[1][1] if len(obs) > 1 else None
+            prev = obs[1][1]
             mom = ((latest - prev) / abs(prev) * 100) if prev else None
+            yoy = None
+            if len(obs) >= 13:
+                yr_ago = obs[12][1]
+                yoy = (latest - yr_ago) / yr_ago * 100
             result[key] = {
                 "value": latest,
                 "date": obs[0][0],
@@ -7917,8 +7922,10 @@ def render_macro_indicators():
             st.markdown(
                 '<div style="background:#1e293b;border:1px solid #334155;'
                 'border-radius:10px;padding:14px;text-align:center;">'
-                '<div style="font-size:11px;color:#94a3b8">Conference Board LEI</div>'
-                '<div style="font-size:14px;color:#64748b;margin-top:8px">FRED_API_KEY 要設定</div>'
+                '<div style="font-size:11px;color:#94a3b8">OECD 景気先行指数 (CLI)</div>'
+                '<div style="font-size:14px;color:#64748b;margin-top:8px">'
+                + ("取得中..." if FRED_API_KEY else "FRED_API_KEY 要設定") +
+                '</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -7926,34 +7933,31 @@ def render_macro_indicators():
     # ③ PCE カード
     with col_pce:
         if cpce:
-            yoy = cpce["yoy"]
-            target = 2.0
-            if yoy >= 3.5:
+            yoy  = cpce.get("yoy")
+            mom  = cpce.get("mom")
+            display_val = yoy if yoy is not None else mom
+            if display_val is None:
+                p_color, p_label, p_icon = "#94a3b8", "データ不足", "⬜"
+            elif display_val >= 3.5:
                 p_color, p_label, p_icon = "#ef4444", "Fed目標大幅超過", "🔴"
-            elif yoy >= 2.5:
+            elif display_val >= 2.5:
                 p_color, p_label, p_icon = "#f59e0b", "目標超過・引締め継続", "🟡"
-            elif yoy >= 1.5:
+            elif display_val >= 1.5:
                 p_color, p_label, p_icon = "#22c55e", "目標近辺・緩和余地", "🟢"
             else:
                 p_color, p_label, p_icon = "#14b8a6", "目標以下・緩和的", "🔵"
+            val_label = "前年比" if yoy is not None else "前月比"
+            val_str = f"{display_val:.1f}%" if display_val is not None else "—"
+            pce_hl = pce.get("yoy") if pce else None
+            sub_str = (f"Fed目標 2.0% | ヘッドライン {pce_hl:.1f}% | " if pce_hl else "Fed目標 2.0% | ")
             st.markdown(
                 f'<div style="background:#1e293b;border:1px solid {p_color};'
                 f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（前年比）</div>'
-                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{yoy:.1f}%</div>'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（{val_label}）</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{val_str}</div>'
                 f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
                 f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
-                f'Fed目標 2.0% | ヘッドライン {pce["yoy"]:.1f}% | {cpce["date"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            ) if pce else st.markdown(
-                f'<div style="background:#1e293b;border:1px solid {p_color};'
-                f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（前年比）</div>'
-                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{yoy:.1f}%</div>'
-                f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
-                f'Fed目標 2.0% | {cpce["date"]}</div>'
+                f'{sub_str}{cpce["date"]}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -7962,7 +7966,9 @@ def render_macro_indicators():
                 '<div style="background:#1e293b;border:1px solid #334155;'
                 'border-radius:10px;padding:14px;text-align:center;">'
                 '<div style="font-size:11px;color:#94a3b8">Core PCE インフレ</div>'
-                '<div style="font-size:14px;color:#64748b;margin-top:8px">FRED_API_KEY 要設定</div>'
+                '<div style="font-size:14px;color:#64748b;margin-top:8px">'
+                + ("取得中..." if FRED_API_KEY else "FRED_API_KEY 要設定") +
+                '</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -8728,9 +8734,10 @@ def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
                     unit = u
                     break
 
-            # 同日に複数イベントが来る場合は優先度順で最初のもの（NFP優先）
-            if date_raw not in results:
-                results[date_raw] = {
+            # 日付 + イベント名をキーにして同日複数イベントを区別
+            key = f"{date_raw}|{matched_name}"
+            if key not in results:
+                results[key] = {
                     "name":     matched_name,
                     "actual":   actual,
                     "estimate": estimate,
@@ -8739,6 +8746,9 @@ def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
                     "unit":     unit,
                     "raw_event": raw_event,
                 }
+            # 日付のみキーにも記録（後方互換・フォールバック用）
+            if date_raw not in results:
+                results[date_raw] = results[key]
         results["_debug_count"]  = len(items)
         results["_debug_sample"] = _sample
         return results
@@ -8943,8 +8953,12 @@ def render_economic_events_section():
                 is_past     = ev["is_past"]
                 ev_date_str = ev.get("date_str")
 
-                # FMP 実績データ
-                fmp = eco_actuals.get(ev_date_str) if ev_date_str else None
+                # FMP 実績データ（日付+名前で先に探し、なければ日付のみで検索）
+                fmp = None
+                if ev_date_str:
+                    fmp = eco_actuals.get(f"{ev_date_str}|{ev['name']}")
+                    if fmp is None:
+                        fmp = eco_actuals.get(ev_date_str)
 
                 # ── 実績/予想セル ──────────────────────────────────
                 if is_past and fmp and fmp.get("actual") is not None:
