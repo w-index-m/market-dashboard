@@ -8022,6 +8022,103 @@ _FMP_UNIT_MAP: List[Tuple[str, str, int]] = [
 ]
 
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_eco_actuals_bls() -> Dict[str, Dict]:
+    """
+    BLS APIから主要米国経済指標の実績値を取得（APIキー不要）。
+    CPI(YoY)・失業率・NFP(MoM変化)を対応するカレンダー日付にマッピング。
+    """
+    try:
+        now = datetime.now()
+        resp = requests.post(
+            "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+            json={
+                "seriesid": ["CUSR0000SA0", "LNS14000000", "CES0000000001"],
+                "startyear": str(now.year - 2),
+                "endyear":   str(now.year + 1),
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return {}
+        payload = resp.json()
+        if payload.get("status") != "REQUEST_SUCCEEDED":
+            return {}
+
+        # (year, month) → value
+        series_ym: Dict[str, Dict] = {}
+        for s in payload.get("Results", {}).get("series", []):
+            sid  = s["seriesID"]
+            vals: Dict[tuple, float] = {}
+            for item in s.get("data", []):
+                p = item.get("period", "")
+                if not p.startswith("M"):
+                    continue
+                m = int(p[1:])
+                y = int(item["year"])
+                try:
+                    vals[(y, m)] = float(item["value"])
+                except (ValueError, TypeError):
+                    pass
+            series_ym[sid] = vals
+
+        cpi = series_ym.get("CUSR0000SA0", {})
+        une = series_ym.get("LNS14000000", {})
+        nfp = series_ym.get("CES0000000001", {})
+
+        results: Dict[str, Dict] = {}
+        for date_str, _time_et, name, _icon, _impact, _note in _US_ECO_CALENDAR:
+            try:
+                ev = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                continue
+
+            # データ対象月 = リリース月の1ヶ月前
+            dm = ev.month - 1 if ev.month > 1 else 12
+            dy = ev.year  if ev.month > 1 else ev.year - 1
+            pm = dm - 1   if dm > 1 else 12
+            py = dy       if dm > 1 else dy - 1
+
+            if date_str in results:
+                continue
+
+            if "CPI" in name or "消費者物価" in name:
+                cur = cpi.get((dy, dm))
+                prv = cpi.get((dy - 1, dm))   # 1年前同月 → YoY
+                p_cur = cpi.get((py, pm))
+                p_prv = cpi.get((py - 1, pm))
+                if cur and prv:
+                    actual   = round((cur / prv - 1) * 100, 2)
+                    previous = round((p_cur / p_prv - 1) * 100, 2) if p_cur and p_prv else None
+                    results[date_str] = {
+                        "name": name, "actual": actual, "estimate": None,
+                        "previous": previous, "beat": None, "unit": "%",
+                    }
+
+            elif "非農業部門" in name or "NFP" in name:
+                cur_nfp = nfp.get((dy, dm))
+                prv_nfp = nfp.get((py, pm))
+                cur_une = une.get((dy, dm))
+                prv_une = une.get((py, pm))
+                if cur_nfp and prv_nfp:
+                    nfp_chg  = round(cur_nfp - prv_nfp, 0)
+                    prev_chg = None
+                    pp_nfp = nfp.get((py - 1 if pm == 12 else py, pm - 1 if pm > 1 else 12))
+                    if pp_nfp:
+                        prev_chg = round(prv_nfp - pp_nfp, 0)
+                    results[date_str] = {
+                        "name": name, "actual": nfp_chg, "estimate": None,
+                        "previous": prev_chg, "beat": None, "unit": "K",
+                        "unemployment": cur_une, "prev_unemployment": prv_une,
+                    }
+
+        return results
+    except Exception as e:
+        logger.warning(f"[bls] {e}")
+        return {}
+
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
     """
@@ -8302,8 +8399,17 @@ def render_economic_events_section():
 
         # 過去イベントの株価反応データ（S&P500当日リターン）
         reactions = _fetch_event_market_reactions()
-        # 経済指標実績・予想データ（FMP）
+        # 経済指標実績・予想データ（FMP優先 → BLS fallback）
         eco_actuals = _fetch_eco_actuals_fmp()
+        _fmp_has_data = any(
+            isinstance(v, dict) for k, v in eco_actuals.items()
+            if not k.startswith("_")
+        )
+        if not _fmp_has_data:
+            _bls = _fetch_eco_actuals_bls()
+            for _k, _v in _bls.items():
+                if _k not in eco_actuals:
+                    eco_actuals[_k] = _v
         has_fmp = bool(eco_actuals)
 
         now_jst = datetime.now(JST)
