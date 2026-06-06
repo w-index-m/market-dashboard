@@ -7915,22 +7915,31 @@ def render_macro_indicators():
             v = cape["value"]
             avg = cape["avg_lt"]
             pct_above = (v - avg) / avg * 100
-            if v >= 35:
+            if v >= 40:
                 c_color, c_label, c_icon = "#ef4444", "割高警戒", "🔴"
+                c_comment = f"{v:.1f}はドットコムバブル（44）に次ぐ歴史的な割高水準。長期リターン低下リスク大。"
+            elif v >= 35:
+                c_color, c_label, c_icon = "#ef4444", "割高警戒", "🔴"
+                c_comment = f"{v:.1f}は2007年リーマン前（27）や2018年（33）を大きく上回る割高水準。"
             elif v >= 25:
                 c_color, c_label, c_icon = "#f59e0b", "やや割高", "🟡"
+                c_comment = f"{v:.1f}は長期平均17を大きく上回る。強気相場継続中だが長期リターンは低下傾向。"
             elif v >= 15:
                 c_color, c_label, c_icon = "#22c55e", "適正水準", "🟢"
+                c_comment = f"{v:.1f}は長期平均（17）近辺の適正ゾーン。過去データでは良好なリターンが期待できる水準。"
             else:
                 c_color, c_label, c_icon = "#14b8a6", "割安", "🔵"
+                c_comment = f"{v:.1f}は歴史的な割安水準。2009年底（13）、1982年底（7）に近い水準。"
             st.markdown(
                 f'<div style="background:#1e293b;border:1px solid {c_color};'
                 f'border-radius:10px;padding:14px;text-align:center;">'
                 f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Shiller CAPE</div>'
                 f'<div style="font-size:32px;font-weight:900;color:{c_color};margin:4px 0">{v:.1f}</div>'
                 f'<div style="font-size:11px;color:#cbd5e1">{c_icon} {c_label}</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
+                f'<div style="font-size:10px;color:#64748b;margin-top:6px">'
                 f'長期平均{avg:.0f}比 +{pct_above:.0f}%超 | {cape["date"]}</div>'
+                f'<div style="font-size:10px;color:#94a3b8;margin-top:6px;text-align:left;'
+                f'border-top:1px solid #334155;padding-top:6px">{c_comment}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
