@@ -304,6 +304,7 @@ OPENROUTER_API_KEY = get_env_var("OPENROUTER_API_KEY", "")
 FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
 FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
+FRED_API_KEY       = get_env_var("FRED_API_KEY", "")
 
 # Gemini設定
 if GENAI_AVAILABLE and GEMINI_API_KEY:
@@ -7713,6 +7714,322 @@ def compute_bear_market_risk() -> Dict[str, Any]:
         return {"ok": False, "reason": str(e)[:200]}
 
 
+_FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def fetch_macro_indicators() -> Dict[str, Any]:
+    """CAPE(Shiller P/E) / Conference Board LEI / PCE を取得"""
+    result: Dict[str, Any] = {}
+
+    def _fred(series_id: str, limit: int = 14) -> list:
+        if not FRED_API_KEY:
+            return []
+        try:
+            r = requests.get(_FRED_BASE, params={
+                "series_id": series_id,
+                "api_key": FRED_API_KEY,
+                "file_type": "json",
+                "limit": limit,
+                "sort_order": "desc",
+            }, timeout=12)
+            if r.status_code == 200:
+                obs = r.json().get("observations", [])
+                return [(o["date"], float(o["value"]))
+                        for o in obs if o.get("value", ".") != "."]
+        except Exception as e:
+            logger.warning(f"FRED {series_id}: {e}")
+        return []
+
+    # ① CAPE (Shiller P/E) — multpl.com（APIキー不要）
+    try:
+        r = requests.get(
+            "https://www.multpl.com/shiller-pe/table/by-month",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=12,
+        )
+        if r.status_code == 200:
+            tables = pd.read_html(r.text)
+            if tables:
+                df = tables[0]
+                df.columns = ["date", "value"]
+                df["value"] = pd.to_numeric(
+                    df["value"].astype(str)
+                    .str.replace(",", "", regex=False)
+                    .str.strip(),
+                    errors="coerce",
+                )
+                df = df.dropna(subset=["value"]).reset_index(drop=True)
+                if not df.empty:
+                    current = float(df.iloc[0]["value"])
+                    hist = [
+                        (str(df.iloc[i]["date"]), float(df.iloc[i]["value"]))
+                        for i in range(min(36, len(df)))
+                    ]
+                    result["cape"] = {
+                        "value": current,
+                        "date": str(df.iloc[0]["date"]),
+                        "history": list(reversed(hist)),
+                        "avg_lt": 17.0,
+                    }
+    except Exception as e:
+        logger.warning(f"CAPE fetch: {e}")
+
+    # ② Conference Board LEI — FRED USSLIND
+    lei_obs = _fred("USSLIND", limit=24)
+    if lei_obs:
+        latest_v = lei_obs[0][1]
+        prev_v = lei_obs[1][1] if len(lei_obs) > 1 else None
+        mom = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
+        streak = 0
+        for i in range(len(lei_obs) - 1):
+            if lei_obs[i][1] < lei_obs[i + 1][1]:
+                streak += 1
+            else:
+                break
+        result["lei"] = {
+            "value": latest_v,
+            "date": lei_obs[0][0],
+            "mom": mom,
+            "streak_down": streak,
+            "history": list(reversed(lei_obs)),
+        }
+
+    # ③ PCE — FRED PCEPI / PCEPILFE
+    for sid, key in [("PCEPI", "pce"), ("PCEPILFE", "core_pce")]:
+        obs = _fred(sid, limit=14)
+        if len(obs) >= 13:
+            latest = obs[0][1]
+            yr_ago = obs[12][1]
+            yoy = (latest - yr_ago) / yr_ago * 100
+            prev = obs[1][1] if len(obs) > 1 else None
+            mom = ((latest - prev) / abs(prev) * 100) if prev else None
+            result[key] = {
+                "value": latest,
+                "date": obs[0][0],
+                "yoy": yoy,
+                "mom": mom,
+            }
+
+    return result
+
+
+def render_macro_indicators():
+    """🌐 マクロ経済指標（CAPE / LEI / PCE）セクション"""
+    st.markdown('<a id="macro"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0a1628,#0d2137,#0a1628);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:12px;">'
+        '<div style="font-size:20px;font-weight:800;color:#7dd3fc">'
+        '🌐 マクロ経済指標 — シンクタンク視点</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        'Shiller CAPE · Conference Board LEI · PCE インフレ</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("マクロ指標を取得中..."):
+        macro = fetch_macro_indicators()
+
+    if not macro:
+        st.warning("⚠️ マクロ指標の取得に失敗しました。")
+        return
+
+    cape  = macro.get("cape")
+    lei   = macro.get("lei")
+    pce   = macro.get("pce")
+    cpce  = macro.get("core_pce")
+
+    # ── FRED APIキー未設定の案内 ──────────────────────────────
+    if not FRED_API_KEY and not cape:
+        st.info(
+            "💡 **FRED API キーを設定するとLEI・PCEが表示されます**\n\n"
+            "1. [fred.stlouisfed.org](https://fred.stlouisfed.org) で無料登録\n"
+            "2. API Keys ページでキーを発行\n"
+            "3. Streamlit Cloud の Secrets に `FRED_API_KEY = \"your_key\"` を追加"
+        )
+        return
+
+    # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
+    col_cape, col_lei, col_pce = st.columns(3)
+
+    # ① CAPE カード
+    with col_cape:
+        if cape:
+            v = cape["value"]
+            avg = cape["avg_lt"]
+            pct_above = (v - avg) / avg * 100
+            if v >= 35:
+                c_color, c_label, c_icon = "#ef4444", "割高警戒", "🔴"
+            elif v >= 25:
+                c_color, c_label, c_icon = "#f59e0b", "やや割高", "🟡"
+            elif v >= 15:
+                c_color, c_label, c_icon = "#22c55e", "適正水準", "🟢"
+            else:
+                c_color, c_label, c_icon = "#14b8a6", "割安", "🔵"
+            st.markdown(
+                f'<div style="background:#1e293b;border:1px solid {c_color};'
+                f'border-radius:10px;padding:14px;text-align:center;">'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Shiller CAPE</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{c_color};margin:4px 0">{v:.1f}</div>'
+                f'<div style="font-size:11px;color:#cbd5e1">{c_icon} {c_label}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
+                f'長期平均{avg:.0f}比 +{pct_above:.0f}%超 | {cape["date"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;'
+                'border-radius:10px;padding:14px;text-align:center;">'
+                '<div style="font-size:11px;color:#94a3b8">Shiller CAPE</div>'
+                '<div style="font-size:18px;color:#64748b;margin-top:8px">取得失敗</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ② LEI カード
+    with col_lei:
+        if lei:
+            mom = lei.get("mom")
+            streak = lei.get("streak_down", 0)
+            if streak >= 6:
+                l_color, l_label, l_icon = "#ef4444", f"⚠️ {streak}ヶ月連続低下", "🔴"
+            elif streak >= 3:
+                l_color, l_label, l_icon = "#f59e0b", f"注意 {streak}ヶ月低下", "🟡"
+            elif mom and mom > 0:
+                l_color, l_label, l_icon = "#22c55e", "拡張", "🟢"
+            else:
+                l_color, l_label, l_icon = "#94a3b8", "横ばい", "⬜"
+            mom_str = f"{mom:+.2f}%" if mom is not None else "—"
+            st.markdown(
+                f'<div style="background:#1e293b;border:1px solid {l_color};'
+                f'border-radius:10px;padding:14px;text-align:center;">'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Conference Board LEI</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{l_color};margin:4px 0">{lei["value"]:.1f}</div>'
+                f'<div style="font-size:11px;color:#cbd5e1">{l_icon} {l_label}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
+                f'前月比 {mom_str} | {lei["date"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;'
+                'border-radius:10px;padding:14px;text-align:center;">'
+                '<div style="font-size:11px;color:#94a3b8">Conference Board LEI</div>'
+                '<div style="font-size:14px;color:#64748b;margin-top:8px">FRED_API_KEY 要設定</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ③ PCE カード
+    with col_pce:
+        if cpce:
+            yoy = cpce["yoy"]
+            target = 2.0
+            if yoy >= 3.5:
+                p_color, p_label, p_icon = "#ef4444", "Fed目標大幅超過", "🔴"
+            elif yoy >= 2.5:
+                p_color, p_label, p_icon = "#f59e0b", "目標超過・引締め継続", "🟡"
+            elif yoy >= 1.5:
+                p_color, p_label, p_icon = "#22c55e", "目標近辺・緩和余地", "🟢"
+            else:
+                p_color, p_label, p_icon = "#14b8a6", "目標以下・緩和的", "🔵"
+            st.markdown(
+                f'<div style="background:#1e293b;border:1px solid {p_color};'
+                f'border-radius:10px;padding:14px;text-align:center;">'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（前年比）</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{yoy:.1f}%</div>'
+                f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
+                f'Fed目標 2.0% | ヘッドライン {pce["yoy"]:.1f}% | {cpce["date"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            ) if pce else st.markdown(
+                f'<div style="background:#1e293b;border:1px solid {p_color};'
+                f'border-radius:10px;padding:14px;text-align:center;">'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（前年比）</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{yoy:.1f}%</div>'
+                f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
+                f'Fed目標 2.0% | {cpce["date"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;'
+                'border-radius:10px;padding:14px;text-align:center;">'
+                '<div style="font-size:11px;color:#94a3b8">Core PCE インフレ</div>'
+                '<div style="font-size:14px;color:#64748b;margin-top:8px">FRED_API_KEY 要設定</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 各指標の詳細解説 ───────────────────────────────────────
+    with st.expander("📖 各指標の読み方 — シンクタンクはここを見る", expanded=False):
+
+        st.markdown("### 📊 Shiller CAPE（景気調整済PER）")
+        st.markdown(
+            "ノーベル賞経済学者ロバート・シラーが考案。直近10年間の実質利益平均で株価を割った指標。\n\n"
+            "| 水準 | 意味 | 過去の事例 |\n"
+            "|---|---|---|\n"
+            "| **44以上** | 極度の過熱 | 2000年ドットコムバブル(最高値44) |\n"
+            "| **35〜44** | 非常に割高 | 2021年ピーク(38)、現在もこのゾーン |\n"
+            "| **25〜35** | 割高 | 2007年リーマン前(27)、2018年(33) |\n"
+            "| **15〜25** | 適正 | 長期平均17、歴史的に最も多い水準 |\n"
+            "| **15以下** | 割安 | 2009年金融危機底(13)、1982年底(7) |\n\n"
+            "> ⚠️ CAPEは**長期バリュエーション**指標。高水準でも数年上昇が続くことがある。"
+            "「いつ下がるか」ではなく「長期リターンが低くなるリスク」を示す指標として使う。"
+        )
+
+        st.markdown("---")
+        st.markdown("### 📉 Conference Board LEI（景気先行指数）")
+        st.markdown(
+            "全米経済研究所(NBER)も参照する10指標の合成先行指数。景気転換を**6〜9ヶ月先行**する。\n\n"
+            "**構成指標（主なもの）:**\n"
+            "- 週平均製造業労働時間、新規失業保険申請件数\n"
+            "- ISM新規受注、住宅着工許可件数\n"
+            "- S&P500株価、信用スプレッド、イールドカーブ\n\n"
+            "| シグナル | 判断 | 実績 |\n"
+            "|---|---|---|\n"
+            "| **6ヶ月以上連続低下** | 景気後退の強いシグナル | 過去8回の景気後退すべてで発生 |\n"
+            "| **3〜5ヶ月連続低下** | 景気減速の注意 | 一時的な調整の場合も |\n"
+            "| **横ばい〜上昇** | 景気拡張継続 | — |\n\n"
+            "> 2022年〜2023年: LEIが18ヶ月連続低下 → 「景気後退は来る」と言われたが実際はソフトランディング。"
+            "LEIは**精度が高いが偽陽性もある**。他指標と組み合わせて判断することが重要。"
+        )
+
+        st.markdown("---")
+        st.markdown("### 🏦 Core PCE（FRBが最重視するインフレ指標）")
+        st.markdown(
+            "PCE = 個人消費支出デフレーター。CPIと異なり**代替効果（消費者が安い商品に切り替える行動）**を反映。\n\n"
+            "**CPIとの違い:**\n"
+            "| | CPI | Core PCE |\n"
+            "|---|---|---|\n"
+            "| 作成機関 | 労働統計局(BLS) | 商務省(BEA) |\n"
+            "| 住居費ウェイト | 約33% | 約15% |\n"
+            "| 特徴 | 固定ウェイト | 変動ウェイト（代替効果反映） |\n"
+            "| FRBの使用 | 参考 | **政策判断の基準** |\n\n"
+            "| Core PCE水準 | FRBの行動示唆 |\n"
+            "|---|---|\n"
+            "| **3.5%以上** | 利上げ継続または高止まり維持 |\n"
+            "| **2.5〜3.5%** | 据え置き、利下げは後退 |\n"
+            "| **2.0〜2.5%** | 利下げ検討ゾーン |\n"
+            "| **2.0%以下** | 積極的利下げ余地あり |"
+        )
+
+    # ── FRED APIキー設定案内（キーなしの場合）──────────────────
+    if not FRED_API_KEY:
+        st.info(
+            "💡 **LEI・PCEを表示するには FRED API キーが必要です（無料）**\n\n"
+            "1. [fred.stlouisfed.org/docs/api/api_key.html](https://fred.stlouisfed.org/docs/api/api_key.html) で登録\n"
+            "2. Streamlit Cloud の Secrets に追加: `FRED_API_KEY = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"`"
+        )
+
+
 def render_bear_market_checker():
     """🐻 弱気相場リスク判定セクション"""
     st.markdown('<a id="bear-risk"></a>', unsafe_allow_html=True)
@@ -7997,6 +8314,92 @@ def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
     return dt_et.astimezone(JST)
 
 
+
+
+# ===========================
+# 日本経済カレンダー
+# ===========================
+_JP_ECO_CALENDAR: List[Tuple[str, str, str, str, str, str]] = [
+    # BOJ 金融政策決定会合（結果発表日、JST午後）
+    ("2025-01-24", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "1月"),
+    ("2025-03-19", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "3月"),
+    ("2025-05-01", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "4-5月"),
+    ("2025-06-17", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "6月"),
+    ("2025-07-31", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "7月"),
+    ("2025-09-19", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "9月"),
+    ("2025-10-29", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "10月"),
+    ("2025-12-19", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "12月"),
+    ("2026-01-24", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "1月"),
+    ("2026-03-19", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "3月"),
+    ("2026-04-28", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "4月"),
+    ("2026-06-17", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "6月"),
+    ("2026-07-31", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "7月"),
+    ("2026-09-18", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "9月"),
+    ("2026-10-29", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "10月"),
+    ("2026-12-18", "12:00", "BOJ 金融政策決定会合",            "🏦", "high",   "12月"),
+    # 日本CPI（全国消費者物価指数）毎月第3金曜前後 8:30 JST
+    ("2025-01-24", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "12月分"),
+    ("2025-02-21", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "1月分"),
+    ("2025-03-21", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "2月分"),
+    ("2025-04-18", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "3月分"),
+    ("2025-05-23", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "4月分"),
+    ("2025-06-20", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "5月分"),
+    ("2025-07-18", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "6月分"),
+    ("2025-08-22", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "7月分"),
+    ("2025-09-19", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "8月分"),
+    ("2025-10-24", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "9月分"),
+    ("2025-11-21", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "10月分"),
+    ("2025-12-19", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "11月分"),
+    ("2026-01-23", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "12月分"),
+    ("2026-02-20", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "1月分"),
+    ("2026-03-20", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "2月分"),
+    ("2026-04-17", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "3月分"),
+    ("2026-05-22", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "4月分"),
+    ("2026-06-19", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "5月分"),
+    ("2026-07-17", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "6月分"),
+    ("2026-08-21", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "7月分"),
+    ("2026-09-18", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "8月分"),
+    ("2026-10-23", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "9月分"),
+    ("2026-11-20", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "10月分"),
+    ("2026-12-18", "08:30", "日本CPI（消費者物価指数）",       "💴", "high",   "11月分"),
+    # 日本失業率・有効求人倍率（毎月末）
+    ("2025-01-31", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "12月分"),
+    ("2025-02-28", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "1月分"),
+    ("2025-03-28", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "2月分"),
+    ("2025-04-25", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "3月分"),
+    ("2025-05-30", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "4月分"),
+    ("2025-06-27", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "5月分"),
+    ("2025-07-29", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "6月分"),
+    ("2025-08-29", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "7月分"),
+    ("2025-09-30", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "8月分"),
+    ("2025-10-31", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "9月分"),
+    ("2025-11-28", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "10月分"),
+    ("2025-12-26", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "11月分"),
+    ("2026-01-30", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "12月分"),
+    ("2026-02-27", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "1月分"),
+    ("2026-03-31", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "2月分"),
+    ("2026-04-28", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "3月分"),
+    ("2026-05-29", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "4月分"),
+    ("2026-06-30", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "5月分"),
+    ("2026-07-31", "08:30", "日本失業率 / 有効求人倍率",       "👷", "medium", "6月分"),
+    # 日銀短観（四半期）
+    ("2025-04-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "3月調査"),
+    ("2025-07-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "6月調査"),
+    ("2025-10-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "9月調査"),
+    ("2026-01-05", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "12月調査"),
+    ("2026-04-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "3月調査"),
+    ("2026-07-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "6月調査"),
+    ("2026-10-01", "08:50", "日銀短観（企業短期経済観測）",    "📊", "high",   "9月調査"),
+    # 日本GDP速報（四半期）
+    ("2025-02-17", "08:50", "日本GDP速報値",                  "📈", "high",   "2024Q4"),
+    ("2025-05-15", "08:50", "日本GDP速報値",                  "📈", "high",   "2025Q1"),
+    ("2025-08-15", "08:50", "日本GDP速報値",                  "📈", "high",   "2025Q2"),
+    ("2025-11-17", "08:50", "日本GDP速報値",                  "📈", "high",   "2025Q3"),
+    ("2026-02-16", "08:50", "日本GDP速報値",                  "📈", "high",   "2025Q4"),
+    ("2026-05-15", "08:50", "日本GDP速報値",                  "📈", "high",   "2026Q1"),
+]
+
+
 # FMP イベント名 → カレンダー表示名 + beat判定の向き（True = actual > estimate が良い）
 _FMP_EVENT_MAP: List[Tuple[str, str, bool]] = [
     ("Nonfarm Payrolls",          "非農業部門雇用者数(NFP) / 失業率",  True),   # 多いほど良い
@@ -8118,6 +8521,115 @@ def _fetch_eco_actuals_bls() -> Dict[str, Dict]:
     except Exception as e:
         logger.warning(f"[bls] {e}")
         return {}
+
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_eco_actuals_fred() -> Dict[str, Dict]:
+    """
+    FRED CSV エンドポイントから ISM PMI・日本マクロ指標を取得（APIキー不要）。
+    ISM Manufacturing: NAPMSA / Japan CPI: JPNCPIALLMINMEI 等
+    """
+    FRED_MAP = [
+        # (series_id, calendar_name_substr, unit, higher_is_good, is_japan)
+        ("NAPMSA",           "ISM製造業",      "",   True,  False),
+        ("NMFSA",            "ISM非製造業",    "",   True,  False),
+        ("JPNCPIALLMINMEI",  "日本CPI",        "%",  False, True),
+        ("LRUN74TTJPM156S",  "日本失業率",     "%",  False, True),
+        ("IRSTCB01JPM156N",  "BOJ",           "%",  False, True),
+    ]
+    BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv?id="
+
+    def _fetch_series(sid: str) -> Dict[str, float]:
+        """date_str -> value"""
+        try:
+            r = requests.get(BASE + sid, timeout=12,
+                             headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                return {}
+            vals = {}
+            for line in r.text.strip().split("\n")[1:]:
+                parts = line.split(",")
+                if len(parts) < 2 or parts[1].strip() == ".":
+                    continue
+                try:
+                    vals[parts[0].strip()] = float(parts[1].strip())
+                except ValueError:
+                    pass
+            return vals
+        except Exception as e:
+            logger.debug(f"[fred] {sid}: {e}")
+            return {}
+
+    results: Dict[str, Dict] = {}
+
+    for sid, name_sub, unit, higher_good, is_jp in FRED_MAP:
+        series = _fetch_series(sid)
+        if not series:
+            continue
+
+        sorted_dates = sorted(series.keys())
+        cal = _JP_ECO_CALENDAR if is_jp else _US_ECO_CALENDAR
+
+        for date_str, _time, ev_name, _icon, _impact, _note in cal:
+            if name_sub not in ev_name:
+                continue
+            if date_str in results:
+                continue
+            try:
+                ev = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                continue
+
+            # データ対象月 = リリース月の1ヶ月前
+            dm = ev.month - 1 if ev.month > 1 else 12
+            dy = ev.year  if ev.month > 1 else ev.year - 1
+            key = f"{dy}-{dm:02d}-01"
+
+            # 直近の該当データ日付を探す
+            match_key = None
+            for dk in sorted_dates:
+                if dk[:7] == key[:7]:
+                    match_key = dk
+                    break
+            if not match_key:
+                # 同月が見つからなければ最も近い過去
+                past = [d for d in sorted_dates if d <= date_str]
+                if past:
+                    match_key = past[-1]
+
+            if not match_key:
+                continue
+
+            actual = series[match_key]
+            prev_key = sorted_dates[sorted_dates.index(match_key) - 1] if sorted_dates.index(match_key) > 0 else None
+            previous = series.get(prev_key) if prev_key else None
+
+            if unit == "%" and name_sub == "日本CPI":
+                # YoY計算
+                try:
+                    idx = sorted_dates.index(match_key)
+                    yoy_key = sorted_dates[idx - 12] if idx >= 12 else None
+                    if yoy_key:
+                        actual_yoy = round((actual / series[yoy_key] - 1) * 100, 2)
+                        prev_idx = idx - 1
+                        prev_yoy_key = sorted_dates[prev_idx - 12] if prev_idx >= 12 else None
+                        previous_yoy = round((series[sorted_dates[prev_idx]] / series[prev_yoy_key] - 1) * 100, 2) if prev_yoy_key else None
+                        actual = actual_yoy
+                        previous = previous_yoy
+                    else:
+                        continue
+                except Exception:
+                    continue
+
+            beat = None
+            results[date_str] = {
+                "name": ev_name, "actual": round(actual, 2),
+                "estimate": None, "previous": round(previous, 2) if previous else None,
+                "beat": beat, "unit": unit,
+            }
+
+    return results
 
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
@@ -8390,7 +8902,7 @@ def render_economic_events_section():
         unsafe_allow_html=True,
     )
 
-    tab_cal, tab_vol = st.tabs(["📆 発表スケジュール（日本時間）", "📊 過去の株価変動実績"])
+    tab_cal, tab_jp, tab_vol = st.tabs(["📆 米国 発表スケジュール", "🇯🇵 日本 マクロ指標", "📊 過去の株価変動実績"])
 
     # ── タブ①: カレンダー ──────────────────────────────────
     with tab_cal:
@@ -8410,6 +8922,10 @@ def render_economic_events_section():
             for _k, _v in _bls.items():
                 if _k not in eco_actuals:
                     eco_actuals[_k] = _v
+        _fred = _fetch_eco_actuals_fred()
+        for _k, _v in _fred.items():
+            if _k not in eco_actuals:
+                eco_actuals[_k] = _v
         has_fmp = bool(eco_actuals)
 
         now_jst = datetime.now(JST)
@@ -8564,7 +9080,108 @@ def render_economic_events_section():
             "※ 日程は近似値。investing.com等でご確認ください。"
         )
 
-    # ── タブ②: ボラティリティ実績 ──────────────────────────
+
+    # ── タブ②: 日本マクロ指標 ──────────────────────────────────────
+    with tab_jp:
+        now_jst_jp = datetime.now(JST)
+        days_ahead_jp = st.slider("今後何日分を表示", 7, 90, 60, key="jp_eco_days_ahead")
+        cutoff_past_jp  = now_jst_jp - timedelta(days=180)
+        cutoff_future_jp = now_jst_jp + timedelta(days=days_ahead_jp)
+
+        jp_events = []
+        for date_str, time_jst, name, icon, impact, note in _JP_ECO_CALENDAR:
+            try:
+                naive = datetime.strptime(f"{date_str} {time_jst}", "%Y-%m-%d %H:%M")
+                jst_dt = JST.localize(naive)
+            except Exception:
+                continue
+            if cutoff_past_jp <= jst_dt <= cutoff_future_jp:
+                delta_h = (jst_dt - now_jst_jp).total_seconds() / 3600
+                jp_events.append({
+                    "date_str": date_str, "jst_dt": jst_dt,
+                    "name": name, "icon": icon, "impact": impact,
+                    "note": note, "delta_h": delta_h,
+                    "is_past": jst_dt < now_jst_jp,
+                })
+        jp_events.sort(key=lambda x: x["jst_dt"])
+
+        jp_actuals = _fetch_eco_actuals_fred()
+
+        impact_color_jp = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
+        impact_label_jp = {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}
+
+        if not jp_events:
+            st.info(f"今後{days_ahead_jp}日間に主要イベントはありません。")
+        else:
+            rows_html_jp = ""
+            for ev in jp_events:
+                jst_str   = ev["jst_dt"].strftime("%m/%d(%a) %H:%M JST")
+                delta_h   = ev["delta_h"]
+                is_past   = ev["is_past"]
+                dstr      = ev["date_str"]
+                fmp_jp    = jp_actuals.get(dstr)
+
+                if is_past and fmp_jp and fmp_jp.get("actual") is not None:
+                    act  = fmp_jp["actual"]
+                    prv  = fmp_jp.get("previous")
+                    unit = fmp_jp.get("unit", "")
+                    def _fmt_jp(v, u):
+                        if v is None: return "—"
+                        return f"{v:.2f}{u}"
+                    act_html = f"<span style='font-weight:700;color:#f1f5f9'>{_fmt_jp(act, unit)}</span>"
+                    if prv is not None:
+                        act_html += f"<span style='color:#64748b;font-size:10px'> 前回:{_fmt_jp(prv, unit)}</span>"
+                    actual_cell_jp = act_html
+                elif not is_past:
+                    actual_cell_jp = "<span style='color:#64748b;font-size:11px'>未発表</span>"
+                else:
+                    actual_cell_jp = "<span style='color:#475569;font-size:11px'>—</span>"
+
+                if is_past:
+                    timing_jp = f"<span style='color:#6b7280'>✅ {abs(delta_h/24):.0f}日前</span>"
+                elif delta_h < 2:
+                    timing_jp = f"<span style='color:#ef4444;font-weight:bold'>🔴 まもなく</span>"
+                elif delta_h < 24:
+                    timing_jp = f"<span style='color:#f59e0b;font-weight:bold'>🟡 本日</span>"
+                elif delta_h < 48:
+                    timing_jp = f"<span style='color:#fbbf24'>🟠 明日</span>"
+                else:
+                    timing_jp = f"<span style='color:#94a3b8'>⚪ {delta_h/24:.0f}日後</span>"
+
+                note_badge_jp = (
+                    f"<span style='background:#1e3a5f;color:#93c5fd;padding:1px 6px;border-radius:8px;font-size:11px'>{ev['note']}</span> "
+                    if ev["note"] else ""
+                )
+                imp_col_jp = impact_color_jp.get(ev["impact"], "#6b7280")
+                imp_lbl_jp = impact_label_jp.get(ev["impact"], "")
+                row_style_jp = "opacity:0.75;" if is_past else ""
+
+                rows_html_jp += (
+                    f"<tr style='border-bottom:1px solid #1e293b;{row_style_jp}'>"
+                    f"<td style='padding:7px 8px;white-space:nowrap'>{jst_str}</td>"
+                    f"<td style='padding:7px 8px'>{ev['icon']} <b>{ev['name']}</b> {note_badge_jp}</td>"
+                    f"<td style='padding:7px 8px;color:{imp_col_jp};white-space:nowrap'>{imp_lbl_jp}</td>"
+                    f"<td style='padding:7px 8px'>{timing_jp}</td>"
+                    f"<td style='padding:7px 8px'>{actual_cell_jp}</td>"
+                    f"</tr>"
+                )
+
+            st.markdown(
+                f"<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+                f"<thead><tr style='color:#64748b;border-bottom:2px solid #334155'>"
+                f"<th style='padding:6px 8px;text-align:left'>発表日時（JST）</th>"
+                f"<th style='padding:6px 8px;text-align:left'>指標名</th>"
+                f"<th style='padding:6px 8px;text-align:left'>影響度</th>"
+                f"<th style='padding:6px 8px;text-align:left'>タイミング</th>"
+                f"<th style='padding:6px 8px;text-align:left'>実績</th>"
+                f"</tr></thead><tbody>{rows_html_jp}</tbody></table>",
+                unsafe_allow_html=True,
+            )
+            st.caption("📌 実績値はFRED（セントルイス連銀）から取得。日本CPI=前年同月比%、失業率=%。")
+            st.caption("⏰ BOJ会合は結果発表の概算時刻。短観は8:50 JST発表。")
+
+
+    # ── タブ③: ボラティリティ実績 ──────────────────────────
     with tab_vol:
         if not st.session_state.get("_vol_loaded"):
             st.info("「ボラティリティを分析」ボタンを押すと過去のS&P500変動データを取得します（初回のみ時間がかかります）。")
