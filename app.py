@@ -8643,12 +8643,13 @@ def render_market_summary():
                 prompt = (
                     "あなたは市場アナリストです。以下の市場センチメント指標データをもとに、"
                     f"なぜ総合スコアが{composite:.0f}/100（{ol}）になったのか、"
-                    f"米国{us_composite:.0f}・日本{jp_composite:.0f}の地域差も含め、"
-                    "投資家向けに200字以内で簡潔に日本語で説明してください。\n\n"
+                    f"米国{us_composite:.0f}・日本{jp_composite:.0f}の地域差も含め説明してください。"
+                    "さらに「このまま下落が続く可能性が高いのか、それとも一時的な調整で終わりそうか」"
+                    "という今後の見通しも含めて、投資家向けに300字以内で簡潔に日本語で答えてください。\n\n"
                     f"指標スコア一覧（低い順）:\n{comp_text}"
                 )
                 with st.spinner("AI分析中..."):
-                    comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=400, temperature=0.4)
+                    comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=600, temperature=0.4)
                 st.session_state[ai_comment_key] = (comment, used_model)
 
         if ai_comment_key in st.session_state:
@@ -8668,8 +8669,12 @@ def render_market_summary():
             "F&G Index":      ("CNNの投資家心理指数。",      "高い=市場が強欲(Greed)＝強気。低い=恐怖(Fear)＝弱気。"),
             "VIX水準":        ("S&P500の予想変動率。",       "低い(15以下)=市場が落ち着いている=強気。高い(30超)=投資家が怯えている=弱気。"),
             "VIX期間構造":    ("近い将来vs遠い将来の恐怖度。","長期>短期(順イールド)=正常=強気。逆転=パニック売り懸念=弱気。"),
-            "Put/Call比率":   ("プット(売り保険)の需要。",   "低い=投資家が安心して保険を買っていない=強気。高い=守りに入っている=弱気。"),
-            "Put/Call(VXX代替)": ("ボラETF需要で代替計測。","低水準=市場の安心感が高い=強気。"),
+            "Put/Call比率":   ("CBOE Put/Call Ratio。プット(下落ヘッジ)÷コール(上昇賭け)の出来高比。",
+                              "高い(>1.0)=投資家が守りに入っている=弱気。ただし1.3超は逆張り底打ちサインになることも。"
+                              "低い(<0.7)=強気一色=慢心の警戒ゾーン。"),
+            "Put/Call(VXX代替)": ("VXX(VIX先物ETF)価格水準でPut/Call的な恐怖度を代替計測。",
+                                 "低%ile=市場が『変動は来ない』と楽観=安心感強い=強気シグナル。"
+                                 "ただし低すぎ(5%ile以下)は慢心警戒ゾーン。高%ile=恐怖ETFに資金流入=パニック=弱気だが逆張りチャンスにも。"),
             "価格モメンタム": ("S&P500の20日リターン。",     "上昇が続いている=トレンドが強い=強気。下落中=弱気。"),
             "Safe Haven需要": ("株vs国債の相対パフォーマンス。","国債より株が強い=リスクオン=強気。国債に資金が逃げている=弱気。"),
             "セクター配分":   ("テック株(攻め)vs公益株(守り)。","テックが公益を上回っている=リスクオン=強気。公益優位=守り型=弱気。"),
@@ -8724,6 +8729,79 @@ def render_market_summary():
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+
+            # ── Put/Call 深掘り解説 ──────────────────────────────
+            pc_comp = comps.get("Put/Call比率") or comps.get("Put/Call(VXX代替)")
+            if pc_comp:
+                pc_sc = pc_comp["score"]
+                pc_lbl = pc_comp["label"]
+                if pc_sc >= 80:
+                    pc_state = "low"    # VXX低・P/C低 = 楽観・慢心
+                elif pc_sc <= 25:
+                    pc_state = "high"   # VXX高・P/C高 = パニック
+                else:
+                    pc_state = "normal"
+
+                _PC_LOW_MSG = (
+                    "**⚠️ 現在: 極度の楽観 (Put/Call が低水準)**\n\n"
+                    "投資家がほとんどヘッジを買っていません。市場全体が「下落しない」と信じている状態です。\n\n"
+                    "| 過去の類似局面 | Put/Call水準 | その後の値動き |\n"
+                    "|---|---|---|\n"
+                    "| 2020年2月（コロナ直前） | 歴史的低水準 | 翌月S&P500 **▼34%** 急落 |\n"
+                    "| 2021年1月（ミームストック狂乱） | 0.4台まで低下 | 2022年に**▼25%**調整 |\n"
+                    "| 2007年10月（リーマン前夜） | 極端に低い | 2008年に**▼57%**暴落 |\n\n"
+                    "> **類推**: 楽観が行き過ぎると、わずかな悪材料で連鎖的な売りが発生しやすい。"
+                    "現在は「守り」を意識しつつ、ポジションサイズを管理することを推奨します。"
+                )
+                _PC_HIGH_MSG = (
+                    "**📉 現在: パニック的恐怖 (Put/Call が高水準)**\n\n"
+                    "投資家が大量に下落ヘッジを買っています。悲観が支配的な状態です。\n\n"
+                    "| 過去の類似局面 | Put/Call水準 | その後の値動き |\n"
+                    "|---|---|---|\n"
+                    "| 2020年3月（コロナショック底） | 1.5超 | 翌月から**▲35%**反発 |\n"
+                    "| 2022年10月（FRB利上げ底） | 高水準 | 3ヶ月で**▲20%**反発 |\n"
+                    "| 2011年8月（米国債格下げ） | 急騰 | 数週間で**▲15%**反発 |\n\n"
+                    "> **類推**: 極端なパニック買いは逆張りの買いシグナルになることが多い。"
+                    "ただし底を確認してからの行動が安全。焦りの売りには付き合わないこと。"
+                )
+                _PC_NORMAL_MSG = (
+                    "**✅ 現在: 正常レンジ**\n\n"
+                    "Put/Call比率は中立的な水準です。極端な楽観も悲観もない、バランスの取れた市場心理です。"
+                )
+                pc_msgs = {"low": _PC_LOW_MSG, "high": _PC_HIGH_MSG, "normal": _PC_NORMAL_MSG}
+                pc_colors = {"low": "#fef3c7", "high": "#fee2e2", "normal": "#f0fdf4"}
+                pc_borders = {"low": "#f59e0b", "high": "#ef4444", "normal": "#22c55e"}
+
+                st.markdown("---")
+                st.markdown("#### 📊 Put/Call比率(VXX代替) 深掘り解説")
+                st.markdown(
+                    f'<div style="background:{pc_colors[pc_state]};border-left:4px solid {pc_borders[pc_state]};'
+                    f'border-radius:6px;padding:12px 16px;margin-bottom:8px;">'
+                    f'<div style="font-size:11px;color:#475569;margin-bottom:4px">'
+                    f'現在スコア: <b>{pc_sc:.0f}/100</b> &nbsp;|&nbsp; {pc_lbl}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(pc_msgs[pc_state])
+                with st.expander("📖 Put/Call比率の仕組みをもっと詳しく"):
+                    st.markdown(
+                        "**Put/Call比率とは？**\n\n"
+                        "- **Put オプション**: 「株が下がったら利益が出る」権利。下落ヘッジや空売り代替に使われる\n"
+                        "- **Call オプション**: 「株が上がったら利益が出る」権利。上昇に賭けるときに使われる\n"
+                        "- **P/C比率 = Put出来高 ÷ Call出来高**\n\n"
+                        "| 水準 | 意味 | 市場心理 | 投資行動の示唆 |\n"
+                        "|---|---|---|---|\n"
+                        "| 1.3以上 | ヘッジ需要急増 | 極端な悲観 | 逆張り検討（底に近い可能性） |\n"
+                        "| 0.9〜1.2 | やや守り優位 | 弱気 | 慎重 |\n"
+                        "| 0.7〜0.9 | 中立 | ニュートラル | 標準的なポジション |\n"
+                        "| 0.5〜0.7 | コール優位 | 強気 | 過熱に注意しつつ保有 |\n"
+                        "| 0.5以下 | 楽観が支配的 | 極端な強気 | 慢心警戒、ヘッジ増加を検討 |\n\n"
+                        "**VXX代替について**\n\n"
+                        "CBOEのP/Cデータが取得できない場合、VXX（VIX先物ETF）の価格水準で代替します。"
+                        "VXXが低い = 市場が将来の変動を恐れていない = 実質的にPut需要が低い状態と同義です。\n\n"
+                        "> ⚠️ **注意**: Put/Call比率は **逆張り指標** です。極端な値が出たときが最も注目すべき局面ですが、"
+                        "タイミングの特定は難しく、単独では使わず他の指標と組み合わせて判断してください。"
+                    )
 
             # 米国・日本の内訳
             us_comps = sent.get("us_components", {})
@@ -9479,6 +9557,61 @@ def render_composite_sentiment():
                     hoverinfo="skip",
                 ))
 
+                # ── 21日先 類推ライン (直近30日 × 2次多項式回帰) ──
+                try:
+                    n_fit = min(30, len(df_p))
+                    df_fit = df_p.tail(n_fit)
+                    xi = np.arange(n_fit, dtype=float)
+                    yi = df_fit["score"].values.astype(float)
+                    coeffs = np.polyfit(xi, yi, deg=2)
+                    resid_std = float((yi - np.polyval(coeffs, xi)).std())
+
+                    n_proj = 21
+                    xi_proj = np.arange(n_fit - 1, n_fit + n_proj, dtype=float)
+                    yi_proj  = np.polyval(coeffs, xi_proj).clip(0, 100)
+                    yi_upper = (yi_proj + resid_std).clip(0, 100)
+                    yi_lower = (yi_proj - resid_std).clip(0, 100)
+                    last_dt  = df_p["date"].iloc[-1]
+                    proj_dates = [last_dt + pd.Timedelta(days=i) for i in range(n_proj + 1)]
+
+                    # 信頼帯（±1σ）
+                    fig.add_trace(go.Scatter(
+                        x=proj_dates + proj_dates[::-1],
+                        y=list(yi_upper) + list(yi_lower[::-1]),
+                        fill="toself",
+                        fillcolor="rgba(232,121,160,0.13)",
+                        line=dict(width=0),
+                        showlegend=True,
+                        name="類推レンジ(±1σ)",
+                        hoverinfo="skip",
+                    ))
+                    # 類推ライン本体
+                    proj_end_score = float(yi_proj[-1])
+                    direction = "↗" if proj_end_score > float(yi_proj[0]) else "↘"
+                    fig.add_trace(go.Scatter(
+                        x=proj_dates,
+                        y=yi_proj,
+                        mode="lines",
+                        line=dict(color="#e879a0", width=2, dash="dot"),
+                        name=f"📈 類推 {direction}{proj_end_score:.0f}(21日後)",
+                        hovertemplate="類推: <b>%{y:.1f}</b><extra></extra>",
+                    ))
+                    # 類推終端マーカー
+                    fig.add_trace(go.Scatter(
+                        x=[proj_dates[-1]],
+                        y=[proj_end_score],
+                        mode="markers+text",
+                        marker=dict(size=9, color="#e879a0", symbol="diamond",
+                                    line=dict(width=2, color="white")),
+                        text=[f"{proj_end_score:.0f}"],
+                        textposition="middle right",
+                        textfont=dict(size=12, color="#e879a0"),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+                except Exception:
+                    pass  # 類推失敗時はスキップ
+
                 fig.update_layout(
                     title=dict(text=chart_title, font=dict(size=13, color="#111827")),
                     yaxis=dict(range=[0, 100], title="AI Sentiment Score",
@@ -9494,9 +9627,15 @@ def render_composite_sentiment():
                         bordercolor="#e879a0",
                         font_size=12,
                     ),
-                    margin=dict(l=50, r=80, t=40, b=40),
-                    height=380,
-                    showlegend=False,
+                    margin=dict(l=50, r=80, t=40, b=60),
+                    height=420,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom", y=-0.18,
+                        xanchor="left", x=0,
+                        font=dict(size=11),
+                    ),
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
