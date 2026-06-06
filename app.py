@@ -698,6 +698,7 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
     if not OPENROUTER_API_KEY:
         return "⚠️ OPENROUTER_API_KEY が設定されていません", ""
     OPENROUTER_MODELS = [
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
         "meta-llama/llama-3.3-70b-instruct:free",
         "meta-llama/llama-3.1-8b-instruct:free",
         "google/gemma-2-9b-it:free",
@@ -870,35 +871,49 @@ DASHBOARD_LINKS_HTML = """
 """
 
 DASHBOARD_LINKS_TOP_HTML = """
-<div style="
-    background: linear-gradient(135deg, #e8eaf6 0%, #e8f5e9 100%);
-    border: 1px solid #c5cae9;
-    border-radius: 10px;
-    padding: 10px 16px;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-wrap: wrap;
-">
-    <span style="font-weight:700;font-size:13px;color:#3949ab;white-space:nowrap;">🔗 関連ダッシュボード</span>
-    <a href="https://usstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer" style="
-        display:inline-flex;align-items:center;gap:6px;
-        background:linear-gradient(135deg,#1565c0,#1976d2);
-        color:#fff;padding:7px 16px;border-radius:7px;text-decoration:none;
-        font-size:13px;font-weight:700;
-        box-shadow:0 2px 8px rgba(21,101,192,0.35);
-        white-space:nowrap;
-    ">🇺🇸&nbsp;USStockMetrics</a>
-    <a href="https://jstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer" style="
-        display:inline-flex;align-items:center;gap:6px;
-        background:linear-gradient(135deg,#c62828,#e53935);
-        color:#fff;padding:7px 16px;border-radius:7px;text-decoration:none;
-        font-size:13px;font-weight:700;
-        box-shadow:0 2px 8px rgba(198,40,40,0.35);
-        white-space:nowrap;
-    ">🇯🇵&nbsp;JStockMetrics</a>
-    <span style="font-size:11px;color:#888;">各ダッシュボードで詳細な銘柄分析・指標をご覧いただけます</span>
+<style>
+.nav-btn {
+    display:inline-flex;align-items:center;gap:5px;
+    padding:5px 12px;border-radius:6px;text-decoration:none;
+    font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;
+    border:1px solid rgba(255,255,255,0.15);
+    background:rgba(255,255,255,0.08);color:#cbd5e1;
+    transition:background 0.15s;
+}
+.nav-btn:hover { background:rgba(255,255,255,0.18);color:#f1f5f9; }
+.ext-btn {
+    display:inline-flex;align-items:center;gap:6px;
+    padding:6px 14px;border-radius:7px;text-decoration:none;
+    font-size:12px;font-weight:700;white-space:nowrap;
+}
+</style>
+<!-- ページ内ナビ -->
+<div style="background:#0f172a;border:1px solid #1e293b;border-radius:10px;
+     padding:10px 16px;margin-bottom:8px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-size:11px;color:#475569;font-weight:700;white-space:nowrap;">📍 このページ内</span>
+    <a class="nav-btn" href="#market-snapshot">📊 マーケット</a>
+    <a class="nav-btn" href="#eco-calendar">📅 経済イベント</a>
+    <a class="nav-btn" href="#bear-risk">🐻 弱気判定</a>
+    <a class="nav-btn" href="#momentum">🚀 モメンタム</a>
+    <a class="nav-btn" href="#fear-greed">😱 Fear&amp;Greed</a>
+    <a class="nav-btn" href="#sector">🔄 セクター</a>
+    <a class="nav-btn" href="#nikkei-pred">🔮 日経予測</a>
+    <a class="nav-btn" href="#us-pred">🎯 米国予測</a>
+    <span style="flex:1"></span>
+    <a href="https://usstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer"
+       class="ext-btn"
+       style="background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;
+              box-shadow:0 2px 6px rgba(21,101,192,0.4);">
+      🇺🇸&nbsp;USStockMetrics
+    </a>
+    <a href="https://jstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer"
+       class="ext-btn"
+       style="background:linear-gradient(135deg,#c62828,#e53935);color:#fff;
+              box-shadow:0 2px 6px rgba(198,40,40,0.4);">
+      🇯🇵&nbsp;JStockMetrics
+    </a>
+  </div>
 </div>
 """
 
@@ -3465,6 +3480,7 @@ def _cat_score_bar_html(score: float) -> str:
 
 def render_nikkei_prediction():
     """日経平均予測スコアセクション — 9カテゴリ完全版"""
+    st.markdown('<a id="nikkei-pred"></a>', unsafe_allow_html=True)
     st.header("🔮 日経平均 方向性予測スコア")
     st.markdown(
         """<div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);
@@ -4833,6 +4849,7 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
 
 def render_us_prediction():
     """米国株 方向性予測スコアセクション"""
+    st.markdown('<a id="us-pred"></a>', unsafe_allow_html=True)
     st.header("🇺🇸 米国株 方向性予測スコア")
     st.markdown(
         """<div style="background:linear-gradient(135deg,#e3f2fd,#fce4ec);
@@ -5138,6 +5155,7 @@ def compute_sector_rotation() -> Dict[str, Any]:
 
 def render_sector_rotation():
     """セクターローテーションマップ描画"""
+    st.markdown('<a id="sector"></a>', unsafe_allow_html=True)
     st.header("🔄 Sector Rotation Map")
     st.markdown(
         '<div style="background:linear-gradient(135deg,#e3f2fd,#e8f5e9);'
@@ -7483,8 +7501,308 @@ def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# =====================================================
+# 🐻 弱気相場リスク判定
+# =====================================================
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def compute_bear_market_risk() -> Dict[str, Any]:
+    """
+    複数の市場指標から弱気相場リスクスコア（0=最悪, 100=最良）を算出。
+    各指標に重みを設定し加重平均でcompositeスコアを計算。
+    """
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=420)
+
+        syms = ["^GSPC", "^VIX", "HYG", "LQD", "^TNX", "^IRX", "^VIX3M"]
+        raw  = yf.download(syms, start=start, end=end,
+                           progress=False, auto_adjust=True, group_by="ticker")
+
+        def _g(sym):
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    s = raw[sym]["Close"]
+                else:
+                    s = raw["Close"]
+                return s.dropna().astype(float)
+            except Exception:
+                return pd.Series(dtype=float)
+
+        sp    = _g("^GSPC")
+        vix   = _g("^VIX")
+        vix3m = _g("^VIX3M")
+        hyg   = _g("HYG")
+        lqd   = _g("LQD")
+        tnx   = _g("^TNX")
+        irx   = _g("^IRX")
+
+        signals: List[Dict] = []
+
+        def _add(name, value_str, sig, color, score, weight, desc):
+            signals.append({
+                "name": name, "value": value_str,
+                "signal": sig, "color": color,
+                "score": score, "weight": weight, "desc": desc,
+            })
+
+        # ① S&P500 52週高値からの下落率
+        if len(sp) >= 50:
+            high_52w = float(sp.rolling(252, min_periods=50).max().iloc[-1])
+            cur      = float(sp.iloc[-1])
+            dd       = (cur / high_52w - 1) * 100
+            if dd <= -20:
+                sig, col, pts = "🔴 弱気相場入り",  "#ef4444", 0
+            elif dd <= -10:
+                sig, col, pts = "🟠 調整局面",      "#f97316", 25
+            elif dd <= -5:
+                sig, col, pts = "🟡 軽微な調整",    "#f59e0b", 55
+            else:
+                sig, col, pts = "🟢 正常レンジ",    "#22c55e", 90
+            _add("S&P500 高値比", f"{dd:+.1f}%", sig, col, pts, 2.5,
+                 "-20%到達で弱気相場確定。-10%は調整局面。")
+
+        # ② VIX 水準
+        if len(vix) >= 5:
+            vv = float(vix.iloc[-1])
+            if vv >= 40:
+                sig, col, pts = "🔴 パニック",      "#ef4444", 0
+            elif vv >= 30:
+                sig, col, pts = "🔴 高恐怖",        "#ef4444", 15
+            elif vv >= 22:
+                sig, col, pts = "🟠 警戒",          "#f97316", 40
+            elif vv >= 16:
+                sig, col, pts = "🟡 やや高め",      "#f59e0b", 65
+            else:
+                sig, col, pts = "🟢 安定",          "#22c55e", 90
+            _add("VIX 恐怖指数", f"{vv:.1f}", sig, col, pts, 1.5,
+                 "30超で高恐怖。暴落時は40-80台まで上昇する。")
+
+        # ③ VIX期間構造（VIX3M/VIX）— 逆イールドは極端な恐怖
+        if len(vix) >= 5 and len(vix3m) >= 5:
+            common = vix.index.intersection(vix3m.index)
+            if len(common) >= 5:
+                ratio = float(vix3m.loc[common].iloc[-1]) / max(float(vix.loc[common].iloc[-1]), 0.01)
+                if ratio < 0.90:
+                    sig, col, pts = "🔴 VIX逆イールド（パニック）", "#ef4444", 5
+                elif ratio < 1.00:
+                    sig, col, pts = "🟠 VIXフラット（警戒）",       "#f97316", 35
+                else:
+                    sig, col, pts = "🟢 VIX順イールド（安定）",     "#22c55e", 85
+                _add("VIX期間構造 VIX3M/VIX", f"{ratio:.2f}x", sig, col, pts, 1.0,
+                     "1.0未満（逆イールド）は極度の恐怖・短期パニックのサイン。")
+
+        # ④ 信用スプレッド（HYG vs LQD 20日パフォーマンス差）
+        if len(hyg) >= 22 and len(lqd) >= 22:
+            common = hyg.index.intersection(lqd.index)
+            if len(common) >= 22:
+                hyg_r  = (float(hyg.loc[common].iloc[-1]) / float(hyg.loc[common].iloc[-22]) - 1) * 100
+                lqd_r  = (float(lqd.loc[common].iloc[-1]) / float(lqd.loc[common].iloc[-22]) - 1) * 100
+                spread = hyg_r - lqd_r
+                if spread <= -4:
+                    sig, col, pts = "🔴 信用収縮",     "#ef4444", 5
+                elif spread <= -2:
+                    sig, col, pts = "🟠 信用やや悪化", "#f97316", 30
+                elif spread <= 0:
+                    sig, col, pts = "🟡 中立",         "#f59e0b", 60
+                else:
+                    sig, col, pts = "🟢 リスク選好",   "#22c55e", 88
+                _add("信用スプレッド HY-IG", f"{spread:+.1f}%pt", sig, col, pts, 1.5,
+                     "HY債がIG債より大幅下落 = 企業信用収縮。景気後退の先行指標。")
+
+        # ⑤ イールドカーブ（10年 - 3ヶ月）
+        if len(tnx) >= 5 and len(irx) >= 5:
+            common = tnx.index.intersection(irx.index)
+            if len(common) >= 5:
+                yc = float(tnx.loc[common].iloc[-1]) - float(irx.loc[common].iloc[-1])
+                if yc <= -1.5:
+                    sig, col, pts = "🔴 深い逆イールド",  "#ef4444", 10
+                elif yc <= 0:
+                    sig, col, pts = "🟠 逆イールド",      "#f97316", 30
+                elif yc <= 0.5:
+                    sig, col, pts = "🟡 フラット",        "#f59e0b", 58
+                else:
+                    sig, col, pts = "🟢 順イールド",      "#22c55e", 85
+                _add("イールドカーブ 10y-3m", f"{yc:+.2f}%", sig, col, pts, 1.5,
+                     "逆イールドは過去8回中8回で景気後退を12-18ヶ月先行して発生。")
+
+        # ⑥ S&P500モメンタム（3M・6M）
+        if len(sp) >= 130:
+            r3m = (float(sp.iloc[-1]) / float(sp.iloc[-66])  - 1) * 100
+            r6m = (float(sp.iloc[-1]) / float(sp.iloc[-130]) - 1) * 100
+            if r3m < -15 or r6m < -20:
+                sig, col, pts = "🔴 モメンタム崩壊",  "#ef4444", 5
+            elif r3m < -8 or r6m < -12:
+                sig, col, pts = "🟠 下降トレンド",    "#f97316", 28
+            elif r3m < -2:
+                sig, col, pts = "🟡 軟調",            "#f59e0b", 55
+            elif r3m < 5:
+                sig, col, pts = "🟡 横ばい",          "#f59e0b", 65
+            else:
+                sig, col, pts = "🟢 上昇トレンド",    "#22c55e", 88
+            _add("価格モメンタム", f"3M {r3m:+.1f}% / 6M {r6m:+.1f}%",
+                 sig, col, pts, 1.0,
+                 "継続的な下落はトレンド転換を示す。3M・6M両方マイナスは要警戒。")
+
+        # ⑦ サームルール（Alpha Vantage 失業率データがあれば）
+        if ALPHA_VANTAGE_KEY:
+            try:
+                r_av = requests.get(
+                    "https://www.alphavantage.co/query",
+                    params={"function": "UNEMPLOYMENT", "apikey": ALPHA_VANTAGE_KEY},
+                    timeout=8,
+                )
+                if r_av.status_code == 200:
+                    u_data = r_av.json().get("data", [])
+                    if len(u_data) >= 13:
+                        u_vals = [float(x["value"]) for x in u_data[:13]]
+                        u_3m_avg    = sum(u_vals[:3]) / 3
+                        u_12m_low   = min(u_vals[1:13])
+                        sahm_val    = u_3m_avg - u_12m_low
+                        u_current   = u_vals[0]
+                        if sahm_val >= 0.5:
+                            sig, col, pts = "🔴 景気後退シグナル発動",  "#ef4444", 0
+                        elif sahm_val >= 0.3:
+                            sig, col, pts = "🟠 警戒域に接近",         "#f97316", 25
+                        elif sahm_val >= 0.1:
+                            sig, col, pts = "🟡 軽微な上昇",           "#f59e0b", 60
+                        else:
+                            sig, col, pts = "🟢 正常",                  "#22c55e", 90
+                        _add(
+                            "サームルール（失業率）",
+                            f"現在 {u_current:.1f}% / トリガー差 {sahm_val:+.2f}%pt",
+                            sig, col, pts, 2.0,
+                            "失業率3ヶ月平均 - 過去12ヶ月最低値 ≥ 0.5% で景気後退シグナル。"
+                            "クロードサームが考案。過去8回すべての後退を捉えた。"
+                        )
+            except Exception:
+                pass
+
+        if not signals:
+            return {"ok": False, "reason": "データ取得失敗"}
+
+        total_score  = sum(s["score"]  * s["weight"] for s in signals)
+        total_weight = sum(s["weight"] for s in signals)
+        composite    = total_score / total_weight
+
+        if composite >= 72:
+            verdict, vc = "🟢 弱気相場リスク: 低",  "#22c55e"
+            detail = "主要指標は安定しています。急な下落を示すシグナルは限定的です。"
+        elif composite >= 48:
+            verdict, vc = "🟡 弱気相場リスク: 中",  "#f59e0b"
+            detail = "一部の指標に警戒シグナルが出ています。過度なリスクを避けた姿勢が適切です。"
+        elif composite >= 25:
+            verdict, vc = "🔴 弱気相場リスク: 高",  "#ef4444"
+            detail = "複数の先行指標が弱気を示しています。防御的なポジションを検討してください。"
+        else:
+            verdict, vc = "🔴 弱気相場リスク: 非常に高",  "#dc2626"
+            detail = "ほぼすべての指標が危険域にあります。強い防御姿勢が必要です。"
+
+        return {
+            "ok":          True,
+            "signals":     signals,
+            "composite":   round(composite, 1),
+            "verdict":     verdict,
+            "verdict_color": vc,
+            "detail":      detail,
+        }
+
+    except Exception as e:
+        logger.error(f"compute_bear_market_risk: {e}")
+        return {"ok": False, "reason": str(e)[:200]}
+
+
+def render_bear_market_checker():
+    """🐻 弱気相場リスク判定セクション"""
+    st.markdown('<a id="bear-risk"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#1a0a0a,#2d0a0a,#1a0a1a);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
+        '<div style="font-size:20px;font-weight:800;color:#fca5a5">'
+        '🐻 弱気相場リスク判定</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        'S&P500高値比・VIX・信用スプレッド・イールドカーブ等の複合指標でリスクを評価します。'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.spinner("市場リスク指標を取得中..."):
+        data = compute_bear_market_risk()
+
+    if not data.get("ok"):
+        st.warning(f"データ取得失敗: {data.get('reason', '不明')}")
+        return
+
+    composite = data["composite"]
+    verdict   = data["verdict"]
+    vc        = data["verdict_color"]
+    detail    = data["detail"]
+    signals   = data["signals"]
+
+    # ── 総合判定バー ──────────────────────────────────────────
+    bar_pct  = int(composite)
+    bar_col  = "#22c55e" if composite >= 72 else ("#f59e0b" if composite >= 48 else "#ef4444")
+    st.markdown(
+        f'<div style="margin-bottom:14px">'
+        f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
+        f'<div style="font-size:22px;font-weight:900;color:{vc}">{verdict}</div>'
+        f'<div style="font-size:28px;font-weight:900;color:{vc}">{composite:.0f}<span style="font-size:14px;color:#64748b">/100</span></div>'
+        f'</div>'
+        f'<div style="background:#1e293b;border-radius:6px;height:10px;overflow:hidden">'
+        f'<div style="width:{bar_pct}%;height:100%;background:{bar_col};border-radius:6px;transition:width 0.5s"></div>'
+        f'</div>'
+        f'<div style="font-size:12px;color:#94a3b8;margin-top:5px">{detail}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 個別シグナルカード ────────────────────────────────────
+    cols = st.columns(min(len(signals), 3))
+    for i, sig in enumerate(signals):
+        with cols[i % 3]:
+            st.markdown(
+                f'<div style="border:1px solid {sig["color"]}44;background:{sig["color"]}10;'
+                f'border-radius:8px;padding:10px 12px;margin-bottom:8px;">'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:600">{sig["name"]}</div>'
+                f'<div style="font-size:16px;font-weight:800;color:{sig["color"]};margin:3px 0">'
+                f'{sig["signal"]}</div>'
+                f'<div style="font-size:13px;color:#cbd5e1;font-weight:700">{sig["value"]}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">{sig["desc"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── 判断ガイド ─────────────────────────────────────────────
+    with st.expander("📖 スコアの見方・指標の説明"):
+        st.markdown("""
+| スコア | 判定 | 意味 |
+|--------|------|------|
+| 72〜100 | 🟢 低リスク | 主要指標が安定。通常の市場環境。 |
+| 48〜71 | 🟡 中リスク | 一部に警戒シグナル。慎重な運用を。 |
+| 25〜47 | 🔴 高リスク | 複数の先行指標が悪化。防御的に。 |
+| 0〜24 | 🔴 非常に高 | ほぼ全指標が危険域。強い警戒が必要。 |
+
+**スコア計算の重み**
+- S&P500高値比 (2.5x) — 最も直接的な弱気相場指標
+- サームルール (2.0x) — 失業率による景気後退判定（AVキー必要）
+- VIX (1.5x) / 信用スプレッド (1.5x) / イールドカーブ (1.5x)
+- VIX期間構造 (1.0x) / 価格モメンタム (1.0x)
+
+> ⚠️ このスコアは参考指標です。投資判断はご自身の責任で行ってください。
+        """)
+
+    # ── 雇用統計連携メモ ──────────────────────────────────────
+    st.info(
+        "💡 **雇用統計（NFP）との関係**: "
+        "単発の雇用統計で弱気相場が始まることはまれです。"
+        "ただし「NFP大幅miss + サームルール接近 + VIX急騰 + イールドカーブ逆転」が重なると"
+        "転換点になりやすい傾向があります。上記の複数指標を組み合わせて判断してください。"
+    )
+
+
 def render_momentum_ranking():
     """🚀 モメンタム上位 / 下位 銘柄ランキング"""
+    st.markdown('<a id="momentum"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0d1117,#161b22,#1f2937);'
         'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
@@ -7962,6 +8280,7 @@ def _fetch_sp500_event_volatility() -> Dict[str, Any]:
 
 def render_economic_events_section():
     """📅 米国経済イベントカレンダー × ボラティリティ分析セクション"""
+    st.markdown('<a id="eco-calendar"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);'
         'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
@@ -8251,7 +8570,7 @@ def render_economic_events_section():
 
 def render_market_summary():
     """📊 Today's Market Snapshot — Fear & Greed より前に表示する全体概要"""
-
+    st.markdown('<a id="market-snapshot"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0f172a,#1e293b);'
         'border-radius:12px;padding:16px 22px;margin-bottom:6px;">'
@@ -15173,6 +15492,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     render_economic_events_section()
 
     # ===================================================
+    # ★ 弱気相場リスク判定
+    # ===================================================
+    render_bear_market_checker()
+
+    # ===================================================
     # ★ モメンタムランキング（日経225 / ナスダック）
     # ===================================================
     render_momentum_ranking()
@@ -15180,6 +15504,7 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
     # ===================================================
+    st.markdown('<a id="fear-greed"></a>', unsafe_allow_html=True)
     st.header("😱 Fear & Greed Index")
     tab_us, tab_jp = st.tabs(["🇺🇸 米国版", "🇯🇵 日本版"])
 
