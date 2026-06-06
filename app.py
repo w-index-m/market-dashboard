@@ -896,6 +896,7 @@ DASHBOARD_LINKS_TOP_HTML = """
     <span style="font-size:11px;color:#888;font-weight:700;white-space:nowrap;">📍 このページ内</span>
     <a class="nav-btn" href="#market-snapshot">📊 マーケット</a>
     <a class="nav-btn" href="#eco-calendar">📅 経済イベント</a>
+    <a class="nav-btn" href="#macro">🌐 マクロ指標</a>
     <a class="nav-btn" href="#bear-risk">🐻 弱気判定</a>
     <a class="nav-btn" href="#momentum">🚀 モメンタム</a>
     <a class="nav-btn" href="#fear-greed">😱 Fear&amp;Greed</a>
@@ -16387,6 +16388,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ 米国経済イベントカレンダー × ボラティリティ
     # ===================================================
     render_economic_events_section()
+
+    # ===================================================
+    # ★ マクロ経済指標（CAPE / LEI / PCE）
+    # ===================================================
+    render_macro_indicators()
 
     # ===================================================
     # ★ 弱気相場リスク判定
