@@ -7717,74 +7717,88 @@ def compute_bear_market_risk() -> Dict[str, Any]:
 
 _FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
-@st.cache_data(ttl=3600 * 12, show_spinner=False)
-def fetch_macro_indicators() -> Dict[str, Any]:
-    """CAPE(Shiller P/E) / Conference Board LEI / PCE を取得"""
-    result: Dict[str, Any] = {}
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
+    """CAPE(Shiller P/E) / OECD CLI / PCE を取得。
+    fred_key をパラメータにすることでキー変更時にキャッシュが自動無効化される。"""
+    result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
     def _fred(series_id: str, limit: int = 14) -> list:
-        if not FRED_API_KEY:
+        if not fred_key:
             return []
         try:
             r = requests.get(_FRED_BASE, params={
                 "series_id": series_id,
-                "api_key": FRED_API_KEY,
+                "api_key": fred_key,
                 "file_type": "json",
                 "limit": limit,
                 "sort_order": "desc",
-            }, timeout=12)
+            }, timeout=15)
             if r.status_code == 200:
                 obs = r.json().get("observations", [])
                 return [(o["date"], float(o["value"]))
-                        for o in obs if o.get("value", ".") != "."]
+                        for o in obs if o.get("value") not in (".", None, "")]
+            else:
+                result["_errors"][series_id] = f"HTTP {r.status_code}"
         except Exception as e:
-            logger.warning(f"FRED {series_id}: {e}")
+            result["_errors"][series_id] = str(e)[:120]
         return []
 
-    # ① CAPE (Shiller P/E) — multpl.com（APIキー不要）
-    try:
-        r = requests.get(
-            "https://www.multpl.com/shiller-pe/table/by-month",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=12,
-        )
-        if r.status_code == 200:
-            tables = pd.read_html(r.text)
-            if tables:
-                df = tables[0]
-                df.columns = ["date", "value"]
-                df["value"] = pd.to_numeric(
-                    df["value"].astype(str)
-                    .str.replace(",", "", regex=False)
-                    .str.strip(),
-                    errors="coerce",
-                )
-                df = df.dropna(subset=["value"]).reset_index(drop=True)
-                if not df.empty:
-                    current = float(df.iloc[0]["value"])
-                    hist = [
-                        (str(df.iloc[i]["date"]), float(df.iloc[i]["value"]))
-                        for i in range(min(36, len(df)))
-                    ]
+    # ① CAPE — FRED "CAPE" 優先、フォールバックで multpl.com (BS4)
+    cape_obs = _fred("CAPE", limit=3)
+    if cape_obs:
+        result["cape"] = {
+            "value": cape_obs[0][1],
+            "date": cape_obs[0][0],
+            "avg_lt": 17.0,
+            "source": "FRED",
+        }
+        result["_ok"].append("cape")
+    else:
+        try:
+            from bs4 import BeautifulSoup
+            r = requests.get(
+                "https://www.multpl.com/shiller-pe/table/by-month",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "lxml")
+                rows = soup.select("table tbody tr")
+                vals = []
+                for row in rows:
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        date_txt = cells[0].get_text(strip=True)
+                        val_txt  = cells[1].get_text(strip=True).replace(",", "")
+                        try:
+                            vals.append((date_txt, float(val_txt)))
+                        except ValueError:
+                            pass
+                if vals:
                     result["cape"] = {
-                        "value": current,
-                        "date": str(df.iloc[0]["date"]),
-                        "history": list(reversed(hist)),
+                        "value": vals[0][1],
+                        "date": vals[0][0],
                         "avg_lt": 17.0,
+                        "source": "multpl.com",
                     }
-    except Exception as e:
-        logger.warning(f"CAPE fetch: {e}")
+                    result["_ok"].append("cape")
+                else:
+                    result["_errors"]["cape_multpl"] = "テーブル行が見つかりません"
+            else:
+                result["_errors"]["cape_multpl"] = f"HTTP {r.status_code}"
+        except Exception as e:
+            result["_errors"]["cape_multpl"] = str(e)[:120]
 
-    # ② OECD Composite Leading Indicator (CLI) — FRED USALOLITONOSTSAM
-    # ※ Conference Board LEI (USSLIND) は2023年にFREDから廃止済みのため OECD CLIで代替
+    # ② OECD CLI — FRED USALOLITONOSTSAM（Conference Board LEIはFREDで2023年廃止）
     lei_obs = _fred("USALOLITONOSTSAM", limit=24)
     if not lei_obs:
-        lei_obs = _fred("USSLIND", limit=24)  # 旧シリーズのフォールバック
+        lei_obs = _fred("USSLIND", limit=24)
     if lei_obs:
         latest_v = lei_obs[0][1]
-        prev_v = lei_obs[1][1] if len(lei_obs) > 1 else None
-        mom = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
-        streak = 0
+        prev_v   = lei_obs[1][1] if len(lei_obs) > 1 else None
+        mom      = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
+        streak   = 0
         for i in range(len(lei_obs) - 1):
             if lei_obs[i][1] < lei_obs[i + 1][1]:
                 streak += 1
@@ -7792,29 +7806,29 @@ def fetch_macro_indicators() -> Dict[str, Any]:
                 break
         result["lei"] = {
             "value": latest_v,
-            "date": lei_obs[0][0],
-            "mom": mom,
+            "date":  lei_obs[0][0],
+            "mom":   mom,
             "streak_down": streak,
-            "history": list(reversed(lei_obs)),
         }
+        result["_ok"].append("lei")
 
     # ③ PCE — FRED PCEPI / PCEPILFE
     for sid, key in [("PCEPI", "pce"), ("PCEPILFE", "core_pce")]:
         obs = _fred(sid, limit=14)
         if len(obs) >= 2:
             latest = obs[0][1]
-            prev = obs[1][1]
-            mom = ((latest - prev) / abs(prev) * 100) if prev else None
-            yoy = None
+            prev   = obs[1][1]
+            mom    = ((latest - prev) / abs(prev) * 100) if prev else None
+            yoy    = None
             if len(obs) >= 13:
-                yr_ago = obs[12][1]
-                yoy = (latest - yr_ago) / yr_ago * 100
+                yoy = (latest - obs[12][1]) / obs[12][1] * 100
             result[key] = {
                 "value": latest,
-                "date": obs[0][0],
-                "yoy": yoy,
-                "mom": mom,
+                "date":  obs[0][0],
+                "yoy":   yoy,
+                "mom":   mom,
             }
+            result["_ok"].append(key)
 
     return result
 
@@ -7834,26 +7848,26 @@ def render_macro_indicators():
     )
 
     with st.spinner("マクロ指標を取得中..."):
-        macro = fetch_macro_indicators()
-
-    if not macro:
-        st.warning("⚠️ マクロ指標の取得に失敗しました。")
-        return
+        macro = fetch_macro_indicators(fred_key=FRED_API_KEY)
 
     cape  = macro.get("cape")
     lei   = macro.get("lei")
     pce   = macro.get("pce")
     cpce  = macro.get("core_pce")
+    errs  = macro.get("_errors", {})
+    ok    = macro.get("_ok", [])
 
-    # ── FRED APIキー未設定の案内 ──────────────────────────────
-    if not FRED_API_KEY and not cape:
-        st.info(
-            "💡 **FRED API キーを設定するとLEI・PCEが表示されます**\n\n"
-            "1. [fred.stlouisfed.org](https://fred.stlouisfed.org) で無料登録\n"
-            "2. API Keys ページでキーを発行\n"
-            "3. Streamlit Cloud の Secrets に `FRED_API_KEY = \"your_key\"` を追加"
-        )
-        return
+    # ── 診断パネル ────────────────────────────────────────────
+    if errs or not ok:
+        with st.expander("🔧 取得状況診断", expanded=not ok):
+            if not FRED_API_KEY:
+                st.warning("FRED_API_KEY が未設定です。LEI・PCE・CAPEはFREDキーがあると取得できます。")
+            if ok:
+                st.success(f"✅ 取得成功: {', '.join(ok)}")
+            for sid, msg in errs.items():
+                st.error(f"❌ {sid}: {msg}")
+            if not ok and not errs:
+                st.info("全指標でデータ取得を試みましたが結果がありません。再起動をお試しください。")
 
     # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
     col_cape, col_lei, col_pce = st.columns(3)
@@ -8028,12 +8042,13 @@ def render_macro_indicators():
             "| **2.0%以下** | 積極的利下げ余地あり |"
         )
 
-    # ── FRED APIキー設定案内（キーなしの場合）──────────────────
+    # ── FRED APIキー未設定の案内 ────────────────────────────────
     if not FRED_API_KEY:
         st.info(
-            "💡 **LEI・PCEを表示するには FRED API キーが必要です（無料）**\n\n"
-            "1. [fred.stlouisfed.org/docs/api/api_key.html](https://fred.stlouisfed.org/docs/api/api_key.html) で登録\n"
-            "2. Streamlit Cloud の Secrets に追加: `FRED_API_KEY = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"`"
+            "💡 **LEI・PCE・CAPEをFREDから取得するには FRED API キーが必要です（無料）**\n\n"
+            "1. [fred.stlouisfed.org](https://fred.stlouisfed.org) で無料アカウント作成\n"
+            "2. My Account → API Keys でキーを発行\n"
+            "3. Streamlit Cloud Secrets に追加: `FRED_API_KEY = \"your_key_here\"`"
         )
 
 
