@@ -7715,47 +7715,34 @@ def compute_bear_market_risk() -> Dict[str, Any]:
         return {"ok": False, "reason": str(e)[:200]}
 
 
-_FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
-
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
-def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
-    """CAPE(Shiller P/E) / OECD CLI / PCE を取得。
-    fred_key をパラメータにすることでキー変更時にキャッシュが自動無効化される。"""
+def fetch_macro_indicators() -> Dict[str, Any]:
+    """CAPE / OECD CLI / Core PCE を取得（APIキー不要・FRED CSV方式）"""
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
-    # キーの先頭4文字を診断用に記録（空かどうか確認できる）
-    result["_key_prefix"] = fred_key[:4] + "..." if len(fred_key) >= 4 else f"(len={len(fred_key)})"
-
-    def _fred(series_id: str, limit: int = 14) -> list:
-        if not fred_key:
-            return []
+    def _fred_csv(series_id: str, n_rows: int = 14) -> list:
+        """FREDのCSVエンドポイント（APIキー不要）から直近データを取得"""
         try:
-            r = requests.get(_FRED_BASE, params={
-                "series_id": series_id,
-                "api_key": fred_key,
-                "file_type": "json",
-                "limit": limit,
-                "sort_order": "desc",
-            }, timeout=15)
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+            r = requests.get(url, timeout=15,
+                             headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code == 200:
-                obs = r.json().get("observations", [])
-                return [(o["date"], float(o["value"]))
-                        for o in obs if o.get("value") not in (".", None, "")]
+                from io import StringIO
+                df = pd.read_csv(StringIO(r.text))
+                df.columns = ["date", "value"]
+                df["value"] = pd.to_numeric(df["value"], errors="coerce")
+                df = df.dropna(subset=["value"]).sort_values("date", ascending=False)
+                return list(zip(df["date"].tolist(), df["value"].tolist()))[:n_rows]
             else:
-                # エラー本文も記録してFREDの詳細メッセージを確認可能に
-                try:
-                    err_msg = r.json().get("error_message", r.text[:150])
-                except Exception:
-                    err_msg = r.text[:150]
-                result["_errors"][series_id] = f"HTTP {r.status_code}: {err_msg}"
+                result["_errors"][series_id] = f"HTTP {r.status_code}"
         except Exception as e:
             result["_errors"][series_id] = str(e)[:120]
         return []
 
-    # ① CAPE — multpl.com (BS4) をメインに、FRED "CAPE" をフォールバック
+    # ① CAPE — multpl.com (BS4 → pd.read_html フォールバック)
     try:
         from bs4 import BeautifulSoup
-        from io import StringIO
+        from io import StringIO as _SIO
         r_cape = requests.get(
             "https://www.multpl.com/shiller-pe/table/by-month",
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
@@ -7763,7 +7750,6 @@ def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
         )
         if r_cape.status_code == 200:
             soup = BeautifulSoup(r_cape.text, "lxml")
-            # datatable id または最初のtableのどちらかを試みる
             table = soup.find("table", {"id": "datatable"}) or soup.find("table")
             vals = []
             if table:
@@ -7776,57 +7762,33 @@ def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
                             vals.append((date_txt, float(val_txt)))
                         except ValueError:
                             pass
+            if not vals:
+                tables = pd.read_html(_SIO(r_cape.text))
+                if tables:
+                    df = tables[0].iloc[:, :2]
+                    df.columns = ["date", "value"]
+                    df["value"] = pd.to_numeric(
+                        df["value"].astype(str).str.replace(",", "", regex=False).str.strip(),
+                        errors="coerce",
+                    )
+                    df = df.dropna(subset=["value"])
+                    vals = list(zip(df["date"].astype(str), df["value"]))
             if vals:
                 result["cape"] = {
-                    "value": vals[0][1],
-                    "date":  vals[0][0],
+                    "value":  vals[0][1],
+                    "date":   vals[0][0],
                     "avg_lt": 17.0,
-                    "source": "multpl.com",
                 }
                 result["_ok"].append("cape")
             else:
-                # pd.read_html でリトライ
-                try:
-                    tables = pd.read_html(StringIO(r_cape.text))
-                    if tables:
-                        df = tables[0]
-                        df.columns = [str(c) for c in df.columns]
-                        # 最初の2列を date/value とみなす
-                        df = df.iloc[:, :2]
-                        df.columns = ["date", "value"]
-                        df["value"] = pd.to_numeric(
-                            df["value"].astype(str).str.replace(",", "", regex=False).str.strip(),
-                            errors="coerce",
-                        )
-                        df = df.dropna(subset=["value"])
-                        if not df.empty:
-                            result["cape"] = {
-                                "value": float(df.iloc[0]["value"]),
-                                "date":  str(df.iloc[0]["date"]),
-                                "avg_lt": 17.0,
-                                "source": "multpl.com(html)",
-                            }
-                            result["_ok"].append("cape")
-                        else:
-                            result["_errors"]["cape_multpl"] = f"HTML取得成功だがデータなし (rows={len(tables[0])})"
-                except Exception as e2:
-                    result["_errors"]["cape_multpl"] = f"BS4失敗 + read_html失敗: {e2}"
+                result["_errors"]["cape"] = "テーブル行が取得できませんでした"
         else:
-            result["_errors"]["cape_multpl"] = f"HTTP {r_cape.status_code}"
+            result["_errors"]["cape"] = f"multpl.com HTTP {r_cape.status_code}"
     except Exception as e:
-        result["_errors"]["cape_multpl"] = str(e)[:120]
-    # FREDにCAPEがある場合のフォールバック
-    if "cape" not in result:
-        cape_obs = _fred("CAPE", limit=3)
-        if cape_obs:
-            result["cape"] = {"value": cape_obs[0][1], "date": cape_obs[0][0],
-                              "avg_lt": 17.0, "source": "FRED"}
-            result["_ok"].append("cape")
+        result["_errors"]["cape"] = str(e)[:120]
 
-    # ② OECD CLI — FRED USALOLITONOSTSAM（Conference Board LEIはFREDで2023年廃止）
-    lei_obs = _fred("USALOLITONOSTSAM", limit=24)
-    if not lei_obs:
-        lei_obs = _fred("USSLIND", limit=24)
+    # ② OECD CLI — FRED CSV（APIキー不要）
+    lei_obs = _fred_csv("USALOLITONOSTSAM", n_rows=24)
     if lei_obs:
         latest_v = lei_obs[0][1]
         prev_v   = lei_obs[1][1] if len(lei_obs) > 1 else None
@@ -7845,9 +7807,9 @@ def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
         }
         result["_ok"].append("lei")
 
-    # ③ PCE — FRED PCEPI / PCEPILFE
+    # ③ PCE — FRED CSV（APIキー不要）
     for sid, key in [("PCEPI", "pce"), ("PCEPILFE", "core_pce")]:
-        obs = _fred(sid, limit=14)
+        obs = _fred_csv(sid, n_rows=14)
         if len(obs) >= 2:
             latest = obs[0][1]
             prev   = obs[1][1]
@@ -7881,7 +7843,7 @@ def render_macro_indicators():
     )
 
     with st.spinner("マクロ指標を取得中..."):
-        macro = fetch_macro_indicators(fred_key=FRED_API_KEY)
+        macro = fetch_macro_indicators()
 
     cape  = macro.get("cape")
     lei   = macro.get("lei")
@@ -7893,18 +7855,13 @@ def render_macro_indicators():
     # ── 診断パネル ────────────────────────────────────────────
     if errs or not ok:
         with st.expander("🔧 取得状況診断", expanded=not ok):
-            key_prefix = macro.get("_key_prefix", "(不明)")
-            if not FRED_API_KEY:
-                st.warning("FRED_API_KEY が未設定です。")
-            else:
-                st.info(f"🔑 FRED_API_KEY 先頭4文字: `{key_prefix}` — 正しいキーか確認してください")
+            st.info("FRED CSV方式（APIキー不要）でデータ取得中")
             if ok:
                 st.success(f"✅ 取得成功: {', '.join(ok)}")
             for sid, msg in errs.items():
                 st.error(f"❌ {sid}: {msg}")
             if not ok and not errs:
                 st.info("全指標でデータ取得を試みましたが結果がありません。再起動をお試しください。")
-            st.caption("HTTP 400 が全系列で出る場合はFREDキーが無効です。fred.stlouisfed.orgで新しいキーを発行してください。")
 
     # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
     col_cape, col_lei, col_pce = st.columns(3)
