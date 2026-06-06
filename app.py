@@ -7723,6 +7723,9 @@ def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
     fred_key をパラメータにすることでキー変更時にキャッシュが自動無効化される。"""
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
+    # キーの先頭4文字を診断用に記録（空かどうか確認できる）
+    result["_key_prefix"] = fred_key[:4] + "..." if len(fred_key) >= 4 else f"(len={len(fred_key)})"
+
     def _fred(series_id: str, limit: int = 14) -> list:
         if not fred_key:
             return []
@@ -7739,56 +7742,86 @@ def fetch_macro_indicators(fred_key: str = "") -> Dict[str, Any]:
                 return [(o["date"], float(o["value"]))
                         for o in obs if o.get("value") not in (".", None, "")]
             else:
-                result["_errors"][series_id] = f"HTTP {r.status_code}"
+                # エラー本文も記録してFREDの詳細メッセージを確認可能に
+                try:
+                    err_msg = r.json().get("error_message", r.text[:150])
+                except Exception:
+                    err_msg = r.text[:150]
+                result["_errors"][series_id] = f"HTTP {r.status_code}: {err_msg}"
         except Exception as e:
             result["_errors"][series_id] = str(e)[:120]
         return []
 
-    # ① CAPE — FRED "CAPE" 優先、フォールバックで multpl.com (BS4)
-    cape_obs = _fred("CAPE", limit=3)
-    if cape_obs:
-        result["cape"] = {
-            "value": cape_obs[0][1],
-            "date": cape_obs[0][0],
-            "avg_lt": 17.0,
-            "source": "FRED",
-        }
-        result["_ok"].append("cape")
-    else:
-        try:
-            from bs4 import BeautifulSoup
-            r = requests.get(
-                "https://www.multpl.com/shiller-pe/table/by-month",
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-                timeout=15,
-            )
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "lxml")
-                rows = soup.select("table tbody tr")
-                vals = []
-                for row in rows:
+    # ① CAPE — multpl.com (BS4) をメインに、FRED "CAPE" をフォールバック
+    try:
+        from bs4 import BeautifulSoup
+        from io import StringIO
+        r_cape = requests.get(
+            "https://www.multpl.com/shiller-pe/table/by-month",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=15,
+        )
+        if r_cape.status_code == 200:
+            soup = BeautifulSoup(r_cape.text, "lxml")
+            # datatable id または最初のtableのどちらかを試みる
+            table = soup.find("table", {"id": "datatable"}) or soup.find("table")
+            vals = []
+            if table:
+                for row in table.find_all("tr"):
                     cells = row.find_all("td")
                     if len(cells) >= 2:
                         date_txt = cells[0].get_text(strip=True)
-                        val_txt  = cells[1].get_text(strip=True).replace(",", "")
+                        val_txt  = cells[1].get_text(strip=True).replace(",", "").strip()
                         try:
                             vals.append((date_txt, float(val_txt)))
                         except ValueError:
                             pass
-                if vals:
-                    result["cape"] = {
-                        "value": vals[0][1],
-                        "date": vals[0][0],
-                        "avg_lt": 17.0,
-                        "source": "multpl.com",
-                    }
-                    result["_ok"].append("cape")
-                else:
-                    result["_errors"]["cape_multpl"] = "テーブル行が見つかりません"
+            if vals:
+                result["cape"] = {
+                    "value": vals[0][1],
+                    "date":  vals[0][0],
+                    "avg_lt": 17.0,
+                    "source": "multpl.com",
+                }
+                result["_ok"].append("cape")
             else:
-                result["_errors"]["cape_multpl"] = f"HTTP {r.status_code}"
-        except Exception as e:
-            result["_errors"]["cape_multpl"] = str(e)[:120]
+                # pd.read_html でリトライ
+                try:
+                    tables = pd.read_html(StringIO(r_cape.text))
+                    if tables:
+                        df = tables[0]
+                        df.columns = [str(c) for c in df.columns]
+                        # 最初の2列を date/value とみなす
+                        df = df.iloc[:, :2]
+                        df.columns = ["date", "value"]
+                        df["value"] = pd.to_numeric(
+                            df["value"].astype(str).str.replace(",", "", regex=False).str.strip(),
+                            errors="coerce",
+                        )
+                        df = df.dropna(subset=["value"])
+                        if not df.empty:
+                            result["cape"] = {
+                                "value": float(df.iloc[0]["value"]),
+                                "date":  str(df.iloc[0]["date"]),
+                                "avg_lt": 17.0,
+                                "source": "multpl.com(html)",
+                            }
+                            result["_ok"].append("cape")
+                        else:
+                            result["_errors"]["cape_multpl"] = f"HTML取得成功だがデータなし (rows={len(tables[0])})"
+                except Exception as e2:
+                    result["_errors"]["cape_multpl"] = f"BS4失敗 + read_html失敗: {e2}"
+        else:
+            result["_errors"]["cape_multpl"] = f"HTTP {r_cape.status_code}"
+    except Exception as e:
+        result["_errors"]["cape_multpl"] = str(e)[:120]
+    # FREDにCAPEがある場合のフォールバック
+    if "cape" not in result:
+        cape_obs = _fred("CAPE", limit=3)
+        if cape_obs:
+            result["cape"] = {"value": cape_obs[0][1], "date": cape_obs[0][0],
+                              "avg_lt": 17.0, "source": "FRED"}
+            result["_ok"].append("cape")
 
     # ② OECD CLI — FRED USALOLITONOSTSAM（Conference Board LEIはFREDで2023年廃止）
     lei_obs = _fred("USALOLITONOSTSAM", limit=24)
@@ -7860,14 +7893,18 @@ def render_macro_indicators():
     # ── 診断パネル ────────────────────────────────────────────
     if errs or not ok:
         with st.expander("🔧 取得状況診断", expanded=not ok):
+            key_prefix = macro.get("_key_prefix", "(不明)")
             if not FRED_API_KEY:
-                st.warning("FRED_API_KEY が未設定です。LEI・PCE・CAPEはFREDキーがあると取得できます。")
+                st.warning("FRED_API_KEY が未設定です。")
+            else:
+                st.info(f"🔑 FRED_API_KEY 先頭4文字: `{key_prefix}` — 正しいキーか確認してください")
             if ok:
                 st.success(f"✅ 取得成功: {', '.join(ok)}")
             for sid, msg in errs.items():
                 st.error(f"❌ {sid}: {msg}")
             if not ok and not errs:
                 st.info("全指標でデータ取得を試みましたが結果がありません。再起動をお試しください。")
+            st.caption("HTTP 400 が全系列で出る場合はFREDキーが無効です。fred.stlouisfed.orgで新しいキーを発行してください。")
 
     # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
     col_cape, col_lei, col_pce = st.columns(3)
