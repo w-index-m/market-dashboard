@@ -7717,23 +7717,42 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     """CAPE / OECD CLI / Core PCE を取得（APIキー不要・FRED CSV方式）"""
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
-    def _fred_csv(series_id: str, n_rows: int = 14) -> list:
+    def _fred_csv(series_id: str, n_rows: int = 60) -> list:
         """FREDのCSVエンドポイント（APIキー不要）から直近データを取得"""
         try:
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            r = requests.get(url, timeout=15,
-                             headers={"User-Agent": "Mozilla/5.0"})
+            r = requests.get(url, timeout=20,
+                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             if r.status_code == 200:
                 from io import StringIO
-                df = pd.read_csv(StringIO(r.text))
+                text = r.text.strip()
+                if not text:
+                    result["_errors"][series_id] = "空のレスポンス"
+                    return []
+                df = pd.read_csv(StringIO(text))
+                if df.shape[1] < 2:
+                    result["_errors"][series_id] = f"列不足: {list(df.columns)}"
+                    return []
                 df.columns = ["date", "value"]
+                # "." はFREDの欠損値表記 → NaN に変換
+                df["value"] = pd.to_numeric(
+                    df["value"].astype(str).str.replace(".", "", regex=False).where(
+                        df["value"].astype(str) != ".", other=float("nan")
+                    ),
+                    errors="coerce",
+                )
                 df["value"] = pd.to_numeric(df["value"], errors="coerce")
-                df = df.dropna(subset=["value"]).sort_values("date", ascending=False)
-                return list(zip(df["date"].tolist(), df["value"].tolist()))[:n_rows]
+                df_ok = df.dropna(subset=["value"]).sort_values("date", ascending=False)
+                if df_ok.empty:
+                    # 全行がNaN — サンプルを記録して診断できるようにする
+                    sample = df["value"].head(5).tolist()
+                    result["_errors"][series_id] = f"有効データなし（全{len(df)}行がNaN）。先頭サンプル: {sample}"
+                    return []
+                return list(zip(df_ok["date"].tolist(), df_ok["value"].tolist()))[:n_rows]
             else:
-                result["_errors"][series_id] = f"HTTP {r.status_code}"
+                result["_errors"][series_id] = f"HTTP {r.status_code}: {r.text[:80]}"
         except Exception as e:
-            result["_errors"][series_id] = str(e)[:120]
+            result["_errors"][series_id] = f"{type(e).__name__}: {str(e)[:120]}"
         return []
 
     # ① CAPE — multpl.com (BS4 → pd.read_html フォールバック)
@@ -7850,15 +7869,21 @@ def render_macro_indicators():
     ok    = macro.get("_ok", [])
 
     # ── 診断パネル ────────────────────────────────────────────
-    if errs or not ok:
-        with st.expander("🔧 取得状況診断", expanded=not ok):
-            st.info("FRED CSV方式（APIキー不要）でデータ取得中")
-            if ok:
-                st.success(f"✅ 取得成功: {', '.join(ok)}")
-            for sid, msg in errs.items():
-                st.error(f"❌ {sid}: {msg}")
-            if not ok and not errs:
-                st.info("全指標でデータ取得を試みましたが結果がありません。再起動をお試しください。")
+    missing = [x for x in ("cape", "lei", "core_pce") if x not in ok]
+    with st.expander("🔧 マクロ指標 取得状況", expanded=bool(missing)):
+        st.caption("FRED CSV方式（APIキー不要）・multpl.com スクレイピング")
+        all_keys = {"cape": "CAPE", "lei": "OECD CLI", "pce": "PCE", "core_pce": "Core PCE"}
+        for k, label in all_keys.items():
+            if k in ok:
+                st.success(f"✅ {label}: 取得成功")
+            else:
+                # 関連するエラーキーを探す
+                series_map = {"lei": "USALOLITONOSTSAM", "pce": "PCEPI", "core_pce": "PCEPILFE", "cape": "cape"}
+                err_key = series_map.get(k, k)
+                err_msg = errs.get(err_key, "エラー詳細なし（サイレント失敗）")
+                st.error(f"❌ {label}: {err_msg}")
+        if not errs and not ok:
+            st.warning("全指標で結果なし。キャッシュクリアボタン（サイドバー）を押してください。")
 
     # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
     col_cape, col_lei, col_pce = st.columns(3)
@@ -7933,13 +7958,13 @@ def render_macro_indicators():
                 unsafe_allow_html=True,
             )
         else:
+            _lei_err = errs.get("USALOLITONOSTSAM", "取得失敗（詳細不明）")
             st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;'
+                '<div style="background:#1e293b;border:1px solid #475569;'
                 'border-radius:10px;padding:14px;text-align:center;">'
                 '<div style="font-size:11px;color:#94a3b8">OECD 景気先行指数 (CLI)</div>'
-                '<div style="font-size:14px;color:#64748b;margin-top:8px">'
-                + ("取得中..." if FRED_API_KEY else "FRED_API_KEY 要設定") +
-                '</div>'
+                '<div style="font-size:13px;color:#ef4444;margin-top:8px">取得失敗</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px;word-break:break-all">{_lei_err[:80]}</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -7976,13 +8001,13 @@ def render_macro_indicators():
                 unsafe_allow_html=True,
             )
         else:
+            _pce_err = errs.get("PCEPILFE", errs.get("PCEPI", "取得失敗（詳細不明）"))
             st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;'
+                '<div style="background:#1e293b;border:1px solid #475569;'
                 'border-radius:10px;padding:14px;text-align:center;">'
                 '<div style="font-size:11px;color:#94a3b8">Core PCE インフレ</div>'
-                '<div style="font-size:14px;color:#64748b;margin-top:8px">'
-                + ("取得中..." if FRED_API_KEY else "FRED_API_KEY 要設定") +
-                '</div>'
+                '<div style="font-size:13px;color:#ef4444;margin-top:8px">取得失敗</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px;word-break:break-all">{_pce_err[:80]}</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
