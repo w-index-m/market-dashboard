@@ -64,12 +64,8 @@ except ImportError:
     def inject_client_info_collector():
         pass
 
-# ── streamlit-analytics2 ─────────────────────────────────
-try:
-    import streamlit_analytics2 as streamlit_analytics
-    ANALYTICS2_AVAILABLE = True
-except ImportError:
-    ANALYTICS2_AVAILABLE = False
+# streamlit-analytics2 は削除済み（Streamlit互換性バグのため）
+ANALYTICS2_AVAILABLE = False
 
 
 
