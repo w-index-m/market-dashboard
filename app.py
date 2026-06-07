@@ -8142,13 +8142,15 @@ def render_bear_market_checker():
 
 # ── 光通信 vs 半導体 バスケット定義 ──────────────────────────────────
 _OPTICAL_BASKET: list[tuple[str, str]] = [
-    ("CIEN",  "Ciena（光NW）"),
-    ("COHR",  "Coherent（光部品）"),
-    ("LITE",  "Lumentum（光部品）"),
-    ("VIAV",  "Viavi（光試験）"),
-    ("AAOI",  "AAOI（トランシーバ）"),
-    ("IIVI",  "II-VI → COHR"),      # 旧IIVI、COHRに吸収（データが残っている場合のみ）
-    ("FNSR",  "Finisar"),
+    ("CIEN",   "Ciena（光NW）"),
+    ("COHR",   "Coherent（光部品）"),
+    ("LITE",   "Lumentum（光部品）"),
+    ("VIAV",   "Viavi（光試験）"),
+    ("AAOI",   "AAOI（トランシーバ）"),
+    ("ATXI",   "ATXI（光インフラ）"),
+    ("5803.T", "フジクラ（光ファイバー・JPY）"),
+    ("IIVI",   "II-VI → COHR"),      # 旧IIVI、データが残っている場合のみ
+    ("FNSR",   "Finisar"),
 ]
 
 _SEMI_BASKET: list[tuple[str, str]] = [
@@ -8400,13 +8402,16 @@ def render_optical_vs_semi():
 | **COHR** | 光部品 | 800G/1.6T 光トランシーバ、VCSEL（旧II-VI） |
 | **LITE** | 光部品 | 光コンポーネント・3Dセンシング |
 | **VIAV** | 光試験 | 光ファイバー試験・測定機器 |
-| **AAOI** | 光トランシーバ | データセンター向け高速トランシーバ |
+| **AAOI** | 光トランシーバ | データセンター向け高速トランシーバ（AI DC集中投資で急騰） |
+| **ATXI** | 光インフラ | 光通信インフラ関連（データ取得可能な場合のみ表示） |
+| **フジクラ（5803.T）** | 光ファイバー | 世界首位級の光ファイバーケーブルメーカー（JPY建て・為替影響含む） |
 | **SMH** | 半導体ETF | NVDA/TSMC/AVGO等を含む半導体業界代表ETF |
 | **NVDA** | GPU/AI半導体 | AI学習・推論GPU、データセンター主力 |
 | **AMD** | CPU/GPU | AI GPU（MI300X）・データセンターCPU |
 | **AVGO** | NW/AI半導体 | カスタムAIチップ（XPU）・データセンターNW IC |
         """)
         st.caption("💡 光通信は半導体より出遅れて動く傾向（GPU需要→データセンター拡張→光接続需要）があります。")
+        st.caption("⚠️ フジクラ（5803.T）はJPY建て。パフォーマンス比較には円安・円高の影響が含まれます。")
 
 
 def render_momentum_ranking():
