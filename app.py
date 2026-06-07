@@ -7765,53 +7765,72 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     except Exception as e:
         result["_errors"]["cape"] = str(e)[:120]
 
-    # ② OECD CLI — OECD SDMX API（FREDを経由しない直接エンドポイント）
-    try:
-        oecd_url = (
-            "https://sdmx.oecd.org/public/rest/data/"
-            "OECD.SDD.STES,DSD_KEI@DF_KEI,4.0/"
-            "USA.LOLITONOSTSAM......M"
-            "?startPeriod=2022-01&format=csvfilewithlabels&detail=dataonly"
-        )
-        r_oecd = requests.get(
-            oecd_url, timeout=15,
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,application/csv,*/*"},
-        )
-        if r_oecd.status_code == 200:
-            from io import StringIO as _SIO2
-            df_o = pd.read_csv(_SIO2(r_oecd.text))
-            # OECD CSV の列は TIME_PERIOD と OBS_VALUE
-            tp_col  = next((c for c in df_o.columns if "TIME" in c.upper()), None)
-            obs_col = next((c for c in df_o.columns if "OBS_VALUE" in c.upper() or "VALUE" in c.upper()), None)
-            if tp_col and obs_col:
-                df_o = df_o[[tp_col, obs_col]].copy()
-                df_o.columns = ["date", "value"]
-                df_o["value"] = pd.to_numeric(df_o["value"], errors="coerce")
-                df_o = df_o.dropna(subset=["value"]).sort_values("date", ascending=False)
-                if not df_o.empty:
-                    lei_rows = list(zip(df_o["date"].tolist(), df_o["value"].tolist()))
-                    latest_v = lei_rows[0][1]
-                    prev_v   = lei_rows[1][1] if len(lei_rows) > 1 else None
-                    mom      = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
-                    streak   = 0
-                    for i in range(len(lei_rows) - 1):
-                        if lei_rows[i][1] < lei_rows[i + 1][1]:
-                            streak += 1
-                        else:
-                            break
-                    result["lei"] = {
-                        "value": latest_v, "date": lei_rows[0][0],
-                        "mom": mom, "streak_down": streak,
-                    }
-                    result["_ok"].append("lei")
-                else:
-                    result["_errors"]["OECD_CLI"] = "有効データなし（全行NaN）"
+    # ② OECD CLI — 旧 stats.oecd.org REST API → 失敗時は yfinance イールドカーブで代替
+    def _parse_lei_rows(lei_rows: list):
+        latest_v = lei_rows[0][1]
+        prev_v   = lei_rows[1][1] if len(lei_rows) > 1 else None
+        mom      = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
+        streak   = 0
+        for i in range(len(lei_rows) - 1):
+            if lei_rows[i][1] < lei_rows[i + 1][1]:
+                streak += 1
             else:
-                result["_errors"]["OECD_CLI"] = f"列名不明: {list(df_o.columns)[:5]}"
-        else:
-            result["_errors"]["OECD_CLI"] = f"HTTP {r_oecd.status_code}: {r_oecd.text[:80]}"
+                break
+        return {"value": latest_v, "date": lei_rows[0][0], "mom": mom, "streak_down": streak}
+
+    _lei_fetched = False
+
+    # 試行 A: 旧 OECD stats API（MEI_CLI データセット）
+    try:
+        url_a = (
+            "https://stats.oecd.org/restsdmx/sdmx.ashx/GetData/"
+            "MEI_CLI/LOLITONOSTSAM.USA.ST.M/OECD"
+            "?startTime=2022&contentType=csv"
+        )
+        r_a = requests.get(url_a, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        if r_a.status_code == 200:
+            from io import StringIO as _SIO2
+            df_a = pd.read_csv(_SIO2(r_a.text))
+            tp  = next((c for c in df_a.columns if "TIME" in c.upper() or "PERIOD" in c.upper()), None)
+            val = next((c for c in df_a.columns if "VALUE" in c.upper() or "OBS" in c.upper()), None)
+            if tp and val:
+                df_a = df_a[[tp, val]].copy()
+                df_a.columns = ["date", "value"]
+                df_a["value"] = pd.to_numeric(df_a["value"], errors="coerce")
+                df_a = df_a.dropna(subset=["value"]).sort_values("date", ascending=False)
+                if not df_a.empty:
+                    result["lei"] = _parse_lei_rows(list(zip(df_a["date"], df_a["value"])))
+                    result["_ok"].append("lei")
+                    _lei_fetched = True
+        if not _lei_fetched:
+            result["_errors"]["OECD_A"] = f"HTTP {r_a.status_code} / 列={list(df_a.columns)[:4] if 'df_a' in dir() else '?'}"
     except Exception as e:
-        result["_errors"]["OECD_CLI"] = f"{type(e).__name__}: {str(e)[:120]}"
+        result["_errors"]["OECD_A"] = f"{type(e).__name__}: {str(e)[:80]}"
+
+    # 試行 B: yfinance イールドカーブ（10Y - 3M スプレッド）を LEI 代替として使用
+    if not _lei_fetched:
+        try:
+            _yc = yf.download(["^TNX", "^IRX"], period="2y",
+                               auto_adjust=True, progress=False)["Close"]
+            _tnx = _yc["^TNX"].dropna()
+            _irx = _yc["^IRX"].dropna()
+            _spread = (_tnx - _irx).dropna()
+            if len(_spread) >= 2:
+                latest_v = float(_spread.iloc[-1])
+                prev_v   = float(_spread.iloc[-2])
+                mom      = latest_v - prev_v
+                date_str = _spread.index[-1].strftime("%Y-%m-%d")
+                result["lei"] = {
+                    "value": round(latest_v, 2),
+                    "date":  date_str,
+                    "mom":   round(mom, 3),
+                    "streak_down": 0,
+                    "_is_yield_curve": True,   # カード表示で判定用
+                }
+                result["_ok"].append("lei")
+                _lei_fetched = True
+        except Exception as e:
+            result["_errors"]["OECD_CLI"] = f"OECD+YC両方失敗: {str(e)[:80]}"
 
     # ③ インフレ指標 — BLS API（FREDの代替。カレンダーと同じAPIで疎通確認済み）
     #    CUSR0000SA0     = CPI All Items（ヘッドライン、PCE代替）
@@ -7979,34 +7998,54 @@ def render_macro_indicators():
     # ② LEI カード
     with col_lei:
         if lei:
-            mom = lei.get("mom")
-            streak = lei.get("streak_down", 0)
-            if streak >= 6:
-                l_color, l_label, l_icon = "#ef4444", f"⚠️ {streak}ヶ月連続低下", "🔴"
-            elif streak >= 3:
-                l_color, l_label, l_icon = "#f59e0b", f"注意 {streak}ヶ月低下", "🟡"
-            elif mom and mom > 0:
-                l_color, l_label, l_icon = "#22c55e", "拡張", "🟢"
+            is_yc   = lei.get("_is_yield_curve", False)
+            mom     = lei.get("mom")
+            streak  = lei.get("streak_down", 0)
+            val     = lei["value"]
+
+            if is_yc:
+                # イールドカーブ（10Y-3M スプレッド）モード
+                card_title = "イールドカーブ（10Y-3M）"
+                val_str    = f"{val:+.2f}%"
+                mom_str    = f"{mom:+.3f}pt" if mom is not None else "—"
+                if val >= 1.0:
+                    l_color, l_label, l_icon = "#22c55e", "順イールド・拡張", "🟢"
+                elif val >= 0:
+                    l_color, l_label, l_icon = "#f59e0b", "フラット・注意", "🟡"
+                else:
+                    l_color, l_label, l_icon = "#ef4444", "逆イールド・景気後退警戒", "🔴"
+                sub_str = f"前日差 {mom_str} | {lei['date']}"
             else:
-                l_color, l_label, l_icon = "#94a3b8", "横ばい", "⬜"
-            mom_str = f"{mom:+.2f}%" if mom is not None else "—"
+                # OECD CLI モード
+                card_title = "OECD 景気先行指数"
+                val_str    = f"{val:.1f}"
+                mom_str    = f"{mom:+.2f}%" if mom is not None else "—"
+                if streak >= 6:
+                    l_color, l_label, l_icon = "#ef4444", f"⚠️ {streak}ヶ月連続低下", "🔴"
+                elif streak >= 3:
+                    l_color, l_label, l_icon = "#f59e0b", f"注意 {streak}ヶ月低下", "🟡"
+                elif mom and mom > 0:
+                    l_color, l_label, l_icon = "#22c55e", "拡張", "🟢"
+                else:
+                    l_color, l_label, l_icon = "#94a3b8", "横ばい", "⬜"
+                sub_str = f"前月比 {mom_str} | {lei['date']}"
+
             st.markdown(
                 f'<div style="background:#1e293b;border:1px solid {l_color};'
                 f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Conference Board LEI</div>'
-                f'<div style="font-size:32px;font-weight:900;color:{l_color};margin:4px 0">{lei["value"]:.1f}</div>'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">{card_title}</div>'
+                f'<div style="font-size:32px;font-weight:900;color:{l_color};margin:4px 0">{val_str}</div>'
                 f'<div style="font-size:11px;color:#cbd5e1">{l_icon} {l_label}</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
-                f'前月比 {mom_str} | {lei["date"]}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:4px">{sub_str}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
         else:
-            _lei_err = errs.get("USALOLITONOSTSAM", "取得失敗（詳細不明）")
+            _lei_err = errs.get("OECD_CLI", errs.get("OECD_A", "取得失敗（詳細不明）"))
             st.markdown(
                 '<div style="background:#1e293b;border:1px solid #475569;'
                 'border-radius:10px;padding:14px;text-align:center;">'
-                '<div style="font-size:11px;color:#94a3b8">OECD 景気先行指数 (CLI)</div>'
+                '<div style="font-size:11px;color:#94a3b8">景気先行指数</div>'
                 '<div style="font-size:13px;color:#ef4444;margin-top:8px">取得失敗</div>'
                 f'<div style="font-size:10px;color:#64748b;margin-top:4px;word-break:break-all">{_lei_err[:80]}</div>'
                 '</div>',
