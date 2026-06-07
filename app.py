@@ -8913,8 +8913,13 @@ def _fetch_sp500_event_volatility() -> Dict[str, Any]:
     return result
 
 
-def render_economic_events_section():
-    """📅 米国経済イベントカレンダー × ボラティリティ分析セクション"""
+def render_economic_events_section(preloaded: dict | None = None):
+    """📅 米国経済イベントカレンダー × ボラティリティ分析セクション
+
+    preloaded: main() で事前並列取得したデータ辞書。
+        {"reactions": dict, "fmp": dict, "bls": dict, "fred": dict}
+    None の場合は従来どおり逐次取得する。
+    """
     st.markdown('<a id="eco-calendar"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);'
@@ -8934,23 +8939,38 @@ def render_economic_events_section():
         days_ahead = st.slider("今後何日分を表示", 7, 60, 30, key="eco_days_ahead")
         events = _get_upcoming_us_eco_events(days_back=180, days_ahead=days_ahead)
 
-        # 過去イベントの株価反応データ（S&P500当日リターン）
-        reactions = _fetch_event_market_reactions()
-        # 経済指標実績・予想データ（FMP優先 → BLS fallback）
-        eco_actuals = _fetch_eco_actuals_fmp()
-        _fmp_has_data = any(
-            isinstance(v, dict) for k, v in eco_actuals.items()
-            if not k.startswith("_")
-        )
-        if not _fmp_has_data:
-            _bls = _fetch_eco_actuals_bls()
-            for _k, _v in _bls.items():
+        if preloaded is not None:
+            # 事前並列取得済みデータを使用（待ち時間なし）
+            reactions   = preloaded["reactions"]
+            eco_actuals = dict(preloaded["fmp"])
+            _fmp_has_data = any(
+                isinstance(v, dict) for k, v in eco_actuals.items()
+                if not k.startswith("_")
+            )
+            if not _fmp_has_data:
+                for _k, _v in preloaded["bls"].items():
+                    if _k not in eco_actuals:
+                        eco_actuals[_k] = _v
+            for _k, _v in preloaded["fred"].items():
                 if _k not in eco_actuals:
                     eco_actuals[_k] = _v
-        _fred = _fetch_eco_actuals_fred()
-        for _k, _v in _fred.items():
-            if _k not in eco_actuals:
-                eco_actuals[_k] = _v
+        else:
+            # fallback: 逐次取得
+            reactions = _fetch_event_market_reactions()
+            eco_actuals = _fetch_eco_actuals_fmp()
+            _fmp_has_data = any(
+                isinstance(v, dict) for k, v in eco_actuals.items()
+                if not k.startswith("_")
+            )
+            if not _fmp_has_data:
+                _bls = _fetch_eco_actuals_bls()
+                for _k, _v in _bls.items():
+                    if _k not in eco_actuals:
+                        eco_actuals[_k] = _v
+            _fred = _fetch_eco_actuals_fred()
+            for _k, _v in _fred.items():
+                if _k not in eco_actuals:
+                    eco_actuals[_k] = _v
         has_fmp = bool(eco_actuals)
 
         now_jst = datetime.now(JST)
@@ -9134,7 +9154,7 @@ def render_economic_events_section():
                 })
         jp_events.sort(key=lambda x: x["jst_dt"])
 
-        jp_actuals = _fetch_eco_actuals_fred()
+        jp_actuals = preloaded["fred"] if preloaded is not None else _fetch_eco_actuals_fred()
 
         impact_color_jp = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
         impact_label_jp = {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}
@@ -16413,9 +16433,17 @@ OPENROUTER_API_KEY = "sk-or-..."
     render_market_summary()
 
     # ===================================================
-    # ★ 米国経済イベントカレンダー × ボラティリティ
+    # ★ 米国経済イベントカレンダー（バックグラウンド並列取得）
+    # カレンダーデータを4スレッドで並列フェッチしながら
+    # 後続セクションを先にレンダリングして表示速度を改善する
     # ===================================================
-    render_economic_events_section()
+    _cal_executor = ThreadPoolExecutor(max_workers=4)
+    _f_reactions  = _cal_executor.submit(_fetch_event_market_reactions)
+    _f_fmp        = _cal_executor.submit(_fetch_eco_actuals_fmp)
+    _f_bls        = _cal_executor.submit(_fetch_eco_actuals_bls)
+    _f_fred       = _cal_executor.submit(_fetch_eco_actuals_fred)
+    # プレースホルダーを配置（後で埋める）
+    _calendar_placeholder = st.empty()
 
     # ===================================================
     # ★ マクロ経済指標（CAPE / LEI / PCE）
@@ -17120,6 +17148,19 @@ OPENROUTER_API_KEY = "sk-or-..."
         streamlit_analytics.stop_tracking(
             unsafe_password=None,
         )
+
+    # ── カレンダーセクションをプレースホルダーに埋め込む ──────
+    # 後続セクションの描画が終わった時点でスレッドの結果を回収する。
+    # キャッシュ済みなら即時返却、初回でも並列フェッチ中に他のセクションが描画済み。
+    _preloaded = {
+        "reactions": _f_reactions.result(),
+        "fmp":       _f_fmp.result(),
+        "bls":       _f_bls.result(),
+        "fred":      _f_fred.result(),
+    }
+    _cal_executor.shutdown(wait=False)
+    with _calendar_placeholder.container():
+        render_economic_events_section(preloaded=_preloaded)
 
 
 if __name__ == "__main__":
