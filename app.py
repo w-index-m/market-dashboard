@@ -8319,18 +8319,38 @@ def render_optical_vs_semi():
     fig.update_layout(
         paper_bgcolor="#0f172a",
         plot_bgcolor="#0f172a",
-        font=dict(color="#e2e8f0"),
+        font=dict(color="#e2e8f0", family="sans-serif"),
         height=420,
         margin=dict(l=10, r=10, t=30, b=10),
         yaxis=dict(
-            title="パフォーマンス（期間開始=100）",
+            title=dict(text="パフォーマンス（期間開始=100）", font=dict(color="#e2e8f0")),
             gridcolor="#1e293b",
+            tickcolor="#e2e8f0",
+            tickfont=dict(color="#e2e8f0"),
+            linecolor="#334155",
             ticksuffix="",
         ),
-        xaxis=dict(gridcolor="#1e293b"),
-        legend=dict(orientation="h", y=-0.25, font=dict(size=11)),
+        xaxis=dict(
+            gridcolor="#1e293b",
+            tickcolor="#e2e8f0",
+            tickfont=dict(color="#e2e8f0"),
+            linecolor="#334155",
+        ),
+        legend=dict(
+            orientation="h",
+            y=-0.30,
+            font=dict(size=11, color="#e2e8f0"),
+            bgcolor="rgba(15,23,42,0.8)",
+            bordercolor="#334155",
+            borderwidth=1,
+        ),
         showlegend=True,
         hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#1e293b",
+            font=dict(color="#e2e8f0"),
+            bordercolor="#334155",
+        ),
     )
     st.plotly_chart(fig, use_container_width=True)
 
