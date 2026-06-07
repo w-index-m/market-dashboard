@@ -7714,46 +7714,12 @@ def compute_bear_market_risk() -> Dict[str, Any]:
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
 def fetch_macro_indicators() -> Dict[str, Any]:
-    """CAPE / OECD CLI / Core PCE を取得（APIキー不要・FRED CSV方式）"""
+    """CAPE / OECD CLI / インフレ指標を取得
+    - CAPE    : multpl.com スクレイピング
+    - OECD CLI: OECD SDMX API（FRED不使用）
+    - PCE代替 : BLS API — CPI / Core CPI（FRED接続不可のため代替）
+    """
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
-
-    def _fred_csv(series_id: str, n_rows: int = 60) -> list:
-        """FREDのCSVエンドポイント（APIキー不要）から直近データを取得"""
-        try:
-            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            r = requests.get(url, timeout=20,
-                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            if r.status_code == 200:
-                from io import StringIO
-                text = r.text.strip()
-                if not text:
-                    result["_errors"][series_id] = "空のレスポンス"
-                    return []
-                df = pd.read_csv(StringIO(text))
-                if df.shape[1] < 2:
-                    result["_errors"][series_id] = f"列不足: {list(df.columns)}"
-                    return []
-                df.columns = ["date", "value"]
-                # "." はFREDの欠損値表記 → NaN に変換
-                df["value"] = pd.to_numeric(
-                    df["value"].astype(str).str.replace(".", "", regex=False).where(
-                        df["value"].astype(str) != ".", other=float("nan")
-                    ),
-                    errors="coerce",
-                )
-                df["value"] = pd.to_numeric(df["value"], errors="coerce")
-                df_ok = df.dropna(subset=["value"]).sort_values("date", ascending=False)
-                if df_ok.empty:
-                    # 全行がNaN — サンプルを記録して診断できるようにする
-                    sample = df["value"].head(5).tolist()
-                    result["_errors"][series_id] = f"有効データなし（全{len(df)}行がNaN）。先頭サンプル: {sample}"
-                    return []
-                return list(zip(df_ok["date"].tolist(), df_ok["value"].tolist()))[:n_rows]
-            else:
-                result["_errors"][series_id] = f"HTTP {r.status_code}: {r.text[:80]}"
-        except Exception as e:
-            result["_errors"][series_id] = f"{type(e).__name__}: {str(e)[:120]}"
-        return []
 
     # ① CAPE — multpl.com (BS4 → pd.read_html フォールバック)
     try:
@@ -7790,11 +7756,7 @@ def fetch_macro_indicators() -> Dict[str, Any]:
                     df = df.dropna(subset=["value"])
                     vals = list(zip(df["date"].astype(str), df["value"]))
             if vals:
-                result["cape"] = {
-                    "value":  vals[0][1],
-                    "date":   vals[0][0],
-                    "avg_lt": 17.0,
-                }
+                result["cape"] = {"value": vals[0][1], "date": vals[0][0], "avg_lt": 17.0}
                 result["_ok"].append("cape")
             else:
                 result["_errors"]["cape"] = "テーブル行が取得できませんでした"
@@ -7803,43 +7765,125 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     except Exception as e:
         result["_errors"]["cape"] = str(e)[:120]
 
-    # ② OECD CLI — FRED CSV（APIキー不要）
-    lei_obs = _fred_csv("USALOLITONOSTSAM", n_rows=24)
-    if lei_obs:
-        latest_v = lei_obs[0][1]
-        prev_v   = lei_obs[1][1] if len(lei_obs) > 1 else None
-        mom      = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
-        streak   = 0
-        for i in range(len(lei_obs) - 1):
-            if lei_obs[i][1] < lei_obs[i + 1][1]:
-                streak += 1
+    # ② OECD CLI — OECD SDMX API（FREDを経由しない直接エンドポイント）
+    try:
+        oecd_url = (
+            "https://sdmx.oecd.org/public/rest/data/"
+            "OECD.SDD.STES,DSD_KEI@DF_KEI,4.0/"
+            "USA.LOLITONOSTSAM......M"
+            "?startPeriod=2022-01&format=csvfilewithlabels&detail=dataonly"
+        )
+        r_oecd = requests.get(
+            oecd_url, timeout=15,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,application/csv,*/*"},
+        )
+        if r_oecd.status_code == 200:
+            from io import StringIO as _SIO2
+            df_o = pd.read_csv(_SIO2(r_oecd.text))
+            # OECD CSV の列は TIME_PERIOD と OBS_VALUE
+            tp_col  = next((c for c in df_o.columns if "TIME" in c.upper()), None)
+            obs_col = next((c for c in df_o.columns if "OBS_VALUE" in c.upper() or "VALUE" in c.upper()), None)
+            if tp_col and obs_col:
+                df_o = df_o[[tp_col, obs_col]].copy()
+                df_o.columns = ["date", "value"]
+                df_o["value"] = pd.to_numeric(df_o["value"], errors="coerce")
+                df_o = df_o.dropna(subset=["value"]).sort_values("date", ascending=False)
+                if not df_o.empty:
+                    lei_rows = list(zip(df_o["date"].tolist(), df_o["value"].tolist()))
+                    latest_v = lei_rows[0][1]
+                    prev_v   = lei_rows[1][1] if len(lei_rows) > 1 else None
+                    mom      = ((latest_v - prev_v) / abs(prev_v) * 100) if prev_v else None
+                    streak   = 0
+                    for i in range(len(lei_rows) - 1):
+                        if lei_rows[i][1] < lei_rows[i + 1][1]:
+                            streak += 1
+                        else:
+                            break
+                    result["lei"] = {
+                        "value": latest_v, "date": lei_rows[0][0],
+                        "mom": mom, "streak_down": streak,
+                    }
+                    result["_ok"].append("lei")
+                else:
+                    result["_errors"]["OECD_CLI"] = "有効データなし（全行NaN）"
             else:
-                break
-        result["lei"] = {
-            "value": latest_v,
-            "date":  lei_obs[0][0],
-            "mom":   mom,
-            "streak_down": streak,
-        }
-        result["_ok"].append("lei")
+                result["_errors"]["OECD_CLI"] = f"列名不明: {list(df_o.columns)[:5]}"
+        else:
+            result["_errors"]["OECD_CLI"] = f"HTTP {r_oecd.status_code}: {r_oecd.text[:80]}"
+    except Exception as e:
+        result["_errors"]["OECD_CLI"] = f"{type(e).__name__}: {str(e)[:120]}"
 
-    # ③ PCE — FRED CSV（APIキー不要）
-    for sid, key in [("PCEPI", "pce"), ("PCEPILFE", "core_pce")]:
-        obs = _fred_csv(sid, n_rows=14)
-        if len(obs) >= 2:
-            latest = obs[0][1]
-            prev   = obs[1][1]
-            mom    = ((latest - prev) / abs(prev) * 100) if prev else None
-            yoy    = None
-            if len(obs) >= 13:
-                yoy = (latest - obs[12][1]) / obs[12][1] * 100
-            result[key] = {
-                "value": latest,
-                "date":  obs[0][0],
-                "yoy":   yoy,
-                "mom":   mom,
-            }
-            result["_ok"].append(key)
+    # ③ インフレ指標 — BLS API（FREDの代替。カレンダーと同じAPIで疎通確認済み）
+    #    CUSR0000SA0     = CPI All Items（ヘッドライン、PCE代替）
+    #    CUSR0000SA0L1E  = CPI ex Food & Energy（Core CPI、Core PCE代替）
+    try:
+        now_dt = datetime.now()
+        bls_resp = requests.post(
+            "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+            json={
+                "seriesid":  ["CUSR0000SA0", "CUSR0000SA0L1E"],
+                "startyear": str(now_dt.year - 3),
+                "endyear":   str(now_dt.year + 1),
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        if bls_resp.status_code == 200:
+            payload = bls_resp.json()
+            if payload.get("status") == "REQUEST_SUCCEEDED":
+                sid_map = {
+                    "CUSR0000SA0":    ("pce",      "CPI（ヘッドライン）"),
+                    "CUSR0000SA0L1E": ("core_pce", "Core CPI（食品・エネ除く）"),
+                }
+                for series in payload.get("Results", {}).get("series", []):
+                    sid  = series["seriesID"]
+                    key, _label = sid_map.get(sid, (None, None))
+                    if not key:
+                        continue
+                    # (year, month, value) の降順リストを作る
+                    items = []
+                    for item in series.get("data", []):
+                        period = item.get("period", "")
+                        if not period.startswith("M"):
+                            continue
+                        try:
+                            yr  = int(item["year"])
+                            mo  = int(period[1:])
+                            val = float(item["value"])
+                            items.append((yr, mo, val))
+                        except (ValueError, KeyError):
+                            pass
+                    items.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    if len(items) >= 13:
+                        latest = items[0][2]
+                        prev   = items[1][2]
+                        yr12   = items[12][2]
+                        mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+                        yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
+                        date_str = f"{items[0][0]}-{items[0][1]:02d}"
+                        result[key] = {
+                            "value": latest,
+                            "date":  date_str,
+                            "yoy":   yoy_pct,
+                            "mom":   mom_pct,
+                        }
+                        result["_ok"].append(key)
+                    elif len(items) >= 2:
+                        latest = items[0][2]
+                        prev   = items[1][2]
+                        mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+                        date_str = f"{items[0][0]}-{items[0][1]:02d}"
+                        result[key] = {
+                            "value": latest, "date": date_str,
+                            "yoy": None, "mom": mom_pct,
+                        }
+                        result["_ok"].append(key)
+            else:
+                result["_errors"]["BLS"] = f"status={payload.get('status')} msg={payload.get('message',[''])[0][:80]}"
+        else:
+            result["_errors"]["BLS"] = f"HTTP {bls_resp.status_code}"
+    except Exception as e:
+        result["_errors"]["BLS"] = f"{type(e).__name__}: {str(e)[:120]}"
 
     return result
 
@@ -7878,7 +7922,7 @@ def render_macro_indicators():
                 st.success(f"✅ {label}: 取得成功")
             else:
                 # 関連するエラーキーを探す
-                series_map = {"lei": "USALOLITONOSTSAM", "pce": "PCEPI", "core_pce": "PCEPILFE", "cape": "cape"}
+                series_map = {"lei": "OECD_CLI", "pce": "BLS", "core_pce": "BLS", "cape": "cape"}
                 err_key = series_map.get(k, k)
                 err_msg = errs.get(err_key, "エラー詳細なし（サイレント失敗）")
                 st.error(f"❌ {label}: {err_msg}")
@@ -7992,7 +8036,7 @@ def render_macro_indicators():
             st.markdown(
                 f'<div style="background:#1e293b;border:1px solid {p_color};'
                 f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core PCE（{val_label}）</div>'
+                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core CPI（{val_label}・PCE代替）</div>'
                 f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{val_str}</div>'
                 f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
                 f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
@@ -8005,7 +8049,7 @@ def render_macro_indicators():
             st.markdown(
                 '<div style="background:#1e293b;border:1px solid #475569;'
                 'border-radius:10px;padding:14px;text-align:center;">'
-                '<div style="font-size:11px;color:#94a3b8">Core PCE インフレ</div>'
+                '<div style="font-size:11px;color:#94a3b8">Core CPI インフレ（PCE代替）</div>'
                 '<div style="font-size:13px;color:#ef4444;margin-top:8px">取得失敗</div>'
                 f'<div style="font-size:10px;color:#64748b;margin-top:4px;word-break:break-all">{_pce_err[:80]}</div>'
                 '</div>',
