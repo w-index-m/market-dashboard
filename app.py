@@ -895,6 +895,7 @@ DASHBOARD_LINKS_TOP_HTML = """
     <a class="nav-btn" href="#macro">🌐 マクロ指標</a>
     <a class="nav-btn" href="#bear-risk">🐻 弱気判定</a>
     <a class="nav-btn" href="#momentum">🚀 モメンタム</a>
+    <a class="nav-btn" href="#optical-semi">📡 光通信vs半導体</a>
     <a class="nav-btn" href="#fear-greed">😱 Fear&amp;Greed</a>
     <a class="nav-btn" href="#sector">🔄 セクター</a>
     <a class="nav-btn" href="#nikkei-pred">🔮 日経予測</a>
@@ -8137,6 +8138,275 @@ def render_bear_market_checker():
         "ただし「NFP大幅miss + サームルール接近 + VIX急騰 + イールドカーブ逆転」が重なると"
         "転換点になりやすい傾向があります。上記の複数指標を組み合わせて判断してください。"
     )
+
+
+# ── 光通信 vs 半導体 バスケット定義 ──────────────────────────────────
+_OPTICAL_BASKET: list[tuple[str, str]] = [
+    ("CIEN",  "Ciena（光NW）"),
+    ("COHR",  "Coherent（光部品）"),
+    ("LITE",  "Lumentum（光部品）"),
+    ("VIAV",  "Viavi（光試験）"),
+    ("AAOI",  "AAOI（トランシーバ）"),
+    ("IIVI",  "II-VI → COHR"),      # 旧IIVI、COHRに吸収（データが残っている場合のみ）
+    ("FNSR",  "Finisar"),
+]
+
+_SEMI_BASKET: list[tuple[str, str]] = [
+    ("SMH",   "半導体ETF (SMH)"),
+    ("SOXX",  "半導体ETF (SOXX)"),
+    ("NVDA",  "NVIDIA"),
+    ("AMD",   "AMD"),
+    ("AVGO",  "Broadcom"),
+    ("INTC",  "Intel"),
+    ("QCOM",  "Qualcomm"),
+]
+
+
+@st.cache_data(ttl=3600 * 4, show_spinner=False)
+def _fetch_optical_vs_semi(period: str = "1y") -> dict:
+    """光通信バスケットと半導体バスケットの正規化パフォーマンスを返す"""
+    import yfinance as yf
+
+    optical_tickers = [t for t, _ in _OPTICAL_BASKET]
+    semi_tickers    = [t for t, _ in _SEMI_BASKET]
+    all_tickers     = optical_tickers + semi_tickers
+
+    try:
+        raw = yf.download(all_tickers, period=period, auto_adjust=True, progress=False)
+    except Exception:
+        return {}
+
+    # MultiIndex 対応
+    if isinstance(raw.columns, pd.MultiIndex):
+        close = raw["Close"] if "Close" in raw.columns.get_level_values(0) else raw.iloc[:, :len(all_tickers)]
+    else:
+        close = raw[["Close"]] if "Close" in raw.columns else raw
+
+    close = close.dropna(axis=1, how="all")
+
+    # 正規化（period 最初の有効行を 100 とする）
+    first_valid = close.ffill().bfill().iloc[0]
+    norm = (close / first_valid * 100).copy()
+
+    # 有効ティッカーを抽出
+    opt_valid  = [t for t in optical_tickers if t in norm.columns and norm[t].notna().sum() > 5]
+    semi_valid = [t for t in semi_tickers    if t in norm.columns and norm[t].notna().sum() > 5]
+
+    # 等加重バスケット
+    if opt_valid:
+        norm["【光通信バスケット】"] = norm[opt_valid].mean(axis=1)
+    if [t for t in semi_valid if t not in ("SMH", "SOXX")]:
+        norm["【個別半導体平均】"] = norm[[t for t in semi_valid if t not in ("SMH", "SOXX")]].mean(axis=1)
+
+    # 期間リターン計算
+    label_map  = {t: lbl for t, lbl in _OPTICAL_BASKET + _SEMI_BASKET}
+    label_map["【光通信バスケット】"] = "光通信バスケット（等加重）"
+    label_map["【個別半導体平均】"]   = "個別半導体平均（等加重）"
+
+    rets: dict[str, float] = {}
+    for col in norm.columns:
+        s = norm[col].dropna()
+        if len(s) >= 2:
+            rets[col] = round(float(s.iloc[-1]) - 100, 2)
+
+    return {
+        "norm":        norm,
+        "opt_valid":   opt_valid,
+        "semi_valid":  semi_valid,
+        "rets":        rets,
+        "label_map":   label_map,
+        "close":       close,
+    }
+
+
+def render_optical_vs_semi():
+    """📡 光通信・AI インフラ vs 半導体 パフォーマンス比較"""
+    st.markdown('<a id="optical-semi"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0a192f,#112240,#1d3a6e);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
+        '<div style="font-size:20px;font-weight:800;color:#f0f4f8;">'
+        '📡 光通信・AIインフラ vs 半導体 パフォーマンス比較</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">'
+        'AI データセンター投資の恩恵：光通信（CIEN/COHR/LITE等）と半導体（NVDA/AMD/SMH）の強さを比較します。'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    col_period, col_view = st.columns([3, 1])
+    with col_period:
+        period_map = {"1ヶ月": "1mo", "3ヶ月": "3mo", "6ヶ月": "6mo", "1年": "1y", "2年": "2y", "5年": "5y"}
+        period_lbl = st.radio("期間", list(period_map.keys()), index=3, horizontal=True, key="optsemi_period")
+        period = period_map[period_lbl]
+    with col_view:
+        show_individual = st.checkbox("個別銘柄を表示", value=False, key="optsemi_individual")
+
+    with st.spinner("パフォーマンスデータを取得中..."):
+        data = _fetch_optical_vs_semi(period)
+
+    if not data:
+        st.warning("データを取得できませんでした。しばらくしてから再試行してください。")
+        return
+
+    norm       = data["norm"]
+    opt_valid  = data["opt_valid"]
+    semi_valid = data["semi_valid"]
+    rets       = data["rets"]
+    label_map  = data["label_map"]
+
+    # ── パフォーマンスチャート ─────────────────────────────────────
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    OPTICAL_COLOR = "#38bdf8"   # 水色：光通信
+    SEMI_COLOR    = "#f59e0b"   # 橙色：半導体
+
+    # 個別光通信銘柄（細い補助線）
+    if show_individual:
+        for t in opt_valid:
+            if t in norm.columns:
+                fig.add_trace(go.Scatter(
+                    x=norm.index, y=norm[t],
+                    name=label_map.get(t, t),
+                    line=dict(width=1, dash="dot", color=OPTICAL_COLOR),
+                    opacity=0.45,
+                    legendgroup="optical",
+                    showlegend=True,
+                ))
+        for t in semi_valid:
+            if t in norm.columns and t not in ("SMH", "SOXX"):
+                fig.add_trace(go.Scatter(
+                    x=norm.index, y=norm[t],
+                    name=label_map.get(t, t),
+                    line=dict(width=1, dash="dot", color=SEMI_COLOR),
+                    opacity=0.45,
+                    legendgroup="semi",
+                    showlegend=True,
+                ))
+
+    # SMH / SOXX（半導体ETF — 太い線）
+    for etf in ("SMH", "SOXX"):
+        if etf in norm.columns:
+            fig.add_trace(go.Scatter(
+                x=norm.index, y=norm[etf],
+                name=label_map.get(etf, etf),
+                line=dict(width=2.5, color=SEMI_COLOR, dash="dash"),
+                legendgroup="semi",
+            ))
+
+    # 等加重バスケット（最も太い線）
+    if "【光通信バスケット】" in norm.columns:
+        fig.add_trace(go.Scatter(
+            x=norm.index, y=norm["【光通信バスケット】"],
+            name="光通信バスケット（等加重）",
+            line=dict(width=3.5, color=OPTICAL_COLOR),
+            legendgroup="optical",
+        ))
+    if "【個別半導体平均】" in norm.columns:
+        fig.add_trace(go.Scatter(
+            x=norm.index, y=norm["【個別半導体平均】"],
+            name="個別半導体平均（等加重）",
+            line=dict(width=3.5, color=SEMI_COLOR),
+            legendgroup="semi",
+        ))
+
+    # 基準線（100）
+    fig.add_hline(y=100, line_dash="dot", line_color="#475569", line_width=1)
+
+    fig.update_layout(
+        paper_bgcolor="#0f172a",
+        plot_bgcolor="#0f172a",
+        font=dict(color="#e2e8f0"),
+        height=420,
+        margin=dict(l=10, r=10, t=30, b=10),
+        yaxis=dict(
+            title="パフォーマンス（期間開始=100）",
+            gridcolor="#1e293b",
+            ticksuffix="",
+        ),
+        xaxis=dict(gridcolor="#1e293b"),
+        legend=dict(orientation="h", y=-0.25, font=dict(size=11)),
+        showlegend=True,
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── リターン比較テーブル ──────────────────────────────────────
+    st.markdown("#### 📊 期間リターン比較")
+
+    display_order = (
+        ["【光通信バスケット】"] + opt_valid +
+        ["【個別半導体平均】", "SMH", "SOXX"] +
+        [t for t in semi_valid if t not in ("SMH", "SOXX")]
+    )
+
+    rows_html = ""
+    for col in display_order:
+        if col not in rets:
+            continue
+        r = rets[col]
+        color = "#22c55e" if r >= 0 else "#ef4444"
+        arrow = "▲" if r >= 0 else "▼"
+        is_basket = col.startswith("【")
+        bg = "#1e3a5f" if "光通信" in col else ("#3d2a00" if "半導体" in col or col in ("SMH","SOXX") else "#1e293b")
+        weight = "font-weight:700;" if is_basket else ""
+        rows_html += (
+            f"<tr style='border-bottom:1px solid #334155;background:{bg};{weight}'>"
+            f"<td style='padding:8px 12px;color:#e2e8f0'>{label_map.get(col, col)}</td>"
+            f"<td style='padding:8px 12px;text-align:right;color:{color};font-weight:700'>"
+            f"{arrow} {abs(r):.1f}%</td>"
+            f"</tr>"
+        )
+
+    st.markdown(
+        f"<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+        f"<thead><tr style='color:#64748b;border-bottom:2px solid #334155'>"
+        f"<th style='padding:8px 12px;text-align:left'>銘柄 / バスケット</th>"
+        f"<th style='padding:8px 12px;text-align:right'>{period_lbl} リターン</th>"
+        f"</tr></thead><tbody>{rows_html}</tbody></table>",
+        unsafe_allow_html=True,
+    )
+
+    # ── 解説 ────────────────────────────────────────────────────
+    st.markdown("---")
+
+    opt_ret  = rets.get("【光通信バスケット】")
+    semi_ret = rets.get("SMH") or rets.get("【個別半導体平均】")
+
+    if opt_ret is not None and semi_ret is not None:
+        diff = opt_ret - semi_ret
+        if diff > 5:
+            verdict = f"📡 **光通信バスケットが半導体を {diff:+.1f}pt 上回っています。** AIデータセンター向け光接続需要（800G/1.6T トランシーバ）の拡大が主因と考えられます。"
+            verdict_color = "#38bdf8"
+        elif diff < -5:
+            verdict = f"🔬 **半導体（SMH）が光通信を {abs(diff):.1f}pt 上回っています。** GPUサイクルの直接的な恩恵が大きく、光通信はまだ出遅れ状態です。"
+            verdict_color = "#f59e0b"
+        else:
+            verdict = f"⚖️ **光通信と半導体は拮抗しています（差 {diff:+.1f}pt）。** AIインフラ投資の恩恵を両セクターが受けている局面です。"
+            verdict_color = "#a78bfa"
+        st.markdown(
+            f'<div style="background:#1e293b;border-left:4px solid {verdict_color};'
+            f'padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#e2e8f0">'
+            f'{verdict}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("📖 各銘柄の役割メモ", expanded=False):
+        st.markdown("""
+| 銘柄 | セクター | 役割 |
+|---|---|---|
+| **CIEN** | 光通信NW | データセンター間長距離光ネットワーク装置 |
+| **COHR** | 光部品 | 800G/1.6T 光トランシーバ、VCSEL（旧II-VI） |
+| **LITE** | 光部品 | 光コンポーネント・3Dセンシング |
+| **VIAV** | 光試験 | 光ファイバー試験・測定機器 |
+| **AAOI** | 光トランシーバ | データセンター向け高速トランシーバ |
+| **SMH** | 半導体ETF | NVDA/TSMC/AVGO等を含む半導体業界代表ETF |
+| **NVDA** | GPU/AI半導体 | AI学習・推論GPU、データセンター主力 |
+| **AMD** | CPU/GPU | AI GPU（MI300X）・データセンターCPU |
+| **AVGO** | NW/AI半導体 | カスタムAIチップ（XPU）・データセンターNW IC |
+        """)
+        st.caption("💡 光通信は半導体より出遅れて動く傾向（GPU需要→データセンター拡張→光接続需要）があります。")
 
 
 def render_momentum_ranking():
@@ -16459,6 +16729,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ モメンタムランキング（日経225 / ナスダック）
     # ===================================================
     render_momentum_ranking()
+
+    # ===================================================
+    # ★ 光通信・AIインフラ vs 半導体 パフォーマンス比較
+    # ===================================================
+    render_optical_vs_semi()
 
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
