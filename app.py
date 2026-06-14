@@ -931,6 +931,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#bear-risk",       "🐻 Bear Risk"),
             ("#momentum",        "🚀 Momentum"),
             ("#optical-semi",    "📡 Optical vs Semi"),
+            ("#earnings-forecast", "📊 Index Forecast"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
             ("#sector",          "🔄 Sectors"),
             ("#nikkei-pred",     "🔮 Nikkei Forecast"),
@@ -945,6 +946,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#bear-risk",       "🐻 弱気判定"),
             ("#momentum",        "🚀 モメンタム"),
             ("#optical-semi",    "📡 光通信vs半導体"),
+            ("#earnings-forecast", "📊 指数予測"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
             ("#sector",          "🔄 セクター"),
             ("#nikkei-pred",     "🔮 日経予測"),
@@ -8649,6 +8651,562 @@ def render_optical_vs_semi():
         """)
         st.caption("💡 光通信は半導体より出遅れて動く傾向（GPU需要→データセンター拡張→光接続需要）があります。")
         st.caption("⚠️ フジクラ（5803.T）はJPY建て。パフォーマンス比較には円安・円高の影響が含まれます。")
+
+
+# =====================================================================
+# 決算ベース指数予測（SOX・光通信バスケット）
+# =====================================================================
+_SEMI_FORECAST_TICKERS: list[tuple[str, str]] = [
+    ("NVDA", "NVIDIA"),
+    ("AMD",  "AMD"),
+    ("AVGO", "Broadcom"),
+    ("QCOM", "Qualcomm"),
+    ("INTC", "Intel"),
+    ("AMAT", "Applied Materials"),
+    ("MU",   "Micron"),
+]
+_OPTICAL_FORECAST_TICKERS: list[tuple[str, str]] = [
+    ("CIEN", "Ciena"),
+    ("COHR", "Coherent"),
+    ("LITE", "Lumentum"),
+    ("VIAV", "Viavi Solutions"),
+    ("AAOI", "AAOI"),
+]
+
+
+@st.cache_data(ttl=3600 * 3, show_spinner=False)
+def _fetch_earnings_forecast(tickers_json: str) -> dict:
+    """
+    代表銘柄のアナリスト目標株価・決算データを取得し、
+    バスケット指数の推定上限・中央・下限を算出する。
+    tickers_json: JSON文字列 [["SYM","Name"], ...]
+    """
+    import json as _json
+    tickers = _json.loads(tickers_json)
+    stocks: dict[str, dict] = {}
+
+    for sym, name in tickers:
+        try:
+            info = yf.Ticker(sym).info
+            price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+            if price <= 0:
+                continue
+            t_high = info.get("targetHighPrice")
+            t_low  = info.get("targetLowPrice")
+            t_mean = info.get("targetMeanPrice")
+            rec    = info.get("recommendationMean")  # 1=Strong Buy … 5=Strong Sell
+            rec_key = info.get("recommendationKey", "")
+
+            def _up(target):
+                return round((target / price - 1) * 100, 1) if target else None
+
+            stocks[sym] = {
+                "name":           name,
+                "price":          price,
+                "target_high":    t_high,
+                "target_low":     t_low,
+                "target_mean":    t_mean,
+                "upside_high":    _up(t_high),
+                "upside_low":     _up(t_low),
+                "upside_mean":    _up(t_mean),
+                "trailing_eps":   info.get("trailingEps"),
+                "forward_eps":    info.get("forwardEps"),
+                "trailing_pe":    info.get("trailingPE"),
+                "forward_pe":     info.get("forwardPE"),
+                "revenue_growth": info.get("revenueGrowth"),
+                "eps_growth":     info.get("earningsGrowth"),
+                "n_analysts":     info.get("numberOfAnalystOpinions") or 0,
+                "rec_mean":       rec,
+                "rec_key":        rec_key,
+            }
+        except Exception as e:
+            logger.debug(f"[earnings_forecast] {sym}: {e}")
+
+    def _wavg(key: str) -> float | None:
+        vals = [s[key] for s in stocks.values() if s.get(key) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    return {
+        "stocks":             stocks,
+        "basket_upside_high": _wavg("upside_high"),
+        "basket_upside_low":  _wavg("upside_low"),
+        "basket_upside_mean": _wavg("upside_mean"),
+        "n_valid":            len(stocks),
+    }
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_sox_current() -> float | None:
+    """SOX 指数の現在値を取得"""
+    try:
+        df = yf.download("^SOX", period="5d", progress=False, auto_adjust=True)
+        if df is not None and not df.empty:
+            close = df["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            return float(close.dropna().iloc[-1])
+    except Exception:
+        pass
+    return None
+
+
+def _render_forecast_gauge(
+    basket_label: str,
+    current_level: float,
+    upside_low: float | None,
+    upside_mean: float | None,
+    upside_high: float | None,
+    lang: str = "ja",
+) -> None:
+    """バスケット推定レンジをゲージカードで描画"""
+    level_low  = current_level * (1 + (upside_low  or 0) / 100)
+    level_mean = current_level * (1 + (upside_mean or 0) / 100)
+    level_high = current_level * (1 + (upside_high or 0) / 100)
+
+    def _pct(v):
+        return f"{v:+.1f}%" if v is not None else "N/A"
+
+    low_color  = "#ef4444" if (upside_low  or 0) < 0 else "#22c55e"
+    mean_color = "#f59e0b" if (upside_mean or 0) < 0 else "#3b82f6"
+    high_color = "#22c55e"
+
+    if lang == "en":
+        label_high, label_mean, label_low = "Upside (High)", "Consensus (Mean)", "Downside (Low)"
+        label_current = "Current"
+    else:
+        label_high, label_mean, label_low = "楽観シナリオ（上限）", "コンセンサス（中央）", "悲観シナリオ（下限）"
+        label_current = "現在値"
+
+    st.markdown(
+        f"""<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;
+        padding:16px 20px;margin-bottom:12px;">
+        <div style="font-size:15px;font-weight:800;color:#f8fafc;margin-bottom:12px;">{basket_label}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;text-align:center;">
+          <div style="background:#1e293b;border-radius:8px;padding:10px 6px;">
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">{label_current}</div>
+            <div style="font-size:16px;font-weight:700;color:#e2e8f0;">{current_level:,.1f}</div>
+          </div>
+          <div style="background:#1e293b;border-radius:8px;padding:10px 6px;">
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">{label_low}</div>
+            <div style="font-size:16px;font-weight:700;color:{low_color};">{_pct(upside_low)}</div>
+            <div style="font-size:12px;color:#64748b;">{level_low:,.1f}</div>
+          </div>
+          <div style="background:#1e293b;border-radius:8px;padding:10px 6px;">
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">{label_mean}</div>
+            <div style="font-size:16px;font-weight:700;color:{mean_color};">{_pct(upside_mean)}</div>
+            <div style="font-size:12px;color:#64748b;">{level_mean:,.1f}</div>
+          </div>
+          <div style="background:#1e293b;border-radius:8px;padding:10px 6px;">
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">{label_high}</div>
+            <div style="font-size:16px;font-weight:700;color:{high_color};">{_pct(upside_high)}</div>
+            <div style="font-size:12px;color:#64748b;">{level_high:,.1f}</div>
+          </div>
+        </div></div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
+    """銘柄ごとの決算・アナリスト目標テーブルを描画"""
+    if not stocks:
+        st.warning(t("データ取得失敗", "Failed to load data") if lang == "ja" else "Failed to load data")
+        return
+
+    rec_label = {
+        "strong_buy": "💚 Strong Buy", "buy": "🟢 Buy",
+        "hold": "🟡 Hold", "underperform": "🔴 Underperform",
+        "sell": "🔴 Sell",
+    }
+
+    if lang == "en":
+        headers = ["Ticker", "Name", "Price", "Low Target", "Mean Target", "High Target",
+                   "Down%", "Mean%", "Up%", "Fwd P/E", "Rev.Growth", "Recommendation"]
+    else:
+        headers = ["銘柄", "社名", "現在値", "目標安値", "目標中央", "目標高値",
+                   "下限%", "中央%", "上限%", "予想PER", "売上成長", "レーティング"]
+
+    hdr = "".join(f"<th style='padding:7px 10px;text-align:right;color:#94a3b8;"
+                  f"font-weight:600;font-size:11px;white-space:nowrap'>{h}</th>" for h in headers)
+    rows_html = f"<tr style='border-bottom:1px solid #334155'>{hdr}</tr>"
+
+    for sym, s in stocks.items():
+        def _fmt_pct(v):
+            if v is None:
+                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
+            color = "#22c55e" if v >= 0 else "#ef4444"
+            return f"<td style='padding:6px 10px;text-align:right;color:{color};font-weight:700'>{v:+.1f}%</td>"
+
+        def _fmt_num(v, fmt=".1f", suffix=""):
+            if v is None:
+                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
+            return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{v:{fmt}}{suffix}</td>"
+
+        def _fmt_price(v):
+            if v is None:
+                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
+            return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>${v:,.2f}</td>"
+
+        rec_text = rec_label.get(s.get("rec_key", ""), "—")
+        rev_g = (f"{s['revenue_growth']*100:+.1f}%"
+                 if s.get("revenue_growth") is not None else "—")
+
+        rows_html += (
+            f"<tr style='border-bottom:1px solid #1e293b'>"
+            f"<td style='padding:6px 10px;font-weight:700;color:#7dd3fc'>{sym}</td>"
+            f"<td style='padding:6px 10px;color:#94a3b8;font-size:12px;white-space:nowrap'>{s['name']}</td>"
+            f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>${s['price']:,.2f}</td>"
+            + _fmt_price(s.get("target_low"))
+            + _fmt_price(s.get("target_mean"))
+            + _fmt_price(s.get("target_high"))
+            + _fmt_pct(s.get("upside_low"))
+            + _fmt_pct(s.get("upside_mean"))
+            + _fmt_pct(s.get("upside_high"))
+            + _fmt_num(s.get("forward_pe"), ".1f", "x")
+            + f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{rev_g}</td>"
+            + f"<td style='padding:6px 10px;text-align:right;font-size:11px;color:#e2e8f0'>{rec_text}</td>"
+            + "</tr>"
+        )
+
+    st.markdown(
+        f"<div style='overflow-x:auto'>"
+        f"<table style='width:100%;border-collapse:collapse;font-size:13px;"
+        f"background:#0f172a;border-radius:8px;overflow:hidden'>"
+        f"<tbody>{rows_html}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_upside_chart(stocks: dict, title: str) -> None:
+    """各銘柄の目標株価レンジを横棒グラフで描画"""
+    if not stocks:
+        return
+    syms, lows, means, highs = [], [], [], []
+    for sym, s in stocks.items():
+        if s.get("upside_mean") is None:
+            continue
+        syms.append(sym)
+        lows.append(s.get("upside_low") or s.get("upside_mean", 0))
+        means.append(s.get("upside_mean", 0))
+        highs.append(s.get("upside_high") or s.get("upside_mean", 0))
+
+    if not syms:
+        return
+
+    import plotly.graph_objects as go
+    fig = go.Figure()
+
+    # 低〜高レンジバー（ガントチャート風）
+    for i, sym in enumerate(syms):
+        lo, hi = lows[i], highs[i]
+        color = "#22c55e" if means[i] >= 0 else "#ef4444"
+        fig.add_trace(go.Bar(
+            x=[hi - lo],
+            y=[sym],
+            base=[lo],
+            orientation="h",
+            marker_color=color,
+            marker_opacity=0.35,
+            showlegend=False,
+            hovertemplate=f"<b>{sym}</b><br>Low: {lo:+.1f}%<br>High: {hi:+.1f}%<extra></extra>",
+        ))
+        # コンセンサス点
+        fig.add_trace(go.Scatter(
+            x=[means[i]], y=[sym],
+            mode="markers",
+            marker=dict(symbol="diamond", size=10, color="#f59e0b",
+                        line=dict(color="#fff", width=1)),
+            showlegend=(i == 0),
+            name="Consensus",
+            hovertemplate=f"<b>{sym}</b> Consensus: {means[i]:+.1f}%<extra></extra>",
+        ))
+
+    fig.add_vline(x=0, line_width=1.5, line_color="#94a3b8", line_dash="dot")
+    fig.update_layout(
+        title=dict(text=title, font=dict(color="#e2e8f0", size=14)),
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+        height=max(220, len(syms) * 45),
+        margin=dict(l=10, r=30, t=40, b=30),
+        xaxis=dict(
+            title="Upside / Downside %",
+            tickfont=dict(color="#94a3b8"),
+            title_font=dict(color="#94a3b8"),
+            gridcolor="#1e293b",
+            zeroline=False,
+        ),
+        yaxis=dict(
+            tickfont=dict(color="#e2e8f0"),
+            gridcolor="#1e293b",
+        ),
+        legend=dict(font=dict(color="#e2e8f0"), bgcolor="rgba(0,0,0,0)"),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        barmode="overlay",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _ai_earnings_outlook(
+    semi_summary: str, optical_summary: str, lang: str = "ja"
+) -> tuple[str, str]:
+    """決算データを基に AI が SOX・光通信バスケットの先行き見通しコメントを生成"""
+    _lang_suffix = "\n\nIMPORTANT: Respond entirely in English. Do not use Japanese." if lang == "en" else ""
+    if lang == "en":
+        prompt = f"""You are a senior equity analyst specializing in semiconductors and AI infrastructure.
+Based on the analyst consensus price targets and earnings data below, write a concise 6–12 month outlook for:
+1. SOX (Philadelphia Semiconductor Index) — represented by key component stocks
+2. Optical/AI Infrastructure basket — CIEN, COHR, LITE, VIAV, AAOI
+
+[Semiconductor Basket Data]
+{semi_summary}
+
+[Optical Basket Data]
+{optical_summary}
+
+Please cover (in ~300 words total):
+- Key upside catalysts and downside risks for each basket
+- Relative outlook: which basket looks stronger over the next 6–12 months?
+- Key earnings events or thresholds to watch
+
+*For informational purposes only. Not investment advice.*{_lang_suffix}"""
+    else:
+        prompt = f"""あなたは半導体・AIインフラ専門のシニアアナリストです。
+以下のアナリストコンセンサス目標株価・決算データをもとに、
+SOX（半導体指数）と光通信バスケットの今後6〜12ヶ月の見通しを述べてください。
+
+【半導体バスケット（SOXプロキシ）データ】
+{semi_summary}
+
+【光通信バスケットデータ】
+{optical_summary}
+
+以下の点を各200字程度でまとめてください：
+1. 半導体（SOX）の上昇シナリオと下落リスク
+2. 光通信バスケットの上昇シナリオと下落リスク
+3. 相対比較：どちらが今後6〜12ヶ月で有望か？
+4. 注目すべき決算イベント・閾値
+
+※情報提供目的のみ。投資助言ではありません。"""
+
+    try:
+        return call_ai_with_fallback(prompt, max_output_tokens=900, temperature=0.4)
+    except Exception as e:
+        return f"AI生成エラー: {e}", ""
+
+
+def render_earnings_index_forecast():
+    """📊 決算ベース指数予測 — SOX・光通信バスケット"""
+    import json as _json
+
+    lang = st.session_state.get("lang", "ja")
+    st.markdown('<a id="earnings-forecast"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0a1628,#0d2440,#0a1628);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:12px;">'
+        '<div style="font-size:20px;font-weight:800;color:#a78bfa">'
+        + t("📊 決算ベース指数予測 — SOX & 光通信バスケット",
+            "📊 Earnings-Based Index Forecast — SOX & Optical Basket") +
+        '</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        + t("代表銘柄のアナリスト目標株価・決算データから指数の推定上限・下限を算出します",
+            "Estimates index upper/lower bounds using analyst price targets & earnings data from representative stocks") +
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── データ取得 ──────────────────────────────────────────
+    semi_json    = _json.dumps(_SEMI_FORECAST_TICKERS)
+    optical_json = _json.dumps(_OPTICAL_FORECAST_TICKERS)
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        with st.spinner(t("半導体データ取得中...", "Loading semiconductor data...")):
+            semi_data = _fetch_earnings_forecast(semi_json)
+    with col_r:
+        with st.spinner(t("光通信データ取得中...", "Loading optical data...")):
+            optical_data = _fetch_earnings_forecast(optical_json)
+
+    sox_price = _fetch_sox_current()
+
+    # ── タブ表示 ──────────────────────────────────────────
+    tab_semi, tab_opt, tab_compare = st.tabs([
+        t("🔬 半導体 (SOX)", "🔬 Semiconductors (SOX)"),
+        t("📡 光通信バスケット", "📡 Optical Basket"),
+        t("📊 比較・AI見通し", "📊 Comparison & AI Outlook"),
+    ])
+
+    # ── Tab1: 半導体 ─────────────────────────────────────
+    with tab_semi:
+        st.markdown(f"**{t('代表銘柄', 'Representative stocks')}**: " +
+                    ", ".join(_SEMI_FORECAST_TICKERS[i][0] for i in range(len(_SEMI_FORECAST_TICKERS))))
+
+        if semi_data["n_valid"] > 0:
+            # SOX 現在値ベースのゲージ
+            sox_base = sox_price if sox_price else 5000.0
+            if sox_price:
+                st.caption(f"SOX {t('現在値', 'current')}: {sox_price:,.1f} pts")
+            _render_forecast_gauge(
+                t("SOX 推定レンジ（アナリストコンセンサス合算）",
+                  "SOX Estimated Range (analyst consensus composite)"),
+                sox_base,
+                semi_data["basket_upside_low"],
+                semi_data["basket_upside_mean"],
+                semi_data["basket_upside_high"],
+                lang=lang,
+            )
+            st.markdown("---")
+            st.markdown(f"**{t('銘柄別 決算・目標株価', 'Per-stock Earnings & Price Targets')}**")
+            _render_stock_table(semi_data["stocks"], lang=lang)
+            _render_upside_chart(
+                semi_data["stocks"],
+                t("半導体 各銘柄のアップサイド/ダウンサイド",
+                  "Semiconductor Upside / Downside by Stock"),
+            )
+            n = semi_data["n_valid"]
+            st.caption(
+                t(f"※ {n}銘柄のアナリスト目標株価の等加重平均。SOX実際の指数構成比とは異なります。",
+                  f"* Equal-weighted average of {n} stocks' analyst targets. Differs from actual SOX index weighting.")
+            )
+        else:
+            st.warning(t("半導体データを取得できませんでした", "Could not load semiconductor data"))
+
+    # ── Tab2: 光通信 ─────────────────────────────────────
+    with tab_opt:
+        st.markdown(f"**{t('代表銘柄', 'Representative stocks')}**: " +
+                    ", ".join(_OPTICAL_FORECAST_TICKERS[i][0] for i in range(len(_OPTICAL_FORECAST_TICKERS))))
+
+        if optical_data["n_valid"] > 0:
+            # 光通信バスケット現在値（等加重平均価格を指数化）
+            opt_prices = [s["price"] for s in optical_data["stocks"].values()]
+            opt_base = sum(opt_prices) / len(opt_prices) if opt_prices else 100.0
+            _render_forecast_gauge(
+                t("光通信バスケット 推定レンジ（アナリストコンセンサス合算）",
+                  "Optical Basket Estimated Range (analyst consensus composite)"),
+                opt_base,
+                optical_data["basket_upside_low"],
+                optical_data["basket_upside_mean"],
+                optical_data["basket_upside_high"],
+                lang=lang,
+            )
+            st.markdown("---")
+            st.markdown(f"**{t('銘柄別 決算・目標株価', 'Per-stock Earnings & Price Targets')}**")
+            _render_stock_table(optical_data["stocks"], lang=lang)
+            _render_upside_chart(
+                optical_data["stocks"],
+                t("光通信 各銘柄のアップサイド/ダウンサイド",
+                  "Optical Basket Upside / Downside by Stock"),
+            )
+            n = optical_data["n_valid"]
+            st.caption(
+                t(f"※ {n}銘柄のアナリスト目標株価の等加重平均。5803.T（フジクラ）は JPY 建てのため除外。",
+                  f"* Equal-weighted average of {n} stocks' analyst targets. 5803.T (Fujikura) excluded (JPY-denominated).")
+            )
+        else:
+            st.warning(t("光通信データを取得できませんでした", "Could not load optical data"))
+
+    # ── Tab3: 比較・AI見通し ──────────────────────────────
+    with tab_compare:
+        # サマリー比較カード
+        col_s, col_o = st.columns(2)
+
+        def _summary_card(label: str, data: dict, color: str) -> None:
+            hi = data.get("basket_upside_high")
+            lo = data.get("basket_upside_low")
+            me = data.get("basket_upside_mean")
+
+            def _pct(v):
+                return f"{v:+.1f}%" if v is not None else "N/A"
+
+            st.markdown(
+                f'<div style="background:#0f172a;border:2px solid {color};'
+                f'border-radius:10px;padding:14px 16px;text-align:center;">'
+                f'<div style="font-size:14px;font-weight:700;color:{color};margin-bottom:8px">{label}</div>'
+                f'<div style="display:flex;justify-content:space-around;margin-top:6px">'
+                f'<div><div style="font-size:10px;color:#64748b">{t("下限","Low")}</div>'
+                f'<div style="font-size:18px;font-weight:700;color:#ef4444">{_pct(lo)}</div></div>'
+                f'<div><div style="font-size:10px;color:#64748b">{t("中央","Mean")}</div>'
+                f'<div style="font-size:18px;font-weight:700;color:#f59e0b">{_pct(me)}</div></div>'
+                f'<div><div style="font-size:10px;color:#22c55e">{t("上限","High")}</div>'
+                f'<div style="font-size:22px;font-weight:800;color:#22c55e">{_pct(hi)}</div></div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_s:
+            _summary_card(t("🔬 半導体（SOX）", "🔬 Semiconductors (SOX)"),
+                          semi_data, "#818cf8")
+        with col_o:
+            _summary_card(t("📡 光通信バスケット", "📡 Optical Basket"),
+                          optical_data, "#38bdf8")
+
+        st.markdown("---")
+
+        # AI 見通しコメント
+        st.markdown(f"**🤖 {t('AI 決算見通しコメント', 'AI Earnings Outlook')}**")
+        _ai_key = _lang_key("earnings_forecast_ai")
+
+        btn_col, _ = st.columns([1, 2])
+        with btn_col:
+            if st.button(
+                t("🤖 AI見通しを生成", "🤖 Generate AI Outlook"),
+                key="earnings_forecast_ai_btn",
+                type="primary",
+                use_container_width=True,
+            ):
+                # プロンプト用サマリーテキスト生成
+                def _make_summary(data: dict) -> str:
+                    lines = []
+                    for sym, s in data["stocks"].items():
+                        rg = s.get("revenue_growth")
+                        eg = s.get("eps_growth")
+                        rev_str = f"{rg*100:.1f}%" if rg is not None else "N/A"
+                        eps_str = f"{eg*100:.1f}%" if eg is not None else "N/A"
+                        lines.append(
+                            f"  {sym} ({s['name']}): "
+                            f"Price=${s['price']:.2f}, "
+                            f"TargetHigh={s.get('target_high') or 'N/A'}, "
+                            f"TargetMean={s.get('target_mean') or 'N/A'}, "
+                            f"TargetLow={s.get('target_low') or 'N/A'}, "
+                            f"FwdPE={s.get('forward_pe') or 'N/A'}, "
+                            f"RevGrowth={rev_str}, "
+                            f"EPSGrowth={eps_str}, "
+                            f"Analysts={s.get('n_analysts', 0)}, Rec={s.get('rec_key', 'N/A')}"
+                        )
+                    basket_hi = data.get("basket_upside_high")
+                    basket_me = data.get("basket_upside_mean")
+                    basket_lo = data.get("basket_upside_low")
+                    hi_str = f"+{basket_hi:.1f}%" if basket_hi is not None else "N/A"
+                    me_str = f"+{basket_me:.1f}%" if basket_me is not None else "N/A"
+                    lo_str = f"{basket_lo:.1f}%" if basket_lo is not None else "N/A"
+                    lines.append(
+                        f"  Basket consensus upside: High={hi_str}, Mean={me_str}, Low={lo_str}"
+                    )
+                    return "\n".join(lines)
+
+                semi_summary    = _make_summary(semi_data)   # noqa: E501
+                optical_summary = _make_summary(optical_data)  # noqa: E501
+
+                with st.spinner(t("AI分析中（決算データ処理）...",
+                                  "Running AI analysis (processing earnings data)...")):
+                    comment, model = _ai_earnings_outlook(
+                        semi_summary, optical_summary, lang=lang
+                    )
+                st.session_state[_ai_key] = (comment, model)
+
+        if _ai_key in st.session_state:
+            ai_txt, ai_model = st.session_state[_ai_key]
+            st.markdown(
+                f'<div style="background:#0f172a;border-left:4px solid #a78bfa;'
+                f'padding:14px 18px;border-radius:6px;margin-top:8px;">'
+                f'<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">🤖 AI ({ai_model})</div>'
+                f'<div style="font-size:14px;color:#e2e8f0;line-height:1.7;">'
+                f'{ai_txt.replace(chr(10), "<br>")}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        st.caption(
+            t("⚠️ アナリスト目標株価は将来を保証するものではありません。投資判断は自己責任でお願いします。",
+              "⚠️ Analyst price targets do not guarantee future performance. Invest at your own risk.")
+        )
 
 
 def render_momentum_ranking():
@@ -17096,6 +17654,11 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ 光通信・AIインフラ vs 半導体 パフォーマンス比較
     # ===================================================
     render_optical_vs_semi()
+
+    # ===================================================
+    # ★ 決算ベース指数予測（SOX・光通信バスケット）
+    # ===================================================
+    render_earnings_index_forecast()
 
     # ===================================================
     # ★ Fear & Greed Index（米国・日本）
