@@ -8364,8 +8364,12 @@ _OPTICAL_BASKET: list[tuple[str, str]] = [
     ("VIAV",   "Viavi（光試験）"),
     ("AAOI",   "AAOI（トランシーバ）"),
     ("ATXI",   "ATXI（光インフラ）"),
+    ("SDSK",   "SDSK"),
+    ("GLW",    "Corning（光ファイバー）"),
+    ("APH",    "Amphenol（コネクタ）"),
+    ("VRT",    "Vertiv（AIインフラ電源）"),
     ("5803.T", "フジクラ（光ファイバー・JPY）"),
-    ("IIVI",   "II-VI → COHR"),      # 旧IIVI、データが残っている場合のみ
+    ("IIVI",   "II-VI → COHR"),
     ("FNSR",   "Finisar"),
 ]
 
@@ -8643,6 +8647,10 @@ def render_optical_vs_semi():
 | **VIAV** | 光試験 | 光ファイバー試験・測定機器 |
 | **AAOI** | 光トランシーバ | データセンター向け高速トランシーバ（AI DC集中投資で急騰） |
 | **ATXI** | 光インフラ | 光通信インフラ関連（データ取得可能な場合のみ表示） |
+| **GLW** | 光ファイバー | Corning：光ファイバー素材・ケーブル世界最大手 |
+| **APH** | コネクタ・ケーブル | Amphenol：AI DC向け高速コネクタ・ハーネス |
+| **VRT** | AIインフラ電源 | Vertiv：AIデータセンター向け電源・冷却システム |
+| **SDSK** | — | （データ取得可能な場合のみ表示） |
 | **フジクラ（5803.T）** | 光ファイバー | 世界首位級の光ファイバーケーブルメーカー（JPY建て・為替影響含む） |
 | **SMH** | 半導体ETF | NVDA/TSMC/AVGO等を含む半導体業界代表ETF |
 | **NVDA** | GPU/AI半導体 | AI学習・推論GPU、データセンター主力 |
@@ -8666,11 +8674,16 @@ _SEMI_FORECAST_TICKERS: list[tuple[str, str]] = [
     ("MU",   "Micron"),
 ]
 _OPTICAL_FORECAST_TICKERS: list[tuple[str, str]] = [
-    ("CIEN", "Ciena"),
-    ("COHR", "Coherent"),
-    ("LITE", "Lumentum"),
-    ("VIAV", "Viavi Solutions"),
-    ("AAOI", "AAOI"),
+    ("SDSK",   "SDSK"),
+    ("AAOI",   "AAOI"),
+    ("LITE",   "Lumentum"),
+    ("GLW",    "Corning"),
+    ("COHR",   "Coherent"),
+    ("APH",    "Amphenol"),
+    ("VRT",    "Vertiv"),
+    ("5803.T", "フジクラ"),
+    ("CIEN",   "Ciena"),
+    ("VIAV",   "Viavi Solutions"),
 ]
 
 
@@ -8700,9 +8713,11 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
             def _up(target):
                 return round((target / price - 1) * 100, 1) if target else None
 
+            currency = "JPY" if sym.endswith(".T") else "USD"
             stocks[sym] = {
                 "name":           name,
                 "price":          price,
+                "currency":       currency,
                 "target_high":    t_high,
                 "target_low":     t_low,
                 "target_mean":    t_mean,
@@ -8820,16 +8835,21 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
 
     if lang == "en":
         headers = ["Ticker", "Name", "Price", "Low Target", "Mean Target", "High Target",
-                   "Down%", "Mean%", "Up%", "Fwd P/E", "Rev.Growth", "Recommendation"]
+                   "Down%", "Mean%", "Up%", "Analysts", "Fwd P/E", "Rev.Growth", "Recommendation"]
     else:
         headers = ["銘柄", "社名", "現在値", "目標安値", "目標中央", "目標高値",
-                   "下限%", "中央%", "上限%", "予想PER", "売上成長", "レーティング"]
+                   "下限%", "中央%", "上限%", "アナリスト数", "予想PER", "売上成長", "レーティング"]
 
     hdr = "".join(f"<th style='padding:7px 10px;text-align:right;color:#94a3b8;"
                   f"font-weight:600;font-size:11px;white-space:nowrap'>{h}</th>" for h in headers)
     rows_html = f"<tr style='border-bottom:1px solid #334155'>{hdr}</tr>"
 
     for sym, s in stocks.items():
+        currency = s.get("currency", "USD")
+        is_jpy = currency == "JPY"
+        price_sym = "¥" if is_jpy else "$"
+        price_fmt = ",.0f" if is_jpy else ",.2f"
+
         def _fmt_pct(v):
             if v is None:
                 return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
@@ -8841,37 +8861,45 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
                 return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
             return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{v:{fmt}}{suffix}</td>"
 
-        def _fmt_price(v):
+        def _fmt_price(v, ps=price_sym, pf=price_fmt):
             if v is None:
                 return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
-            return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>${v:,.2f}</td>"
+            return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{ps}{v:{pf}}</td>"
 
         rec_text = rec_label.get(s.get("rec_key", ""), "—")
         rev_g = (f"{s['revenue_growth']*100:+.1f}%"
                  if s.get("revenue_growth") is not None else "—")
+        n_ana = s.get("n_analysts") or 0
+        n_ana_str = str(n_ana) if n_ana else "—"
 
         rows_html += (
             f"<tr style='border-bottom:1px solid #1e293b'>"
             f"<td style='padding:6px 10px;font-weight:700;color:#7dd3fc'>{sym}</td>"
             f"<td style='padding:6px 10px;color:#94a3b8;font-size:12px;white-space:nowrap'>{s['name']}</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>${s['price']:,.2f}</td>"
+            f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{price_sym}{s['price']:{price_fmt}}</td>"
             + _fmt_price(s.get("target_low"))
             + _fmt_price(s.get("target_mean"))
             + _fmt_price(s.get("target_high"))
             + _fmt_pct(s.get("upside_low"))
             + _fmt_pct(s.get("upside_mean"))
             + _fmt_pct(s.get("upside_high"))
+            + f"<td style='padding:6px 10px;text-align:right;color:#64748b;font-size:11px'>{n_ana_str}</td>"
             + _fmt_num(s.get("forward_pe"), ".1f", "x")
             + f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{rev_g}</td>"
             + f"<td style='padding:6px 10px;text-align:right;font-size:11px;color:#e2e8f0'>{rec_text}</td>"
             + "</tr>"
         )
 
+    src_note = ("Data source: Yahoo Finance (Wall Street analyst consensus)"
+                if lang == "en" else
+                "データソース: Yahoo Finance（ウォール街アナリスト・コンセンサス予測）| ¥ = JPY建て")
     st.markdown(
         f"<div style='overflow-x:auto'>"
         f"<table style='width:100%;border-collapse:collapse;font-size:13px;"
         f"background:#0f172a;border-radius:8px;overflow:hidden'>"
-        f"<tbody>{rows_html}</tbody></table></div>",
+        f"<tbody>{rows_html}</tbody></table></div>"
+        f"<div style='font-size:11px;color:#64748b;margin-top:6px;padding-left:4px'>"
+        f"📊 {src_note}</div>",
         unsafe_allow_html=True,
     )
 
