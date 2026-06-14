@@ -419,6 +419,18 @@ def t(ja: str, en: str) -> str:
     return en if st.session_state.get("lang") == "en" else ja
 
 
+def _lang_prompt_suffix() -> str:
+    """AI プロンプトに追加する言語指示を返す。"""
+    if st.session_state.get("lang") == "en":
+        return "\n\nIMPORTANT: Respond entirely in English. Do not use Japanese."
+    return ""
+
+
+def _lang_key(base: str) -> str:
+    """セッション state のキーを言語ごとに分ける。"""
+    return f"{base}_{st.session_state.get('lang', 'ja')}"
+
+
 def fetch_ip_info_server_side() -> dict:
     """
     サーバー側でipinfo.ioを呼んでIP・地域を取得。
@@ -969,11 +981,12 @@ DASHBOARD_LINKS_TOP_HTML = _build_nav_html("ja")
 # Market Board用ニュース表示
 # ===========================
 @st.cache_data(ttl=TTL_MARKET_NEWS, show_spinner=False)
-def fetch_and_summarize_market_news(market: str = "日本", _cache_key: str = "") -> Optional[str]:
+def fetch_and_summarize_market_news(market: str = "日本", _cache_key: str = "", lang: str = "ja") -> Optional[str]:
     if not GENAI_AVAILABLE or not GEMINI_API_KEY:
         if not GROQ_API_KEY:
             return "__USED_API__:none\n⚠️ AI APIが設定されていません。"
 
+    _en = (lang == "en")
     try:
         if market == "日本":
             feeds = [
@@ -983,7 +996,20 @@ def fetch_and_summarize_market_news(market: str = "日本", _cache_key: str = ""
                 "https://assets.wor.jp/rss/rdf/minkabufx/stock.rdf",
                 "https://webapi.yanoshin.jp/webapi/tdnet/list/recent.rss",
             ]
-            prompt_template = """あなたは日本株式市場の専門アナリストです。
+            if _en:
+                prompt_template = """You are a senior analyst specializing in the Japanese stock market.
+Analyze {article_count} news items and produce a concise English-language investment report.
+
+## 📊 Today's Market Overview
+## 🔥 Key Sectors & Themes
+## 📈 Notable Individual Stocks
+## 🌍 Macro & External Factors
+## ⚠️ Risks & Cautions
+## 🔮 What to Watch Tomorrow
+
+Sources ({article_count} items):\n{sources}"""
+            else:
+                prompt_template = """あなたは日本株式市場の専門アナリストです。
 以下のニュースソース（{article_count}件）を精査し、投資判断に役立つ詳細なレポートを作成してください。
 
 ## 📊 本日の市場概況
@@ -1002,7 +1028,21 @@ def fetch_and_summarize_market_news(market: str = "日本", _cache_key: str = ""
                 "https://www.cnbc.com/id/20409666/device/rss/rss.html",
                 "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
             ]
-            prompt_template = """You are a senior Wall Street market analyst.
+            if _en:
+                prompt_template = """You are a senior Wall Street market analyst.
+Analyze {article_count} news items and produce a comprehensive English-language report.
+
+## 📊 Today's US Market Overview
+## 🔥 Key Sectors & Themes
+## 📈 Notable Stocks
+## 🏦 Macro & Fed Policy
+## 🌍 Geopolitical & External Risks
+## ⚠️ Risk Factors
+## 🔮 What to Watch Tomorrow
+
+Sources ({article_count} items):\n{sources}"""
+            else:
+                prompt_template = """You are a senior Wall Street market analyst.
 Analyze {article_count} news items and produce a comprehensive Japanese-language report.
 
 ## 📊 本日の米国市場概況
@@ -1077,12 +1117,14 @@ def render_market_news_board(translate_mode: bool = True):
             st.info("ℹ️ Gemini APIキー未設定のためGroqを使用します")
 
     tab_jp, tab_us = st.tabs(["🇯🇵 日本株市場", "🇺🇸 米国株市場"])
-    cache_key = str(int(time.time() / TTL_MARKET_NEWS))
+    _news_lang = st.session_state.get("lang", "ja")
+    cache_key = f"{int(time.time() / TTL_MARKET_NEWS)}_{_news_lang}"
 
     with tab_jp:
-        st.subheader("🔍 日本株式市場の最新動向（AI要約）")
-        with st.spinner("日本市場のニュースをAIで分析中..."):
-            raw_jp = fetch_and_summarize_market_news("日本", _cache_key=cache_key)
+        st.subheader(t("🔍 日本株式市場の最新動向（AI要約）",
+                       "🔍 Japanese Stock Market — AI Summary"))
+        with st.spinner(t("日本市場のニュースをAIで分析中...", "Analyzing Japan market news with AI...")):
+            raw_jp = fetch_and_summarize_market_news("日本", _cache_key=cache_key, lang=_news_lang)
         used_api_jp, summary_jp = _parse_summary_result(raw_jp)
         if summary_jp:
             if summary_jp.startswith("⚠️"):
@@ -1090,9 +1132,10 @@ def render_market_news_board(translate_mode: bool = True):
             else:
                 st.markdown(summary_jp)
                 if used_api_jp:
-                    st.caption(f"📡 情報源: Yahoo!ニュース | 🤖 使用AI: {used_api_jp}")
+                    st.caption(f"{'📡 情報源' if _news_lang != 'en' else '📡 Source'}: Yahoo!News Japan | 🤖 AI: {used_api_jp}")
         else:
-            st.warning("日本市場のニュース要約を取得できませんでした。")
+            st.warning(t("日本市場のニュース要約を取得できませんでした。",
+                         "Could not load Japan market news summary."))
 
         with st.expander("📋 元ニュース一覧を表示", expanded=False):
             feeds = [
@@ -1111,9 +1154,10 @@ def render_market_news_board(translate_mode: bool = True):
                     st.divider()
 
     with tab_us:
-        st.subheader("🔍 米国株式市場の最新動向（AI要約）")
-        with st.spinner("米国市場のニュースをAIで分析中..."):
-            raw_us = fetch_and_summarize_market_news("米国", _cache_key=cache_key)
+        st.subheader(t("🔍 米国株式市場の最新動向（AI要約）",
+                       "🔍 US Stock Market — AI Summary"))
+        with st.spinner(t("米国市場のニュースをAIで分析中...", "Analyzing US market news with AI...")):
+            raw_us = fetch_and_summarize_market_news("米国", _cache_key=cache_key, lang=_news_lang)
         used_api_us, summary_us = _parse_summary_result(raw_us)
         if summary_us:
             if summary_us.startswith("⚠️"):
@@ -1121,9 +1165,10 @@ def render_market_news_board(translate_mode: bool = True):
             else:
                 st.markdown(summary_us)
                 if used_api_us:
-                    st.caption(f"📡 情報源: CNBC, Bloomberg | 🤖 使用AI: {used_api_us}")
+                    st.caption(f"{'📡 情報源' if _news_lang != 'en' else '📡 Source'}: CNBC, Bloomberg | 🤖 AI: {used_api_us}")
         else:
-            st.warning("米国市場のニュース要約を取得できませんでした。")
+            st.warning(t("米国市場のニュース要約を取得できませんでした。",
+                         "Could not load US market news summary."))
 
         with st.expander("📋 元ニュース一覧を表示（英語）", expanded=False):
             feeds = [
@@ -7131,32 +7176,34 @@ def render_4indicator_correlation():
 2. 現在の指標水準から読み取れる市場環境
 3. 投資家への示唆（1〜2点）
 
-専門用語は使いすぎず、わかりやすく書いてください。"""
+専門用語は使いすぎず、わかりやすく書いてください。""" + _lang_prompt_suffix()
 
-        if st.button("🤖 AIコメントを生成", key="corr4_ai_btn", type="primary"):
-            with st.spinner("AI分析中..."):
+        _corr4_key = _lang_key("corr4_ai_comment")
+        _corr4_model_key = _lang_key("corr4_ai_model")
+        if st.button(t("🤖 AIコメントを生成", "🤖 Generate AI Comment"), key="corr4_ai_btn", type="primary"):
+            with st.spinner(t("AI分析中...", "Analyzing with AI...")):
                 try:
                     comment, used_model = call_ai_with_fallback(
                         prompt,
                         max_output_tokens=600,
                         temperature=0.5,
                     )
-                    st.session_state["corr4_ai_comment"] = comment
-                    st.session_state["corr4_ai_model"]   = used_model
+                    st.session_state[_corr4_key] = comment
+                    st.session_state[_corr4_model_key] = used_model
                 except Exception as e:
                     st.error(f"AI生成エラー: {e}")
 
-        if "corr4_ai_comment" in st.session_state:
+        if _corr4_key in st.session_state:
             st.markdown(
                 f'<div style="background:#f8f9ff;border-left:4px solid #1976d2;'
                 f'border-radius:6px;padding:16px 20px;font-size:14px;'
                 f'line-height:1.8;color:#222;margin-top:12px;">'
-                f'{st.session_state["corr4_ai_comment"].replace(chr(10),"<br>")}'
+                f'{st.session_state[_corr4_key].replace(chr(10),"<br>")}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            if st.session_state.get("corr4_ai_model"):
-                st.caption(f"🤖 使用AI: {st.session_state['corr4_ai_model']}")
+            if st.session_state.get(_corr4_model_key):
+                st.caption(f"🤖 AI: {st.session_state[_corr4_model_key]}")
 
         # 相関係数テーブルも表示
         st.markdown("**相関係数一覧（参考）**")
@@ -9872,10 +9919,10 @@ def render_market_summary():
 
     # ── AIコメント（なぜこの判断か） ──────────────────────
     if sent.get("ok") and sent.get("components"):
-        ai_comment_key = "sentiment_ai_comment"
+        ai_comment_key = _lang_key("sentiment_ai_comment")
         _, col_ai_btn = st.columns([3, 1])
         with col_ai_btn:
-            if st.button("🤖 AIに理由を聞く", key="btn_sentiment_ai", use_container_width=True):
+            if st.button(t("🤖 AIに理由を聞く", "🤖 Ask AI"), key="btn_sentiment_ai", use_container_width=True):
                 comps_for_prompt = sent["components"]
                 lines_data = [
                     f"  - {n}: {c['score']:.0f}/100 ({c['label']})"
@@ -9889,8 +9936,9 @@ def render_market_summary():
                     "さらに「このまま下落が続く可能性が高いのか、それとも一時的な調整で終わりそうか」"
                     "という今後の見通しも含めて、投資家向けに300字以内で簡潔に日本語で答えてください。\n\n"
                     f"指標スコア一覧（低い順）:\n{comp_text}"
+                    + _lang_prompt_suffix()
                 )
-                with st.spinner("AI分析中..."):
+                with st.spinner(t("AI分析中...", "Analyzing with AI...")):
                     comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=600, temperature=0.4)
                 st.session_state[ai_comment_key] = (comment, used_model)
 
@@ -13896,9 +13944,27 @@ def fetch_ai_infra_news(rss_symbols: str, max_items: int = 15) -> List[Dict]:
 
 
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
-def ai_infra_commentary(theme: str, headlines: str, quarter: str) -> tuple:
+def ai_infra_commentary(theme: str, headlines: str, quarter: str, lang: str = "ja") -> tuple:
     """AIがテーマ別に投資マネーフローをコメント"""
-    prompt = f"""あなたはAIインフラ投資を専門とする日本人アナリストです。
+    _lang_suffix = "\n\nIMPORTANT: Respond entirely in English. Do not use Japanese." if lang == "en" else ""
+    if lang == "en":
+        prompt = f"""You are an AI infrastructure investment analyst.
+Analyze the following theme and latest news headlines, and provide a concise investment commentary for global investors.
+
+Theme: {theme}
+Period: {quarter}
+
+[Latest News Headlines]
+{headlines}
+
+Summarize in 150 words or fewer using this format:
+[Money Flow] Major investment trends and capital movements
+[Key Stocks] Companies gaining prominence in this theme
+[Japan Stocks Impact] Related Japanese stocks / supply chain implications
+
+*For informational purposes only. Not investment advice.*{_lang_suffix}"""
+    else:
+        prompt = f"""あなたはAIインフラ投資を専門とする日本人アナリストです。
 以下のテーマと最新ニュースを分析し、日本の投資家向けに日本語で簡潔にコメントしてください。
 
 テーマ: {theme}
@@ -13918,7 +13984,7 @@ def ai_infra_commentary(theme: str, headlines: str, quarter: str) -> tuple:
         comment, model = call_ai_with_fallback(prompt, max_output_tokens=400, temperature=0.4)
         return comment, model
     except Exception as e:
-        return f"AI生成エラー: {e}", ""
+        return f"AI generation error: {e}" if lang == "en" else f"AI生成エラー: {e}", ""
 
 
 def render_ai_infra_moneyflow():
@@ -14027,7 +14093,8 @@ def render_ai_infra_moneyflow():
                     ) or "（ニュース取得なし）"
                     with st.spinner(f"🤖 {theme_name} をAI分析中..."):
                         comment, model = ai_infra_commentary(
-                            theme_name, headlines, quarter
+                            theme_name, headlines, quarter,
+                            lang=st.session_state.get("lang", "ja"),
                         )
                     st.session_state[ai_key] = (comment, model)
 
@@ -15073,8 +15140,26 @@ def fetch_stock_details(symbol: str) -> Dict:
 
 
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
-def ai_stock_evaluation(symbol: str, name: str, sector: str, data: str, quarter: str) -> tuple:
-    prompt = f"""あなたはAIインフラ投資専門のアナリストです。
+def ai_stock_evaluation(symbol: str, name: str, sector: str, data: str, quarter: str, lang: str = "ja") -> tuple:
+    _lang_suffix = "\n\nIMPORTANT: Respond entirely in English. Do not use Japanese." if lang == "en" else ""
+    if lang == "en":
+        prompt = f"""You are an AI infrastructure investment analyst.
+Analyze the following stock data and provide a concise evaluation for investors.
+
+Stock: {symbol} ({name}) / Sector: {sector}
+Period: {quarter}
+
+[Supply/Demand & Valuation Data]
+{data}
+
+Summarize in 100 words or fewer using this format:
+[Supply/Demand] Balance from volume, short interest, institutional holdings
+[Valuation] P/E, P/B, P/S — overvalued or undervalued?
+[Overall Rating] ⭐1–5 with a one-line key takeaway
+
+*For informational purposes only. Not investment advice.*"""
+    else:
+        prompt = f"""あなたはAIインフラ投資専門のアナリストです。
 以下の銘柄データを分析し、日本の投資家向けに日本語で総合評価してください。
 
 銘柄: {symbol} ({name}) / セクター: {sector}
@@ -15093,7 +15178,7 @@ def ai_stock_evaluation(symbol: str, name: str, sector: str, data: str, quarter:
         comment, model = call_ai_with_fallback(prompt, max_output_tokens=350, temperature=0.3)
         return comment, model
     except Exception as e:
-        return f"AI生成エラー: {e}", ""
+        return f"AI generation error: {e}" if lang == "en" else f"AI生成エラー: {e}", ""
 
 
 
@@ -15526,7 +15611,8 @@ def render_stock_screener():
             )
             with st.spinner(f"🤖 {sel_symbol} をAI評価中..."):
                 comment, model = ai_stock_evaluation(
-                    sel_symbol, info["name"], info["sector"], data_str, quarter)
+                    sel_symbol, info["name"], info["sector"], data_str, quarter,
+                    lang=st.session_state.get("lang", "ja"))
             st.session_state[ai_key] = (comment, model)
 
         if ai_key in st.session_state:
@@ -16075,7 +16161,7 @@ def render_market_research_ai():
 ## ⚠️ 注意事項
 このレポートは情報提供目的であり、投資助言ではありません。最終的な投資判断は自己責任でお願いします。
 
-※ニュースの具体的な内容を根拠として積極的に引用してください。"""
+※ニュースの具体的な内容を根拠として積極的に引用してください。""" + _lang_prompt_suffix()
 
         try:
             result, used_model = call_ai_with_fallback(
@@ -16348,10 +16434,29 @@ def fetch_politician_recent_trades(politician_name: str) -> List[Dict]:
 
 
 @st.cache_data(ttl=60 * 60 * 24, show_spinner=False)  # 24時間キャッシュ
-def ai_congress_analysis(politician_name: str, trades_text: str, quarter: str) -> tuple:
+def ai_congress_analysis(politician_name: str, trades_text: str, quarter: str, lang: str = "ja") -> tuple:
     """AIが議員のトレードを分析してコメントを生成"""
     info = CONGRESS_WATCH.get(politician_name, {})
-    prompt = f"""あなたは米国議会の株取引を監視する金融アナリストです。
+    if lang == "en":
+        prompt = f"""You are a financial analyst monitoring US congressional stock trades.
+Analyze the following legislator's recent stock trades and write a concise report for investors.
+
+Legislator: {politician_name} ({info.get('party','?')} Party)
+Profile: {info.get('note','')}
+Period: {quarter}
+
+[Recent Trades]
+{trades_text if trades_text else "No recent disclosures found"}
+
+Summarize in 150–200 words using this format:
+[Key Stocks] Main stocks bought/sold and their direction
+[Theme] Sectors/themes this legislator is betting on
+[Notable Points] Connection between committee role and trades
+[Japan Stock Implications] Related Japanese stocks / themes
+
+*Based on public disclosures under the STOCK Act.*"""
+    else:
+        prompt = f"""あなたは米国議会の株取引を監視する金融アナリストです。
 以下の議員の最新株取引情報を分析し、日本の投資家向けに日本語でレポートしてください。
 
 議員: {politician_name}（{info.get('party','?')}党）
@@ -16570,7 +16675,8 @@ def render_congress_tracker():
                     trades_text += "\n" + "\n".join(feed_trades[:5])
 
                 comment, model = ai_congress_analysis(
-                    ai_target, trades_text, quarter
+                    ai_target, trades_text, quarter,
+                    lang=st.session_state.get("lang", "ja"),
                 )
                 st.session_state[cache_key] = (comment, model)
 
