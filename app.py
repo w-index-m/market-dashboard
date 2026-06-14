@@ -395,6 +395,30 @@ def is_ipad_or_ios_safari() -> bool:
     return False
 
 
+# ── 言語ユーティリティ ────────────────────────────────────────────
+def _detect_lang() -> str:
+    """HTTP Accept-Language ヘッダー + IP国コードで言語を自動判定。'ja' or 'en' を返す。"""
+    try:
+        accept = str(st.context.headers.get("accept-language", "")).lower()
+        if accept.startswith("ja"):
+            return "ja"
+    except Exception:
+        pass
+    # セッションに既に country が保存されていれば流用
+    country = st.session_state.get("_anl_country", "")
+    if not country:
+        try:
+            country = fetch_ip_info_server_side().get("country", "")
+        except Exception:
+            country = ""
+    return "ja" if country == "JP" else "en"
+
+
+def t(ja: str, en: str) -> str:
+    """現在のセッション言語に合わせたテキストを返す。"""
+    return en if st.session_state.get("lang") == "en" else ja
+
+
 def fetch_ip_info_server_side() -> dict:
     """
     サーバー側でipinfo.ioを呼んでIP・地域を取得。
@@ -867,8 +891,9 @@ DASHBOARD_LINKS_HTML = """
 </div>
 """
 
-DASHBOARD_LINKS_TOP_HTML = """
-<style>
+def _build_nav_html(lang: str = "ja") -> str:
+    """ページ内ナビゲーションバーの HTML を言語に合わせて生成する。"""
+    _css = """<style>
 .nav-btn {
     display:inline-flex !important;align-items:center;gap:5px;
     padding:5px 12px;border-radius:6px;text-decoration:none !important;
@@ -884,22 +909,42 @@ DASHBOARD_LINKS_TOP_HTML = """
     padding:6px 14px;border-radius:7px;text-decoration:none !important;
     font-size:12px;font-weight:700;white-space:nowrap;
 }
-</style>
-<!-- ページ内ナビ -->
+</style>"""
+    if lang == "en":
+        label_prefix = "📍 On this page"
+        links = [
+            ("#market-snapshot", "📊 Market"),
+            ("#eco-calendar",    "📅 Eco Calendar"),
+            ("#macro",           "🌐 Macro"),
+            ("#bear-risk",       "🐻 Bear Risk"),
+            ("#momentum",        "🚀 Momentum"),
+            ("#optical-semi",    "📡 Optical vs Semi"),
+            ("#fear-greed",      "😱 Fear&amp;Greed"),
+            ("#sector",          "🔄 Sectors"),
+            ("#nikkei-pred",     "🔮 Nikkei Forecast"),
+            ("#us-pred",         "🎯 US Forecast"),
+        ]
+    else:
+        label_prefix = "📍 このページ内"
+        links = [
+            ("#market-snapshot", "📊 マーケット"),
+            ("#eco-calendar",    "📅 経済イベント"),
+            ("#macro",           "🌐 マクロ指標"),
+            ("#bear-risk",       "🐻 弱気判定"),
+            ("#momentum",        "🚀 モメンタム"),
+            ("#optical-semi",    "📡 光通信vs半導体"),
+            ("#fear-greed",      "😱 Fear&amp;Greed"),
+            ("#sector",          "🔄 セクター"),
+            ("#nikkei-pred",     "🔮 日経予測"),
+            ("#us-pred",         "🎯 米国予測"),
+        ]
+    nav_items = "".join(f'<a class="nav-btn" href="{href}">{label}</a>' for href, label in links)
+    return f"""{_css}
 <div style="background:#111111;border:1px solid #333;border-radius:10px;
      padding:10px 16px;margin-bottom:8px;">
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <span style="font-size:11px;color:#888;font-weight:700;white-space:nowrap;">📍 このページ内</span>
-    <a class="nav-btn" href="#market-snapshot">📊 マーケット</a>
-    <a class="nav-btn" href="#eco-calendar">📅 経済イベント</a>
-    <a class="nav-btn" href="#macro">🌐 マクロ指標</a>
-    <a class="nav-btn" href="#bear-risk">🐻 弱気判定</a>
-    <a class="nav-btn" href="#momentum">🚀 モメンタム</a>
-    <a class="nav-btn" href="#optical-semi">📡 光通信vs半導体</a>
-    <a class="nav-btn" href="#fear-greed">😱 Fear&amp;Greed</a>
-    <a class="nav-btn" href="#sector">🔄 セクター</a>
-    <a class="nav-btn" href="#nikkei-pred">🔮 日経予測</a>
-    <a class="nav-btn" href="#us-pred">🎯 米国予測</a>
+    <span style="font-size:11px;color:#888;font-weight:700;white-space:nowrap;">{label_prefix}</span>
+    {nav_items}
     <span style="flex:1"></span>
     <a href="https://usstock-metrics.streamlit.app/" target="_blank" rel="noopener noreferrer"
        class="ext-btn"
@@ -914,8 +959,10 @@ DASHBOARD_LINKS_TOP_HTML = """
       🇯🇵&nbsp;JStockMetrics
     </a>
   </div>
-</div>
-"""
+</div>"""
+
+
+DASHBOARD_LINKS_TOP_HTML = _build_nav_html("ja")
 
 
 # ===========================
@@ -3481,14 +3528,16 @@ def _cat_score_bar_html(score: float) -> str:
 def render_nikkei_prediction():
     """日経平均予測スコアセクション — 9カテゴリ完全版"""
     st.markdown('<a id="nikkei-pred"></a>', unsafe_allow_html=True)
-    st.header("🔮 日経平均 方向性予測スコア")
+    st.header(t("🔮 日経平均 方向性予測スコア", "🔮 Nikkei 225 Directional Forecast"))
     st.markdown(
-        """<div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);
-        border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;
-        font-size:13px;color:#333;margin-bottom:12px;">
-        <strong>9カテゴリ・25シグナル</strong> の重み付き複合スコアで方向性確率を推定します。<br>
-        グローバル市場・為替・先物・金利・VIX・コモディティ・ETFフロー・テクニカル・センチメント
-        </div>""",
+        '<div style="background:linear-gradient(135deg,#e3f2fd,#f3e5f5);'
+        'border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;'
+        'font-size:13px;color:#333;margin-bottom:12px;">'
+        + t('<strong>9カテゴリ・25シグナル</strong> の重み付き複合スコアで方向性確率を推定します。<br>'
+            'グローバル市場・為替・先物・金利・VIX・コモディティ・ETFフロー・テクニカル・センチメント',
+            '<strong>9 categories · 25 signals</strong> — weighted composite score for directional probability.<br>'
+            'Global markets · FX · Futures · Rates · VIX · Commodities · ETF flows · Technical · Sentiment') +
+        '</div>',
         unsafe_allow_html=True
     )
 
@@ -4850,14 +4899,16 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
 def render_us_prediction():
     """米国株 方向性予測スコアセクション"""
     st.markdown('<a id="us-pred"></a>', unsafe_allow_html=True)
-    st.header("🇺🇸 米国株 方向性予測スコア")
+    st.header(t("🇺🇸 米国株 方向性予測スコア", "🇺🇸 US Stocks Directional Forecast"))
     st.markdown(
-        """<div style="background:linear-gradient(135deg,#e3f2fd,#fce4ec);
-        border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;
-        font-size:13px;color:#333;margin-bottom:12px;">
-        <strong>9カテゴリ・複合シグナル</strong> で S&P500 / NASDAQ100 / ダウ の方向性確率を推定します。<br>
-        マクロ・金利・VIX・セクター・モメンタム・市場の幅・コモディティ・テクニカル・センチメント
-        </div>""",
+        '<div style="background:linear-gradient(135deg,#e3f2fd,#fce4ec);'
+        'border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;'
+        'font-size:13px;color:#333;margin-bottom:12px;">'
+        + t('<strong>9カテゴリ・複合シグナル</strong> で S&P500 / NASDAQ100 / ダウ の方向性確率を推定します。<br>'
+            'マクロ・金利・VIX・セクター・モメンタム・市場の幅・コモディティ・テクニカル・センチメント',
+            '<strong>9 categories · composite signals</strong> — directional probability for S&P500 / NASDAQ100 / Dow.<br>'
+            'Macro · Rates · VIX · Sector · Momentum · Breadth · Commodities · Technical · Sentiment') +
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -5161,9 +5212,10 @@ def render_sector_rotation():
         '<div style="background:linear-gradient(135deg,#e3f2fd,#e8f5e9);'
         'border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;'
         'font-size:13px;color:#333;margin-bottom:12px;">'
-        '<strong>RRG（Relative Rotation Graph）方式</strong>: '
-        'x軸=相対強度, y軸=モメンタム の2軸で11セクターの位置を可視化。'
-        '<br>🟢Leading（強い）→ 🟡Weakening（失速）→ 🔴Lagging（弱い）→ 🔵Improving（回復）のサイクルで回転します。'
+        + t('<strong>RRG（Relative Rotation Graph）方式</strong>: x軸=相対強度, y軸=モメンタム の2軸で11セクターの位置を可視化。'
+            '<br>🟢Leading（強い）→ 🟡Weakening（失速）→ 🔴Lagging（弱い）→ 🔵Improving（回復）のサイクルで回転します。',
+            '<strong>RRG (Relative Rotation Graph)</strong>: x-axis = relative strength, y-axis = momentum — plots 11 sectors.'
+            '<br>🟢 Leading → 🟡 Weakening → 🔴 Lagging → 🔵 Improving cycle.') +
         '</div>', unsafe_allow_html=True)
 
     with st.spinner("セクターデータ取得中..."):
@@ -6403,12 +6455,16 @@ def fetch_naaim_data() -> pd.DataFrame:
 
 def render_naaim_section():
     """NAAIM Exposure Index セクション描画（並行取得・遅延表示対応）"""
-    st.subheader("📡 NAAIM Exposure Index（機関投資家エクスポージャー）")
-    st.caption(
+    st.subheader(t("📡 NAAIM Exposure Index（機関投資家エクスポージャー）",
+                   "📡 NAAIM Exposure Index (Institutional Positioning)"))
+    st.caption(t(
         "全米アクティブ投資マネージャー協会（NAAIM）が毎週水曜公表。"
         "プロの運用者が実際にどれだけ米株ロングを持っているかを示す逆張り指標。"
-        "高値圏（>80）は過熱・天井警戒、低値圏（<30）は恐怖・底値候補。"
-    )
+        "高値圏（>80）は過熱・天井警戒、低値圏（<30）は恐怖・底値候補。",
+        "Published weekly by NAAIM (National Association of Active Investment Managers). "
+        "Shows how much net long exposure professional managers carry — a contrarian indicator. "
+        ">80: overheated / top risk; <30: fear / potential bottom.",
+    ))
 
     # ─────────────────────────────────────────────────────────
     # セッションキャッシュ方式（rerunループなし）:
@@ -7914,9 +7970,10 @@ def render_macro_indicators():
         '<div style="background:linear-gradient(135deg,#0a1628,#0d2137,#0a1628);'
         'border-radius:12px;padding:14px 20px;margin-bottom:12px;">'
         '<div style="font-size:20px;font-weight:800;color:#7dd3fc">'
-        '🌐 マクロ経済指標 — シンクタンク視点</div>'
+        + t('🌐 マクロ経済指標 — シンクタンク視点', '🌐 Macro Indicators — Think Tank View') +
+        '</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
-        'Shiller CAPE · Conference Board LEI · PCE インフレ</div>'
+        'Shiller CAPE · Conference Board LEI · PCE Inflation</div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -8167,9 +8224,11 @@ def render_bear_market_checker():
         '<div style="background:linear-gradient(135deg,#1a0a0a,#2d0a0a,#1a0a1a);'
         'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
         '<div style="font-size:20px;font-weight:800;color:#fca5a5">'
-        '🐻 弱気相場リスク判定</div>'
+        + t('🐻 弱気相場リスク判定', '🐻 Bear Market Risk Assessment') +
+        '</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
-        'S&P500高値比・VIX・信用スプレッド・イールドカーブ等の複合指標でリスクを評価します。'
+        + t('S&P500高値比・VIX・信用スプレッド・イールドカーブ等の複合指標でリスクを評価します。',
+            'Composite risk score: S&P500 drawdown, VIX, credit spreads, yield curve & more.') +
         '</div></div>',
         unsafe_allow_html=True,
     )
@@ -8336,9 +8395,12 @@ def render_optical_vs_semi():
         '<div style="background:linear-gradient(135deg,#0a192f,#112240,#1d3a6e);'
         'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
         '<div style="font-size:20px;font-weight:800;color:#f0f4f8;">'
-        '📡 光通信・AIインフラ vs 半導体 パフォーマンス比較</div>'
+        + t('📡 光通信・AIインフラ vs 半導体 パフォーマンス比較',
+            '📡 Optical / AI Infra vs Semiconductors') +
+        '</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">'
-        'AI データセンター投資の恩恵：光通信（CIEN/COHR/LITE等）と半導体（NVDA/AMD/SMH）の強さを比較します。'
+        + t('AI データセンター投資の恩恵：光通信（CIEN/COHR/LITE等）と半導体（NVDA/AMD/SMH）の強さを比較します。',
+            'AI datacenter beneficiaries: optical networking (CIEN/COHR/LITE) vs semiconductors (NVDA/AMD/SMH).') +
         '</div></div>',
         unsafe_allow_html=True,
     )
@@ -8549,9 +8611,12 @@ def render_momentum_ranking():
         '<div style="background:linear-gradient(135deg,#0d1117,#161b22,#1f2937);'
         'border-radius:12px;padding:14px 20px;margin-bottom:8px;">'
         '<div style="font-size:20px;font-weight:800;color:#f0f4f8">'
-        '🚀 モメンタムランキング</div>'
+        + t('🚀 モメンタムランキング', '🚀 Momentum Ranking') +
+        '</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
-        '当日・5日・20日リターンの加重平均スコアで上昇力の強い銘柄を表示します。</div>'
+        + t('当日・5日・20日リターンの加重平均スコアで上昇力の強い銘柄を表示します。',
+            'Weighted score of 1-day, 5-day, and 20-day returns to rank strongest movers.') +
+        '</div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -9753,7 +9818,9 @@ def render_market_summary():
         '<div style="font-size:22px;font-weight:900;color:#f8fafc;letter-spacing:-0.5px;">'
         '📊 Today\'s Market Snapshot</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">'
-        '主要指標を自動集計した今日の概要。詳細は各セクションで確認できます。</div>'
+        + t('主要指標を自動集計した今日の概要。詳細は各セクションで確認できます。',
+            'Auto-aggregated overview of today\'s key indicators. See each section for details.') +
+        '</div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -16653,11 +16720,18 @@ def main():
         st.stop()
         return
 
-    # ── ② SEO / OGP メタタグ注入 ────────────────────────────────
+    # ── ② 言語自動検出（セッション初回のみ）────────────────────
+    if "lang" not in st.session_state:
+        st.session_state["lang"] = _detect_lang()
+
+    # ── ③ SEO / OGP メタタグ注入 ────────────────────────────────
     inject_seo_meta()
 
     st.title("📊 Market Dashboard")
-    st.caption(f"最終更新: {now_jst:%Y-%m-%d %H:%M:%S} JST | フォント: {FONT_NAME}")
+    st.caption(
+        t(f"最終更新: {now_jst:%Y-%m-%d %H:%M:%S} JST | フォント: {FONT_NAME}",
+          f"Last updated: {now_jst:%Y-%m-%d %H:%M:%S} JST | Font: {FONT_NAME}")
+    )
 
     # ── Google翻訳ウィジェット ──────────────────────────────────
     # components.html だと Streamlit 再描画のたびに iframe がリセットされて消える。
@@ -16751,14 +16825,31 @@ def main():
         streamlit_analytics.start_tracking()
     # (disabled)
 
-    st.markdown(DASHBOARD_LINKS_TOP_HTML, unsafe_allow_html=True)
+    st.markdown(_build_nav_html(st.session_state.get("lang", "ja")), unsafe_allow_html=True)
 
     inject_global_css()
     responsive_cols = get_responsive_cols()
 
     with st.sidebar:
-        st.subheader("⚙️ 操作")
-        if st.button("🔄 マーケットデータ更新", type="primary", use_container_width=True):
+        # ── 言語切替トグル ───────────────────────────────────────
+        _lang_ja, _lang_en = st.columns(2)
+        with _lang_ja:
+            if st.button("🇯🇵 日本語", key="lang_ja_btn", use_container_width=True,
+                         type="primary" if st.session_state.get("lang") == "ja" else "secondary"):
+                st.session_state["lang"] = "ja"
+                st.rerun()
+        with _lang_en:
+            if st.button("🇺🇸 English", key="lang_en_btn", use_container_width=True,
+                         type="primary" if st.session_state.get("lang") == "en" else "secondary"):
+                st.session_state["lang"] = "en"
+                st.rerun()
+        st.divider()
+
+        st.subheader(t("⚙️ 操作", "⚙️ Controls"))
+        if st.button(
+            t("🔄 マーケットデータ更新", "🔄 Refresh Market Data"),
+            type="primary", use_container_width=True,
+        ):
             # 市場データのみクリア（AI生成コンテンツは保持）
             for fn in [
                 fetch_macro_indicators,
@@ -16782,10 +16873,10 @@ def main():
                     fn.clear()
                 except Exception:
                     pass
-            st.success("✅ マーケットデータを更新しました")
+            st.success(t("✅ マーケットデータを更新しました", "✅ Market data refreshed"))
             st.rerun()
         st.divider()
-        st.subheader("🔑 API設定")
+        st.subheader(t("🔑 API設定", "🔑 API Status"))
         api_status = {
             "Tiingo": "✅" if TIINGO_API_KEY else "❌",
             "Google Analytics": "✅" if GA_MEASUREMENT_ID else "❌",
@@ -16793,7 +16884,7 @@ def main():
             "Gemini": "✅" if GEMINI_API_KEY else "❌",
             "Groq": "✅" if GROQ_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
-            "FMP (経済指標実績)": "✅" if FMP_API_KEY else "❌ 未設定（無料登録可）",
+            t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
         }
         for name, status in api_status.items():
             st.write(f"**{name}:** {status}")
@@ -16801,9 +16892,9 @@ def main():
         if GEMINI_API_KEY: active_ai.append("Gemini")
         if GROQ_API_KEY: active_ai.append("Groq")
         if OPENROUTER_API_KEY: active_ai.append("OpenRouter")
-        chain_str = " → ".join(active_ai) if active_ai else "未設定"
-        st.caption(f"🤖 AIチェーン: {chain_str}")
-        with st.expander("📝 設定方法"):
+        chain_str = " → ".join(active_ai) if active_ai else t("未設定", "Not configured")
+        st.caption(f"🤖 AI chain: {chain_str}")
+        with st.expander(t("📝 設定方法", "📝 How to configure")):
             st.code("""
 # .streamlit/secrets.toml
 TIINGO_API_KEY = "your_key"
@@ -16814,47 +16905,53 @@ GROQ_API_KEY = "gsk_..."
 OPENROUTER_API_KEY = "sk-or-..."
             """, language="toml")
         st.divider()
-        st.subheader("🌐 ニュース設定")
-        translate_mode = st.toggle("📰 ニュース翻訳", value=True)
+        st.subheader(t("🌐 ニュース設定", "🌐 News"))
+        translate_mode = st.toggle(t("📰 ニュース翻訳", "📰 Translate news"), value=True)
         st.divider()
-        st.subheader("📱 表示設定")
-        st.caption("CSSで自動切替: PC→4列 / タブレット横→3列 / iPad mini縦→2列")
+        st.subheader(t("📱 表示設定", "📱 Display"))
+        st.caption(t("CSSで自動切替: PC→4列 / タブレット横→3列 / iPad mini縦→2列",
+                     "Auto layout: PC→4col / Tablet→3col / iPad mini→2col"))
         col_manual = st.selectbox(
-            "カラム数を手動指定（自動の上書き）",
-            options=["自動（CSS制御）", "2列", "3列", "4列"],
+            t("カラム数を手動指定（自動の上書き）", "Override column count"),
+            options=(["自動（CSS制御）", "2列", "3列", "4列"] if st.session_state.get("lang") != "en"
+                     else ["Auto (CSS)", "2 col", "3 col", "4 col"]),
             index=0,
             key="col_select",
         )
-        manual_map = {"自動（CSS制御）": None, "2列": 2, "3列": 3, "4列": 4}
-        manual_val = manual_map[col_manual]
+        manual_map = ({"自動（CSS制御）": None, "2列": 2, "3列": 3, "4列": 4}
+                      if st.session_state.get("lang") != "en"
+                      else {"Auto (CSS)": None, "2 col": 2, "3 col": 3, "4 col": 4})
+        manual_val = manual_map.get(col_manual)
         if manual_val is not None:
             st.session_state["detected_cols"] = manual_val
             responsive_cols = manual_val
         else:
             st.session_state.pop("detected_cols", None)
             responsive_cols = 4
-        st.caption(f"Python列数: {responsive_cols}（表示はCSS自動調整）")
+        st.caption(t(f"Python列数: {responsive_cols}（表示はCSS自動調整）",
+                     f"Columns: {responsive_cols} (CSS auto-adjusts display)"))
         st.divider()
-        st.subheader("ℹ️ キャッシュ設定")
-        st.write(f"**日足:** {TTL_DAILY}秒")
-        st.write(f"**イントラ:** {TTL_INTRADAY}秒")
-        st.write(f"**RSS:** {TTL_RSS}秒")
-        st.write(f"**チャート:** {TTL_CHART}秒 ★10分")
+        st.subheader(t("ℹ️ キャッシュ設定", "ℹ️ Cache TTLs"))
+        st.write(f"**{'日足' if st.session_state.get('lang')!='en' else 'Daily'}:** {TTL_DAILY}s")
+        st.write(f"**{'イントラ' if st.session_state.get('lang')!='en' else 'Intraday'}:** {TTL_INTRADAY}s")
+        st.write(f"**RSS:** {TTL_RSS}s")
+        st.write(f"**{'チャート' if st.session_state.get('lang')!='en' else 'Chart'}:** {TTL_CHART}s")
         st.divider()
-        st.subheader("🤖 AI設定")
-        st.caption("Gemini優先 → quota超過(429)時のみGroqへ自動切替")
+        st.subheader(t("🤖 AI設定", "🤖 AI Settings"))
+        st.caption(t("Gemini優先 → quota超過(429)時のみGroqへ自動切替",
+                     "Gemini first → auto-fallback to Groq on quota (429)"))
         st.divider()
-        st.subheader("🔧 デバッグ情報")
-        if st.checkbox("利用可能なGeminiモデルを表示", value=False):
+        st.subheader(t("🔧 デバッグ情報", "🔧 Debug"))
+        if st.checkbox(t("利用可能なGeminiモデルを表示", "Show available Gemini models"), value=False):
             if GENAI_AVAILABLE and GEMINI_API_KEY:
                 try:
                     genai.configure(api_key=GEMINI_API_KEY)
                     models_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                     st.write(models_list[:10])
                 except Exception as e:
-                    st.error(f"モデル一覧取得エラー: {e}")
+                    st.error(f"{'モデル一覧取得エラー' if st.session_state.get('lang')!='en' else 'Model list error'}: {e}")
             else:
-                st.warning("Gemini APIキーが設定されていません")
+                st.warning(t("Gemini APIキーが設定されていません", "Gemini API key not configured"))
 
     # ===================================================
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）
@@ -16899,11 +16996,15 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ===================================================
     st.markdown('<a id="fear-greed"></a>', unsafe_allow_html=True)
     st.header("😱 Fear & Greed Index")
-    tab_us, tab_jp = st.tabs(["🇺🇸 米国版", "🇯🇵 日本版"])
+    tab_us, tab_jp = st.tabs([
+        t("🇺🇸 米国版", "🇺🇸 US"),
+        t("🇯🇵 日本版", "🇯🇵 Japan"),
+    ])
 
     with tab_us:
-        st.subheader("米国市場の投資家心理（CNN Fear & Greed Index）")
-        with st.spinner("Fear & Greed Indexを取得中..."):
+        st.subheader(t("米国市場の投資家心理（CNN Fear & Greed Index）",
+                       "US Market Sentiment (CNN Fear & Greed Index)"))
+        with st.spinner(t("Fear & Greed Indexを取得中...", "Loading Fear & Greed Index...")):
             fg_data = fetch_fear_greed_index()
 
         if fg_data:
@@ -16922,13 +17023,13 @@ OPENROUTER_API_KEY = "sk-or-..."
                 else:
                     st.pyplot(png_bytes, clear_figure=True)
             with col2:
-                st.metric("現在スコア", f"{score:.0f}/100",
+                st.metric(t("現在スコア", "Current Score"), f"{score:.0f}/100",
                           delta=f"{score_change:+.1f}" if score_change else None,
                           delta_color="inverse")
-                st.markdown(f"**状態:** <span style='color:{color};font-weight:bold'>{label}</span>", unsafe_allow_html=True)
-                st.caption(f"レーティング: {rating}")
+                st.markdown(f"**{t('状態', 'Status')}:** <span style='color:{color};font-weight:bold'>{label}</span>", unsafe_allow_html=True)
+                st.caption(f"{t('レーティング', 'Rating')}: {rating}")
             with col3:
-                st.markdown("**📊 指標の見方**")
+                st.markdown(f"**📊 {t('指標の見方', 'Scale')}**")
                 st.caption("0-25: Extreme Fear")
                 st.caption("25-45: Fear")
                 st.caption("45-55: Neutral")
@@ -16936,10 +17037,10 @@ OPENROUTER_API_KEY = "sk-or-..."
                 st.caption("75-100: Extreme Greed")
 
             if hist_df is not None and not hist_df.empty:
-                with st.expander("📈 履歴トレンド", expanded=True):
+                with st.expander(t("📈 履歴トレンド", "📈 Historical Trend"), expanded=True):
                     draw_trend_chart(
                         hist_df,
-                        title="米国 Fear & Greed Index 推移",
+                        title=t("米国 Fear & Greed Index 推移", "US Fear & Greed Index History"),
                         ylabel="Fear & Greed Score",
                         y_min=0, y_max=100,
                         add_fg_bands=True,
@@ -16947,10 +17048,12 @@ OPENROUTER_API_KEY = "sk-or-..."
                     )
                     st.markdown(DASHBOARD_LINKS_HTML, unsafe_allow_html=True)
         else:
-            st.error("⚠️ Fear & Greed Indexを取得できませんでした")
+            st.error(t("⚠️ Fear & Greed Indexを取得できませんでした",
+                       "⚠️ Failed to load Fear & Greed Index"))
 
         st.divider()
-        st.caption("🤖 CNN Fear & Greed Indexとは別手法で、市場全体を総合評価した参考スコアです。")
+        st.caption(t("🤖 CNN Fear & Greed Indexとは別手法で、市場全体を総合評価した参考スコアです。",
+                     "🤖 An independent composite score evaluating overall market sentiment."))
 
         # ── AI Sentiment Index を先に描画（重いNAAIMを待たない） ──
         render_composite_sentiment()
