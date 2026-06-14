@@ -15717,7 +15717,11 @@ def render_market_research_ai():
             help="Finnhub/AVのキャッシュをクリアして再取得",
         )
     if clear_btn:
-        st.cache_data.clear()
+        for fn in [fetch_news_for_research, fetch_av_news_sentiment, fetch_finnhub_company_news]:
+            try:
+                fn.clear()
+            except Exception:
+                pass
         for k in ["market_research_result", "market_research_meta", "market_research_model"]:
             st.session_state.pop(k, None)
         st.success("✅ キャッシュクリア完了。再度「AIリサーチを実行」を押してください。")
@@ -16754,9 +16758,31 @@ def main():
 
     with st.sidebar:
         st.subheader("⚙️ 操作")
-        if st.button("🔄 キャッシュクリア & 更新", type="primary", use_container_width=True):
-            st.cache_data.clear()
-            st.success("✅ キャッシュをクリアしました")
+        if st.button("🔄 マーケットデータ更新", type="primary", use_container_width=True):
+            # 市場データのみクリア（AI生成コンテンツは保持）
+            for fn in [
+                fetch_macro_indicators,
+                _fetch_summary_prices,
+                compute_bear_market_risk,
+                compute_composite_sentiment,
+                fetch_fear_greed_index,
+                fetch_fg_components,
+                fetch_japan_fear_greed_index,
+                _fetch_momentum_ranking,
+                _fetch_optical_vs_semi,
+                _fetch_eco_actuals_bls,
+                _fetch_eco_actuals_fmp,
+                _fetch_eco_actuals_fred,
+                _fetch_event_market_reactions,
+                compute_nikkei_prediction,
+                compute_sector_rotation,
+                fetch_naaim_data,
+            ]:
+                try:
+                    fn.clear()
+                except Exception:
+                    pass
+            st.success("✅ マーケットデータを更新しました")
             st.rerun()
         st.divider()
         st.subheader("🔑 API設定")
