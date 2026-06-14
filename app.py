@@ -8485,21 +8485,21 @@ def render_optical_vs_semi():
 
     # 個別光通信銘柄（細い補助線）
     if show_individual:
-        for t in opt_valid:
-            if t in norm.columns:
+        for tk in opt_valid:
+            if tk in norm.columns:
                 fig.add_trace(go.Scatter(
-                    x=norm.index, y=norm[t],
-                    name=label_map.get(t, t),
+                    x=norm.index, y=norm[tk],
+                    name=label_map.get(tk, tk),
                     line=dict(width=1, dash="dot", color=OPTICAL_COLOR),
                     opacity=0.45,
                     legendgroup="optical",
                     showlegend=True,
                 ))
-        for t in semi_valid:
-            if t in norm.columns and t not in ("SMH", "SOXX"):
+        for tk in semi_valid:
+            if tk in norm.columns and tk not in ("SMH", "SOXX"):
                 fig.add_trace(go.Scatter(
-                    x=norm.index, y=norm[t],
-                    name=label_map.get(t, t),
+                    x=norm.index, y=norm[tk],
+                    name=label_map.get(tk, tk),
                     line=dict(width=1, dash="dot", color=SEMI_COLOR),
                     opacity=0.45,
                     legendgroup="semi",
@@ -8579,7 +8579,7 @@ def render_optical_vs_semi():
     display_order = (
         ["【光通信バスケット】"] + opt_valid +
         ["【個別半導体平均】", "SMH", "SOXX"] +
-        [t for t in semi_valid if t not in ("SMH", "SOXX")]
+        [tk for tk in semi_valid if tk not in ("SMH", "SOXX")]
     )
 
     rows_html = ""
