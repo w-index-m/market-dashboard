@@ -8364,7 +8364,7 @@ _OPTICAL_BASKET: list[tuple[str, str]] = [
     ("VIAV",   "Viavi（光試験）"),
     ("AAOI",   "AAOI（トランシーバ）"),
     ("ATXI",   "ATXI（光インフラ）"),
-    ("SDSK",   "SDSK"),
+    ("SNDK",   "SanDisk"),
     ("GLW",    "Corning（光ファイバー）"),
     ("APH",    "Amphenol（コネクタ）"),
     ("VRT",    "Vertiv（AIインフラ電源）"),
@@ -8650,7 +8650,7 @@ def render_optical_vs_semi():
 | **GLW** | 光ファイバー | Corning：光ファイバー素材・ケーブル世界最大手 |
 | **APH** | コネクタ・ケーブル | Amphenol：AI DC向け高速コネクタ・ハーネス |
 | **VRT** | AIインフラ電源 | Vertiv：AIデータセンター向け電源・冷却システム |
-| **SDSK** | — | （データ取得可能な場合のみ表示） |
+| **SNDK** | NAND Flash | SanDisk（WDスピンオフ・NAND型フラッシュ） |
 | **フジクラ（5803.T）** | 光ファイバー | 世界首位級の光ファイバーケーブルメーカー（JPY建て・為替影響含む） |
 | **SMH** | 半導体ETF | NVDA/TSMC/AVGO等を含む半導体業界代表ETF |
 | **NVDA** | GPU/AI半導体 | AI学習・推論GPU、データセンター主力 |
@@ -8672,9 +8672,10 @@ _SEMI_FORECAST_TICKERS: list[tuple[str, str]] = [
     ("INTC", "Intel"),
     ("AMAT", "Applied Materials"),
     ("MU",   "Micron"),
+    ("SNDK", "SanDisk"),
 ]
 _OPTICAL_FORECAST_TICKERS: list[tuple[str, str]] = [
-    ("SDSK",   "SDSK"),
+    ("SNDK",   "SanDisk"),
     ("AAOI",   "AAOI"),
     ("LITE",   "Lumentum"),
     ("GLW",    "Corning"),
@@ -8763,6 +8764,167 @@ def _fetch_sox_current() -> float | None:
     except Exception:
         pass
     return None
+
+
+def _render_sector_upside_comparison(
+    semi_data: dict,
+    optical_data: dict,
+    lang: str = "ja",
+) -> None:
+    """半導体 vs 光通信バスケットの推定アップサイド比較チャートを描画"""
+    import plotly.graph_objects as go
+
+    s_lo  = semi_data.get("basket_upside_low")
+    s_me  = semi_data.get("basket_upside_mean")
+    s_hi  = semi_data.get("basket_upside_high")
+    o_lo  = optical_data.get("basket_upside_low")
+    o_me  = optical_data.get("basket_upside_mean")
+    o_hi  = optical_data.get("basket_upside_high")
+
+    if any(v is None for v in [s_lo, s_me, s_hi, o_lo, o_me, o_hi]):
+        return
+
+    SEMI_COLOR   = "#818cf8"
+    OPTICAL_COLOR = "#38bdf8"
+
+    if lang == "en":
+        labels      = ["Downside (Low)", "Consensus (Mean)", "Upside (High)"]
+        semi_label  = "🔬 Semiconductors (SOX)"
+        opt_label   = "📡 Optical Basket"
+        disclaimer  = "⚠️ Estimated from analyst consensus price targets. Not a guarantee of future performance."
+        verdict_more = "More upside potential"
+        title_txt   = "Estimated Upside/Downside Comparison  ※ Analyst Consensus Based Estimate"
+    else:
+        labels      = ["悲観シナリオ（下限）", "コンセンサス（中央）", "楽観シナリオ（上限）"]
+        semi_label  = "🔬 半導体（SOX）"
+        opt_label   = "📡 光通信バスケット"
+        disclaimer  = "⚠️ アナリスト・コンセンサス目標株価を等加重平均した推定値です。実際の指数リターンを保証するものではありません。"
+        verdict_more = "の方がアップサイド大きい見込み（推定）"
+        title_txt   = "上振れ・下振れ シナリオ比較（アナリスト・コンセンサス ベース推定）"
+
+    semi_vals    = [s_lo,  s_me,  s_hi]
+    optical_vals = [o_lo,  o_me,  o_hi]
+
+    fig = go.Figure()
+
+    # 半導体バー
+    fig.add_trace(go.Bar(
+        name=semi_label,
+        x=labels,
+        y=semi_vals,
+        marker_color=[SEMI_COLOR if v >= 0 else "#ef4444" for v in semi_vals],
+        marker_opacity=0.85,
+        text=[f"{v:+.1f}%" for v in semi_vals],
+        textposition="outside",
+        textfont=dict(color="#e2e8f0", size=13, family="sans-serif"),
+        width=0.35,
+        offsetgroup=0,
+        hovertemplate="%{x}: <b>%{y:+.1f}%</b><extra>" + semi_label + "</extra>",
+    ))
+
+    # 光通信バー
+    fig.add_trace(go.Bar(
+        name=opt_label,
+        x=labels,
+        y=optical_vals,
+        marker_color=[OPTICAL_COLOR if v >= 0 else "#f87171" for v in optical_vals],
+        marker_opacity=0.85,
+        text=[f"{v:+.1f}%" for v in optical_vals],
+        textposition="outside",
+        textfont=dict(color="#e2e8f0", size=13, family="sans-serif"),
+        width=0.35,
+        offsetgroup=1,
+        hovertemplate="%{x}: <b>%{y:+.1f}%</b><extra>" + opt_label + "</extra>",
+    ))
+
+    # レンジ範囲の参考線（薄い帯）
+    for vals, color in [(semi_vals, SEMI_COLOR), (optical_vals, OPTICAL_COLOR)]:
+        fig.add_trace(go.Scatter(
+            x=labels + labels[::-1],
+            y=[vals[0], vals[1], vals[2], vals[2], vals[1], vals[0]],
+            fill="toself",
+            fillcolor=color,
+            opacity=0.07,
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    fig.add_hline(y=0, line_width=1.5, line_color="#475569", line_dash="dot")
+
+    ymin = min(s_lo, o_lo, 0) * 1.4
+    ymax = max(s_hi, o_hi, 0) * 1.4
+
+    fig.update_layout(
+        title=dict(text=title_txt, font=dict(color="#94a3b8", size=13), x=0),
+        paper_bgcolor="#0f172a",
+        plot_bgcolor="#0f172a",
+        barmode="group",
+        bargap=0.25,
+        bargroupgap=0.06,
+        height=380,
+        margin=dict(l=10, r=20, t=60, b=80),
+        yaxis=dict(
+            title=dict(text="推定アップサイド %" if lang == "ja" else "Estimated Upside %",
+                       font=dict(color="#94a3b8", size=11)),
+            ticksuffix="%",
+            tickfont=dict(color="#94a3b8"),
+            gridcolor="#1e293b",
+            zeroline=False,
+            range=[ymin, ymax],
+        ),
+        xaxis=dict(
+            tickfont=dict(color="#e2e8f0", size=12),
+            linecolor="#334155",
+        ),
+        legend=dict(
+            orientation="h",
+            y=-0.22,
+            x=0.5,
+            xanchor="center",
+            font=dict(color="#e2e8f0", size=12),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        font=dict(color="#e2e8f0"),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 勝者バナー
+    if s_me is not None and o_me is not None:
+        if abs(s_me - o_me) < 1.0:
+            verdict_html = (
+                f'<div style="background:#1e293b;border:1px solid #334155;'
+                f'border-radius:8px;padding:10px 16px;font-size:13px;color:#e2e8f0;text-align:center;">'
+                + (f"⚖️ コンセンサスベースでは両セクターはほぼ拮抗（差 {s_me-o_me:+.1f}pt）" if lang == "ja"
+                   else f"⚖️ Broadly equal on consensus basis (diff {s_me-o_me:+.1f}pt)")
+                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px">※ 推定値</span>'
+                f'</div>'
+            )
+        elif s_me > o_me:
+            verdict_html = (
+                f'<div style="background:#1e1040;border:2px solid {SEMI_COLOR};'
+                f'border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;color:{SEMI_COLOR};text-align:center;">'
+                + (f"🔬 半導体（SOX）{verdict_more}　コンセンサス中央値: {s_me:+.1f}% vs {o_me:+.1f}%"
+                   if lang == "ja" else
+                   f"🔬 Semiconductors (SOX) {verdict_more}  Consensus: {s_me:+.1f}% vs {o_me:+.1f}%")
+                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
+                f'</div>'
+            )
+        else:
+            verdict_html = (
+                f'<div style="background:#001f3f;border:2px solid {OPTICAL_COLOR};'
+                f'border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;color:{OPTICAL_COLOR};text-align:center;">'
+                + (f"📡 光通信バスケット{verdict_more}　コンセンサス中央値: {o_me:+.1f}% vs {s_me:+.1f}%"
+                   if lang == "ja" else
+                   f"📡 Optical Basket {verdict_more}  Consensus: {o_me:+.1f}% vs {s_me:+.1f}%")
+                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
+                f'</div>'
+            )
+        st.markdown(verdict_html, unsafe_allow_html=True)
+
+    st.caption(disclaimer)
 
 
 def _render_forecast_gauge(
@@ -9166,6 +9328,8 @@ def render_earnings_index_forecast():
             _summary_card(t("📡 光通信バスケット", "📡 Optical Basket"),
                           optical_data, "#38bdf8")
 
+        st.markdown("<br>", unsafe_allow_html=True)
+        _render_sector_upside_comparison(semi_data, optical_data, lang=lang)
         st.markdown("---")
 
         # AI 見通しコメント
