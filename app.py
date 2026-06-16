@@ -41,7 +41,6 @@ import matplotlib.font_manager as fm
 import numpy as np
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 # Plotly（インタラクティブチャート）
 try:
@@ -201,7 +200,7 @@ def inject_seo_meta():
     st.markdown(_SEO_META, unsafe_allow_html=True)
 
     # 手法②: GTM + meta を親フレームheadに直接inject
-    components.html(
+    st.html(
         """
         <!-- Google Tag Manager -->
         <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -260,10 +259,7 @@ def inject_seo_meta():
           <iframe src="https://www.googletagmanager.com/ns.html?id=GTM-MSPS3KGR"
                   height="0" width="0" style="display:none;visibility:hidden"></iframe>
         </noscript>
-        """,
-        height=0,
-        width=0,
-    )
+        """)
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -487,7 +483,7 @@ def inject_ga():
     if not GA_MEASUREMENT_ID or not GA_MEASUREMENT_ID.startswith("G-"):
         return
     # height=1 にしないとiframeが描画されずスクリプトが実行されない
-    components.html(
+    st.html(
         f"""
         <script async src="https://www.googletagmanager.com/gtag/js?id={sanitize_html(GA_MEASUREMENT_ID)}"></script>
         <script>
@@ -499,15 +495,13 @@ def inject_ga():
             'transport_type': 'beacon'
           }});
         </script>
-        """,
-        height=1, width=0,
-    )
+        """)
 # inject_ga()  # disabled by patch
 
 def track_page_view():
     if not GA_MEASUREMENT_ID:
         return
-    components.html(
+    st.html(
         """
         <script>
         (function() {
@@ -518,16 +512,13 @@ def track_page_view():
                         page_location: window.location.href
                     });
                 } else {
-                    // gtag未ロードなら少し待ってリトライ
                     setTimeout(sendGA, 500);
                 }
             }
             sendGA();
         })();
         </script>
-        """,
-        height=1, width=0,
-    )
+        """)
 # track_page_view()  # disabled by patch
 
 # ===========================
@@ -2370,7 +2361,7 @@ def draw_trend_chart(
                 height=360,
                 showlegend=False,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         else:
             # ── matplotlibフォールバック ──────────────────────────
@@ -2668,7 +2659,7 @@ def render_prediction_history():
                 hoverlabel=dict(bgcolor="white", font_size=12),
                 height=300, margin=dict(l=60, r=20, t=40, b=40),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             st.caption("↑ 日経平均実績のみ表示中（予測スコア蓄積後に比較グラフが表示されます）")
         return
 
@@ -2823,7 +2814,7 @@ def render_prediction_history():
             height=420,
             margin=dict(l=60, r=70, t=60, b=40),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     else:
         # ── matplotlibフォールバック ──────────────────────────
@@ -2868,7 +2859,7 @@ def render_prediction_history():
         disp["方向性"] = disp["Prob. Up(%)"].apply(
             lambda x: "📈 強気" if x > 55 else ("📉 弱気" if x < 45 else "➡️ 中立")
         )
-        st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.dataframe(disp, width="stretch", hide_index=True)
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def fetch_nikkei_vi_history(years: int = 4) -> pd.DataFrame:
@@ -3625,7 +3616,7 @@ def render_nikkei_prediction():
             'margin-bottom:4px;">📅 明日の予測</div>',
             unsafe_allow_html=True
         )
-        st.image(render_prediction_gauge(prob_up_t), use_container_width=True)
+        st.image(render_prediction_gauge(prob_up_t), width="stretch")
         st.markdown(
             f'<div style="text-align:center;margin-top:2px;">'
             f'<div style="font-size:12px;color:#666;margin-bottom:3px;">Prob. Up</div>'
@@ -3644,7 +3635,7 @@ def render_nikkei_prediction():
             'margin-bottom:4px;">📆 今週の予測</div>',
             unsafe_allow_html=True
         )
-        st.image(render_prediction_gauge(prob_up_w), use_container_width=True)
+        st.image(render_prediction_gauge(prob_up_w), width="stretch")
         st.markdown(
             f'<div style="text-align:center;margin-top:2px;">'
             f'<div style="font-size:12px;color:#666;margin-bottom:3px;">Prob. Up</div>'
@@ -3665,7 +3656,7 @@ def render_nikkei_prediction():
         if cat_scores:
             radar_bytes = _draw_category_radar(cat_scores)
             if radar_bytes:
-                st.image(radar_bytes, use_container_width=True)
+                st.image(radar_bytes, width="stretch")
 
     with col_conf:
         direction = "強気 📈" if composite > 0.1 else ("弱気 📉" if composite < -0.1 else "中立 ➡️")
@@ -3726,7 +3717,7 @@ def render_nikkei_prediction():
             df_all = pd.DataFrame(details)
             st.dataframe(
                 df_all[["判定", "カテゴリ", "シグナル", "値", "重み", "生データ", "説明"]],
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
 
     tab_idx = 1
@@ -3743,7 +3734,7 @@ def render_nikkei_prediction():
             df_cat = pd.DataFrame(rows)
             st.dataframe(
                 df_cat[["判定", "シグナル", "値", "重み", "生データ", "説明"]],
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
         tab_idx += 1
 
@@ -4386,7 +4377,7 @@ def render_us_quant_analysis(target: str = "SP500"):
     if not st.session_state[key]:
         if st.button(f"🔬 クオンツ分析を実行（{target}）",
                      key=f"run_quant_us_{target}", type="secondary",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state[key] = True
             st.rerun()
         st.caption("※ バックテスト・ML最適化・アンサンブルを実行します（初回30〜60秒）")
@@ -4428,7 +4419,7 @@ def render_us_quant_analysis(target: str = "SP500"):
                         for k, v in sorted(bt.get("signal_stats", {}).items(),
                                            key=lambda x: x[1]["hit_rate"], reverse=True)]
                 if rows:
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     with tab_ml:
         st.markdown("#### 🤖 ML Weight Optimization")
@@ -4997,7 +4988,7 @@ def render_us_prediction():
             with col_t:
                 color_t = "#1a7f37" if prob_up_t > 55 else ("#d1242f" if prob_up_t < 45 else "#888")
                 st.markdown('<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📅 明日の予測</div>', unsafe_allow_html=True)
-                st.image(render_prediction_gauge(prob_up_t), use_container_width=True)
+                st.image(render_prediction_gauge(prob_up_t), width="stretch")
                 st.markdown(
                     f'<div style="text-align:center;">'
                     f'<div style="font-size:12px;color:#666;">Prob. Up</div>'
@@ -5009,7 +5000,7 @@ def render_us_prediction():
             with col_w:
                 color_w = "#1a7f37" if prob_up_w > 55 else ("#d1242f" if prob_up_w < 45 else "#888")
                 st.markdown('<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📆 今週の予測</div>', unsafe_allow_html=True)
-                st.image(render_prediction_gauge(prob_up_w), use_container_width=True)
+                st.image(render_prediction_gauge(prob_up_w), width="stretch")
                 st.markdown(
                     f'<div style="text-align:center;">'
                     f'<div style="font-size:12px;color:#666;">Prob. Up</div>'
@@ -5023,7 +5014,7 @@ def render_us_prediction():
                 if cat_scores:
                     radar_bytes = _draw_us_radar(cat_scores)
                     if radar_bytes:
-                        st.image(radar_bytes, use_container_width=True)
+                        st.image(radar_bytes, width="stretch")
 
             with col_conf:
                 direction = "強気 📈" if composite > 0.1 else ("弱気 📉" if composite < -0.1 else "中立 ➡️")
@@ -5061,7 +5052,7 @@ def render_us_prediction():
                 if details:
                     st.dataframe(
                         pd.DataFrame(details)[["判定","カテゴリ","シグナル","値","重み","生データ","説明"]],
-                        use_container_width=True, hide_index=True)
+                        width="stretch", hide_index=True)
 
             st.markdown(
                 '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;'
@@ -5362,7 +5353,7 @@ def render_sector_rotation():
                                            key=lambda x: x[1]["rs_ratio"],
                                            reverse=True)]
                 st.dataframe(pd.DataFrame(rows),
-                             use_container_width=True, hide_index=True)
+                             width="stretch", hide_index=True)
 
     st.caption(f"Updated: {data['updated_at']} | Bubble size = abs(1M return)")
 
@@ -5694,7 +5685,7 @@ def render_macro_regime():
              "Value": f"{scores.get('safe_haven', 0):+.2f}%pt"},
         ]
         st.dataframe(pd.DataFrame(signal_rows),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
 
     st.caption(f"更新: {regime_data['updated_at']}")
 
@@ -5859,12 +5850,12 @@ def render_correlation_heatmap():
 
     with col_pos:
         st.markdown("**🔴 High Positive Correlation (Top5)**")
-        st.dataframe(pairs_df.head(5), use_container_width=True, hide_index=True)
+        st.dataframe(pairs_df.head(5), width="stretch", hide_index=True)
 
     with col_neg:
         st.markdown("**🔵 High Negative Correlation (Top5)**")
         st.dataframe(pairs_df.tail(5).iloc[::-1],
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
 
     st.caption(f"Updated: {corr_data['updated_at']} / Data points: {n_days} days")
 
@@ -6998,10 +6989,10 @@ def render_4indicator_correlation():
                 margin=dict(l=100, r=20, t=50, b=80),
                 xaxis=dict(tickangle=-30),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.dataframe(corr_ret.rename(index=col_names_jp, columns=col_names_jp).round(3),
-                         use_container_width=True)
+                         width="stretch")
 
         # 解釈ガイド
         st.markdown("""
@@ -7086,7 +7077,7 @@ def render_4indicator_correlation():
                         height=400,
                         margin=dict(l=60, r=20, t=50, b=50),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
         else:
             st.warning(f"⚠️ 選択したペアの一方または両方のデータがありません: {col_x}, {col_y}")
 
@@ -7134,7 +7125,7 @@ def render_4indicator_correlation():
                 height=420,
                 margin=dict(l=60, r=20, t=60, b=40),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # ── ④ AIコメント ──────────────────────────────────────
     with tab_ai:
@@ -7210,7 +7201,7 @@ def render_4indicator_correlation():
         # 相関係数テーブルも表示
         st.markdown("**相関係数一覧（参考）**")
         corr_disp2 = corr_ret.rename(index=col_names_jp, columns=col_names_jp).round(3)
-        st.dataframe(corr_disp2, use_container_width=True)
+        st.dataframe(corr_disp2, width="stretch")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -8575,7 +8566,7 @@ def render_optical_vs_semi():
             bordercolor="#334155",
         ),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # ── リターン比較テーブル ──────────────────────────────────────
     st.markdown("#### 📊 期間リターン比較")
@@ -8889,7 +8880,7 @@ def _render_sector_upside_comparison(
         font=dict(color="#e2e8f0"),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # 勝者バナー
     if s_me is not None and o_me is not None:
@@ -9131,7 +9122,7 @@ def _render_upside_chart(stocks: dict, title: str) -> None:
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
         barmode="overlay",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
@@ -9342,7 +9333,7 @@ def render_earnings_index_forecast():
                 t("🤖 AI見通しを生成", "🤖 Generate AI Outlook"),
                 key="earnings_forecast_ai_btn",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 # プロンプト用サマリーテキスト生成
                 def _make_summary(data: dict) -> str:
@@ -9472,7 +9463,7 @@ def render_momentum_ranking():
         with st.expander("📋 全銘柄スコア一覧"):
             disp = df[["name", "ticker", "price", "1日", "5日", "20日", "score"]].copy()
             disp.columns = ["銘柄名", "コード", "株価", "今日%", "5日%", "20日%", "スコア"]
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+            st.dataframe(disp, width="stretch", hide_index=True)
 
     with st.spinner("銘柄データを取得中..."):
         df_active = _fetch_momentum_ranking(active_market)
@@ -10540,7 +10531,7 @@ def render_economic_events_section(preloaded: dict | None = None):
                 font=dict(color="white"),
                 xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
             )
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width="stretch")
 
         # 統計テーブル
         st.markdown("#### 📋 詳細統計")
@@ -10556,7 +10547,7 @@ def render_economic_events_section(preloaded: dict | None = None):
                 "σ(標準偏差)": f"{v['std']:.2f}%",
                 "サンプル":   f"{v['n']}回",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
         # 個別イベント詳細
         st.markdown("#### 🔍 個別イベントのリターン分布")
@@ -10598,7 +10589,7 @@ def render_economic_events_section(preloaded: dict | None = None):
                     yaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
                     margin=dict(t=40, b=30),
                 )
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, width="stretch")
 
         st.caption(
             "※ データはYahoo Finance (^GSPC) から取得。"
@@ -10672,7 +10663,7 @@ def render_market_summary():
         ai_comment_key = _lang_key("sentiment_ai_comment")
         _, col_ai_btn = st.columns([3, 1])
         with col_ai_btn:
-            if st.button(t("🤖 AIに理由を聞く", "🤖 Ask AI"), key="btn_sentiment_ai", use_container_width=True):
+            if st.button(t("🤖 AIに理由を聞く", "🤖 Ask AI"), key="btn_sentiment_ai", width="stretch"):
                 comps_for_prompt = sent["components"]
                 lines_data = [
                     f"  - {n}: {c['score']:.0f}/100 ({c['label']})"
@@ -11037,7 +11028,7 @@ def render_market_summary():
                            ticksuffix="%"),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig_trend, use_container_width=True)
+            st.plotly_chart(fig_trend, width="stretch")
 
     # ── セクター: 買われている / 売られている ─────────────
     if sector.get("ok") and sector.get("sectors"):
@@ -11477,7 +11468,7 @@ def render_composite_sentiment():
                         paper_bgcolor="rgba(0,0,0,0)",
                         yaxis=dict(range=[0, 100], title="Score"),
                     )
-                    st.plotly_chart(fig_r, use_container_width=True)
+                    st.plotly_chart(fig_r, width="stretch")
 
     tab_us_sent, tab_jp_sent = st.tabs(["🇺🇸 米国センチメント", "🇯🇵 日本センチメント"])
     with tab_us_sent:
@@ -11677,7 +11668,7 @@ def render_composite_sentiment():
                         font=dict(size=11),
                     ),
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             else:
                 # ── Plotly未インストール時はmatplotlibフォールバック ──
@@ -11793,7 +11784,7 @@ def render_composite_sentiment():
                         fig.update_yaxes(title_text="Sentiment (0-100)", secondary_y=False,
                                          range=[0, 100])
                         fig.update_yaxes(title_text="日経平均 (円)", secondary_y=True)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                         # 相関係数
                         if len(df_c) >= 10:
@@ -11881,7 +11872,7 @@ def render_composite_sentiment():
                     paper_bgcolor="rgba(0,0,0,0)",
                     yaxis=dict(range=[0, 100], title="Sentiment"),
                 )
-                st.plotly_chart(fig_kw, use_container_width=True)
+                st.plotly_chart(fig_kw, width="stretch")
 
             hint = ("FOMC・利上げ・雇用統計・関税発表" if is_us_news else "日銀会合・円安・貿易収支発表")
             st.markdown(f"💡 **使い方:** {hint}の日とセンチメントスコアの変化を見比べることで、マーケットへの影響を把握できます。")
@@ -12011,7 +12002,7 @@ def render_composite_sentiment():
                             st.dataframe(
                                 result_df.style.map(_color_ret_bt,
                                     subset=["平均10日(%)", "平均30日(%)", "平均90日(%)"]),
-                                use_container_width=True,
+                                width="stretch",
                                 hide_index=True,
                             )
 
@@ -12050,7 +12041,7 @@ def render_composite_sentiment():
                                     paper_bgcolor="rgba(0,0,0,0)",
                                     legend=dict(orientation="h", y=1.08),
                                 )
-                                st.plotly_chart(fig_bt, use_container_width=True)
+                                st.plotly_chart(fig_bt, width="stretch")
                                 st.caption(
                                     f"赤点線 = Extreme Fear発生日（{len(fear_dates)}回）。"
                                     "発生後30〜90日の日経平均の動きを確認できます。"
@@ -12426,7 +12417,7 @@ def render_media_analysis():
                 font=dict(color="#94a3b8"),
                 margin=dict(l=10, r=50, t=40, b=20),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         st.markdown("---")
         st.markdown("#### 📋 媒体別詳細スコア＆AI評価")
@@ -12465,7 +12456,7 @@ def render_media_analysis():
                 # AI評価ボタン
                 btn_key = f"ai_media_{prefix}_{i}"
                 cache_key = f"ai_media_result_{prefix}_{i}"
-                if st.button("🤖 AI評価を生成（Gemini/Groq）", key=btn_key, use_container_width=True):
+                if st.button("🤖 AI評価を生成（Gemini/Groq）", key=btn_key, width="stretch"):
                     with st.spinner(f"🤖 {m['name']} を分析中..."):
                         comment, model = _ai_media_comment(
                             m["name"], m["type"],
@@ -12538,7 +12529,7 @@ def render_media_analysis():
                 height=420,
                 margin=dict(t=30, b=60),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         # 推奨組み合わせ
         st.markdown("#### 💡 政治経済を深く理解するための推奨メディア組み合わせ")
@@ -12613,7 +12604,7 @@ def render_media_analysis():
                 height=460,
                 margin=dict(l=60, r=20, t=50, b=100),
             )
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width="stretch")
 
             # ── ヒートマップ（機関 × メディアのスコアマップ） ──
             st.markdown("**ヒートマップ（機関 × 媒体）**")
@@ -12640,7 +12631,7 @@ def render_media_analysis():
                 margin=dict(l=160, r=20, t=20, b=60),
                 xaxis=dict(tickangle=-30),
             )
-            st.plotly_chart(fig_heat, use_container_width=True)
+            st.plotly_chart(fig_heat, width="stretch")
 
         # ── 機関の説明と出典リンク ──────────────────────
         st.markdown("**📋 評価機関の説明と出典**")
@@ -12672,13 +12663,13 @@ AIが評価機関の最新調査をもとに信頼度トレンドを要約しま
                 "🔄 AI評価を今すぐ取得・更新",
                 type="primary",
                 key="media_rating_update_btn",
-                use_container_width=True,
+                width="stretch",
             )
         with col_b:
             force_clear = st.button(
                 "🗑️ キャッシュクリア",
                 key="media_rating_clear_btn",
-                use_container_width=True,
+                width="stretch",
             )
 
         if force_clear:
@@ -12760,7 +12751,7 @@ def render_advanced_analytics():
             "🔬 高度市場解析を読み込む",
             key="run_advanced_analytics",
             type="secondary",
-            use_container_width=True,
+            width="stretch",
         ):
             st.session_state["show_advanced_analytics"] = True
             st.rerun()
@@ -13472,7 +13463,7 @@ def render_backtest_section():
                     "Down HIT": f"{v['hit_down']}%",
                     "Count": v["n_signals"],
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 # =====================================================
@@ -13549,7 +13540,7 @@ def render_ml_optimization_section():
     with st.expander("📋 Walk-forward Detail", expanded=False):
         folds = ml.get("fold_details", [])
         if folds:
-            st.dataframe(pd.DataFrame(folds), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(folds), width="stretch", hide_index=True)
         st.caption(
             "Walk-forward検証: 時系列を5分割し、過去データで学習→未来データで検証を繰り返す。"
             "CV平均>53%であれば統計的に有意なシグナルが存在すると考えられます。"
@@ -13653,7 +13644,7 @@ def render_quant_analysis():
     if not st.session_state["show_quant_jp"]:
         if st.button("🔬 クオンツ分析を実行（日本株）",
                      key="run_quant_jp", type="secondary",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state["show_quant_jp"] = True
             st.rerun()
         st.caption("※ バックテスト・ML最適化・アンサンブルを実行します（初回30〜60秒）")
@@ -13840,7 +13831,7 @@ def render_market_row(items: List[Dict], cols: int = 4):
                 st.caption(f"ℹ️ {note}")
             png_bytes = make_sparkline(data["series"], data["base"], data["mode"], up=up)
             if isinstance(png_bytes, bytes):
-                st.image(png_bytes, use_container_width=True)
+                st.image(png_bytes, width="stretch")
             else:
                 st.pyplot(png_bytes, clear_figure=True)
 
@@ -13888,7 +13879,7 @@ def render_rss_news(translate_mode: bool = True):
             if st.button(
                 cat_name,
                 key=f"rss_cat_btn_{cat_name}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if is_active else "secondary",
             ):
                 st.session_state["rss_active_cat"] = cat_name
@@ -13924,7 +13915,7 @@ def render_rss_news(translate_mode: bool = True):
             if st.button(
                 fname,
                 key=f"rss_feed_btn_{fname}",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if is_active_feed else "secondary",
             ):
                 st.session_state["rss_active_feed"] = fname
@@ -13938,7 +13929,7 @@ def render_rss_news(translate_mode: bool = True):
     col_f1, col_f2 = st.columns([4, 1])
     with col_f2:
         if st.button("🔄 更新", key=f"rss_refresh_{active_feed}",
-                     use_container_width=True):
+                     width="stretch"):
             fetch_rss_feed.clear()
             st.rerun()
 
@@ -14553,7 +14544,7 @@ def render_optical_basket():
             paper_bgcolor="rgba(0,0,0,0)",
             yaxis=dict(title="基準日=100"),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── 個別銘柄パフォーマンス ───────────────────────
     st.markdown("#### 📊 構成銘柄パフォーマンス")
@@ -14598,7 +14589,7 @@ def render_optical_basket():
 
     st.dataframe(
         perf_df.style.map(_color_ret2, subset=[f"リターン({period_sel})"]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -14774,7 +14765,7 @@ def render_ai_infra_moneyflow():
                 refresh_btn = st.button(
                     "🔄 更新",
                     key=f"infra_refresh_{theme_name}",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 if refresh_btn:
                     fetch_ai_infra_news.clear()
@@ -14825,12 +14816,12 @@ def render_ai_infra_moneyflow():
                     "🤖 AIコメント生成",
                     key=f"infra_ai_btn_{theme_name}",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 if st.button(
                     "🗑️ クリア",
                     key=f"infra_ai_clear_{theme_name}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.session_state.pop(ai_key, None)
                     ai_infra_commentary.clear()
@@ -15068,7 +15059,7 @@ def render_short_position_ranking(code: str, color: str):
     col_sp1, col_sp2 = st.columns([3, 1])
     with col_sp2:
         if st.button("🔄 更新", key=f"short_rank_refresh_{code}",
-                     use_container_width=True):
+                     width="stretch"):
             fetch_jpx_short_positions.clear()
             fetch_jpx_short_excel.clear()
             st.rerun()
@@ -15599,7 +15590,7 @@ def render_us_supply_score(symbol: str, color: str):
     col_sc1, col_sc2 = st.columns([3, 1])
     with col_sc2:
         if st.button("🔄 更新", key=f"supply_score_refresh_{symbol}",
-                     use_container_width=True):
+                     width="stretch"):
             calc_us_supply_demand_score.clear()
             st.rerun()
 
@@ -15996,7 +15987,7 @@ def render_stock_screener():
                 if isinstance(val, str) and val.startswith("-"): return "color:#dc2626;font-weight:700"
                 return ""
             st.dataframe(df_sum.style.map(_color_chg, subset=["前日比","目標↑"]),
-                         use_container_width=True, hide_index=True)
+                         width="stretch", hide_index=True)
 
     st.markdown("---")
     st.markdown(
@@ -16217,10 +16208,10 @@ def render_stock_screener():
                 "🤖 需給を解説",
                 key=f"supply_ai_btn_{sel_symbol}",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
             if st.button("🗑️ クリア", key=f"supply_ai_clear_{sel_symbol}",
-                         use_container_width=True):
+                         width="stretch"):
                 st.session_state.pop(supply_ai_key, None)
                 st.rerun()
 
@@ -16342,9 +16333,9 @@ def render_stock_screener():
         _, col_ai2 = st.columns([3, 1])
         with col_ai2:
             run_ai = st.button("🤖 AI評価を生成", key=f"screener_ai_btn_{sel_symbol}",
-                               type="primary", use_container_width=True)
+                               type="primary", width="stretch")
             if st.button("🗑️ クリア", key=f"screener_ai_clear_{sel_symbol}",
-                         use_container_width=True):
+                         width="stretch"):
                 st.session_state.pop(ai_key, None)
                 ai_stock_evaluation.clear()
                 st.rerun()
@@ -16610,13 +16601,13 @@ def render_market_research_ai():
             "🔬 AIリサーチを実行",
             type="primary",
             key="research_run_btn",
-            use_container_width=True,
+            width="stretch",
         )
     with col_btn2:
         clear_btn = st.button(
             "🔄 キャッシュクリア",
             key="research_clear_btn",
-            use_container_width=True,
+            width="stretch",
             help="Finnhub/AVのキャッシュをクリアして再取得",
         )
     if clear_btn:
@@ -17375,7 +17366,7 @@ def render_congress_tracker():
             ]
             st.dataframe(
                 pd.DataFrame(pelosi_holdings),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
 
     # ── ③ AI分析レポート ─────────────────────────────
@@ -17398,11 +17389,11 @@ def render_congress_tracker():
         with col_a2:
             run_ai = st.button(
                 "🤖 AI分析を実行", type="primary",
-                key="congress_ai_run", use_container_width=True,
+                key="congress_ai_run", width="stretch",
             )
             clear_ai = st.button(
                 "🗑️ キャッシュクリア",
-                key="congress_ai_clear", use_container_width=True,
+                key="congress_ai_clear", width="stretch",
             )
 
         if clear_ai:
@@ -17502,7 +17493,7 @@ def render_leadlag_section():
 
     st.dataframe(
         us_display.style.map(_color_ret, subset=["リターン(%)"]),
-        use_container_width=True, hide_index=True
+        width="stretch", hide_index=True
     )
     st.subheader("🇯🇵 日本業種 翌営業日 予測シグナル")
     n_jp = len(signal)
@@ -17527,7 +17518,7 @@ def render_leadlag_section():
 
     st.dataframe(
         jp_display.style.map(_color_signal, subset=["シグナル"]),
-        use_container_width=True, hide_index=True
+        width="stretch", hide_index=True
     )
     try:
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -17560,7 +17551,7 @@ def render_leadlag_section():
             "ファクター": [f"F{i+1}" for i in range(len(f_scores))],
             "スコア":    f_scores.round(4),
             "解釈":      interp[:len(f_scores)],
-        }), use_container_width=True, hide_index=True)
+        }), width="stretch", hide_index=True)
     st.info(
         "⚠️ **免責事項**: このシグナルは学術論文の手法を参考にした実験的な指標です。"
         "投資判断は自己責任でお願いします。"
@@ -17690,12 +17681,12 @@ def main():
         # ── 言語切替トグル ───────────────────────────────────────
         _lang_ja, _lang_en = st.columns(2)
         with _lang_ja:
-            if st.button("🇯🇵 日本語", key="lang_ja_btn", use_container_width=True,
+            if st.button("🇯🇵 日本語", key="lang_ja_btn", width="stretch",
                          type="primary" if st.session_state.get("lang") == "ja" else "secondary"):
                 st.session_state["lang"] = "ja"
                 st.rerun()
         with _lang_en:
-            if st.button("🇺🇸 English", key="lang_en_btn", use_container_width=True,
+            if st.button("🇺🇸 English", key="lang_en_btn", width="stretch",
                          type="primary" if st.session_state.get("lang") == "en" else "secondary"):
                 st.session_state["lang"] = "en"
                 st.rerun()
@@ -17704,7 +17695,7 @@ def main():
         st.subheader(t("⚙️ 操作", "⚙️ Controls"))
         if st.button(
             t("🔄 マーケットデータ更新", "🔄 Refresh Market Data"),
-            type="primary", use_container_width=True,
+            type="primary", width="stretch",
         ):
             # 市場データのみクリア（AI生成コンテンツは保持）
             for fn in [
