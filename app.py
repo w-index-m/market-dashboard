@@ -9924,6 +9924,8 @@ def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
         to_d   = datetime.now().strftime("%Y-%m-%d")
 
         items = None
+        _last_status: int = 0
+        _last_body: str = ""
         # v4 → v3 の順で試す
         for endpoint in [
             "https://financialmodelingprep.com/api/v4/economic_calendar",
@@ -9935,19 +9937,33 @@ def _fetch_eco_actuals_fmp() -> Dict[str, Dict]:
                     params={"from": from_d, "to": to_d, "apikey": FMP_API_KEY},
                     timeout=12,
                 )
+                _last_status = r.status_code
+                _last_body   = r.text[:400]
                 if r.status_code == 200:
                     data = r.json()
+                    # リスト形式（通常）
                     if isinstance(data, list) and len(data) > 0:
                         items = data
                         logger.info(f"[fmp] {endpoint} → {len(items)}件取得")
                         break
+                    # {"data": [...]} ネスト形式（FMP v4 の一部プランで発生）
+                    elif isinstance(data, dict) and isinstance(data.get("data"), list) and len(data["data"]) > 0:
+                        items = data["data"]
+                        logger.info(f"[fmp] {endpoint} (nested) → {len(items)}件取得")
+                        break
                     elif isinstance(data, dict):
-                        logger.warning(f"[fmp] {endpoint} error: {data}")
+                        logger.warning(f"[fmp] {endpoint} error response: {str(data)[:200]}")
+                    else:
+                        logger.warning(f"[fmp] {endpoint} empty list returned")
+                else:
+                    logger.warning(f"[fmp] {endpoint} HTTP {r.status_code}: {_last_body[:100]}")
             except Exception as e:
                 logger.debug(f"[fmp] {endpoint} 失敗: {e}")
+                _last_body = str(e)[:200]
 
         if not items:
-            return {"_debug_count": 0, "_debug_sample": [], "_debug_error": "APIからデータが取得できませんでした"}
+            err_msg = f"APIからデータが取得できませんでした (HTTP {_last_status}) | レスポンス: {_last_body[:200]}"
+            return {"_debug_count": 0, "_debug_sample": [], "_debug_error": err_msg}
 
         # デバッグ用: 最初の5件のevent/country/dateを記録
         _sample = [
@@ -10371,6 +10387,12 @@ def render_economic_events_section(preloaded: dict | None = None):
             with st.expander("🔧 FMP診断（デバッグ）", expanded=False):
                 if _dbg_err:
                     st.error(f"FMP APIエラー: {_dbg_err}")
+                    st.caption(
+                        "**よくある原因:** ①FMPの無料プランは経済カレンダーが制限される場合あり "
+                        "②APIキーが無効・期限切れ ③FMP側のサーバーエラー\n\n"
+                        "**対処:** サイドバーの「🔄 キャッシュクリア」→再読み込みで再試行。"
+                        "エラーが続く場合は [financialmodelingprep.com](https://financialmodelingprep.com) でプラン確認。"
+                    )
                 else:
                     st.write(f"**FMP取得件数:** {_dbg_count}件　**カレンダー一致:** {_matched}件")
                     if _dbg_sample:
