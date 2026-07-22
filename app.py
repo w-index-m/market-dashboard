@@ -7928,77 +7928,52 @@ def fetch_macro_indicators() -> Dict[str, Any]:
         except Exception as e:
             result["_errors"]["OECD_CLI"] = f"OECD+YC両方失敗: {str(e)[:80]}"
 
-    # ③ インフレ指標 — BLS API（FREDの代替。カレンダーと同じAPIで疎通確認済み）
-    #    CUSR0000SA0     = CPI All Items（ヘッドライン、PCE代替）
-    #    CUSR0000SA0L1E  = CPI ex Food & Energy（Core CPI、Core PCE代替）
-    try:
-        now_dt = datetime.now()
-        bls_resp = requests.post(
-            "https://api.bls.gov/publicAPI/v2/timeseries/data/",
-            json={
-                "seriesid":  ["CUSR0000SA0", "CUSR0000SA0L1E"],
-                "startyear": str(now_dt.year - 3),
-                "endyear":   str(now_dt.year + 1),
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=15,
-        )
-        if bls_resp.status_code == 200:
-            payload = bls_resp.json()
-            if payload.get("status") == "REQUEST_SUCCEEDED":
-                sid_map = {
-                    "CUSR0000SA0":    ("pce",      "CPI（ヘッドライン）"),
-                    "CUSR0000SA0L1E": ("core_pce", "Core CPI（食品・エネ除く）"),
+    # ③ インフレ指標 — FRED CSV（APIキー不要）
+    #    PCEPI    = PCE Price Index（ヘッドライン）
+    #    PCEPILFE = PCE Excluding Food and Energy（Core PCE）
+    def _fetch_fred_pce(series_id: str, result_key: str):
+        try:
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+            r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                result["_errors"][result_key] = f"FRED HTTP {r.status_code}"
+                return
+            from io import StringIO as _SIO3
+            df = pd.read_csv(_SIO3(r.text))
+            df.columns = ["date", "value"]
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+            df = df.dropna(subset=["value"]).sort_values("date", ascending=False).reset_index(drop=True)
+            if len(df) >= 13:
+                latest  = float(df.loc[0, "value"])
+                prev    = float(df.loc[1, "value"])
+                yr12    = float(df.loc[12, "value"])
+                mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+                yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
+                result[result_key] = {
+                    "value": latest,
+                    "date":  str(df.loc[0, "date"])[:7],
+                    "yoy":   yoy_pct,
+                    "mom":   mom_pct,
                 }
-                for series in payload.get("Results", {}).get("series", []):
-                    sid  = series["seriesID"]
-                    key, _label = sid_map.get(sid, (None, None))
-                    if not key:
-                        continue
-                    # (year, month, value) の降順リストを作る
-                    items = []
-                    for item in series.get("data", []):
-                        period = item.get("period", "")
-                        if not period.startswith("M"):
-                            continue
-                        try:
-                            yr  = int(item["year"])
-                            mo  = int(period[1:])
-                            val = float(item["value"])
-                            items.append((yr, mo, val))
-                        except (ValueError, KeyError):
-                            pass
-                    items.sort(key=lambda x: (x[0], x[1]), reverse=True)
-                    if len(items) >= 13:
-                        latest = items[0][2]
-                        prev   = items[1][2]
-                        yr12   = items[12][2]
-                        mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-                        yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
-                        date_str = f"{items[0][0]}-{items[0][1]:02d}"
-                        result[key] = {
-                            "value": latest,
-                            "date":  date_str,
-                            "yoy":   yoy_pct,
-                            "mom":   mom_pct,
-                        }
-                        result["_ok"].append(key)
-                    elif len(items) >= 2:
-                        latest = items[0][2]
-                        prev   = items[1][2]
-                        mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-                        date_str = f"{items[0][0]}-{items[0][1]:02d}"
-                        result[key] = {
-                            "value": latest, "date": date_str,
-                            "yoy": None, "mom": mom_pct,
-                        }
-                        result["_ok"].append(key)
+                result["_ok"].append(result_key)
+            elif len(df) >= 2:
+                latest  = float(df.loc[0, "value"])
+                prev    = float(df.loc[1, "value"])
+                mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+                result[result_key] = {
+                    "value": latest,
+                    "date":  str(df.loc[0, "date"])[:7],
+                    "yoy":   None,
+                    "mom":   mom_pct,
+                }
+                result["_ok"].append(result_key)
             else:
-                result["_errors"]["BLS"] = f"status={payload.get('status')} msg={payload.get('message',[''])[0][:80]}"
-        else:
-            result["_errors"]["BLS"] = f"HTTP {bls_resp.status_code}"
-    except Exception as e:
-        result["_errors"]["BLS"] = f"{type(e).__name__}: {str(e)[:120]}"
+                result["_errors"][result_key] = "データ行数不足"
+        except Exception as e:
+            result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
+
+    _fetch_fred_pce("PCEPI",    "pce")
+    _fetch_fred_pce("PCEPILFE", "core_pce")
 
     return result
 
@@ -8038,7 +8013,7 @@ def render_macro_indicators():
                 st.success(f"✅ {label}: 取得成功")
             else:
                 # 関連するエラーキーを探す
-                series_map = {"lei": "OECD_CLI", "pce": "BLS", "core_pce": "BLS", "cape": "cape"}
+                series_map = {"lei": "OECD_CLI", "pce": "pce", "core_pce": "core_pce", "cape": "cape"}
                 err_key = series_map.get(k, k)
                 err_msg = errs.get(err_key, "エラー詳細なし（サイレント失敗）")
                 st.error(f"❌ {label}: {err_msg}")
