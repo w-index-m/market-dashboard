@@ -8329,14 +8329,10 @@ _OPTICAL_BASKET: list[tuple[str, str]] = [
     ("LITE",   "Lumentum（光部品）"),
     ("VIAV",   "Viavi（光試験）"),
     ("AAOI",   "AAOI（トランシーバ）"),
-    ("ATXI",   "ATXI（光インフラ）"),
-    ("SNDK",   "SanDisk"),
     ("GLW",    "Corning（光ファイバー）"),
     ("APH",    "Amphenol（コネクタ）"),
     ("VRT",    "Vertiv（AIインフラ電源）"),
     ("5803.T", "フジクラ（光ファイバー・JPY）"),
-    ("IIVI",   "II-VI → COHR"),
-    ("FNSR",   "Finisar"),
 ]
 
 _SEMI_BASKET: list[tuple[str, str]] = [
@@ -8371,9 +8367,11 @@ def _fetch_optical_vs_semi(period: str = "1y") -> dict:
         close = raw[["Close"]] if "Close" in raw.columns else raw
 
     close = close.dropna(axis=1, how="all")
+    # 休場日・欠損日を前日値で補完（等加重平均の急変を防ぐ）
+    close = close.ffill()
 
     # 正規化（period 最初の有効行を 100 とする）
-    first_valid = close.ffill().bfill().iloc[0]
+    first_valid = close.bfill().iloc[0]
     norm = (close / first_valid * 100).copy()
 
     # 有効ティッカーを抽出
