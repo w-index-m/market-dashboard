@@ -307,8 +307,8 @@ if GENAI_AVAILABLE and GEMINI_API_KEY:
     except Exception as e:
         logger.warning(f"Gemini initialization failed: {e}")
         try:
-            model = genai.GenerativeModel("gemini-pro")
-            logger.info("✅ Gemini initialized (fallback): gemini-pro")
+            model = genai.GenerativeModel("gemini-1.5-flash-8b")
+            logger.info("✅ Gemini initialized (fallback): gemini-1.5-flash-8b")
         except Exception:
             model = None
 else:
@@ -7876,19 +7876,19 @@ def fetch_macro_indicators() -> Dict[str, Any]:
 
     _lei_fetched = False
 
-    # 試行 A: 旧 OECD stats API（MEI_CLI データセット）
+    # 試行 A: OECD SDMX REST API（2023年移行済み新エンドポイント）
     try:
         url_a = (
-            "https://stats.oecd.org/restsdmx/sdmx.ashx/GetData/"
-            "MEI_CLI/LOLITONOSTSAM.USA.ST.M/OECD"
-            "?startTime=2022&contentType=csv"
+            "https://sdmx.oecd.org/public/rest/data/"
+            "OECD.SDD.STES,DSD_STES@DF_CLI,1.0/"
+            "USA.M.LI...AA.....?startPeriod=2022-01&format=csvfilewithlabels"
         )
         r_a = requests.get(url_a, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if r_a.status_code == 200:
             from io import StringIO as _SIO2
             df_a = pd.read_csv(_SIO2(r_a.text))
-            tp  = next((c for c in df_a.columns if "TIME" in c.upper() or "PERIOD" in c.upper()), None)
-            val = next((c for c in df_a.columns if "VALUE" in c.upper() or "OBS" in c.upper()), None)
+            tp  = next((c for c in df_a.columns if c.upper() in ("TIME_PERIOD", "TIME", "PERIOD")), None)
+            val = next((c for c in df_a.columns if c.upper() in ("OBS_VALUE", "VALUE")), None)
             if tp and val:
                 df_a = df_a[[tp, val]].copy()
                 df_a.columns = ["date", "value"]
@@ -9689,7 +9689,7 @@ def _fetch_eco_actuals_bls() -> Dict[str, Dict]:
             json={
                 "seriesid": ["CUSR0000SA0", "LNS14000000", "CES0000000001"],
                 "startyear": str(now.year - 2),
-                "endyear":   str(now.year + 1),
+                "endyear":   str(now.year),
             },
             headers={"Content-Type": "application/json"},
             timeout=15,
@@ -14856,7 +14856,6 @@ def render_ai_infra_moneyflow():
 
 
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
-@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def fetch_jpx_short_positions(code: str) -> List[Dict]:
     """
     東証の空売り残高Excelから特定銘柄の証券会社別残高を取得。
@@ -14865,21 +14864,6 @@ def fetch_jpx_short_positions(code: str) -> List[Dict]:
     """
     import io, datetime as dt
     try:
-        # 直近5営業日を試みる（休場日スキップ）
-        today = dt.date.today()
-        for delta in range(7):
-            target_date = today - dt.timedelta(days=delta)
-            if target_date.weekday() >= 5:  # 土日スキップ
-                continue
-            date_str = target_date.strftime("%Y%m%d")
-            url = (
-                f"https://www.jpx.co.jp/markets/public/short-selling/"
-                f"YYYYMMDD_Short_Positions.xls".replace("YYYYMMDD", date_str)
-            )
-            # URLパターンはハッシュ付きなので一覧ページからスクレイピング
-            # 代替: irbank.net のデータを利用
-            break
-
         # irbank.net のAPIを利用（より信頼性が高い）
         code_clean = code.replace(".T", "")
         url_irbank = f"https://irbank.net/short/{code_clean}"
