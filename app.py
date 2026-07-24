@@ -7540,11 +7540,34 @@ _NDX_STOCKS = {
     "ABNB": "Airbnb",       "DXCM": "DexCom",
 }
 
+_SP500_STOCKS = {
+    "JPM":  "JPMorgan Chase",  "V":    "Visa",
+    "MA":   "Mastercard",      "UNH":  "UnitedHealth",
+    "JNJ":  "J&J",             "XOM":  "Exxon Mobil",
+    "WMT":  "Walmart",         "BAC":  "Bank of America",
+    "PG":   "P&G",             "HD":   "Home Depot",
+    "CVX":  "Chevron",         "LLY":  "Eli Lilly",
+    "ABBV": "AbbVie",          "GS":   "Goldman Sachs",
+    "MCD":  "McDonald's",      "CAT":  "Caterpillar",
+    "WFC":  "Wells Fargo",     "TMO":  "Thermo Fisher",
+    "RTX":  "RTX Corp",        "SPGI": "S&P Global",
+    "BLK":  "BlackRock",       "GE":   "GE Aerospace",
+    "KO":   "Coca-Cola",       "PEP":  "PepsiCo",
+    "MS":   "Morgan Stanley",  "DE":   "John Deere",
+    "HON":  "Honeywell",       "UPS":  "UPS",
+    "LOW":  "Lowe's",          "PLD":  "Prologis",
+}
+
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
-    """日経225 or ナスダック100 構成銘柄のモメンタムスコアを計算"""
-    stocks = _NK225_STOCKS if market == "nk225" else _NDX_STOCKS
+    """日経225 / ナスダック100 / S&P500 構成銘柄のモメンタムスコアを計算"""
+    if market == "nk225":
+        stocks = _NK225_STOCKS
+    elif market == "sp500":
+        stocks = _SP500_STOCKS
+    else:
+        stocks = _NDX_STOCKS
     tickers = list(stocks.keys())
     try:
         end   = datetime.now()
@@ -9382,21 +9405,13 @@ def render_momentum_ranking():
         unsafe_allow_html=True,
     )
 
-    market_sel = st.radio(
-        "市場を選択",
-        ["🇯🇵 日経225 構成銘柄", "🇺🇸 ナスダック100 構成銘柄"],
-        horizontal=True,
-        key="momentum_market_sel",
-    )
-    active_market = "nk225" if "日経" in market_sel else "nasdaq"
-
     def _render_cards(df: pd.DataFrame):
         if df.empty:
             st.warning("データを取得できませんでした。")
             return
 
-        top5  = df.head(5)
-        bot5  = df.tail(5).iloc[::-1]
+        top5 = df.head(5)
+        bot5 = df.tail(5).iloc[::-1]
 
         col_up, col_dn = st.columns(2)
 
@@ -9432,15 +9447,27 @@ def render_momentum_ranking():
             for _, row in bot5.iterrows():
                 _card(row, col_dn)
 
-        # 全銘柄テーブル（折り畳み）
         with st.expander("📋 全銘柄スコア一覧"):
             disp = df[["name", "ticker", "price", "1日", "5日", "20日", "score"]].copy()
             disp.columns = ["銘柄名", "コード", "株価", "今日%", "5日%", "20日%", "スコア"]
             st.dataframe(disp, width="stretch", hide_index=True)
 
-    with st.spinner("銘柄データを取得中..."):
-        df_active = _fetch_momentum_ranking(active_market)
-    _render_cards(df_active)
+    tab_nk, tab_ndx, tab_sp = st.tabs(["🇯🇵 日経225", "🇺🇸 NASDAQ100", "🇺🇸 S&P500"])
+
+    with tab_nk:
+        with st.spinner("日経225データを取得中..."):
+            df_nk = _fetch_momentum_ranking("nk225")
+        _render_cards(df_nk)
+
+    with tab_ndx:
+        with st.spinner("NASDAQ100データを取得中..."):
+            df_ndx = _fetch_momentum_ranking("nasdaq")
+        _render_cards(df_ndx)
+
+    with tab_sp:
+        with st.spinner("S&P500データを取得中..."):
+            df_sp = _fetch_momentum_ranking("sp500")
+        _render_cards(df_sp)
 
 
 # =====================================================
