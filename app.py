@@ -921,6 +921,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#macro",           "🌐 Macro"),
             ("#bear-risk",       "🐻 Bear Risk"),
             ("#momentum",        "🚀 Momentum"),
+            ("#claude-trading",  "🤖 Trading"),
             ("#optical-semi",    "📡 Optical vs Semi"),
             ("#earnings-forecast", "📊 Index Forecast"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
@@ -936,6 +937,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#macro",           "🌐 マクロ指標"),
             ("#bear-risk",       "🐻 弱気判定"),
             ("#momentum",        "🚀 モメンタム"),
+            ("#claude-trading",  "🤖 売買プロジェクト"),
             ("#optical-semi",    "📡 光通信vs半導体"),
             ("#earnings-forecast", "📊 指数予測"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
@@ -17563,6 +17565,477 @@ def render_leadlag_section():
         "投資判断は自己責任でお願いします。"
     )
 
+# =====================================================
+# 🤖 Claude 個別株トレーディングプロジェクト
+# =====================================================
+
+def _trading_sheets_client():
+    """Google Sheetsクライアントを返す（app.py内用）"""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        sa_json = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        if not sa_json:
+            return None
+        sa_info = json.loads(sa_json)
+        creds = Credentials.from_service_account_info(sa_info, scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ])
+        return gspread.authorize(creds)
+    except Exception as e:
+        logger.warning(f"[trading] Sheets初期化失敗: {e}")
+        return None
+
+
+def _trading_ws(tab: str, headers: list):
+    """指定シートを取得または新規作成"""
+    try:
+        client = _trading_sheets_client()
+        if not client:
+            return None
+        sheets_id = st.secrets.get("GOOGLE_SHEETS_ID", "")
+        if not sheets_id:
+            return None
+        sp = client.open_by_key(sheets_id)
+        try:
+            ws = sp.worksheet(tab)
+        except Exception:
+            ws = sp.add_worksheet(title=tab, rows=5000, cols=len(headers))
+            ws.append_row(headers)
+            return ws
+        if not ws.row_values(1):
+            ws.append_row(headers)
+        return ws
+    except Exception as e:
+        logger.warning(f"[trading] ws({tab}) 失敗: {e}")
+        return None
+
+
+def _load_watchlist() -> list:
+    """ウォッチリストをGoogle Sheetsから読み込む"""
+    try:
+        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
+        if not ws:
+            return []
+        rows = ws.get_all_records()
+        return [r for r in rows if r.get("ticker")]
+    except Exception:
+        return []
+
+
+def _save_watchlist_item(ticker: str, name: str, market: str, memo: str = ""):
+    """ウォッチリストに銘柄を追加"""
+    try:
+        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
+        if not ws:
+            return False
+        ws.append_row([ticker.upper(), name, market,
+                       datetime.now(JST).strftime("%Y-%m-%d"), memo])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] watchlist追加失敗: {e}")
+        return False
+
+
+def _delete_watchlist_item(ticker: str):
+    """ウォッチリストから銘柄を削除"""
+    try:
+        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
+        if not ws:
+            return False
+        records = ws.get_all_records()
+        for i, r in enumerate(records, start=2):
+            if r.get("ticker", "").upper() == ticker.upper():
+                ws.delete_rows(i)
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"[trading] watchlist削除失敗: {e}")
+        return False
+
+
+def _load_trades() -> pd.DataFrame:
+    """取引記録をGoogle Sheetsから読み込む"""
+    try:
+        ws = _trading_ws("claude_trades", [
+            "date", "ticker", "name", "action", "quantity", "price",
+            "fee", "memo", "ai_target", "ai_stoploss"
+        ])
+        if not ws:
+            return pd.DataFrame()
+        rows = ws.get_all_records()
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        for col in ["quantity", "price", "fee", "ai_target", "ai_stoploss"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _save_trade(date: str, ticker: str, name: str, action: str,
+                quantity: float, price: float, fee: float,
+                memo: str, ai_target: float, ai_stoploss: float):
+    """取引記録をGoogle Sheetsに追加"""
+    try:
+        ws = _trading_ws("claude_trades", [
+            "date", "ticker", "name", "action", "quantity", "price",
+            "fee", "memo", "ai_target", "ai_stoploss"
+        ])
+        if not ws:
+            return False
+        ws.append_row([date, ticker.upper(), name, action,
+                       quantity, price, fee, memo, ai_target, ai_stoploss])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] trade保存失敗: {e}")
+        return False
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
+    """個別銘柄の分析データを取得（テクニカル + ニュース）"""
+    result = {}
+    try:
+        t_ticker = ticker if not is_jp else ticker
+        raw = yf.download(t_ticker, period="6mo", auto_adjust=True, progress=False)
+        if raw.empty:
+            return result
+        close = raw["Close"].dropna()
+        if len(close) < 5:
+            return result
+
+        price   = float(close.iloc[-1])
+        ma25    = float(close.rolling(25).mean().iloc[-1]) if len(close) >= 25 else None
+        ma75    = float(close.rolling(75).mean().iloc[-1]) if len(close) >= 75 else None
+        ret_1d  = float(close.iloc[-1] / close.iloc[-2] - 1) * 100 if len(close) >= 2 else None
+        ret_5d  = float(close.iloc[-1] / close.iloc[-6] - 1) * 100 if len(close) >= 6 else None
+        ret_20d = float(close.iloc[-1] / close.iloc[-21] - 1) * 100 if len(close) >= 21 else None
+
+        # RSI
+        delta = close.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rs    = gain / loss.replace(0, float("nan"))
+        rsi   = float(100 - 100 / (1 + rs.iloc[-1])) if not rs.iloc[-1] != rs.iloc[-1] else None
+
+        # 出来高（存在する場合）
+        vol_ratio = None
+        if "Volume" in raw.columns:
+            vol = raw["Volume"].dropna()
+            if len(vol) >= 20:
+                vol_ratio = float(vol.iloc[-1] / vol.rolling(20).mean().iloc[-1])
+
+        result["price"]     = round(price, 2)
+        result["ma25"]      = round(ma25, 2) if ma25 else None
+        result["ma75"]      = round(ma75, 2) if ma75 else None
+        result["ret_1d"]    = round(ret_1d, 2) if ret_1d is not None else None
+        result["ret_5d"]    = round(ret_5d, 2) if ret_5d is not None else None
+        result["ret_20d"]   = round(ret_20d, 2) if ret_20d is not None else None
+        result["rsi"]       = round(rsi, 1) if rsi else None
+        result["vol_ratio"] = round(vol_ratio, 2) if vol_ratio else None
+        result["close_series"] = close.tail(60).tolist()
+        result["close_dates"]  = [d.strftime("%Y-%m-%d") for d in close.tail(60).index]
+
+    except Exception as e:
+        logger.warning(f"[trading] price fetch失敗 {ticker}: {e}")
+
+    # ニュース（Finnhub / yfinance）
+    news_texts = []
+    try:
+        if not is_jp:
+            api_key = FINNHUB_API_KEY
+            if api_key:
+                from_dt = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                to_dt   = datetime.now().strftime("%Y-%m-%d")
+                r = requests.get(
+                    "https://finnhub.io/api/v1/company-news",
+                    params={"symbol": ticker, "from": from_dt, "to": to_dt, "token": api_key},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    for item in r.json()[:5]:
+                        news_texts.append(item.get("headline", ""))
+        else:
+            # 日本株: TDnetから直近の開示を検索
+            for days_ago in range(0, 10):
+                date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
+                try:
+                    items = fetch_tdnet_items_for_date(date_str)
+                    code = ticker.replace(".T", "")
+                    matched = [it for it in items if code in it.get("code", "")]
+                    for it in matched[:3]:
+                        news_texts.append(it.get("title", ""))
+                    if matched:
+                        break
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"[trading] news fetch失敗 {ticker}: {e}")
+
+    result["news"] = news_texts
+    return result
+
+
+def _generate_ai_trade_signal(ticker: str, name: str, is_jp: bool, data: dict) -> dict:
+    """AIによる中期売買シグナルを生成"""
+    price    = data.get("price", "不明")
+    ma25     = data.get("ma25", "不明")
+    ma75     = data.get("ma75", "不明")
+    rsi      = data.get("rsi", "不明")
+    ret_1d   = data.get("ret_1d", "不明")
+    ret_5d   = data.get("ret_5d", "不明")
+    ret_20d  = data.get("ret_20d", "不明")
+    vol_r    = data.get("vol_ratio", "不明")
+    news     = data.get("news", [])
+    currency = "円" if is_jp else "USD"
+
+    news_str = "\n".join(f"・{n}" for n in news) if news else "直近ニュースなし"
+
+    prompt = f"""あなたはプロの中期株式アナリストです。以下のデータを元に「{name}（{ticker}）」の中期投資判断（数週間〜2ヶ月）を行ってください。
+
+【テクニカルデータ】
+- 現在株価: {price} {currency}
+- 25日移動平均: {ma25} {currency}
+- 75日移動平均: {ma75} {currency}
+- RSI(14): {rsi}
+- 直近1日リターン: {ret_1d}%
+- 直近5日リターン: {ret_5d}%
+- 直近20日リターン: {ret_20d}%
+- 出来高比率（対20日平均）: {vol_r}倍
+
+【直近ニュース・開示】
+{news_str}
+
+【出力形式】必ず以下の形式で回答してください：
+
+**判断**: [強気買い / 買い / 様子見 / 売り / 強気売り]
+
+**理由**: （200字以内で簡潔に。テクニカルとファンダメンタルの両面から）
+
+**目標株価**: {price}円の場合、X円（+Y%）を目標とする ※根拠も一言
+
+**損切りライン**: X円（-Y%）を下回ったら損切り推奨
+
+**保有期間目安**: X〜Y週間
+
+**注意事項**: （リスク要因があれば）
+"""
+    try:
+        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=700, temperature=0.3)
+        return {"text": text, "model": model_used, "error": None}
+    except Exception as e:
+        return {"text": "", "model": "", "error": str(e)}
+
+
+def render_claude_trading_project():
+    """🤖 Claude 個別株トレーディングプロジェクト"""
+    st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0a0f1e,#0d1b2a,#0f2744);'
+        'border-radius:12px;padding:14px 20px;margin-bottom:12px;">'
+        '<div style="font-size:20px;font-weight:800;color:#60a5fa">🤖 Claude 個別株トレーディングプロジェクト</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        'Claudeが中期売買シグナルを生成 → 手動執行 → 約定記録 → 損益追跡</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    tab_watch, tab_signal, tab_trade, tab_pnl = st.tabs([
+        "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力", "💰 損益・ポートフォリオ"
+    ])
+
+    # ── タブ①: ウォッチリスト管理 ─────────────────────────────
+    with tab_watch:
+        st.markdown("#### 監視銘柄の管理")
+        watchlist = _load_watchlist()
+
+        with st.form("add_watch_form", clear_on_submit=True):
+            c1, c2, c3, c4 = st.columns([2, 3, 1.5, 2])
+            w_ticker = c1.text_input("ティッカー", placeholder="例: 7203.T / NVDA")
+            w_name   = c2.text_input("銘柄名", placeholder="例: トヨタ自動車 / NVIDIA")
+            w_market = c3.selectbox("市場", ["🇯🇵 日本株", "🇺🇸 米国株"])
+            w_memo   = c4.text_input("メモ", placeholder="例: AI関連, 決算待ち")
+            if st.form_submit_button("＋ 追加", type="primary"):
+                if w_ticker and w_name:
+                    is_jp = "日本株" in w_market
+                    ok = _save_watchlist_item(
+                        w_ticker.strip().upper(), w_name.strip(),
+                        "JP" if is_jp else "US", w_memo.strip()
+                    )
+                    if ok:
+                        st.success(f"✅ {w_ticker.upper()} を追加しました")
+                        st.rerun()
+                    else:
+                        st.error("❌ Google Sheetsへの保存に失敗しました（Secrets設定を確認）")
+                else:
+                    st.warning("ティッカーと銘柄名を入力してください")
+
+        if watchlist:
+            st.markdown(f"**現在の監視銘柄: {len(watchlist)}銘柄**")
+            for item in watchlist:
+                col_t, col_n, col_m, col_mk, col_d, col_del = st.columns([1.5, 2.5, 2, 1, 1.5, 1])
+                col_t.markdown(f"**{item['ticker']}**")
+                col_n.markdown(item["name"])
+                col_m.markdown(f"_{item.get('memo', '')}_")
+                col_mk.markdown("🇯🇵" if item.get("market") == "JP" else "🇺🇸")
+                col_d.markdown(f"<span style='font-size:11px;color:#94a3b8'>{item.get('added_date','')}</span>",
+                               unsafe_allow_html=True)
+                if col_del.button("🗑️", key=f"del_{item['ticker']}"):
+                    if _delete_watchlist_item(item["ticker"]):
+                        st.rerun()
+        else:
+            st.info("監視銘柄がまだありません。上のフォームから追加してください。")
+
+    # ── タブ②: AI分析・シグナル ────────────────────────────────
+    with tab_signal:
+        watchlist = _load_watchlist()
+        if not watchlist:
+            st.info("先にウォッチリストに銘柄を追加してください。")
+        else:
+            options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
+            sel_label = st.selectbox("分析する銘柄を選択", list(options.keys()))
+            sel = options[sel_label]
+            is_jp = sel.get("market", "JP") == "JP"
+
+            if st.button("🤖 Claude に分析させる", type="primary"):
+                with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
+                    data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
+                    signal = _generate_ai_trade_signal(
+                        sel["ticker"], sel["name"], is_jp, data
+                    )
+
+                if signal.get("error"):
+                    st.error(f"AI分析エラー: {signal['error']}")
+                else:
+                    cur = "円" if is_jp else "USD"
+                    price = data.get("price", "-")
+                    rsi   = data.get("rsi", "-")
+                    ma25  = data.get("ma25", "-")
+                    ma75  = data.get("ma75", "-")
+
+                    st.markdown(
+                        f'<div style="background:#0f2744;border-radius:10px;padding:14px 18px;'
+                        f'margin-bottom:10px;border:1px solid #1e3a5f;">'
+                        f'<div style="font-size:15px;font-weight:700;color:#60a5fa;margin-bottom:8px">'
+                        f'📊 {sel["name"]}（{sel["ticker"]}）のAI分析レポート</div>'
+                        f'<div style="font-size:12px;color:#94a3b8">'
+                        f'株価: <b style="color:#f1f5f9">{price}{cur}</b> ｜ '
+                        f'RSI: <b style="color:#f1f5f9">{rsi}</b> ｜ '
+                        f'MA25: <b style="color:#f1f5f9">{ma25}{cur}</b> ｜ '
+                        f'MA75: <b style="color:#f1f5f9">{ma75}{cur}</b></div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(signal["text"])
+                    st.caption(f"🤖 {signal['model']} ｜ {datetime.now(JST).strftime('%Y-%m-%d %H:%M JST')}")
+
+                    if data.get("news"):
+                        with st.expander("📰 参照したニュース・開示"):
+                            for n in data["news"]:
+                                st.markdown(f"・{n}")
+
+    # ── タブ③: 取引記録入力 ────────────────────────────────────
+    with tab_trade:
+        st.markdown("#### 約定後の取引記録入力")
+        watchlist = _load_watchlist()
+        watch_options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
+        watch_labels  = list(watch_options.keys()) if watch_options else []
+
+        with st.form("trade_form", clear_on_submit=True):
+            t_sel = st.selectbox("銘柄", watch_labels) if watch_labels else None
+            c1, c2, c3 = st.columns(3)
+            t_date   = c1.date_input("約定日", value=datetime.now(JST).date())
+            t_action = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
+            t_qty    = c3.number_input("数量（株）", min_value=1, step=1, value=100)
+            c4, c5, c6 = st.columns(3)
+            t_price  = c4.number_input("約定価格", min_value=0.0, step=0.1, format="%.2f")
+            t_fee    = c5.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
+            c7, c8 = st.columns(2)
+            t_target = c7.number_input("AIの目標株価（参考）", min_value=0.0, step=0.1, format="%.2f")
+            t_stop   = c8.number_input("AIの損切りライン（参考）", min_value=0.0, step=0.1, format="%.2f")
+            t_memo   = st.text_input("メモ（任意）")
+
+            if st.form_submit_button("💾 記録を保存", type="primary"):
+                if t_sel and t_price > 0:
+                    sel_w  = watch_options[t_sel]
+                    action = "BUY" if "BUY" in t_action else "SELL"
+                    ok = _save_trade(
+                        str(t_date), sel_w["ticker"], sel_w["name"],
+                        action, int(t_qty), float(t_price), float(t_fee),
+                        t_memo, float(t_target), float(t_stop)
+                    )
+                    if ok:
+                        st.success(f"✅ {sel_w['ticker']} {action} {t_qty}株 @ {t_price}を記録しました")
+                    else:
+                        st.error("❌ 保存失敗（Google Sheetsの設定を確認してください）")
+                else:
+                    st.warning("銘柄と約定価格を入力してください")
+
+    # ── タブ④: 損益・ポートフォリオ ────────────────────────────
+    with tab_pnl:
+        st.markdown("#### ポートフォリオ損益")
+        df_trades = _load_trades()
+
+        if df_trades.empty:
+            st.info("取引記録がまだありません。")
+        else:
+            st.markdown("**取引履歴**")
+            st.dataframe(
+                df_trades[["date", "ticker", "name", "action", "quantity", "price", "fee", "memo"]],
+                hide_index=True, use_container_width=True
+            )
+
+            # 保有ポジションを計算（BUY - SELL）
+            positions = {}
+            for _, row in df_trades.iterrows():
+                t = row["ticker"]
+                qty   = float(row.get("quantity", 0) or 0)
+                price = float(row.get("price", 0) or 0)
+                fee   = float(row.get("fee", 0) or 0)
+                if row["action"] == "BUY":
+                    if t not in positions:
+                        positions[t] = {"name": row["name"], "qty": 0, "cost": 0.0}
+                    positions[t]["qty"]  += qty
+                    positions[t]["cost"] += qty * price + fee
+                elif row["action"] == "SELL":
+                    if t in positions:
+                        positions[t]["qty"] -= qty
+
+            open_pos = {t: v for t, v in positions.items() if v["qty"] > 0}
+
+            if open_pos:
+                st.markdown("**保有中ポジション（現在値・含み損益）**")
+                pnl_rows = []
+                for ticker, pos in open_pos.items():
+                    try:
+                        cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                        cur_price = float(cur_raw["Close"].dropna().iloc[-1]) if not cur_raw.empty else None
+                    except Exception:
+                        cur_price = None
+
+                    avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
+                    pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
+                    pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
+
+                    pnl_rows.append({
+                        "銘柄":    pos["name"],
+                        "コード":  ticker,
+                        "保有株数": int(pos["qty"]),
+                        "平均取得単価": round(avg_cost, 2),
+                        "現在株価": round(cur_price, 2) if cur_price else "取得失敗",
+                        "含み損益": f"{pnl:+,.0f}" if pnl is not None else "-",
+                        "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
+                    })
+
+                st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+            else:
+                st.info("現在の保有ポジションはありません（全て決済済み）。")
+
+
 # ===========================
 def main():
     now_jst = datetime.now(JST)
@@ -17838,6 +18311,13 @@ OPENROUTER_API_KEY = "sk-or-..."
     # ★ モメンタムランキング（日経225 / ナスダック）
     # ===================================================
     render_momentum_ranking()
+    st.divider()
+
+    # ===================================================
+    # ★ Claude 個別株トレーディングプロジェクト
+    # ===================================================
+    render_claude_trading_project()
+    st.divider()
 
     # ===================================================
     # ★ 光通信・AIインフラ vs 半導体 パフォーマンス比較
