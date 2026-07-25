@@ -20450,10 +20450,11 @@ Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体�
 ## 🏆 銘柄別推奨アクション
 
 各保有銘柄について必ず以下のフォーマットで記載（全銘柄を網羅すること）：
+⚠️ 重要: 「XX」「NN」「[数値]」等のプレースホルダは絶対に残さない。上記の保有銘柄データに記載された実際の数値を必ず使うこと。
 
-### [銘柄名（ティッカー）]
-- **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い]
-- **テクニカル評価**: RSI=XX（70↑過熱/30↓売られ過ぎ）| MA25に対して株価は上/下 | 5日リターンとモメンタム方向
+### [実際の銘柄名（ティッカー）を記入]
+- **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い のいずれかを選択]
+- **テクニカル評価**: RSI=[保有銘柄データのRSI実数値]（70↑過熱/30↓売られ過ぎ）| MA25=[実数値]に対して株価は上/下 | 5日リターン=[実数値]%
 - **IR・ニュース評価**: 最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文
 - **市場環境との整合性**: Fear&Greed・RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
 - **アクション水準**: 具体的な価格や条件（○○円/ドルを超えたら / 下回ったら実行）
@@ -21137,7 +21138,128 @@ def render_claude_trading_project():
                         '🔍 市場×IR 総合AI推奨分析</div>',
                         unsafe_allow_html=True,
                     )
-                    st.markdown(_rec_result["text"])
+                    # ── 銘柄別推奨アクションをパース → 売却セクションにボタン挿入 ──
+                    import re as _re_rec
+                    _rec_text_full = _rec_result["text"]
+                    # ### ヘッダーで分割（各銘柄セクション）
+                    _rec_parts = _re_rec.split(r'(?m)^(?=###\s)', _rec_text_full)
+                    # 全銘柄価格データ（ボタン押下時の解放資金計算用）
+                    _all_prices_rec = _fetch_portfolio_prices(tuple(open_pos.keys())) if open_pos else {}
+                    _usdjpy_rec = _all_prices_rec.get("_usdjpy", 155.0)
+
+                    for _rp_idx, _rp in enumerate(_rec_parts):
+                        st.markdown(_rp)
+                        # このセクションが ### で始まり、売却推奨を含む場合のみボタン表示
+                        if not _rp.startswith("###"):
+                            continue
+                        _rp_is_sell = "🔴 売却" in _rp or (
+                            "売却" in _rp[:200] and "推奨" in _rp[:200]
+                        )
+                        _rp_is_partial = "🟡 一部利確" in _rp
+                        if not (_rp_is_sell or _rp_is_partial):
+                            continue
+                        # ティッカー抽出: "### MU | Micron" or "### 8306.T | 三菱UFJ"
+                        _rp_tkm = _re_rec.search(
+                            r'###\s+([A-Z0-9]+(?:\.[A-Z0-9]+)?)\s*[|｜（\s]', _rp
+                        )
+                        if not _rp_tkm:
+                            continue
+                        _rp_ticker = _rp_tkm.group(1)
+                        if _rp_ticker not in open_pos:
+                            continue
+                        # 解放資金推定
+                        _rp_pos  = open_pos[_rp_ticker]
+                        _rp_qty  = _rp_pos.get("qty", 0)
+                        _rp_pr   = _all_prices_rec.get(_rp_ticker, {})
+                        _rp_p    = _rp_pr.get("price") or _rp_pos.get("market_value", 0) / max(_rp_qty, 1)
+                        if _rp_ticker.endswith(".T"):
+                            _rp_freed = int(_rp_p * _rp_qty)
+                        else:
+                            _rp_freed = int(_rp_p * _rp_qty * _usdjpy_rec)
+                        _rp_label = "売却" if _rp_is_sell else "一部利確（半分）"
+                        _rp_half  = _rp_freed // 2 if _rp_is_partial else _rp_freed
+                        st.markdown(
+                            f'<div style="background:#1c0a0a;border:1px solid #7f1d1d;'
+                            f'border-radius:8px;padding:8px 14px;margin:4px 0 6px">'
+                            f'<span style="color:#ef4444;font-weight:700">⚠️ {_rp_label}推奨</span>'
+                            f'<span style="color:#94a3b8;font-size:12px;margin-left:10px">'
+                            f'解放推定 ≈ ¥{_rp_half:,}</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                        _rp_btn_key = f"btn_rep_full_{_rp_ticker}_{_rp_idx}"
+                        if st.button(
+                            f"🔄 {_rp_ticker} {_rp_label}後の代替銘柄を探す",
+                            key=_rp_btn_key,
+                        ):
+                            with st.spinner("AIが代替銘柄を提案中..."):
+                                _rp_mode = st.session_state.get("trading_mode", "growth")
+                                _rp_res = _generate_replacement_rec(
+                                    sold_ticker=_rp_ticker,
+                                    sold_name=_rp_pos.get("name", _rp_ticker),
+                                    freed_jpy=_rp_half,
+                                    existing_holdings=list(open_pos.keys()),
+                                    market_ctx=_rec_mktctx,
+                                    trading_mode=_rp_mode,
+                                    model_pref=_rec_model_pref,
+                                )
+                            st.session_state[f"_rep_result_{_rp_ticker}_full"] = _rp_res
+                        # キャッシュ済み結果を表示
+                        _rp_cached = st.session_state.get(f"_rep_result_{_rp_ticker}_full")
+                        if _rp_cached:
+                            if _rp_cached.get("error"):
+                                st.error(f"代替推奨エラー: {_rp_cached['error']}")
+                            else:
+                                _rp_cands = _rp_cached.get("candidates", [])
+                                _rp_cprice = _fetch_portfolio_prices(
+                                    tuple(c["ticker"] for c in _rp_cands if c.get("ticker"))
+                                ) if _rp_cands else {}
+                                _rp_cprice_usdjpy = _rp_cprice.get("_usdjpy", _usdjpy_rec)
+                                st.markdown(
+                                    f'<div style="font-size:12px;font-weight:700;color:#4ade80;'
+                                    f'margin:6px 0 4px">💡 代替候補銘柄（解放資金 ¥{_rp_half:,} 想定）</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                for _rp_c in _rp_cands:
+                                    _rp_ct  = _rp_c.get("ticker", "")
+                                    _rp_cn  = _rp_c.get("name", _rp_ct)
+                                    _rp_cf  = _rp_c.get("flag", "")
+                                    _rp_cr  = _rp_c.get("rationale", "")
+                                    _rp_cpd = _rp_cprice.get(_rp_ct, {})
+                                    _rp_cpr = _rp_cpd.get("price")
+                                    # 購入可能株数
+                                    if _rp_cpr and _rp_cpr > 0:
+                                        if _rp_ct.endswith(".T"):
+                                            _rp_lots = max(1, int(_rp_half / (_rp_cpr * 100)))
+                                            _rp_shr_str = f"{_rp_lots}単元({_rp_lots*100}株) ¥{_rp_cpr:,.0f}/株"
+                                        else:
+                                            _rp_cpr_jpy = _rp_cpr * _rp_cprice_usdjpy
+                                            _rp_shrs = max(1, int(_rp_half / _rp_cpr_jpy))
+                                            _rp_shr_str = f"{_rp_shrs}株 ${_rp_cpr:.2f}=¥{_rp_cpr_jpy:,.0f}/株"
+                                    else:
+                                        _rp_shr_str = "価格取得中"
+                                    _rp_r3  = _rp_cpd.get("ret_3m")
+                                    _rp_r6  = _rp_cpd.get("ret_6m")
+                                    _rp_r1y = _rp_cpd.get("ret_1y")
+                                    _rp_ret_str = "  ".join(filter(None, [
+                                        f"3m:{_rp_r3:+.1f}%" if _rp_r3 is not None else None,
+                                        f"6m:{_rp_r6:+.1f}%" if _rp_r6 is not None else None,
+                                        f"1y:{_rp_r1y:+.1f}%" if _rp_r1y is not None else None,
+                                    ]))
+                                    st.markdown(
+                                        f'<div style="background:#0a1f18;border:1px solid #065f46;'
+                                        f'border-radius:6px;padding:8px 12px;margin-bottom:5px">'
+                                        f'<div style="font-weight:700;color:#4ade80;font-size:13px">'
+                                        f'{_rp_cf} {_rp_ct} — {_rp_cn}</div>'
+                                        f'<div style="font-size:11px;color:#94a3b8;margin-top:2px">'
+                                        f'📦 {_rp_shr_str}</div>'
+                                        f'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">'
+                                        f'💡 {_rp_cr}</div>'
+                                        + (f'<div style="font-size:10px;color:#60a5fa;margin-top:2px">'
+                                           f'📈 {_rp_ret_str}</div>' if _rp_ret_str else '')
+                                        + '</div>',
+                                        unsafe_allow_html=True,
+                                    )
+
                     st.markdown("</div>", unsafe_allow_html=True)
                     _cache_badge = " 📋キャッシュ" if _from_cache else ""
                     st.caption(
