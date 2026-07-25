@@ -18101,7 +18101,9 @@ _CHANGELOG = [
 
 def render_admin_changelog():
     """パスワード保護付き管理者チェンジログ"""
-    admin_pw = st.secrets.get("ADMIN_PASSWORD", "windex2024")
+    admin_pw = st.secrets.get("ADMIN_PASSWORD", "")
+    if not admin_pw:
+        return  # secretsに未設定の場合はパネル自体を表示しない
 
     if not st.session_state.get("_admin_authed"):
         with st.expander("🔐 管理者メニュー", expanded=False):
