@@ -17850,6 +17850,96 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         logger.warning(f"[trading] news fetch失敗 {ticker}: {e}")
 
     result["news"] = news_texts
+
+    # ── ファンダメンタルズ: PER推移・決算 ─────────────────────
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+
+        trailing_pe = info.get("trailingPE")
+        forward_pe  = info.get("forwardPE")
+        peg         = info.get("pegRatio")
+        pbr         = info.get("priceToBook")
+        eps_ttm     = info.get("trailingEps")
+        eps_fwd     = info.get("forwardEps")
+        rev_growth  = info.get("revenueGrowth")   # YoY
+        earn_growth = info.get("earningsGrowth")  # YoY
+
+        result["trailing_pe"]   = round(trailing_pe, 1) if trailing_pe else None
+        result["forward_pe"]    = round(forward_pe, 1) if forward_pe else None
+        result["peg"]           = round(peg, 2) if peg else None
+        result["pbr"]           = round(pbr, 2) if pbr else None
+        result["eps_ttm"]       = round(eps_ttm, 2) if eps_ttm else None
+        result["eps_fwd"]       = round(eps_fwd, 2) if eps_fwd else None
+        result["rev_growth"]    = round(rev_growth * 100, 1) if rev_growth else None
+        result["earn_growth"]   = round(earn_growth * 100, 1) if earn_growth else None
+
+        # 次回決算日
+        try:
+            cal = tk.calendar
+            if cal is not None:
+                if isinstance(cal, dict):
+                    ed = cal.get("Earnings Date", [])
+                    result["next_earnings"] = str(ed[0])[:10] if ed else None
+                elif isinstance(cal, pd.DataFrame) and "Value" in cal.columns:
+                    ed = cal.loc["Earnings Date", "Value"] if "Earnings Date" in cal.index else None
+                    result["next_earnings"] = str(ed)[:10] if ed else None
+        except Exception:
+            pass
+
+        # 直近4四半期 EPS 実績 vs 予想
+        try:
+            eh = tk.earnings_history
+            if eh is not None and not eh.empty:
+                recent = eh.tail(4)[["epsEstimate", "epsActual", "surprisePercent"]].copy()
+                recent.index = [str(i)[:7] for i in recent.index]
+                eps_rows = []
+                for quarter, row in recent.iterrows():
+                    est  = row.get("epsEstimate")
+                    act  = row.get("epsActual")
+                    surp = row.get("surprisePercent")
+                    if pd.notna(act):
+                        eps_rows.append(
+                            f"{quarter}: 実績 {act:.2f} / 予想 {est:.2f}"
+                            + (f" (サプライズ {surp:+.1f}%)" if pd.notna(surp) else "")
+                        )
+                result["eps_history"] = eps_rows
+        except Exception:
+            pass
+
+        # 過去5年の年次PER推移（近似：年次EPS + 各年末株価）
+        try:
+            fin = tk.financials  # 年次 income statement
+            if fin is not None and not fin.empty and "Net Income" in fin.index:
+                shares = info.get("sharesOutstanding", 0)
+                if shares and shares > 0:
+                    hist_annual = yf.download(ticker, period="5y", interval="1mo",
+                                              auto_adjust=True, progress=False)
+                    pe_history = []
+                    for col in fin.columns[:4]:  # 直近4年
+                        year = str(col)[:4]
+                        ni   = fin.loc["Net Income", col]
+                        if pd.isna(ni) or ni <= 0:
+                            continue
+                        eps_yr = ni / shares
+                        try:
+                            yr_prices = hist_annual["Close"].loc[year]
+                            if isinstance(yr_prices, pd.DataFrame):
+                                yr_prices = yr_prices.iloc[:, 0]
+                            yr_close = float(yr_prices.dropna().iloc[-1])
+                            pe = yr_close / eps_yr
+                            if 0 < pe < 500:
+                                pe_history.append(f"{year}年末: PER {pe:.1f}倍")
+                        except Exception:
+                            pass
+                    if pe_history:
+                        result["pe_history"] = pe_history
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.warning(f"[trading] fundamentals fetch失敗 {ticker}: {e}")
+
     return result
 
 
@@ -17894,6 +17984,35 @@ def _generate_ai_trade_signal(
     currency = "円" if is_jp else "USD"
     news_str = "\n".join(f"・{n}" for n in news) if news else "直近ニュースなし"
 
+    # ファンダメンタルズ情報をプロンプト用に整形
+    trailing_pe  = data.get("trailing_pe")
+    forward_pe   = data.get("forward_pe")
+    peg          = data.get("peg")
+    pbr          = data.get("pbr")
+    eps_ttm      = data.get("eps_ttm")
+    eps_fwd      = data.get("eps_fwd")
+    rev_growth   = data.get("rev_growth")
+    earn_growth  = data.get("earn_growth")
+    next_earn    = data.get("next_earnings")
+    eps_hist     = data.get("eps_history", [])
+    pe_hist      = data.get("pe_history", [])
+
+    funda_lines = []
+    if trailing_pe:  funda_lines.append(f"- 実績PER: {trailing_pe}倍")
+    if forward_pe:   funda_lines.append(f"- 予想PER: {forward_pe}倍")
+    if peg:          funda_lines.append(f"- PEGレシオ: {peg}")
+    if pbr:          funda_lines.append(f"- PBR: {pbr}倍")
+    if eps_ttm:      funda_lines.append(f"- EPS（直近12ヶ月）: {eps_ttm} {currency}")
+    if eps_fwd:      funda_lines.append(f"- EPS（予想）: {eps_fwd} {currency}")
+    if rev_growth is not None:   funda_lines.append(f"- 売上高成長率（YoY）: {rev_growth:+.1f}%")
+    if earn_growth is not None:  funda_lines.append(f"- 純利益成長率（YoY）: {earn_growth:+.1f}%")
+    if next_earn:    funda_lines.append(f"- 次回決算発表予定: {next_earn}")
+
+    funda_section = "\n".join(funda_lines) if funda_lines else "取得できませんでした"
+
+    eps_hist_str = "\n".join(f"  {e}" for e in eps_hist) if eps_hist else "  データなし"
+    pe_hist_str  = "\n".join(f"  {p}" for p in pe_hist)  if pe_hist  else "  データなし"
+
     if position_ctx:
         avg_cost = position_ctx.get("avg_cost", 0)
         qty      = position_ctx.get("qty", 0)
@@ -17934,6 +18053,15 @@ def _generate_ai_trade_signal(
 - 直近20日リターン: {ret_20d}%
 - 出来高比率（対20日平均）: {vol_r}倍
 {position_section}
+【バリュエーション・決算】
+{funda_section}
+
+【直近4四半期 EPS（実績 vs 予想）】
+{eps_hist_str}
+
+【過去PER推移（年末株価 ÷ 年次EPS）】
+{pe_hist_str}
+
 【直近ニュース・開示】
 {news_str}
 
@@ -17941,7 +18069,9 @@ def _generate_ai_trade_signal(
 
 {judgment}
 
-**理由**: （200字以内で簡潔に。テクニカルとファンダメンタルの両面から）
+**理由**: （250字以内。テクニカル・バリュエーション・決算サプライズの3点から）
+
+**バリュエーション評価**: 現在のPER {trailing_pe}倍は割安/適正/割高か。過去PER推移と比較した見解。
 
 {target_line}
 
@@ -17949,7 +18079,7 @@ def _generate_ai_trade_signal(
 
 {period_line}
 
-**注意事項**: （リスク要因があれば）
+**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点
 """
     try:
         text, model_used = call_ai_with_fallback(prompt, max_output_tokens=700, temperature=0.3)
