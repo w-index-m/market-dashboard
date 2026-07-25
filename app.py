@@ -17988,6 +17988,81 @@ def _generate_ai_allocation_scores(
     return {"_model": ""}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_benchmark_tech_data() -> dict:
+    """QQQ(NDX100)と^N225(日経225)のテクニカルデータを取得（ベンチマーク比較用）"""
+    import yfinance as _yf2
+    out = {}
+    for ticker, key in [("QQQ", "NDX"), ("^N225", "N225")]:
+        try:
+            hist = _yf2.Ticker(ticker).history(period="6mo")
+            if hist.empty or len(hist) < 30:
+                continue
+            close = hist["Close"].dropna()
+            price = float(close.iloc[-1])
+            ma25  = float(close.rolling(25).mean().iloc[-1])
+            ma75  = float(close.rolling(75).mean().iloc[-1])
+            delta = close.diff()
+            gain  = delta.clip(lower=0).rolling(14).mean()
+            loss  = (-delta.clip(upper=0)).rolling(14).mean()
+            rs    = gain.iloc[-1] / loss.iloc[-1] if (loss.iloc[-1] or 0) != 0 else 100
+            rsi   = 100 - (100 / (1 + rs))
+            ret_20d = (price / float(close.iloc[-21]) - 1) * 100 if len(close) >= 21 else 0.0
+            out[key] = {
+                "price": price, "ma25": ma25, "ma75": ma75,
+                "rsi": float(rsi), "ret_20d": float(ret_20d),
+                "sector": "Technology",
+            }
+        except Exception as _e:
+            logger.warning(f"[trading] benchmark fetch {ticker}: {_e}")
+    return out
+
+
+def _score_single_rule(data: dict, market_ctx: dict) -> float:
+    """単一銘柄のルールベーススコアを計算（ベンチマーク比較用）"""
+    fg_sc   = float(market_ctx.get("fg_score") or 50)
+    fg_mult = (1.15 if fg_sc < 25 else 1.05 if fg_sc < 45 else
+               1.00 if fg_sc < 55 else 0.92 if fg_sc < 75 else 0.82)
+    sector_quad  = market_ctx.get("sector_quad") or {}
+    sq_leading   = sector_quad.get("Leading",   [])
+    sq_improving = sector_quad.get("Improving", [])
+    sq_weakening = sector_quad.get("Weakening", [])
+    sq_lagging   = sector_quad.get("Lagging",   [])
+    price   = float(data.get("price")   or 0)
+    ma25    = float(data.get("ma25")    or 0)
+    ma75    = float(data.get("ma75")    or 0)
+    rsi     = float(data.get("rsi")     or 50)
+    ret_20d = float(data.get("ret_20d") or 0)
+    sector  = (data.get("sector") or "").lower()
+    score   = 0.0
+    if price and ma25:
+        score += 1.0 if price > ma25 else -1.0
+    if ma25 and ma75:
+        score += 1.0 if ma25 > ma75 else -1.5
+    if rsi:
+        score += (2.0 if rsi < 30 else 1.0 if rsi < 45 else
+                  0.5 if rsi < 60 else 0.0 if rsi < 70 else -1.0)
+    if ret_20d:
+        score += (1.5 if ret_20d > 10 else 0.5 if ret_20d > 3 else
+                  -1.5 if ret_20d < -10 else -0.5 if ret_20d < -3 else 0.0)
+    for s in sq_leading:
+        if sector in s.lower() or s.lower() in sector:
+            score += 2.0; break
+    else:
+        for s in sq_improving:
+            if sector in s.lower() or s.lower() in sector:
+                score += 1.0; break
+        else:
+            for s in sq_weakening:
+                if sector in s.lower() or s.lower() in sector:
+                    score -= 1.0; break
+            else:
+                for s in sq_lagging:
+                    if sector in s.lower() or s.lower() in sector:
+                        score -= 2.0; break
+    return round(score * fg_mult, 2)
+
+
 def _calc_allocation_recommendations(
     positions: dict,
     stock_data_map: dict,
@@ -18191,16 +18266,118 @@ def _calc_allocation_recommendations(
             result[ticker]["ai_factors"]   = []
             result[ticker]["combined_score"] = result[ticker]["adjusted_score"]
 
+    # ── ベンチマーク比較 (QQQ/NDX vs ^N225) ────────────────────────
+    _qqq_sc, _n225_sc = 0.0, 0.0
+    try:
+        _bm_data = _fetch_benchmark_tech_data()
+        if "NDX" in _bm_data:
+            _qqq_sc  = _score_single_rule(_bm_data["NDX"],  market_ctx)
+        if "N225" in _bm_data:
+            _n225_sc = _score_single_rule(_bm_data["N225"], market_ctx)
+    except Exception as _be:
+        logger.warning(f"[trading] benchmark score error: {_be}")
+    for ticker in result:
+        if ticker == "_meta":
+            continue
+        _is_jp  = ticker.endswith(".T")
+        _csc    = result[ticker].get("combined_score", result[ticker].get("adjusted_score", 0))
+        _bm_ref = _n225_sc if _is_jp else _qqq_sc
+        result[ticker]["bm_diff"]    = round(_csc - _bm_ref, 2)
+        result[ticker]["bm_label"]   = "N225" if _is_jp else "NDX"
+        result[ticker]["switch_flag"]= (_csc - _bm_ref) < -1.5
+
     result["_meta"] = {
-        "fg_score":  fg_sc,
-        "fg_label":  fg_lbl,
-        "fg_mult":   fg_mult,
-        "fg_desc":   fg_desc,
-        "total_mkt": total_mkt,
-        "has_ai":    has_ai,
-        "ai_blend":  ai_blend,
+        "fg_score":    fg_sc,
+        "fg_label":    fg_lbl,
+        "fg_mult":     fg_mult,
+        "fg_desc":     fg_desc,
+        "total_mkt":   total_mkt,
+        "has_ai":      has_ai,
+        "ai_blend":    ai_blend,
+        "bm_qqq_score":  round(_qqq_sc, 2),
+        "bm_n225_score": round(_n225_sc, 2),
     }
     return result
+
+
+def _generate_switch_recommendations(
+    alloc_result: dict,
+    stock_data_map: dict,
+    market_ctx: dict,
+    model_pref: str = "auto",
+) -> tuple:
+    """ベンチマーク(NDX/N225)を下回る銘柄の乗り換え候補をAIが提案。
+    Returns: (list[dict], model_used_str)
+    """
+    _meta      = alloc_result.get("_meta", {})
+    _qqq_sc    = _meta.get("bm_qqq_score", 0.0)
+    _n225_sc   = _meta.get("bm_n225_score", 0.0)
+
+    candidates = []
+    for t, ar in alloc_result.items():
+        if t == "_meta" or not ar.get("switch_flag"):
+            continue
+        _is_jp  = t.endswith(".T")
+        _bm_nm  = "日経225(^N225)" if _is_jp else "Nasdaq100(QQQ)"
+        _bm_sc  = _n225_sc if _is_jp else _qqq_sc
+        _d      = ar.get("stock_data_map", {})
+        _sdata  = stock_data_map.get(t, {})
+        candidates.append({
+            "ticker":    t,
+            "sector":    ar.get("sector", ""),
+            "score":     ar.get("combined_score", ar.get("adjusted_score", 0)),
+            "bm_name":   _bm_nm,
+            "bm_score":  _bm_sc,
+            "bm_diff":   ar.get("bm_diff", 0),
+            "alloc":     ar.get("current_alloc", 0),
+            "rsi":       _sdata.get("rsi", 50),
+            "ret_20d":   _sdata.get("ret_20d", 0),
+            "is_jp":     _is_jp,
+        })
+
+    if not candidates:
+        return [], ""
+
+    lines = []
+    for c in candidates:
+        lines.append(
+            f"- {c['ticker']} (セクター:{c['sector'][:24]}, 保有{c['alloc']:.1f}%): "
+            f"スコア{c['score']:+.2f} vs {c['bm_name']}={c['bm_score']:+.2f} "
+            f"(差{c['bm_diff']:+.2f}) | RSI={c['rsi']:.0f} | 20日リターン={c['ret_20d']:+.1f}%"
+        )
+    cand_text = "\n".join(lines)
+
+    prompt = f"""あなたは株式ポートフォリオ最適化の専門家です。
+以下の保有銘柄はベンチマーク指数のルールスコアを大幅に下回っています。
+
+【アンダーパフォーム銘柄】
+{cand_text}
+
+【市場環境】
+Fear&Greed: {market_ctx.get('fg_score', 50):.0f}
+日経予測: {market_ctx.get('nikkei_pred_label', 'N/A')}
+米国予測: {market_ctx.get('us_pred_label', 'N/A')}
+QQQスコア: {_qqq_sc:+.2f} / 日経225スコア: {_n225_sc:+.2f}
+
+各銘柄について分析し、乗り換え候補を提案してください：
+1. 同セクター/テーマ内でより好調な具体的銘柄（ティッカー）を2〜3銘柄
+2. 対応するETF（QQQ, SPY, VGT, 1321など）への乗り換えも候補に含める
+3. 乗り換えタイミングの注意点（例：RSI調整待ち、決算前後など）
+
+以下のJSON形式のみで回答（前後のテキスト不要）:
+{{"switches": [{{"from": "TICKER", "sector": "セクター", "to_stocks": ["TK1","TK2"], "to_etf": "ETF", "rationale": "乗り換え根拠（50字以内）", "timing": "タイミング注意点（30字以内）"}}]}}"""
+
+    try:
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.3
+        )
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            parsed = _json.loads(m.group())
+            return parsed.get("switches", []), model_used
+    except Exception as _e:
+        logger.warning(f"[trading] switch recommendations failed: {_e}")
+    return [], ""
 
 
 def _load_stock_data_cache(ticker: str, date: str) -> dict | None:
@@ -20166,12 +20343,14 @@ def render_claude_trading_project():
             # ─── アロケーション結果表示 ────────────────────────────────
             _alloc_res = st.session_state.get("_alloc_result")
             if _alloc_res:
-                _meta    = _alloc_res.get("_meta", {})
-                fg_sc    = _meta.get("fg_score", 50)
-                fg_desc  = _meta.get("fg_desc", "")
-                fg_mult  = _meta.get("fg_mult", 1.0)
-                has_ai   = _meta.get("has_ai", False)
-                ai_blend = _meta.get("ai_blend", 0.5)
+                _meta      = _alloc_res.get("_meta", {})
+                fg_sc      = _meta.get("fg_score", 50)
+                fg_desc    = _meta.get("fg_desc", "")
+                fg_mult    = _meta.get("fg_mult", 1.0)
+                has_ai     = _meta.get("has_ai", False)
+                ai_blend   = _meta.get("ai_blend", 0.5)
+                _bm_qqq    = _meta.get("bm_qqq_score", 0.0)
+                _bm_n225   = _meta.get("bm_n225_score", 0.0)
 
                 # F&G バー
                 fg_color = ("#ef4444" if fg_sc < 25 else
@@ -20205,17 +20384,20 @@ def render_claude_trading_project():
                     reverse=True,
                 )
 
-                # ヘッダー
-                _hdr_cols = st.columns([2.2, 1, 1, 1, 1.4, 1.4, 2.8] if has_ai
-                                       else [2.5, 1, 1, 1, 1, 3.5])
-                _hdr_labels = (["銘柄", "現在%", "推奨%", "差分", "ルール", "AI", "シグナル"] if has_ai
-                               else ["銘柄", "現在%", "推奨%", "差分", "スコア", "シグナル"])
+                # ヘッダー（AIあり: 8列 / なし: 7列）
+                _COL_AI  = [1.8, 0.85, 0.85, 0.85, 1.1, 1.1, 1.0, 2.4]
+                _COL_NO  = [2.0, 0.9,  0.9,  0.9,  1.0, 1.0, 3.0]
+                _HDR_AI  = ["銘柄", "現在%", "推奨%", "pp差", "ルール", "AI", "vs BM", "シグナル"]
+                _HDR_NO  = ["銘柄", "現在%", "推奨%", "pp差", "スコア", "vs BM", "シグナル"]
+                _hdr_cols   = st.columns(_COL_AI if has_ai else _COL_NO)
+                _hdr_labels = _HDR_AI if has_ai else _HDR_NO
                 for _h, _lbl in zip(_hdr_cols, _hdr_labels):
                     _h.markdown(
                         f'<div style="font-size:11px;color:#64748b;font-weight:600">{_lbl}</div>',
                         unsafe_allow_html=True,
                     )
 
+                _switch_flags = []  # 乗り換え候補を後でまとめて表示するために収集
                 for _atk in _alloc_sorted:
                     _ar      = _alloc_res[_atk]
                     _delta   = _ar["delta"]
@@ -20227,15 +20409,21 @@ def render_claude_trading_project():
                     _sc_color= ("#4ade80" if _comb_sc > 2 else
                                 "#fbbf24" if _comb_sc > 0 else "#ef4444")
                     _bar_w   = min(max(int((_comb_sc + 7) / 14 * 100), 5), 100)
+                    _bm_diff  = _ar.get("bm_diff", 0.0)
+                    _bm_lbl   = _ar.get("bm_label", "NDX")
+                    _sw_flag  = _ar.get("switch_flag", False)
+                    if _sw_flag:
+                        _switch_flags.append(_atk)
 
-                    if has_ai:
-                        _cols = st.columns([2.2, 1, 1, 1, 1.4, 1.4, 2.8])
-                    else:
-                        _cols = st.columns([2.5, 1, 1, 1, 1, 3.5])
+                    _cols = st.columns(_COL_AI if has_ai else _COL_NO)
 
-                    # 銘柄名
+                    # 銘柄名 + switch警告バッジ
+                    _sw_badge = (' <span style="font-size:9px;background:#7f1d1d;color:#fca5a5;'
+                                 'border-radius:3px;padding:1px 4px">⚠️乗換検討</span>'
+                                 if _sw_flag else "")
                     _cols[0].markdown(
-                        f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_atk}</div>'
+                        f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">'
+                        f'{_atk}{_sw_badge}</div>'
                         f'<div style="font-size:10px;color:#64748b">{_ar.get("sector","")[:16]}</div>',
                         unsafe_allow_html=True,
                     )
@@ -20252,7 +20440,7 @@ def render_claude_trading_project():
                         f'{_di}{abs(_delta):.1f}pp</div>',
                         unsafe_allow_html=True,
                     )
-                    # ルールスコア
+                    # ルールスコア（バー付き）
                     _cols[4].markdown(
                         f'<div style="font-size:11px;color:{_sc_color};font-weight:700">'
                         f'{_rule_sc:+.1f}</div>'
@@ -20272,18 +20460,36 @@ def render_claude_trading_project():
                             f'title="{_ai_reason}">{_ai_txt}</div>',
                             unsafe_allow_html=True,
                         )
+                        # vs BM (col 6)
+                        _bm_c = "#4ade80" if _bm_diff > 0 else "#ef4444" if _bm_diff < -1 else "#f97316"
+                        _cols[6].markdown(
+                            f'<div style="font-size:11px;color:{_bm_c};font-weight:700"'
+                            f' title="vs {_bm_lbl} ({_bm_diff:+.2f})">'
+                            f'{_bm_diff:+.1f}<br>'
+                            f'<span style="font-size:9px;color:#64748b">{_bm_lbl}</span></div>',
+                            unsafe_allow_html=True,
+                        )
                         # シグナル + AI根拠
                         _sig_str  = "  ".join(_ar["signals"][:3])
                         _aif_str  = " / ".join(_ar.get("ai_factors", [])[:2])
-                        _cols[6].markdown(
+                        _cols[7].markdown(
                             f'<div style="font-size:10px;color:#94a3b8;line-height:1.5">{_sig_str}</div>'
                             + (f'<div style="font-size:10px;color:#a78bfa;line-height:1.5">🤖 {_aif_str}</div>'
                                if _aif_str else ""),
                             unsafe_allow_html=True,
                         )
                     else:
-                        _chip_str = "  ".join(_ar["signals"][:4])
+                        # vs BM (col 5)
+                        _bm_c = "#4ade80" if _bm_diff > 0 else "#ef4444" if _bm_diff < -1 else "#f97316"
                         _cols[5].markdown(
+                            f'<div style="font-size:11px;color:{_bm_c};font-weight:700"'
+                            f' title="vs {_bm_lbl} ({_bm_diff:+.2f})">'
+                            f'{_bm_diff:+.1f}<br>'
+                            f'<span style="font-size:9px;color:#64748b">{_bm_lbl}</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                        _chip_str = "  ".join(_ar["signals"][:3])
+                        _cols[6].markdown(
                             f'<div style="font-size:10px;color:#94a3b8;line-height:1.6">{_chip_str}</div>',
                             unsafe_allow_html=True,
                         )
@@ -20293,14 +20499,83 @@ def render_claude_trading_project():
                 _dec = [(t, _alloc_res[t]["delta"]) for t in _alloc_tickers if _alloc_res[t]["delta"] < -1]
                 _inc_str = " / ".join(f"{t}(+{d:.1f}pp)" for t, d in sorted(_inc, key=lambda x:-x[1]))
                 _dec_str = " / ".join(f"{t}({d:.1f}pp)" for t, d in sorted(_dec, key=lambda x:x[1]))
+                # ベンチマークスコア表示
+                _bm_info = (
+                    f'<div style="color:#64748b;font-size:11px;margin-bottom:6px">'
+                    f'📊 ベンチマーク参照スコア → '
+                    f'<span style="color:#38bdf8">NDX(QQQ): {_bm_qqq:+.2f}</span>'
+                    f' &nbsp;|&nbsp; '
+                    f'<span style="color:#fb923c">日経225: {_bm_n225:+.2f}</span>'
+                    f'&nbsp;（vs BM列：各銘柄スコア − ベンチマークスコア）</div>'
+                )
                 st.markdown(
                     f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-top:10px;'
                     f'border:1px solid #1e293b;font-size:12px">'
+                    + _bm_info
                     + (f'<div style="color:#4ade80;margin-bottom:4px">▲ 増やす推奨: {_inc_str}</div>' if _inc_str else '')
                     + (f'<div style="color:#ef4444">▼ 減らす推奨: {_dec_str}</div>' if _dec_str else '')
                     + '</div>',
                     unsafe_allow_html=True,
                 )
+
+                # ── 乗り換え候補 ────────────────────────────────────────
+                if _switch_flags:
+                    st.markdown(
+                        f'<div style="font-size:12px;color:#fca5a5;margin:10px 0 6px">'
+                        f'⚠️ ベンチマークを大幅に下回る銘柄: '
+                        f'<b>{" / ".join(_switch_flags)}</b> — 乗り換えを検討してください</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _sw_col1, _sw_col2 = st.columns([3, 1])
+                    with _sw_col1:
+                        _sw_model_opts = {
+                            "🔄 自動": "auto", "🟡 Gemini": "gemini",
+                            "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
+                        }
+                        _sw_model_sel = st.selectbox(
+                            "モデル（乗り換え分析）",
+                            list(_sw_model_opts.keys()),
+                            key="sw_model_sel",
+                            label_visibility="collapsed",
+                        )
+                    with _sw_col2:
+                        _do_switch = st.button("🔄 乗り換え候補を生成", key="btn_switch_rec")
+                    if _do_switch:
+                        _sw_mctx = st.session_state.get("_alloc_mktctx", {})
+                        _sw_dmap = st.session_state.get("_alloc_data_map", {})
+                        with st.spinner("乗り換え候補をAIが分析中…"):
+                            _sw_res, _sw_model = _generate_switch_recommendations(
+                                _alloc_res, _sw_dmap, _sw_mctx,
+                                model_pref=_sw_model_opts[_sw_model_sel],
+                            )
+                        st.session_state["_switch_result"] = _sw_res
+                        st.session_state["_switch_model"]  = _sw_model
+                    _sw_result = st.session_state.get("_switch_result", [])
+                    if _sw_result:
+                        _sw_model_name = st.session_state.get("_switch_model", "")
+                        st.markdown(
+                            f'<div style="font-size:11px;color:#64748b;margin:4px 0 2px">'
+                            f'🤖 {_sw_model_name} による乗り換え分析</div>',
+                            unsafe_allow_html=True,
+                        )
+                        for _sw in _sw_result:
+                            _sw_from = _sw.get("from", "?")
+                            _sw_to_s = ", ".join(_sw.get("to_stocks", []))
+                            _sw_to_e = _sw.get("to_etf", "")
+                            _sw_rat  = _sw.get("rationale", "")
+                            _sw_tim  = _sw.get("timing", "")
+                            _sw_sec  = _sw.get("sector", "")
+                            _to_all  = " / ".join(filter(None, [_sw_to_s, _sw_to_e]))
+                            st.markdown(
+                                f'<div style="background:#1c0a0a;border:1px solid #7f1d1d;'
+                                f'border-radius:8px;padding:10px 14px;margin-bottom:6px">'
+                                f'<div style="font-size:13px;font-weight:700;color:#fca5a5">'
+                                f'📤 {_sw_from} → 候補: <span style="color:#4ade80">{_to_all}</span></div>'
+                                f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">💡 {_sw_rat}</div>'
+                                f'<div style="font-size:11px;color:#fbbf24;margin-top:2px">⏰ {_sw_tim}</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
