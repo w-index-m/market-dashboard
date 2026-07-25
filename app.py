@@ -19705,17 +19705,106 @@ def _fetch_market_context_for_trading() -> dict:
                 f"⚠️ F&G極度の強欲圏({_fg_score:.0f}): "
                 "歴史的に急落リスクが高い水準。ポジションの一部を現金化し余力確保推奨。"
             )
+        _naaim_r   = naaim_f.result() or {}
+        _us_r      = us_f.result() or {}
+        _naaim_exp = float(_naaim_r.get("exposure") or 0)
+        _us_comp   = float(_us_r.get("composite") or 0)
+        # VIXは文字列 "18.50" として来るのでパース
+        try:
+            _vix_val = float(str(_us_r.get("vix") or "0").replace(",", "").replace("%", ""))
+        except (ValueError, TypeError):
+            _vix_val = 0.0
+
+        # ━━━ クラッシュリスクスコア (0〜10) ━━━
+        # リーマン前兆: NAAIM高・VIX上昇・F&G過熱
+        # ITバブル前兆: F&G極度過熱・NAAIM高・相場高値
+        # コロナ前兆: VIX急上昇・F&G急落→反転
+        _crs = 0
+
+        # F&G 絶対値
+        if _fg_score >= 80:    _crs += 2
+        elif _fg_score >= 75:  _crs += 1
+
+        # F&G 急騰（最重要シグナル）
+        if _fg_c7 is not None:
+            if _fg_c7 >= 20:   _crs += 3
+            elif _fg_c7 >= 15: _crs += 2
+            elif _fg_c7 >= 10: _crs += 1
+        if _fg_c30 is not None:
+            if _fg_c30 >= 35:  _crs += 2
+            elif _fg_c30 >= 25: _crs += 1
+
+        # NAAIM（機関投資家の過剰投資）
+        if _naaim_exp >= 90:   _crs += 3
+        elif _naaim_exp >= 80: _crs += 2
+        elif _naaim_exp >= 70: _crs += 1
+
+        # VIX（恐怖指数）
+        if _vix_val >= 30:     _crs += 3
+        elif _vix_val >= 25:   _crs += 2
+        elif _vix_val >= 20:   _crs += 1
+
+        # 米国予測モデル（弱気シグナル）
+        if _us_comp < -0.3:    _crs += 2
+        elif _us_comp < -0.1:  _crs += 1
+
+        # 逆張り補正（極度の恐怖 = 買い場）
+        if _fg_score <= 15:    _crs -= 4
+        elif _fg_score <= 25:  _crs -= 2
+        elif _fg_score <= 35:  _crs -= 1
+
+        _crs = max(0, min(10, _crs))
+
+        # キャッシュ推奨比率
+        _cash_pct = (
+            0  if _crs <= 1 else
+            10 if _crs <= 3 else
+            20 if _crs <= 5 else
+            35 if _crs <= 7 else
+            50
+        )
+
+        # クラッシュ前兆シグナル一覧
+        _crash_signals = []
+        if _fg_score >= 75:
+            _crash_signals.append(f"F&G極度の強欲({_fg_score:.0f})")
+        if _fg_c7 is not None and _fg_c7 >= 10:
+            _crash_signals.append(f"F&G7日急騰(+{_fg_c7:.0f}pt)")
+        if _fg_c30 is not None and _fg_c30 >= 25:
+            _crash_signals.append(f"F&G30日過熱(+{_fg_c30:.0f}pt)")
+        if _naaim_exp >= 70:
+            _crash_signals.append(f"NAAIM過剰投資({_naaim_exp:.0f}%)")
+        if _vix_val >= 20:
+            _crash_signals.append(f"VIX高水準({_vix_val:.1f})")
+        if _us_comp < -0.1:
+            _crash_signals.append(f"米国市場弱気シグナル({_us_comp:+.2f})")
+
+        # リスクレベルラベル
+        _risk_lv = (
+            "🟢 低リスク"    if _crs <= 2 else
+            "🟡 注意"        if _crs <= 4 else
+            "🟠 警戒"        if _crs <= 6 else
+            "🔴 高リスク"   if _crs <= 8 else
+            "🚨 危険水準"
+        )
+
         return {
-            "fear_greed":    _fg_r,
-            "fg_score":      _fg_score,
-            "fg_label":      _fg_lbl,
-            "fg_change_7d":  _fg_c7,
-            "fg_change_30d": _fg_c30,
-            "fg_spike_warn": _fg_spike_warn,
-            "naaim":         naaim_f.result(),
-            "sector_quad":   sec_f.result(),
-            "nikkei_pred":   nik_f.result(),
-            "us_pred":       us_f.result(),
+            "fear_greed":      _fg_r,
+            "fg_score":        _fg_score,
+            "fg_label":        _fg_lbl,
+            "fg_change_7d":    _fg_c7,
+            "fg_change_30d":   _fg_c30,
+            "fg_spike_warn":   _fg_spike_warn,
+            "crash_risk_score": _crs,
+            "crash_risk_label": _risk_lv,
+            "crash_signals":    _crash_signals,
+            "cash_reserve_pct": _cash_pct,
+            "vix_val":          _vix_val,
+            "naaim_exp":        _naaim_exp,
+            "naaim":            _naaim_r,
+            "sector_quad":      sec_f.result(),
+            "nikkei_pred":      nik_f.result(),
+            "us_pred":          _us_r,
         }
 
 
@@ -20287,10 +20376,31 @@ def _generate_investment_portfolio_rec(
     fg_spike = market_ctx.get("fg_spike_warn", "")
     nk_pred  = market_ctx.get("nikkei_pred_label", "")
     us_pred  = market_ctx.get("us_pred_label", "")
-    leading = market_ctx.get("sector_quad", {}).get("Leading", [])
+    leading  = market_ctx.get("sector_quad", {}).get("Leading", [])
     improving = market_ctx.get("sector_quad", {}).get("Improving", [])
-    leading_str = " / ".join(leading[:4]) if leading else "不明"
+    leading_str   = " / ".join(leading[:4]) if leading else "不明"
     improving_str = " / ".join(improving[:3]) if improving else "不明"
+
+    # クラッシュリスクに基づくキャッシュ留保
+    _crash_score  = market_ctx.get("crash_risk_score", 0)
+    _crash_label  = market_ctx.get("crash_risk_label", "🟢 低リスク")
+    _crash_sigs   = market_ctx.get("crash_signals", [])
+    _cash_reserve = int(market_ctx.get("cash_reserve_pct", 0))
+    _invest_pct   = 100 - _cash_reserve  # 実際に投資する%
+    _vix_val      = market_ctx.get("vix_val", 0)
+    _naaim_exp    = market_ctx.get("naaim_exp", 0)
+
+    # キャッシュ留保の根拠説明文
+    if _cash_reserve == 0:
+        _cash_note = "現在の市場環境はリスク低め。予算のほぼ全額を投資に充てること。"
+    else:
+        _sig_str = "、".join(_crash_sigs) if _crash_sigs else "複合リスクシグナル"
+        _cash_note = (
+            f"⚠️ クラッシュ前兆シグナル検出（{_sig_str}）。"
+            f"予算の{_cash_reserve}%（¥{int(budget*_cash_reserve/100):,}）を現金として保持し、"
+            f"残り{_invest_pct}%（¥{int(budget*_invest_pct/100):,}）のみを投資に充てること。"
+            "歴史的に急落前にはF&G急騰・NAAIM過剰・VIX上昇が重なるパターンが多い。"
+        )
 
     budget_str = f"{budget:,}円"
     model_desc = {
@@ -20388,10 +20498,14 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 
 ・セクター分散も意識しつつ、上記スコアが総合的に高い銘柄を選定すること
 
+【キャッシュ留保指示（必ず守ること）】
+{_cash_note}
+・クラッシュリスクスコア: {_crash_score}/10（{_crash_label}）　VIX: {_vix_val:.1f}　NAAIM: {_naaim_exp:.0f}%
+
 【提案ルール】
 ・銘柄数: {"5〜7" if budget <= 1_000_000 else "8〜12"}銘柄{"(ETF混合)" if model_type == "etf" else ""}（予算{budget_str}に合わせた分散数）
 ・日本株ティッカーは末尾に.T（例: 7203.T）
-・各銘柄の比率合計は100%（0%の銘柄はJSONに含めない）
+・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
 ・根拠は20字以内で端的に（モードの投資スタンスに沿った理由を記載）
 ・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
@@ -20442,11 +20556,14 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
                 parsed = _json_ip.loads(_raw)
             parsed["model"] = _model_used
             parsed["error"] = None
-            # allocation合計が100%でない場合は正規化（AIが60%しか割り当てない等の不具合を修正）
+            parsed["cash_reserve_pct"] = _cash_reserve
+            parsed["crash_risk_score"] = _crash_score
+            parsed["crash_risk_label"] = _crash_label
+            # allocation合計を _invest_pct% に正規化（キャッシュ留保を反映）
             _pf_list = [_i for _i in parsed.get("portfolio", []) if float(_i.get("allocation", 0)) > 0]
             _alloc_sum = sum(float(_i.get("allocation", 0)) for _i in _pf_list)
-            if _alloc_sum > 0 and abs(_alloc_sum - 100) > 1:
-                _scale = 100.0 / _alloc_sum
+            if _alloc_sum > 0:
+                _scale = float(_invest_pct) / _alloc_sum
                 for _itm in _pf_list:
                     _itm["allocation"] = round(float(_itm["allocation"]) * _scale, 1)
             # allocation比率からamountを再計算してAIの計算ミスを修正
@@ -21575,6 +21692,43 @@ def render_claude_trading_project():
                 _ip_rk  = st.session_state.get("_ip_risk_key", "balanced")
                 _ip_rlbl = "🔥 リスク先行型" if _ip_rk == "aggressive" else "⚖️ リスクリターン考慮型"
 
+                # ── クラッシュリスクメーター ──
+                _crs_ctx   = st.session_state.get("_alloc_mktctx") or {}
+                _crs_score = _crs_ctx.get("crash_risk_score", 0)
+                _crs_label = _crs_ctx.get("crash_risk_label", "🟢 低リスク")
+                _crs_sigs  = _crs_ctx.get("crash_signals", [])
+                _crs_cash  = _crs_ctx.get("cash_reserve_pct", 0)
+                _crs_vix   = _crs_ctx.get("vix_val", 0)
+                _crs_naaim = _crs_ctx.get("naaim_exp", 0)
+                _crs_bar_w = int(_crs_score / 10 * 100)
+                _crs_bar_c = ("#16a34a" if _crs_score <= 2 else
+                              "#ca8a04" if _crs_score <= 4 else
+                              "#ea580c" if _crs_score <= 6 else
+                              "#dc2626" if _crs_score <= 8 else "#7f1d1d")
+                _crs_bg    = ("#0f172a" if _crs_score <= 4 else
+                              "#1c0d00" if _crs_score <= 6 else "#1a0000")
+                _crs_sig_str = "　".join(_crs_sigs) if _crs_sigs else "シグナルなし"
+                st.markdown(
+                    f'<div style="background:{_crs_bg};border:1px solid {_crs_bar_c};'
+                    f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
+                    f'<div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">'
+                    f'<div style="font-size:13px;font-weight:700;color:{_crs_bar_c}">'
+                    f'📊 クラッシュリスク: {_crs_label}　スコア {_crs_score}/10</div>'
+                    f'<div style="font-size:11px;color:#94a3b8">'
+                    f'VIX: {_crs_vix:.1f}　NAAIM: {_crs_naaim:.0f}%　'
+                    f'推奨キャッシュ: <b style="color:{_crs_bar_c}">{_crs_cash}%</b></div>'
+                    f'</div>'
+                    f'<div style="background:#1e293b;border-radius:4px;height:6px;margin-bottom:6px">'
+                    f'<div style="background:{_crs_bar_c};width:{_crs_bar_w}%;height:6px;border-radius:4px"></div></div>'
+                    f'<div style="font-size:10px;color:#94a3b8">検出シグナル: {_crs_sig_str}</div>'
+                    + (f'<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
+                       f'⚠️ 過去の急落前兆例: リーマン前（NAAIM90%超・VIX上昇）/'
+                       f'ITバブル前（F&G80超・高NAAIM）/コロナ前（VIX急騰・F&G急落）'
+                       f'</div>' if _crs_score >= 5 else '')
+                    + f'</div>',
+                    unsafe_allow_html=True,
+                )
+
                 _tab_etf, _tab_ind = st.tabs(["📊 ETF混合モデル", "📈 個別株モデル"])
                 for _tab_obj, _ip_mt in [(_tab_etf, "etf"), (_tab_ind, "individual")]:
                     with _tab_obj:
@@ -21786,19 +21940,24 @@ def render_claude_trading_project():
                         # 合計・余剰資金フッター
                         _ip_cash = max(0, _ip_bv - _ip_total_actual)
                         _inv_pct = int(_ip_total_actual / _ip_bv * 100) if _ip_bv else 0
-                        # 余剰理由を動的に生成
+                        # 余剰理由を動的に生成（クラッシュリスク優先）
                         _cash_reasons = []
+                        _r_cash_pct = _ip_r.get("cash_reserve_pct", 0)
+                        _r_crs_lbl  = _ip_r.get("crash_risk_label", "")
+                        _r_crs_sc   = _ip_r.get("crash_risk_score", 0)
+                        _mctx_sigs  = (st.session_state.get("_alloc_mktctx") or {}).get("crash_signals", [])
+                        if _r_cash_pct > 0:
+                            _sig_s = "・".join(_mctx_sigs[:3]) if _mctx_sigs else "複合リスクシグナル"
+                            _cash_reasons.append(
+                                f"クラッシュ前兆シグナル({_r_crs_lbl} score:{_r_crs_sc})"
+                                f" → {_r_cash_pct}%キャッシュ留保指示（{_sig_s}）"
+                            )
                         _has_jp = any(
                             _it.get("ticker", "").endswith(".T")
                             for _it in _ip_pf if float(_it.get("allocation", 0)) > 0
                         )
                         if _has_jp:
                             _cash_reasons.append("日本株の100株単元ロット丸め")
-                        _mktctx_fg = (st.session_state.get("_alloc_mktctx") or {}).get("fg_score", 0)
-                        if _mktctx_fg >= 70:
-                            _cash_reasons.append(f"相場が高値圏（Fear&Greed {_mktctx_fg:.0f}）のためキャッシュバッファ推奨")
-                        elif _mktctx_fg >= 55:
-                            _cash_reasons.append(f"やや強気相場（Fear&Greed {_mktctx_fg:.0f}）で追加買い余力を確保")
                         _ai_comment = _ip_met.get("comment", "")
                         _cash_reason_str = " ／ ".join(_cash_reasons) if _cash_reasons else "単元ロット丸めによる端数"
                         _cash_color = "#ef4444" if _inv_pct < 60 else "#fbbf24" if _inv_pct < 85 else "#4ade80"
