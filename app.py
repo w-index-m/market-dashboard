@@ -20075,8 +20075,9 @@ def _generate_investment_portfolio_rec(
     market_ctx: dict,
     existing_holdings: list | None = None,
     model_pref: str = "auto",
+    trading_mode: str = "growth",  # "growth" | "momentum" | "autonomous"
 ) -> dict:
-    """予算・モデル・リスクプロファイルに応じた新規投資推奨ポートフォリオをAIが生成。
+    """予算・モデル・リスクプロファイル・トレーディングモードに応じた新規投資推奨ポートフォリオをAIが生成。
     Returns: {"portfolio": [...], "metrics": {...}, "model": str, "error": str|None}
     """
     fg_sc   = market_ctx.get("fg_score", 50) or 50
@@ -20097,6 +20098,28 @@ def _generate_investment_portfolio_rec(
         "aggressive": "リスク先行型（高成長・高ボラティリティ許容、期待リターン最大化）",
         "balanced":   "リスクリターン考慮型（シャープレシオ重視、最大ドローダウン抑制）",
     }.get(risk_type, risk_type)
+
+    _mode_info = {
+        "growth": (
+            "🌱 長期育成モード",
+            "ファンダメンタルズ（PER/EPS成長率・配当・財務健全性）を最優先。"
+            "保有期間6ヶ月〜2年を想定した銘柄を選ぶ。短期ノイズに強い大型・中型株中心。"
+            "損切ライン-15〜20%・目標=適正PER×予想EPSの水準。",
+        ),
+        "momentum": (
+            "⚡ モメンタムモード",
+            "テクニカル（RSI・移動平均上抜け・出来高急増・ブレイクアウト）を最優先。"
+            "保有期間1〜4週間の中短期トレードを想定。上昇トレンド継続中の銘柄を優先。"
+            "損切-5〜8%・目標=直近レジスタンス突破後の次の節目。",
+        ),
+        "autonomous": (
+            "🤖 AI自律モード",
+            "投資スタイルをAIが自律決定。成長株・モメンタム・バリュー・決算プレイ等を"
+            "市場環境に応じて最適に組み合わせ。保有期間・損切ラインもAIが柔軟に判断。"
+            "独自の視点で通常は注目されにくい銘柄も積極的に提案してよい。",
+        ),
+    }
+    _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
     holdings_str = "なし（新規投資）"
     if existing_holdings:
@@ -20121,6 +20144,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・既存保有銘柄（重複避けること推奨）: {holdings_str}
 {etf_note}
 
+【投資スタンス（トレーディングモード）】
+・モード: {_mode_label}
+・{_mode_guide}
+
 【現在の市場環境】
 ・Fear&Greed: {fg_sc:.0f} ({fg_lbl})
 ・日経225予測: {nk_pred}
@@ -20133,7 +20160,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・日本株ティッカーは末尾に.T（例: 8306.T）
 ・各銘柄の比率合計は100%
 ・投資金額 = 予算 × 比率
-・根拠は20字以内で端的に
+・根拠は20字以内で端的に（モードの投資スタンスに沿った理由を記載）
 
 【リスク指標の推計方法】
 期待年間リターン: セクター・過去実績・市場環境から推定（%）
@@ -21047,18 +21074,21 @@ def render_claude_trading_project():
             )
 
             if st.button("💼 推奨ポートフォリオを生成（ETF混合 & 個別株）", type="primary", key="btn_invest_portfolio"):
-                _ip_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
-                _ip_risk_key   = "aggressive" if "先行" in _ip_risk else "balanced"
-                _ip_model_pref = _ip_model_opts[_ip_model_sel]
-                _ip_today      = datetime.now(JST).strftime("%Y-%m-%d")
-                _ip_holdings   = list(open_pos.keys()) if open_pos else []
-                _ip_mktctx     = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
+                _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
+                _ip_risk_key    = "aggressive" if "先行" in _ip_risk else "balanced"
+                _ip_model_pref  = _ip_model_opts[_ip_model_sel]
+                _ip_today       = datetime.now(JST).strftime("%Y-%m-%d")
+                _ip_holdings    = list(open_pos.keys()) if open_pos else []
+                _ip_mktctx      = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
+                _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
+                # キャッシュキーにモードを含めて、モード違いのキャッシュが混在しないようにする
+                _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}"
 
                 _ip_results = {}
                 for _ip_mt in ["etf", "individual"]:
                     _cached = None
                     if not _ip_force:
-                        _cached = _load_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_risk_key)
+                        _cached = _load_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_cache_risk)
                     if _cached:
                         _ip_results[_ip_mt] = _cached
                     else:
@@ -21066,9 +21096,10 @@ def render_claude_trading_project():
                             _r = _generate_investment_portfolio_rec(
                                 _ip_budget_val, _ip_mt, _ip_risk_key,
                                 _ip_mktctx, _ip_holdings, _ip_model_pref,
+                                trading_mode=_ip_trade_mode,
                             )
                         if not _r.get("error") and _r.get("portfolio"):
-                            _save_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_risk_key,
+                            _save_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_cache_risk,
                                                    _r, _r.get("model", ""))
                         _ip_results[_ip_mt] = _r
 
