@@ -18995,6 +18995,59 @@ def _compute_portfolio_summary() -> dict:
     }
 
 
+_REC_CACHE_HEADERS = ["date", "mode", "tickers_key", "news_key", "text", "model", "created_at"]
+
+
+def _make_rec_cache_key(tickers: list, stock_data_map: dict) -> tuple:
+    """銘柄リスト＋各銘柄の最新ニュース見出しからキャッシュキーを生成。
+    Returns: (tickers_key: str, news_key: str)
+    """
+    import hashlib as _hl
+    tickers_key = ",".join(sorted(tickers))
+    news_parts = []
+    for t in sorted(tickers):
+        data = stock_data_map.get(t, {})
+        news_list = data.get("news") or []
+        first = news_list[0][:60] if news_list else ""
+        news_parts.append(f"{t}:{first}")
+    news_key = _hl.md5("|".join(news_parts).encode()).hexdigest()[:12]
+    return tickers_key, news_key
+
+
+def _load_rec_cache(date: str, mode: str, tickers_key: str, news_key: str) -> dict | None:
+    """Google Sheetsから推奨分析キャッシュを検索。ヒットすれば {"text", "model"} を返す。"""
+    try:
+        ws = _trading_ws("rec_cache", _REC_CACHE_HEADERS)
+        if not ws:
+            return None
+        rows = ws.get_all_records()
+        for r in reversed(rows):
+            if (r.get("date") == date and r.get("mode") == mode and
+                    r.get("tickers_key") == tickers_key and r.get("news_key") == news_key):
+                return {"text": r.get("text", ""), "model": r.get("model", "")}
+    except Exception as e:
+        logger.warning(f"[trading] rec_cache読込失敗: {e}")
+    return None
+
+
+def _save_rec_cache(date: str, mode: str, tickers_key: str, news_key: str,
+                    text: str, model: str) -> bool:
+    """推奨分析結果をGoogle Sheetsにキャッシュ保存"""
+    try:
+        ws = _trading_ws("rec_cache", _REC_CACHE_HEADERS)
+        if not ws:
+            return False
+        ws.append_row([
+            date, mode, tickers_key, news_key,
+            text, model,
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] rec_cache保存失敗: {e}")
+        return False
+
+
 def _generate_full_portfolio_recommendation(
     positions: dict,
     stock_data_map: dict,
@@ -19219,9 +19272,18 @@ def render_claude_trading_project():
             )
             _rec_model_pref = _rec_model_opts[_rec_model_label]
 
+            _force_regen = st.checkbox(
+                "🔄 キャッシュを無視して再生成する",
+                key="rec_force_regen",
+                help="同日・同銘柄・同ニュースの分析がSheetsに保存されていてもAIを再呼び出しします",
+            )
+
             if st.button("🔍 市場×IR 総合AI推奨を生成", type="primary", key="btn_full_rec"):
                 _rec_mode = st.session_state.get("trading_mode", "growth")
                 _n_stocks = len(open_pos)
+                _today    = datetime.now(JST).strftime("%Y-%m-%d")
+
+                # Step1: 全銘柄データ取得（キャッシュキー算出に必要）
                 with st.spinner(f"全{_n_stocks}銘柄のデータ取得＋市場モデル取得中... （1〜2分）"):
                     import concurrent.futures as _cf_rec
                     _rec_mktctx = _fetch_market_context_for_trading()
@@ -19244,15 +19306,47 @@ def render_claude_trading_project():
                             except Exception:
                                 pass
 
-                with st.spinner("AI 分析中..."):
-                    _rec_result = _generate_full_portfolio_recommendation(
-                        open_pos, _stock_data_map, _rec_mktctx,
-                        mode=_rec_mode, model_pref=_rec_model_pref,
-                    )
+                # Step2: キャッシュキー算出 → Sheets照合（force_regenでスキップ）
+                _tickers_key, _news_key = _make_rec_cache_key(
+                    list(open_pos.keys()), _stock_data_map
+                )
+                _cached_rec = None
+                if not _force_regen:
+                    with st.spinner("📋 キャッシュ確認中..."):
+                        _cached_rec = _load_rec_cache(
+                            _today, _rec_mode, _tickers_key, _news_key
+                        )
+
+                # Step3: キャッシュヒットならそのまま使用、なければAI呼び出し
+                _from_cache = False
+                if _cached_rec:
+                    _rec_result = {
+                        "text":  _cached_rec["text"],
+                        "model": _cached_rec["model"],
+                        "error": None,
+                    }
+                    _from_cache = True
+                else:
+                    with st.spinner("AI 分析中..."):
+                        _rec_result = _generate_full_portfolio_recommendation(
+                            open_pos, _stock_data_map, _rec_mktctx,
+                            mode=_rec_mode, model_pref=_rec_model_pref,
+                        )
+                    # Step4: 成功したらSheetsに保存
+                    if not _rec_result.get("error"):
+                        _save_rec_cache(
+                            _today, _rec_mode, _tickers_key, _news_key,
+                            _rec_result["text"], _rec_result["model"],
+                        )
 
                 if _rec_result.get("error"):
                     st.error(f"AI分析エラー: {_rec_result['error']}")
                 else:
+                    if _from_cache:
+                        st.info(
+                            "📋 本日のキャッシュから取得（同銘柄・同ニュース構成）　"
+                            "最新AIで再取得する場合は「キャッシュを無視して再生成する」にチェックしてください。"
+                        )
                     st.markdown(
                         '<div style="background:#0f172a;border:1px solid #4c1d95;border-radius:10px;'
                         'padding:14px 18px;margin-bottom:8px">'
@@ -19262,9 +19356,10 @@ def render_claude_trading_project():
                     )
                     st.markdown(_rec_result["text"])
                     st.markdown("</div>", unsafe_allow_html=True)
+                    _cache_badge = " 📋キャッシュ" if _from_cache else ""
                     st.caption(
-                        f"🤖 {_rec_result['model']} ｜ "
-                        f"{datetime.now(JST).strftime('%Y-%m-%d %H:%M JST')} ｜ "
+                        f"🤖 {_rec_result['model']}{_cache_badge} ｜ "
+                        f"{_today} ｜ "
                         f"対象{_n_stocks}銘柄 + windexモデル"
                     )
                     # IRニュース詳細をexpanderで表示
