@@ -20033,10 +20033,21 @@ _INVEST_REC_CACHE_HEADERS = ["date", "budget", "model_type", "risk_type", "resul
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _fetch_portfolio_prices(tickers: tuple) -> dict:
-    """ポートフォリオ銘柄の現在値とUSD/JPY為替を取得（TTL=5分）。
-    Returns: {ticker: price, "_usdjpy": rate}  price は現地通貨建て
+    """ポートフォリオ銘柄の現在値・1年パフォーマンス指標・USD/JPY為替を取得（TTL=5分）。
+    Returns:
+      {
+        "_usdjpy": float,
+        ticker: {
+          "price": float,           # 現在値（現地通貨）
+          "ret_1y": float,          # 1年リターン%
+          "volatility": float,      # 年率ボラティリティ%
+          "sharpe": float,          # シャープレシオ（無リスク1.5%）
+          "max_dd": float,          # 最大ドローダウン%（負値）
+        }
+      }
     """
     import yfinance as _yf3
+    import math as _math
     out: dict = {}
     try:
         _fx = _yf3.Ticker("USDJPY=X").history(period="2d")
@@ -20045,9 +20056,39 @@ def _fetch_portfolio_prices(tickers: tuple) -> dict:
         out["_usdjpy"] = 150.0
     for _t in tickers:
         try:
-            _h = _yf3.Ticker(_t).history(period="2d")
-            if not _h.empty:
-                out[_t] = float(_h["Close"].dropna().iloc[-1])
+            _h   = _yf3.Ticker(_t).history(period="13mo")
+            if _h.empty:
+                continue
+            _cl  = _h["Close"].dropna()
+            _price = float(_cl.iloc[-1])
+            # 1年リターン
+            def _ret(n):
+                if len(_cl) > n:
+                    return round((_price / float(_cl.iloc[-n - 1]) - 1) * 100, 1)
+                return None
+            _ret1y  = _ret(252)
+            _ret6m  = _ret(126)
+            _ret3m  = _ret(63)
+            # 年率ボラティリティ
+            _dr  = _cl.pct_change().dropna()
+            _vol = float(_dr.std() * (252 ** 0.5) * 100) if len(_dr) > 1 else 0.0
+            # シャープレシオ（無リスク金利 1.5%）
+            _sr  = ((_ret1y or 0) - 1.5) / _vol if _vol > 0 else 0.0
+            # 最大ドローダウン（直近1年分）
+            _n252   = min(252, len(_cl) - 1)
+            _cl1y   = _cl.iloc[-_n252:] if _n252 > 0 else _cl
+            _roll_max = _cl1y.cummax()
+            _dd  = ((_cl1y - _roll_max) / _roll_max * 100).min()
+            _max_dd = float(_dd) if not _math.isnan(_dd) else 0.0
+            out[_t] = {
+                "price":      _price,
+                "ret_1y":     _ret1y,
+                "ret_6m":     _ret6m,
+                "ret_3m":     _ret3m,
+                "volatility": round(_vol, 1),
+                "sharpe":     round(_sr, 2),
+                "max_dd":     round(_max_dd, 1),
+            }
         except Exception:
             out[_t] = None
     return out
@@ -21207,29 +21248,65 @@ def render_claude_trading_project():
                             _bar_w  = min(int(_alloc), 100)
                             _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
                             _is_jp  = _tk.endswith(".T")
-                            _price  = _px.get(_tk)
+                            _tdat   = _px.get(_tk) or {}
+                            _price  = _tdat.get("price") if isinstance(_tdat, dict) else None
 
                             # 株数・必要金額を株価ベースで計算
                             if _price and _price > 0:
                                 if _is_jp:
-                                    # 日本株: 100株単元
-                                    _lot_cost   = _price * 100
-                                    _lots       = max(1, int(_amt / _lot_cost))
-                                    _shares     = _lots * 100
+                                    _lot_cost    = _price * 100
+                                    _lots        = max(1, int(_amt / _lot_cost))
+                                    _shares      = _lots * 100
                                     _actual_cost = int(_lots * _lot_cost)
-                                    _shares_str = f"{_shares:,}株 ({_lots}単元)"
-                                    _price_str  = f"¥{_price:,.0f}/株"
+                                    _shares_str  = f"{_shares:,}株 ({_lots}単元)"
+                                    _price_str   = f"¥{_price:,.0f}/株"
                                 else:
-                                    # 米国株: 株価×為替
-                                    _price_jpy  = _price * _usdjpy
-                                    _shares     = max(1, int(_amt / _price_jpy))
+                                    _price_jpy   = _price * _usdjpy
+                                    _shares      = max(1, int(_amt / _price_jpy))
                                     _actual_cost = int(_shares * _price_jpy)
-                                    _shares_str = f"{_shares}株"
-                                    _price_str  = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                                    _shares_str  = f"{_shares}株"
+                                    _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
                             else:
                                 _shares_str  = "—"
                                 _price_str   = "価格取得中"
                                 _actual_cost = _amt
+
+                            # パフォーマンス指標
+                            _tdat   = _px.get(_tk) or {}
+                            _ret1y  = _tdat.get("ret_1y")  if isinstance(_tdat, dict) else None
+                            _ret6m  = _tdat.get("ret_6m")  if isinstance(_tdat, dict) else None
+                            _ret3m  = _tdat.get("ret_3m")  if isinstance(_tdat, dict) else None
+                            _pvol   = _tdat.get("volatility") if isinstance(_tdat, dict) else None
+                            _psr    = _tdat.get("sharpe")   if isinstance(_tdat, dict) else None
+                            _pmdd   = _tdat.get("max_dd")   if isinstance(_tdat, dict) else None
+
+                            def _rc(v):
+                                return "#16a34a" if (v or 0) >= 0 else "#dc2626"
+                            def _rv(v):
+                                return f"{v:+.1f}%" if v is not None else "—"
+
+                            if any(v is not None for v in [_ret1y, _ret6m, _ret3m]):
+                                _sr_c2 = "#16a34a" if (_psr or 0) >= 1.0 else "#ca8a04" if (_psr or 0) >= 0.5 else "#dc2626"
+                                _stats_html = (
+                                    f'<div style="font-size:10px;margin-top:4px;line-height:1.6">'
+                                    f'<span style="color:#475569">3m:</span>'
+                                    f'<span style="color:{_rc(_ret3m)};font-weight:700"> {_rv(_ret3m)}</span>'
+                                    f'&nbsp;&nbsp;'
+                                    f'<span style="color:#475569">6m:</span>'
+                                    f'<span style="color:{_rc(_ret6m)};font-weight:700"> {_rv(_ret6m)}</span>'
+                                    f'&nbsp;&nbsp;'
+                                    f'<span style="color:#475569">1y:</span>'
+                                    f'<span style="color:{_rc(_ret1y)};font-weight:700"> {_rv(_ret1y)}</span>'
+                                    f'<br>'
+                                    f'<span style="color:#475569">ボラ:{_pvol:.1f}%</span>'
+                                    f'&nbsp;'
+                                    f'<span style="color:{_sr_c2}">SR:{_psr:.2f}</span>'
+                                    f'&nbsp;'
+                                    f'<span style="color:#b45309">DD:{_pmdd:.1f}%</span>'
+                                    f'</div>'
+                                )
+                            else:
+                                _stats_html = ""
 
                             _row = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
@@ -21252,7 +21329,8 @@ def render_claude_trading_project():
                                 unsafe_allow_html=True,
                             )
                             _row[4].markdown(
-                                f'<div style="font-size:11px;color:#1e3a5f">{_rat}</div>',
+                                f'<div style="font-size:11px;color:#1e3a5f">{_rat}</div>'
+                                + _stats_html,
                                 unsafe_allow_html=True,
                             )
 
