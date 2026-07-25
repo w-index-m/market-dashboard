@@ -21134,7 +21134,7 @@ def render_claude_trading_project():
                         # ポートフォリオテーブル
                         _hdr = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
                         for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "金額(円)", "根拠"]):
-                            _h.markdown(f'<div style="font-size:11px;color:#64748b;font-weight:600">{_lbl}</div>',
+                            _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
                                         unsafe_allow_html=True)
 
                         for _item in _ip_pf:
@@ -21145,27 +21145,27 @@ def render_claude_trading_project():
                             _amt    = int(_item.get("amount", 0))
                             _rat    = _item.get("rationale", "")
                             _bar_w  = min(int(_alloc), 100)
-                            _a_c    = ("#38bdf8" if _alloc >= 20 else "#818cf8" if _alloc >= 10 else "#64748b")
+                            _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
                             _row = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
                                              unsafe_allow_html=True)
                             _row[1].markdown(
-                                f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}</div>'
-                                f'<div style="font-size:10px;color:#64748b">{_nm}</div>',
+                                f'<div style="font-size:12px;font-weight:700;color:#0f172a">{_tk}</div>'
+                                f'<div style="font-size:10px;color:#334155">{_nm}</div>',
                                 unsafe_allow_html=True,
                             )
                             _row[2].markdown(
                                 f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
-                                f'<div style="background:#1e293b;border-radius:3px;height:4px;margin-top:3px">'
+                                f'<div style="background:#cbd5e1;border-radius:3px;height:4px;margin-top:3px">'
                                 f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
                                 unsafe_allow_html=True,
                             )
                             _row[3].markdown(
-                                f'<div style="font-size:12px;color:#94a3b8">{_amt:,}</div>',
+                                f'<div style="font-size:12px;color:#1e293b;font-weight:600">{_amt:,}</div>',
                                 unsafe_allow_html=True,
                             )
                             _row[4].markdown(
-                                f'<div style="font-size:11px;color:#cbd5e1">{_rat}</div>',
+                                f'<div style="font-size:11px;color:#1e3a5f">{_rat}</div>',
                                 unsafe_allow_html=True,
                             )
 
