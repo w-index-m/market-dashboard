@@ -20147,19 +20147,39 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
   }}
 }}"""
 
+    _err = "生成失敗（原因不明）"
+    _model_used = ""
     try:
-        text, model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=900, temperature=0.3
+        text, _model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=1400, temperature=0.3
         )
+        # JSONブロックを抽出（前後のテキストを除去）
         m = _re.search(r'\{[\s\S]*\}', text)
-        if m:
-            parsed = _json.loads(m.group())
-            parsed["model"] = model_used
+        if not m:
+            _err = f"AIがJSON形式で返答しませんでした: {text[:300]}"
+            logger.warning(f"[trading] invest_portfolio JSON未検出: {text[:300]}")
+        else:
+            try:
+                parsed = _json.loads(m.group())
+            except _json.JSONDecodeError:
+                # JSON が途中で切れている場合、末尾を修復して再試行
+                _raw = m.group().rstrip().rstrip(",")
+                # portfolio配列が閉じていない場合に補完
+                if _raw.count("[") > _raw.count("]"):
+                    _raw += "]"
+                if _raw.count("{") > _raw.count("}"):
+                    _raw += "}"
+                parsed = _json.loads(_raw)
+            parsed["model"] = _model_used
             parsed["error"] = None
             return parsed
+    except _json.JSONDecodeError as e:
+        _err = f"JSON解析失敗: {str(e)[:120]}"
+        logger.warning(f"[trading] invest_portfolio JSON解析失敗: {e}")
     except Exception as e:
+        _err = f"AI呼び出し失敗: {str(e)[:120]}"
         logger.warning(f"[trading] invest_portfolio生成失敗: {e}")
-    return {"portfolio": [], "metrics": {}, "model": "", "error": str(e) if 'e' in dir() else "生成失敗"}
+    return {"portfolio": [], "metrics": {}, "model": _model_used, "error": _err}
 
 
 def _generate_full_portfolio_recommendation(
@@ -21059,7 +21079,10 @@ def render_claude_trading_project():
                     with _tab_obj:
                         _ip_r = _ip_disp.get(_ip_mt, {})
                         if _ip_r.get("error") or not _ip_r.get("portfolio"):
-                            st.error(f"生成失敗: {_ip_r.get('error','不明')}")
+                            st.error(f"⚠️ {_ip_r.get('error','生成失敗')}")
+                            if _ip_r.get("model"):
+                                st.caption(f"モデル: {_ip_r['model']}")
+                            st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
                             continue
 
                         _ip_pf  = _ip_r.get("portfolio", [])
