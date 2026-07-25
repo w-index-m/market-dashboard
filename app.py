@@ -21448,7 +21448,6 @@ def render_claude_trading_project():
                     # 現在のステップ内進捗（最大95%まで）
                     _inner_pct = min(95, int(inner_elapsed / _IP_EST * 100))
                     _total_pct = min(99, _base_pct + int((100 / n_steps) * _inner_pct / 100)) if n_steps > 0 else _inner_pct
-                    _remain    = max(0, int(_IP_EST - inner_elapsed) + (_n_steps - done - 1) * _IP_EST if n_steps > 0 else max(0, int(_IP_EST - inner_elapsed)))
                     _remain    = max(0, int((_ip_n_steps - _ip_done - 1) * _IP_EST + max(0, _IP_EST - inner_elapsed)))
                     _ip_prog_area.markdown(
                         f'<div style="background:#0f172a;border:1px solid #334155;'
