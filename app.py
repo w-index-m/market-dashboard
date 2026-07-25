@@ -20675,13 +20675,15 @@ def render_claude_trading_project():
             )
             _rec_model_pref = _rec_model_opts[_rec_model_label]
 
-            _force_regen = st.checkbox(
-                "🔄 キャッシュを無視して再生成する",
-                key="rec_force_regen",
-                help="同日・同銘柄・同ニュースの分析がSheetsに保存されていてもAIを再呼び出しします",
+            _rec_btn_col, _rec_force_col = st.columns([3, 2])
+            _run_rec    = _rec_btn_col.button("🔍 市場×IR 総合AI推奨を生成", type="primary", key="btn_full_rec")
+            _force_regen = _rec_force_col.button(
+                "🔄 キャッシュ無視で再生成",
+                key="btn_rec_force_regen",
+                help="銘柄名修正・プロンプト変更後などに使用。Sheetsキャッシュを無視してAIを再呼び出しします",
             )
 
-            if st.button("🔍 市場×IR 総合AI推奨を生成", type="primary", key="btn_full_rec"):
+            if _run_rec or _force_regen:
                 _rec_mode = st.session_state.get("trading_mode", "growth")
                 _n_stocks = len(open_pos)
                 _today    = datetime.now(JST).strftime("%Y-%m-%d")
