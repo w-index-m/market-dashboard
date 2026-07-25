@@ -17853,8 +17853,35 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     return result
 
 
-def _generate_ai_trade_signal(ticker: str, name: str, is_jp: bool, data: dict) -> dict:
-    """AIによる中期売買シグナルを生成"""
+def _get_open_positions() -> dict:
+    """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
+    df = _load_trades()
+    if df.empty:
+        return {}
+    positions = {}
+    for _, row in df.iterrows():
+        t     = row["ticker"]
+        qty   = float(row.get("quantity", 0) or 0)
+        price = float(row.get("price", 0) or 0)
+        fee   = float(row.get("fee", 0) or 0)
+        if row["action"] == "BUY":
+            if t not in positions:
+                positions[t] = {"name": row["name"], "qty": 0.0, "cost": 0.0}
+            positions[t]["qty"]  += qty
+            positions[t]["cost"] += qty * price + fee
+        elif row["action"] == "SELL" and t in positions:
+            positions[t]["qty"] -= qty
+    return {
+        t: {**v, "avg_cost": v["cost"] / v["qty"] if v["qty"] > 0 else 0}
+        for t, v in positions.items() if v["qty"] > 0
+    }
+
+
+def _generate_ai_trade_signal(
+    ticker: str, name: str, is_jp: bool, data: dict,
+    position_ctx: dict | None = None,
+) -> dict:
+    """AIによる中期売買シグナルを生成。position_ctx があれば保有銘柄モード。"""
     price    = data.get("price", "不明")
     ma25     = data.get("ma25", "不明")
     ma75     = data.get("ma75", "不明")
@@ -17865,10 +17892,37 @@ def _generate_ai_trade_signal(ticker: str, name: str, is_jp: bool, data: dict) -
     vol_r    = data.get("vol_ratio", "不明")
     news     = data.get("news", [])
     currency = "円" if is_jp else "USD"
-
     news_str = "\n".join(f"・{n}" for n in news) if news else "直近ニュースなし"
 
-    prompt = f"""あなたはプロの中期株式アナリストです。以下のデータを元に「{name}（{ticker}）」の中期投資判断（数週間〜2ヶ月）を行ってください。
+    if position_ctx:
+        avg_cost = position_ctx.get("avg_cost", 0)
+        qty      = position_ctx.get("qty", 0)
+        cur_price_val = data.get("price_raw") or (float(price) if str(price).replace(".", "").isdigit() else None)
+        pnl     = (cur_price_val - avg_cost) * qty if cur_price_val else None
+        pnl_pct = (cur_price_val / avg_cost - 1) * 100 if cur_price_val and avg_cost > 0 else None
+
+        pnl_str     = f"{pnl:+,.0f} {currency}（{pnl_pct:+.1f}%）" if pnl is not None else "取得中"
+        position_section = f"""
+【現在の保有ポジション】
+- 保有株数: {int(qty)}株
+- 平均取得単価: {avg_cost:.2f} {currency}
+- 現在株価: {price} {currency}
+- 含み損益: {pnl_str}
+"""
+        scenario  = "保有ポジションをどう扱うべきか"
+        judgment  = "**判断**: [追加買い / 保有継続 / 一部利確（半分売り） / 全株売却]"
+        target_line = f"**目標株価（or 利確目標）**: X{currency}（+Y%）｜根拠も一言"
+        stop_line   = f"**損切りライン**: X{currency}（-Y%）で強制撤退を推奨"
+        period_line = "**推奨アクション期限**: X週間以内に判断"
+    else:
+        position_section = ""
+        scenario  = "新規エントリーを検討すべきか"
+        judgment  = "**判断**: [強気買い / 買い / 様子見 / 見送り / 売り]"
+        target_line = f"**目標株価**: X{currency}（+Y%）｜根拠も一言"
+        stop_line   = f"**損切りライン**: X{currency}（-Y%）を下回ったら損切り推奨"
+        period_line = "**保有期間目安**: X〜Y週間"
+
+    prompt = f"""あなたはプロの中期株式アナリストです。以下のデータを元に「{name}（{ticker}）」について{scenario}を判断してください（中期：数週間〜2ヶ月）。
 
 【テクニカルデータ】
 - 現在株価: {price} {currency}
@@ -17879,21 +17933,21 @@ def _generate_ai_trade_signal(ticker: str, name: str, is_jp: bool, data: dict) -
 - 直近5日リターン: {ret_5d}%
 - 直近20日リターン: {ret_20d}%
 - 出来高比率（対20日平均）: {vol_r}倍
-
+{position_section}
 【直近ニュース・開示】
 {news_str}
 
 【出力形式】必ず以下の形式で回答してください：
 
-**判断**: [強気買い / 買い / 様子見 / 売り / 強気売り]
+{judgment}
 
 **理由**: （200字以内で簡潔に。テクニカルとファンダメンタルの両面から）
 
-**目標株価**: {price}円の場合、X円（+Y%）を目標とする ※根拠も一言
+{target_line}
 
-**損切りライン**: X円（-Y%）を下回ったら損切り推奨
+{stop_line}
 
-**保有期間目安**: X〜Y週間
+{period_line}
 
 **注意事項**: （リスク要因があれば）
 """
@@ -17983,42 +18037,79 @@ def render_claude_trading_project():
 
     # ── タブ②: AI分析・シグナル ────────────────────────────────
     with tab_signal:
-        watchlist = _load_watchlist()
-        if not watchlist:
-            st.info("先にウォッチリストに銘柄を追加してください。")
+        open_pos  = _get_open_positions()   # 保有中ポジション
+        watchlist = _load_watchlist()       # ウォッチリスト
+
+        # 選択肢を構築: 保有銘柄 → ウォッチリスト の順
+        all_options = {}  # label → {ticker, name, market, position_ctx}
+
+        if open_pos:
+            for ticker, pos in open_pos.items():
+                is_jp_pos = ticker.endswith(".T")
+                cur = "円" if is_jp_pos else "USD"
+                avg = pos.get("avg_cost", 0)
+                lbl = f"📂 {ticker} — {pos['name']}（取得単価 {avg:.1f}{cur}）"
+                all_options[lbl] = {
+                    "ticker": ticker, "name": pos["name"],
+                    "market": "JP" if is_jp_pos else "US",
+                    "position_ctx": pos,
+                }
+
+        if watchlist:
+            for w in watchlist:
+                lbl = f"👀 {w['ticker']} — {w['name']}"
+                if lbl not in all_options:
+                    all_options[lbl] = {
+                        "ticker": w["ticker"], "name": w["name"],
+                        "market": w.get("market", "US"),
+                        "position_ctx": None,
+                    }
+
+        if not all_options:
+            st.info("まず「ウォッチリスト」タブに銘柄を追加するか、取引記録を入力してください。")
         else:
-            options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
-            sel_label = st.selectbox("分析する銘柄を選択", list(options.keys()))
-            sel = options[sel_label]
-            is_jp = sel.get("market", "JP") == "JP"
+            if open_pos:
+                st.caption("📂 保有中の銘柄は「追加買い / 保有継続 / 利確 / 損切り」の観点でAIが判断します。👀 はウォッチリスト（新規エントリー候補）です。")
+
+            sel_label = st.selectbox("分析する銘柄を選択", list(all_options.keys()))
+            sel = all_options[sel_label]
+            is_jp = sel["market"] == "JP"
+            pos_ctx = sel.get("position_ctx")
 
             if st.button("🤖 Claude に分析させる", type="primary"):
                 with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
                     data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
                     signal = _generate_ai_trade_signal(
-                        sel["ticker"], sel["name"], is_jp, data
+                        sel["ticker"], sel["name"], is_jp, data, position_ctx=pos_ctx
                     )
 
                 if signal.get("error"):
                     st.error(f"AI分析エラー: {signal['error']}")
                 else:
-                    cur = "円" if is_jp else "USD"
+                    cur   = "円" if is_jp else "USD"
                     price = data.get("price", "-")
                     rsi   = data.get("rsi", "-")
                     ma25  = data.get("ma25", "-")
                     ma75  = data.get("ma75", "-")
 
+                    mode_label = "ポジション管理" if pos_ctx else "新規エントリー検討"
+                    hdr_color  = "#f59e0b" if pos_ctx else "#60a5fa"
+
                     st.markdown(
                         f'<div style="background:#0f2744;border-radius:10px;padding:14px 18px;'
                         f'margin-bottom:10px;border:1px solid #1e3a5f;">'
-                        f'<div style="font-size:15px;font-weight:700;color:#60a5fa;margin-bottom:8px">'
-                        f'📊 {sel["name"]}（{sel["ticker"]}）のAI分析レポート</div>'
+                        f'<div style="font-size:15px;font-weight:700;color:{hdr_color};margin-bottom:6px">'
+                        f'{"📂" if pos_ctx else "👀"} {sel["name"]}（{sel["ticker"]}）'
+                        f' — {mode_label}</div>'
                         f'<div style="font-size:12px;color:#94a3b8">'
                         f'株価: <b style="color:#f1f5f9">{price}{cur}</b> ｜ '
                         f'RSI: <b style="color:#f1f5f9">{rsi}</b> ｜ '
                         f'MA25: <b style="color:#f1f5f9">{ma25}{cur}</b> ｜ '
-                        f'MA75: <b style="color:#f1f5f9">{ma75}{cur}</b></div>'
-                        f'</div>',
+                        f'MA75: <b style="color:#f1f5f9">{ma75}{cur}</b>'
+                        + (f' ｜ 保有 <b style="color:#f1f5f9">{int(pos_ctx["qty"])}株</b>'
+                           f' 取得単価 <b style="color:#f1f5f9">{pos_ctx["avg_cost"]:.1f}{cur}</b>'
+                           if pos_ctx else "")
+                        + f'</div></div>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(signal["text"])
