@@ -17945,18 +17945,31 @@ def render_claude_trading_project():
     with tab_trade:
         st.markdown("#### 約定後の取引記録入力")
         watchlist = _load_watchlist()
-        watch_options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
-        watch_labels  = ["（直接入力）"] + list(watch_options.keys())
+
+        # ウォッチリストがある場合はフォーム外でクイック選択
+        if watchlist:
+            watch_options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
+            sel_quick = st.selectbox(
+                "ウォッチリストから銘柄を選んで自動入力（任意）",
+                ["－ 選択しない －"] + list(watch_options.keys()),
+                key="trade_quick_sel"
+            )
+            if sel_quick != "－ 選択しない －":
+                st.session_state["_trade_ticker"] = watch_options[sel_quick]["ticker"]
+                st.session_state["_trade_name"]   = watch_options[sel_quick]["name"]
+            else:
+                st.session_state.setdefault("_trade_ticker", "")
+                st.session_state.setdefault("_trade_name", "")
+        else:
+            st.session_state.setdefault("_trade_ticker", "")
+            st.session_state.setdefault("_trade_name", "")
 
         with st.form("trade_form", clear_on_submit=True):
-            t_sel = st.selectbox("銘柄（ウォッチリストから選択 または 直接入力）", watch_labels)
-            if t_sel == "（直接入力）":
-                ci1, ci2 = st.columns(2)
-                t_ticker_manual = ci1.text_input("ティッカー", placeholder="例: NVDA / 7203.T")
-                t_name_manual   = ci2.text_input("銘柄名", placeholder="例: NVIDIA / トヨタ自動車")
-            else:
-                t_ticker_manual = ""
-                t_name_manual   = ""
+            ci1, ci2 = st.columns(2)
+            t_ticker = ci1.text_input("ティッカー", value=st.session_state.get("_trade_ticker", ""),
+                                      placeholder="例: NVDA / 7203.T")
+            t_name   = ci2.text_input("銘柄名", value=st.session_state.get("_trade_name", ""),
+                                      placeholder="例: NVIDIA / トヨタ自動車")
             c1, c2, c3 = st.columns(3)
             t_date   = c1.date_input("約定日", value=datetime.now(JST).date())
             t_action = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
@@ -17970,14 +17983,8 @@ def render_claude_trading_project():
             t_memo   = st.text_input("メモ（任意）")
 
             if st.form_submit_button("💾 記録を保存", type="primary"):
-                if t_sel == "（直接入力）":
-                    trade_ticker = t_ticker_manual.strip().upper()
-                    trade_name   = t_name_manual.strip()
-                else:
-                    sel_w        = watch_options[t_sel]
-                    trade_ticker = sel_w["ticker"]
-                    trade_name   = sel_w["name"]
-
+                trade_ticker = t_ticker.strip().upper()
+                trade_name   = t_name.strip() or trade_ticker
                 if trade_ticker and t_price > 0:
                     action = "BUY" if "BUY" in t_action else "SELL"
                     ok, err = _save_trade(
@@ -17986,7 +17993,9 @@ def render_claude_trading_project():
                         t_memo, float(t_target), float(t_stop)
                     )
                     if ok:
-                        st.success(f"✅ {trade_ticker} {action} {t_qty}株 @ {t_price}を記録しました")
+                        st.session_state["_trade_ticker"] = ""
+                        st.session_state["_trade_name"]   = ""
+                        st.success(f"✅ {trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました")
                     else:
                         st.error(f"❌ 保存失敗: {err}")
                 else:
