@@ -18402,11 +18402,12 @@ def _generate_replacement_rec(
 ・Fear&Greed: {fg_sc:.0f}（{fg_lbl}）
 ・RRGリーディング: {leading_str}
 
-【注目候補（参考）】
-光通信・AIインフラ: CIEN, COHR, LITE, VIAV, AAOI, GLW, APH, VRT
-日本光ファイバー: 5803.T（フジクラ）, 5812.T（古河電工）
-半導体: NVDA, AMD, AVGO, MU, AMAT, LRCX
-その他成長: META, AMZN, MSFT, TSM, PLTR
+【銘柄選定範囲】
+・米国株: NASDAQ100・S&P500構成銘柄から選定
+・日本株: 日経225構成銘柄から選定
+・選定軸: 成長性（EPS/売上成長）・モメンタム（上昇トレンド・出来高）・AI/テクノロジー関連
+・特定セクターに偏らず、モードと市場環境で最もスコアが高い銘柄を選ぶこと
+・GAFA・Magnificent 7（NVDA/MSFT/AAPL/GOOGL/META/AMZN/TSLA）も積極的に候補にすること
 
 【制約】
 ・解放資金 {freed_str} で実際に購入可能な価格帯の銘柄を優先
@@ -18416,8 +18417,8 @@ def _generate_replacement_rec(
 以下のJSONのみで回答:
 {{
   "candidates": [
-    {{"ticker": "CIEN", "name": "Ciena", "flag": "🇺🇸", "rationale": "光NW需要継続・モメンタム最強"}},
-    {{"ticker": "5803.T", "name": "フジクラ", "flag": "🇯🇵", "rationale": "光ファイバー需要急増"}}
+    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "rationale": "AI/クラウド成長継続"}},
+    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "rationale": "円安恩恵・EV展開"}}
   ]
 }}"""
     _err = "生成失敗（原因不明）"
@@ -20295,18 +20296,19 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・RRGリーディングセクター: {leading_str}
 ・RRGインプルービングセクター: {improving_str}
 
-【注目セクター（NASDAQ100非構成だが高成長）】
-・光通信・AIインフラ関連（米国）: CIEN(Ciena/光NW), COHR(Coherent/光部品),
-  LITE(Lumentum/光部品), VIAV(Viavi/光試験), AAOI(Applied Optoelectronics/トランシーバ),
-  GLW(Corning/光ファイバー), APH(Amphenol/コネクタ), VRT(Vertiv/AIインフラ電源)
-  ※AIデータセンター向け光接続需要急増で直近1年+100〜700%超の銘柄群。QQQ非採用だが成長継続中。
-・光通信関連（日本株）: 5803.T(フジクラ), 5812.T(古河電気工業)
-  ※日本の光ファイバーケーブルメーカー。海底・陸上ケーブル需要急増。
-※ 上記セクターは予算・リスクプロファイル・モードに合う場合に積極的に採用すること。
+【銘柄選定範囲と軸】
+・米国株: NASDAQ100・S&P500構成銘柄から選定
+・日本株: 日経225構成銘柄から選定
+・選定軸（モードに応じて優先度を変えること）:
+  - 成長性: EPS成長率・売上成長率・利益率改善トレンド
+  - モメンタム: 直近3〜12ヶ月の株価上昇トレンド・出来高増加
+  - AI・テクノロジー関連: AI/クラウド/データセンター/半導体/ソフトウェア等
+・特定セクターに偏らず、上記軸で客観的にスコアが高い銘柄を幅広く選ぶこと
+・GAFA・Magnificent 7（NVDA/MSFT/AAPL/GOOGL/META/AMZN/TSLA）も積極的に候補に含めること
 
 【提案ルール】
 ・銘柄数: {"5〜7" if budget <= 1_000_000 else "8〜12"}銘柄{"(ETF含む)" if model_type == "etf" else ""}（予算{budget_str}に合わせた分散数）
-・日本株ティッカーは末尾に.T（例: 8306.T）
+・日本株ティッカーは末尾に.T（例: 7203.T）
 ・各銘柄の比率合計は100%
 ・投資金額 = 予算 × 比率
 ・根拠は20字以内で端的に（モードの投資スタンスに沿った理由を記載）
@@ -20320,8 +20322,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 以下のJSONのみで回答（前後のテキスト不要）:
 {{
   "portfolio": [
-    {{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 25, "amount": {int(budget*0.25)}, "rationale": "AI半導体独占・成長最大"}},
-    {{"ticker": "8306.T", "name": "三菱UFJ", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "金利上昇恩恵・配当安定"}}
+    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)}, "rationale": "AI/クラウド成長継続"}},
+    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "円安恩恵・EV展開"}}
   ],
   "metrics": {{
     "expected_return": 18.0,
