@@ -17727,6 +17727,81 @@ def _save_trade(date: str, ticker: str, name: str, action: str,
         return False, str(e)[:120]
 
 
+_SIGNALS_HEADERS = [
+    "date", "ticker", "name", "judgment", "target_price", "stoploss",
+    "trailing_pe", "forward_pe", "eps_surprise", "rev_growth",
+    "next_earnings", "summary", "model",
+]
+
+
+def _load_signals(ticker: str) -> list[dict]:
+    """過去のAI分析ログを ticker で絞り込んで返す（新しい順）"""
+    try:
+        ws = _trading_ws("claude_signals", _SIGNALS_HEADERS)
+        if not ws:
+            return []
+        rows = ws.get_all_records()
+        matched = [r for r in rows if r.get("ticker", "").upper() == ticker.upper()]
+        return list(reversed(matched))   # 新しい順
+    except Exception as e:
+        logger.warning(f"[trading] signals読込失敗: {e}")
+        return []
+
+
+def _save_signal(ticker: str, name: str, signal: dict, data: dict) -> bool:
+    """AI分析結果を claude_signals シートに保存"""
+    try:
+        ws = _trading_ws("claude_signals", _SIGNALS_HEADERS)
+        if not ws:
+            return False
+        # 判断行だけ抽出（"**判断**: 保有継続" → "保有継続"）
+        text = signal.get("text", "")
+        judgment = ""
+        for line in text.splitlines():
+            if line.startswith("**判断**"):
+                judgment = line.split(":", 1)[-1].strip().strip("[]").strip()
+                break
+        # 目標株価と損切りラインも抽出
+        target = stoploss = ""
+        for line in text.splitlines():
+            if "目標株価" in line and not target:
+                target = line.split(":", 1)[-1].strip()[:40]
+            if "損切り" in line and "ライン" in line and not stoploss:
+                stoploss = line.split(":", 1)[-1].strip()[:40]
+        # 要約（判断以降の理由部分、最大200字）
+        summary = ""
+        in_reason = False
+        for line in text.splitlines():
+            if line.startswith("**理由**"):
+                summary = line.split(":", 1)[-1].strip()
+                in_reason = True
+            elif in_reason and line.startswith("**"):
+                break
+            elif in_reason:
+                summary += " " + line.strip()
+        summary = summary.strip()[:200]
+
+        ws.append_row([
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+            ticker.upper(),
+            name,
+            judgment,
+            target,
+            stoploss,
+            str(data.get("trailing_pe") or ""),
+            str(data.get("forward_pe") or ""),
+            str(data.get("eps_history", [""])[0] if data.get("eps_history") else ""),
+            str(data.get("rev_growth") or ""),
+            str(data.get("next_earnings") or ""),
+            summary,
+            signal.get("model", ""),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] signal保存失敗: {e}")
+        return False
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     """個別銘柄の分析データを取得（テクニカル + ニュース）"""
@@ -17926,9 +18001,29 @@ def _get_open_positions() -> dict:
     }
 
 
+def _fmt_past_signals(past_signals: list | None) -> str:
+    """過去シグナルリストをプロンプト用テキストに整形"""
+    if not past_signals:
+        return "  （分析履歴なし — 今回が初回分析です）"
+    lines = []
+    for s in past_signals[:5]:   # 直近5件まで
+        date    = s.get("date", "")[:10]
+        jdg     = s.get("judgment", "?")
+        tgt     = s.get("target_price", "")
+        sl      = s.get("stoploss", "")
+        pe      = s.get("trailing_pe", "")
+        summary = s.get("summary", "")[:80]
+        lines.append(
+            f"  {date}: 判断「{jdg}」 目標={tgt} 損切={sl} PER={pe}倍\n"
+            f"    理由要約: {summary}"
+        )
+    return "\n".join(lines)
+
+
 def _generate_ai_trade_signal(
     ticker: str, name: str, is_jp: bool, data: dict,
     position_ctx: dict | None = None,
+    past_signals: list | None = None,
 ) -> dict:
     """AIによる中期売買シグナルを生成。position_ctx があれば保有銘柄モード。"""
     price    = data.get("price", "不明")
@@ -18024,6 +18119,9 @@ def _generate_ai_trade_signal(
 【直近ニュース・開示】
 {news_str}
 
+【過去のAI分析履歴（同銘柄・新しい順）】
+{_fmt_past_signals(past_signals)}
+
 【出力形式】必ず以下の形式で回答してください：
 
 {judgment}
@@ -18039,9 +18137,10 @@ def _generate_ai_trade_signal(
 {period_line}
 
 **決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点
+{"" if not past_signals else chr(10) + "**前回との変化**: 前回分析からPER・株価・業績予想がどう変わったか1〜2文で"}
 """
     try:
-        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=700, temperature=0.3)
+        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=800, temperature=0.3)
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
@@ -18170,9 +18269,11 @@ def render_claude_trading_project():
 
             if st.button("🤖 Claude に分析させる", type="primary"):
                 with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
+                    past   = _load_signals(sel["ticker"])   # 過去の分析履歴
                     data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
                     signal = _generate_ai_trade_signal(
-                        sel["ticker"], sel["name"], is_jp, data, position_ctx=pos_ctx
+                        sel["ticker"], sel["name"], is_jp, data,
+                        position_ctx=pos_ctx, past_signals=past,
                     )
 
                 if signal.get("error"):
@@ -18207,10 +18308,31 @@ def render_claude_trading_project():
                     st.markdown(signal["text"])
                     st.caption(f"🤖 {signal['model']} ｜ {datetime.now(JST).strftime('%Y-%m-%d %H:%M JST')}")
 
+                    # 分析結果を Google Sheets に自動保存
+                    _save_signal(sel["ticker"], sel["name"], signal, data)
+
                     if data.get("news"):
                         with st.expander("📰 参照したニュース・開示"):
                             for n in data["news"]:
                                 st.markdown(f"・{n}")
+
+                    # 過去の分析履歴を表示
+                    if past:
+                        with st.expander(f"📋 {sel['ticker']} の過去分析履歴（{len(past)}件）"):
+                            for s in past[:5]:
+                                jdg   = s.get("judgment", "?")
+                                jdg_c = "#22c55e" if "買" in jdg else "#ef4444" if "売" in jdg else "#94a3b8"
+                                st.markdown(
+                                    f'<div style="border-left:3px solid {jdg_c};padding:6px 10px;'
+                                    f'margin-bottom:6px;background:#1e293b;border-radius:0 6px 6px 0;">'
+                                    f'<span style="font-size:11px;color:#64748b">{s.get("date","")[:10]}</span>'
+                                    f' <span style="color:{jdg_c};font-weight:700">{jdg}</span>'
+                                    f' <span style="font-size:11px;color:#94a3b8">PER {s.get("trailing_pe","-")}倍'
+                                    f' ｜ 目標 {s.get("target_price","-")}</span><br>'
+                                    f'<span style="font-size:11px;color:#94a3b8">{s.get("summary","")[:100]}</span>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
 
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     with tab_trade:
