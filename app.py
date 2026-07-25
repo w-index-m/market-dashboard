@@ -18066,7 +18066,8 @@ def _fetch_benchmark_tech_data() -> dict:
             delta = close.diff()
             gain  = delta.clip(lower=0).rolling(14).mean()
             loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rs    = gain.iloc[-1] / loss.iloc[-1] if (loss.iloc[-1] or 0) != 0 else 100
+            _lv   = float(loss.iloc[-1])
+            rs    = float(gain.iloc[-1]) / _lv if (_lv != 0 and _lv == _lv) else 100
             rsi   = 100 - (100 / (1 + rs))
             ret_20d = (price / float(close.iloc[-21]) - 1) * 100 if len(close) >= 21 else 0.0
             out[key] = {
@@ -18329,12 +18330,14 @@ def _calc_allocation_recommendations(
 
     # ── ベンチマーク比較 (QQQ/NDX vs ^N225) ────────────────────────
     _qqq_sc, _n225_sc = 0.0, 0.0
+    _bm_loaded = False
     try:
         _bm_data = _fetch_benchmark_tech_data()
         if "NDX" in _bm_data:
             _qqq_sc  = _score_single_rule(_bm_data["NDX"],  market_ctx)
         if "N225" in _bm_data:
             _n225_sc = _score_single_rule(_bm_data["N225"], market_ctx)
+        _bm_loaded = bool(_bm_data)
     except Exception as _be:
         logger.warning(f"[trading] benchmark score error: {_be}")
     for ticker in result:
@@ -18345,7 +18348,7 @@ def _calc_allocation_recommendations(
         _bm_ref = _n225_sc if _is_jp else _qqq_sc
         result[ticker]["bm_diff"]    = round(_csc - _bm_ref, 2)
         result[ticker]["bm_label"]   = "N225" if _is_jp else "NDX"
-        result[ticker]["switch_flag"]= (_csc - _bm_ref) < -1.5
+        result[ticker]["switch_flag"] = _bm_loaded and (_csc - _bm_ref) < -1.5
 
     result["_meta"] = {
         "fg_score":    fg_sc,
@@ -18370,6 +18373,7 @@ def _generate_switch_recommendations(
     """ベンチマーク(NDX/N225)を下回る銘柄の乗り換え候補をAIが提案。
     Returns: (list[dict], model_used_str)
     """
+    import json as _json, re as _re
     _meta      = alloc_result.get("_meta", {})
     _qqq_sc    = _meta.get("bm_qqq_score", 0.0)
     _n225_sc   = _meta.get("bm_n225_score", 0.0)
@@ -18381,7 +18385,6 @@ def _generate_switch_recommendations(
         _is_jp  = t.endswith(".T")
         _bm_nm  = "日経225(^N225)" if _is_jp else "Nasdaq100(QQQ)"
         _bm_sc  = _n225_sc if _is_jp else _qqq_sc
-        _d      = ar.get("stock_data_map", {})
         _sdata  = stock_data_map.get(t, {})
         candidates.append({
             "ticker":    t,
@@ -20029,6 +20032,7 @@ _INVEST_REC_CACHE_HEADERS = ["date", "budget", "model_type", "risk_type", "resul
 
 
 def _load_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: str) -> dict | None:
+    import json as _json
     try:
         ws = _trading_ws("invest_rec_cache", _INVEST_REC_CACHE_HEADERS)
         if not ws:
@@ -20038,7 +20042,11 @@ def _load_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: s
                     and r.get("model_type") == model_type and r.get("risk_type") == risk_type):
                 raw = r.get("result_json", "")
                 if raw:
-                    return _json.loads(raw)
+                    try:
+                        return _json.loads(raw)
+                    except ValueError:
+                        logger.warning("[trading] invest_rec_cache JSON破損、スキップ")
+                        continue
     except Exception as e:
         logger.warning(f"[trading] invest_rec_cache読込失敗: {e}")
     return None
@@ -20046,6 +20054,7 @@ def _load_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: s
 
 def _save_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: str,
                            result: dict, ai_model: str) -> bool:
+    import json as _json
     try:
         ws = _trading_ws("invest_rec_cache", _INVEST_REC_CACHE_HEADERS)
         if not ws:
@@ -20147,6 +20156,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
   }}
 }}"""
 
+    import json as _json_ip, re as _re  # ローカルスコープで明示的にインポート
     _err = "生成失敗（原因不明）"
     _model_used = ""
     try:
@@ -20160,20 +20170,19 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             logger.warning(f"[trading] invest_portfolio JSON未検出: {text[:300]}")
         else:
             try:
-                parsed = _json.loads(m.group())
-            except _json.JSONDecodeError:
+                parsed = _json_ip.loads(m.group())
+            except ValueError:
                 # JSON が途中で切れている場合、末尾を修復して再試行
                 _raw = m.group().rstrip().rstrip(",")
-                # portfolio配列が閉じていない場合に補完
                 if _raw.count("[") > _raw.count("]"):
                     _raw += "]"
                 if _raw.count("{") > _raw.count("}"):
                     _raw += "}"
-                parsed = _json.loads(_raw)
+                parsed = _json_ip.loads(_raw)
             parsed["model"] = _model_used
             parsed["error"] = None
             return parsed
-    except _json.JSONDecodeError as e:
+    except ValueError as e:
         _err = f"JSON解析失敗: {str(e)[:120]}"
         logger.warning(f"[trading] invest_portfolio JSON解析失敗: {e}")
     except Exception as e:
