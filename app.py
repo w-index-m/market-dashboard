@@ -17629,72 +17629,28 @@ def render_leadlag_section():
 # 🤖 Claude 個別株トレーディングプロジェクト
 # =====================================================
 
-@st.cache_resource(show_spinner=False)
-def _trading_sheets_client():
-    """Google Sheetsクライアント（trading専用・キャッシュ済み）"""
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        sa_json = str(st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", "") or "")
-        if not sa_json:
-            return None
-        sa_info = json.loads(sa_json)
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
-        return gspread.authorize(creds)
-    except Exception as e:
-        logger.warning(f"[trading] sheets client初期化失敗: {e}")
-        return None
-
-
 def _trading_ws(tab: str, headers: list):
-    """ワークシートを取得または作成（レースコンディション対策済み）"""
+    """analytics._sheets_ws を流用（毎回フレッシュな接続で安定性を確保）"""
+    # NOTE: @st.cache_resource でクライアントをキャッシュすると長時間処理後に
+    # トークンが stale になり接続失敗するため、analytics.py と同じく毎回生成する
     try:
-        import gspread
-        client = _trading_sheets_client()
-        if not client:
-            # フォールバック: analytics.pyのクライアントを使用
-            result = _anl_sheets_ws(tab, headers)
-            return result
-        sheets_id = str(st.secrets.get("GOOGLE_SHEETS_ID", "") or "")
-        if not sheets_id:
-            logger.warning("[trading] GOOGLE_SHEETS_ID 未設定")
-            return None
-        sp = client.open_by_key(sheets_id)
-        # WorksheetNotFoundのみ捕捉し、それ以外は再スロー
-        try:
-            ws = sp.worksheet(tab)
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sp.add_worksheet(title=tab, rows=10000, cols=len(headers))
-            ws.append_row(headers)
-            return ws
-        row1 = ws.row_values(1)
-        if not row1:
-            ws.append_row(headers)
-        elif row1 != headers:
-            existing = set(row1)
-            for i, h in enumerate(headers):
-                if h not in existing:
-                    ws.update_cell(1, len(row1) + 1, h)
-        return ws
+        return _anl_sheets_ws(tab, headers)
     except Exception as e:
         logger.warning(f"[trading] ws({tab}) 失敗: {e}")
         return None
 
 
 def _load_watchlist() -> list:
-    """ウォッチリストをGoogle Sheetsから読み込む"""
+    """ウォッチリストをGoogle Sheetsから読み込む。接続失敗は None を返す。"""
     try:
         ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
         if not ws:
-            return []
+            return None  # 接続失敗を呼び出し側で検知できるよう None
         rows = ws.get_all_records()
         return [r for r in rows if r.get("ticker")]
-    except Exception:
-        return []
+    except Exception as e:
+        logger.warning(f"[trading] watchlist読込失敗: {e}")
+        return None
 
 
 def _save_watchlist_item(ticker: str, name: str, market: str, memo: str = ""):
@@ -17728,25 +17684,28 @@ def _delete_watchlist_item(ticker: str):
         return False
 
 
-def _load_trades() -> pd.DataFrame:
-    """取引記録をGoogle Sheetsから読み込む"""
+_TRADES_HEADERS = [
+    "date", "ticker", "name", "action", "quantity", "price",
+    "fee", "memo", "ai_target", "ai_stoploss"
+]
+
+def _load_trades() -> tuple[pd.DataFrame, str | None]:
+    """取引記録をGoogle Sheetsから読み込む。(DataFrame, error_msg) を返す。"""
     try:
-        ws = _trading_ws("claude_trades", [
-            "date", "ticker", "name", "action", "quantity", "price",
-            "fee", "memo", "ai_target", "ai_stoploss"
-        ])
+        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
         if not ws:
-            return pd.DataFrame()
+            return pd.DataFrame(), "Google Sheets接続失敗（ページを再読み込みしてください）"
         rows = ws.get_all_records()
         if not rows:
-            return pd.DataFrame()
+            return pd.DataFrame(), None
         df = pd.DataFrame(rows)
         for col in ["quantity", "price", "fee", "ai_target", "ai_stoploss"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-        return df
-    except Exception:
-        return pd.DataFrame()
+        return df, None
+    except Exception as e:
+        logger.warning(f"[trading] trades読込失敗: {e}")
+        return pd.DataFrame(), f"読込エラー: {str(e)[:80]}"
 
 
 def _save_trade(date: str, ticker: str, name: str, action: str,
@@ -17945,7 +17904,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
 
 def _get_open_positions() -> dict:
     """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
-    df = _load_trades()
+    df, _ = _load_trades()
     if df.empty:
         return {}
     positions = {}
@@ -18149,7 +18108,10 @@ def render_claude_trading_project():
 
         watchlist = _load_watchlist()
 
-        if watchlist:
+        if watchlist is None:
+            st.error("⚠️ Google Sheets接続失敗。ページを再読み込みしてください。")
+            st.caption("データは保存されています。接続エラーで一時的に表示できない状態です。")
+        elif watchlist:
             st.markdown(f"**現在の監視銘柄: {len(watchlist)}銘柄**")
             for item in watchlist:
                 col_t, col_n, col_m, col_mk, col_d, col_del = st.columns([1.5, 2.5, 2, 1, 1.5, 1])
@@ -18167,8 +18129,8 @@ def render_claude_trading_project():
 
     # ── タブ②: AI分析・シグナル ────────────────────────────────
     with tab_signal:
-        open_pos  = _get_open_positions()   # 保有中ポジション
-        watchlist = _load_watchlist()       # ウォッチリスト
+        open_pos  = _get_open_positions()           # 保有中ポジション
+        watchlist = _load_watchlist() or []         # ウォッチリスト（None時は空リスト）
 
         # 選択肢を構築: 保有銘柄 → ウォッチリスト の順
         all_options = {}  # label → {ticker, name, market, position_ctx}
@@ -18264,7 +18226,7 @@ def render_claude_trading_project():
         elif _tr_status == "warn":
             st.warning(_tr_msg)
 
-        watchlist = _load_watchlist()
+        watchlist = _load_watchlist() or []  # None時は空リスト
 
         # ウォッチリストがある場合はフォーム外でクイック選択
         if watchlist:
@@ -18327,9 +18289,12 @@ def render_claude_trading_project():
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
         st.markdown("#### ポートフォリオ損益")
-        df_trades = _load_trades()
+        df_trades, trades_err = _load_trades()
 
-        if df_trades.empty:
+        if trades_err:
+            st.error(f"⚠️ {trades_err}")
+            st.caption("データは Google Sheets に保存されています。ページを再読み込みすると表示されます。")
+        elif df_trades.empty:
             st.info("取引記録がまだありません。")
         else:
             st.markdown("**取引履歴**")
