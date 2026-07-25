@@ -20571,6 +20571,7 @@ def render_claude_trading_project():
             use_container_width=True,
         ):
             st.session_state["trading_mode"] = _md["key"]
+            st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
             st.rerun()
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -21439,10 +21440,20 @@ def render_claude_trading_project():
                     with _tab_obj:
                         _ip_r = _ip_disp.get(_ip_mt, {})
                         if _ip_r.get("error") or not _ip_r.get("portfolio"):
-                            st.error(f"⚠️ {_ip_r.get('error','生成失敗')}")
-                            if _ip_r.get("model"):
+                            _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
+                            if "quota" in _ip_err_msg or "Groq失敗" in _ip_err_msg:
+                                st.error("⚠️ AI APIが応答しませんでした（Gemini quota超過・Groq過負荷）")
+                                st.info(
+                                    "**対処法:**\n"
+                                    "1. 少し時間をおいて「🔄 再生成（キャッシュ無視）」で再試行\n"
+                                    "2. AIモデルを「Groq」に明示指定して試す\n"
+                                    "3. Streamlit Cloud の secrets.toml に `OPENROUTER_API_KEY` を追加すると第3候補が使えます"
+                                )
+                            else:
+                                st.error(f"⚠️ {_ip_err_msg}")
+                                st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
+                            if _ip_r.get("model") and _ip_r["model"] != "none":
                                 st.caption(f"モデル: {_ip_r['model']}")
-                            st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
                             continue
 
                         _ip_pf  = _ip_r.get("portfolio", [])
