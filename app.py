@@ -20524,10 +20524,13 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・日本株ティッカーは末尾に.T（例: 7203.T）
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
-・各銘柄に以下2フィールドを必ず設ける:
-  rationale: 20字以内の短い投資テーマ（例: "AI/クラウド成長継続"）
-  thesis: 80〜120字の詳細投資根拠。「なぜ今買うのか」「直近パフォーマンスが低くても選ぶ理由」「具体的な触媒（決算・製品・政策等）」「注意すべきリスク」を含めること
-・直近1年でマイナスの銘柄は特にthesisで「なぜ下落中でも買うか」を必ず説明すること
+・各銘柄に以下フィールドを必ず設ける（全て必須）:
+  rationale: 20字以内の短い投資テーマ
+  merits: メリット2〜4点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
+  demerits: デメリット2〜3点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
+  conclusion: 現在の投資モード（{mode_name}）での結論を60字以内で（「なぜ選ぶか or 除外すべきか」）
+・直近1年マイナスの銘柄はmeritsに「なぜ今下落中でも買うか」の観点を必ず含めること
+・demeritsは実際のリスクを正直に記載（過小評価禁止）
 ・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
 
 【リスク指標の推計方法】
@@ -20539,8 +20542,30 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 以下のJSONのみで回答（前後のテキスト不要）:
 {{
   "portfolio": [
-    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)}, "rationale": "AI/クラウド成長継続", "thesis": "直近-24%で割安水準に。Azure OpenAI・Copilot課金本格化で次期決算から増益加速見込み。長期保有前提のバリュー仕込み。ドル資産分散効果も期待。"}},
-    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "円安恩恵・EV展開", "thesis": "円安継続で輸出採算改善。HEV世界シェアNo.1維持。配当利回り3%台。株価調整局面で仕込みチャンス。リスク：円急騰・EV普及遅延。"}}
+    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},
+      "rationale": "AI/クラウド成長継続",
+      "merits": [
+        {{"point": "割安水準", "detail": "-24%の下落でPERが改善。2023年高値比で明らかに割安"}},
+        {{"point": "AI収益化最右翼", "detail": "Azure OpenAI・Copilot課金が本格化。次期決算から増益加速見込み"}}
+      ],
+      "demerits": [
+        {{"point": "モメンタム崩壊", "detail": "3m/6m/1y全てマイナス。下落トレンド継続リスクあり"}},
+        {{"point": "ETF二重取り", "detail": "QQQ+VGTで既に保有中。個別11%は過剰集中になりやすい"}}
+      ],
+      "conclusion": "長期育成モードなら条件付き買い。AI収益が2025〜26年に加速すれば大化け可能性あり。比率5〜10%が適正。"
+    }},
+    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)},
+      "rationale": "円安恩恵・EV展開",
+      "merits": [
+        {{"point": "円安恩恵", "detail": "円安継続で輸出採算改善。業績上振れ余地大"}},
+        {{"point": "配当利回り", "detail": "3%台の安定配当。HEV世界シェアNo.1維持"}}
+      ],
+      "demerits": [
+        {{"point": "EV化リスク", "detail": "EV普及加速でHEV優位性が中期的に低下する可能性"}},
+        {{"point": "円急騰リスク", "detail": "日銀利上げ加速なら円高転換で業績直撃"}}
+      ],
+      "conclusion": "円安継続シナリオなら配当込みで安定。EV・為替リスクを許容できる場合に組み入れ推奨。"
+    }}
   ],
   "metrics": {{
     "expected_return": 18.0,
@@ -20556,7 +20581,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
     _model_used = ""
     try:
         text, _model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=2500, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.3
         )
         # JSONブロックを抽出（前後のテキストを除去）
         m = _re.search(r'\{[\s\S]*\}', text)
@@ -21850,8 +21875,8 @@ def render_claude_trading_project():
                             '</div>',
                             unsafe_allow_html=True,
                         )
-                        _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
-                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "根拠"]):
+                        _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
+                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "投資テーマ（▼で根拠詳細）"]):
                             _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
                                         unsafe_allow_html=True)
 
@@ -21867,7 +21892,6 @@ def render_claude_trading_project():
                             # 予算×比率で投資金額を確定（AIの計算ミスを無効化）
                             _amt    = int(_ip_bv * _alloc / 100)
                             _rat    = _item.get("rationale", "")
-                            _thesis = _item.get("thesis", "")
                             _bar_w  = min(int(_alloc), 100)
                             _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
                             _is_jp  = _tk.endswith(".T")
@@ -21963,16 +21987,48 @@ def render_claude_trading_project():
                                 f'<div style="font-size:10px;color:#1e3a5f;font-weight:600">≒¥{_actual_cost:,}</div>',
                                 unsafe_allow_html=True,
                             )
-                            _thesis_html = (
-                                f'<div style="font-size:10px;color:#64748b;margin-top:3px;line-height:1.5">{_thesis}</div>'
-                                if _thesis else ""
-                            )
                             _row[4].markdown(
                                 f'<div style="font-size:11px;color:#1e3a5f;font-weight:600">{_rat}</div>'
-                                + _thesis_html
                                 + _stats_html,
                                 unsafe_allow_html=True,
                             )
+
+                            # メリット・デメリット expander
+                            _merits   = _item.get("merits", [])
+                            _demerits = _item.get("demerits", [])
+                            _conc     = _item.get("conclusion", "") or _item.get("thesis", "")
+                            if _merits or _demerits or _conc:
+                                with st.expander(f"📊 {_tk} 投資根拠 — {_rat}", expanded=False):
+                                    _col_m, _col_d = st.columns(2)
+                                    if _merits:
+                                        _col_m.markdown(
+                                            '<div style="font-size:11px;font-weight:700;color:#16a34a;margin-bottom:4px">✅ メリット</div>'
+                                            + "".join(
+                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #f0fdf4">'
+                                                f'<span style="color:#15803d;font-weight:700">{_m.get("point","")}</span>'
+                                                f'<br><span style="color:#374151">{_m.get("detail","")}</span></div>'
+                                                for _m in _merits
+                                            ),
+                                            unsafe_allow_html=True,
+                                        )
+                                    if _demerits:
+                                        _col_d.markdown(
+                                            '<div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:4px">⚠️ デメリット</div>'
+                                            + "".join(
+                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #fef2f2">'
+                                                f'<span style="color:#b91c1c;font-weight:700">{_d.get("point","")}</span>'
+                                                f'<br><span style="color:#374151">{_d.get("detail","")}</span></div>'
+                                                for _d in _demerits
+                                            ),
+                                            unsafe_allow_html=True,
+                                        )
+                                    if _conc:
+                                        st.markdown(
+                                            f'<div style="font-size:11px;background:#f0f9ff;border-left:3px solid #0284c7;'
+                                            f'padding:8px 10px;margin-top:8px;border-radius:4px;color:#0c4a6e">'
+                                            f'💡 <b>結論:</b> {_conc}</div>',
+                                            unsafe_allow_html=True,
+                                        )
 
                         # 合計・余剰資金フッター
                         _ip_cash = max(0, _ip_bv - _ip_total_actual)
