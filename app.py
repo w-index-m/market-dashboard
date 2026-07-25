@@ -18104,8 +18104,11 @@ def _generate_ai_trade_signal(
     ticker: str, name: str, is_jp: bool, data: dict,
     position_ctx: dict | None = None,
     past_signals: list | None = None,
+    mode: str = "growth",
 ) -> dict:
-    """AIによる中期売買シグナルを生成。position_ctx があれば保有銘柄モード。"""
+    """AIによる売買シグナルを生成。
+    mode: "growth" = 長期育成（ファンダ重視）/ "momentum" = モメンタム（テクニカル重視）
+    """
     price    = data.get("price", "不明")
     ma25     = data.get("ma25", "不明")
     ma75     = data.get("ma75", "不明")
@@ -18143,18 +18146,19 @@ def _generate_ai_trade_signal(
     if next_earn:    funda_lines.append(f"- 次回決算発表予定: {next_earn}")
 
     funda_section = "\n".join(funda_lines) if funda_lines else "取得できませんでした"
+    eps_hist_str  = "\n".join(f"  {e}" for e in eps_hist) if eps_hist else "  データなし"
+    pe_hist_str   = "\n".join(f"  {p}" for p in pe_hist)  if pe_hist  else "  データなし"
 
-    eps_hist_str = "\n".join(f"  {e}" for e in eps_hist) if eps_hist else "  データなし"
-    pe_hist_str  = "\n".join(f"  {p}" for p in pe_hist)  if pe_hist  else "  データなし"
-
+    # ── ポジション情報 ───────────────────────────────────────
     if position_ctx:
-        avg_cost = position_ctx.get("avg_cost", 0)
-        qty      = position_ctx.get("qty", 0)
-        cur_price_val = data.get("price_raw") or (float(price) if str(price).replace(".", "").isdigit() else None)
+        avg_cost      = position_ctx.get("avg_cost", 0)
+        qty           = position_ctx.get("qty", 0)
+        cur_price_val = data.get("price_raw") or (
+            float(price) if str(price).replace(".", "").isdigit() else None
+        )
         pnl     = (cur_price_val - avg_cost) * qty if cur_price_val else None
         pnl_pct = (cur_price_val / avg_cost - 1) * 100 if cur_price_val and avg_cost > 0 else None
-
-        pnl_str     = f"{pnl:+,.0f} {currency}（{pnl_pct:+.1f}%）" if pnl is not None else "取得中"
+        pnl_str = f"{pnl:+,.0f} {currency}（{pnl_pct:+.1f}%）" if pnl is not None else "取得中"
         position_section = f"""
 【現在の保有ポジション】
 - 保有株数: {int(qty)}株
@@ -18162,24 +18166,68 @@ def _generate_ai_trade_signal(
 - 現在株価: {price} {currency}
 - 含み損益: {pnl_str}
 """
-        scenario  = "保有ポジションをどう扱うべきか"
-        judgment  = "**判断**: [追加買い / 保有継続 / 一部利確（半分売り） / 全株売却]"
-        target_line = f"**目標株価（or 利確目標）**: X{currency}（+Y%）｜根拠も一言"
-        stop_line   = f"**損切りライン**: X{currency}（-Y%）で強制撤退を推奨"
-        period_line = "**推奨アクション期限**: X週間以内に判断"
+        base_scenario = "保有ポジションをどう扱うべきか"
+        judgment      = "**判断**: [追加買い / 保有継続 / 一部利確（半分売り） / 全株売却]"
     else:
         position_section = ""
-        scenario  = "新規エントリーを検討すべきか"
-        judgment  = "**判断**: [強気買い / 買い / 様子見 / 見送り / 売り]"
-        target_line = f"**目標株価**: X{currency}（+Y%）｜根拠も一言"
-        stop_line   = f"**損切りライン**: X{currency}（-Y%）を下回ったら損切り推奨"
-        period_line = "**保有期間目安**: X〜Y週間"
+        base_scenario = "新規エントリーを検討すべきか"
+        judgment      = "**判断**: [強気買い / 買い / 様子見 / 見送り / 売り]"
 
-    prompt = f"""あなたはプロの中期株式アナリストです。以下のデータを元に「{name}（{ticker}）」について{scenario}を判断してください（中期：数週間〜2ヶ月）。
+    # ── モード別プロンプト分岐 ────────────────────────────────
+    if mode == "momentum":
+        mode_header = "📈 モメンタム追跡モード（タイムフレーム: 日足 + 週足）"
+        analyst_role = "プロの短期トレーダー・モメンタムアナリスト"
+        scenario = f"{base_scenario}（モメンタム戦略：1〜4週間の価格上昇モメンタムを捉える）"
+        analysis_focus = """
+【分析の優先順位（モメンタムモード）】
+1. 価格モメンタム: RSI・20日リターン・52週高値からの乖離・直近ブレイクアウト有無
+2. 出来高確認: 出来高急増（対20日平均2倍以上）は強いシグナル。低出来高の上昇は信頼性低
+3. 移動平均: 25日MA・75日MAとの位置関係。MAからの乖離率に注目
+4. 相対強度: 市場全体 vs この銘柄の強弱
+5. ニュース触媒: 決算サプライズ・製品発表・アップグレードなど即時反応を起こすイベント
+※ PER・PBR等のバリュエーションは補助情報として参照する程度でよい"""
+        target_line = f"**利確目標（モメンタム）**: X{currency}（+Y%）｜直近レジスタンス or 目標水準"
+        stop_line   = f"**損切りライン（タイト）**: X{currency}（-5〜8%以内）｜サポート割れで即撤退"
+        period_line = "**保有期間目安**: 1〜4週間（モメンタム喪失で即撤退）"
+        extra_section = """
+**モメンタム強度**: RSI・出来高・価格位置から「強い / 中程度 / 弱い」を判定
+**エントリータイミング**: 今すぐ / 押し目待ち（何円台まで待つか） / ブレイクアウト確認後
+**モメンタム終了シグナル**: どういう状態になったら撤退すべきか（出来高急減・RSI過熱 など）"""
+        reason_note = "テクニカル（モメンタム・出来高・価格位置）中心に200字以内で"
+
+    else:  # growth モード
+        mode_header = "🌱 長期育成モード（タイムフレーム: 月足 + 週足）"
+        analyst_role = "プロの長期成長株アナリスト"
+        scenario = f"{base_scenario}（長期育成戦略：6ヶ月〜2年かけてファンダメンタル価値に収束させる）"
+        analysis_focus = """
+【分析の優先順位（長期育成モード）】
+1. 成長性: EPS成長率・売上成長率・次回決算の予想サプライズ
+2. バリュエーション: 現在PERは過去レンジ・同業他社比で割安/適正/割高か
+3. 競合優位性・ビジネスモデル: 参入障壁・シェア拡大余地
+4. 財務健全性: PEG・自己資本比率・フリーキャッシュフロー
+5. テクニカル: 押し目での仕込み機会・トレンドの方向性（補助として使用）
+※ 短期の株価変動よりも「2年後の企業価値」で判断する"""
+        target_line = f"**目標株価（長期）**: X{currency}（+Y%）｜予想EPS × 適正PER倍率で算出"
+        stop_line   = f"**損切りライン（広め）**: X{currency}（-15〜20%）｜ファンダが崩れる水準"
+        period_line = "**保有期間目安**: 6ヶ月〜2年（決算ごとに再評価）"
+        extra_section = """
+**バリュエーション評価**: 現在PER {trailing_pe}倍は割安/適正/割高か。過去PER推移と比較した見解
+**成長ドライバー**: 今後2年で業績を牽引する要因を1〜2点
+**リスク要因**: ビジネスモデルを脅かす競合・規制・マクロ要因""".format(trailing_pe=trailing_pe or "不明")
+        reason_note = "ファンダメンタルズ・バリュエーション・成長性を中心に250字以内で"
+
+    past_change_line = (
+        "\n**前回との変化**: 前回分析からPER・株価・業績予想がどう変わったか1〜2文で"
+        if past_signals else ""
+    )
+
+    prompt = f"""あなたは{analyst_role}です。以下のデータを元に「{name}（{ticker}）」について{scenario}を判断してください。
+
+{analysis_focus}
 
 【テクニカルデータ】
 - 現在株価: {price} {currency}
-- 25日移動平均: {ma25} {currency}
+- 25日移動平均: {ma25} {currency}（乖離: 株価との差に注目）
 - 75日移動平均: {ma75} {currency}
 - RSI(14): {rsi}
 - 直近1日リターン: {ret_1d}%
@@ -18204,11 +18252,13 @@ def _generate_ai_trade_signal(
 
 【出力形式】必ず以下の形式で回答してください：
 
+🏷️ モード: {mode_header}
+
 {judgment}
 
-**理由**: （250字以内。テクニカル・バリュエーション・決算サプライズの3点から）
+**理由**: （{reason_note}）
 
-**バリュエーション評価**: 現在のPER {trailing_pe}倍は割安/適正/割高か。過去PER推移と比較した見解。
+{extra_section}
 
 {target_line}
 
@@ -18217,10 +18267,10 @@ def _generate_ai_trade_signal(
 {period_line}
 
 **決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点
-{"" if not past_signals else chr(10) + "**前回との変化**: 前回分析からPER・株価・業績予想がどう変わったか1〜2文で"}
+{past_change_line}
 """
     try:
-        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=800, temperature=0.3)
+        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=900, temperature=0.3)
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
@@ -18453,6 +18503,54 @@ def render_claude_trading_project():
         unsafe_allow_html=True,
     )
 
+    # ── 投資戦略モード切替 ─────────────────────────────────────
+    _cur_mode = st.session_state.get("trading_mode", "growth")
+
+    col_g, col_m = st.columns(2)
+    with col_g:
+        g_border = "#22c55e" if _cur_mode == "growth" else "#334155"
+        g_bg     = "#052e16" if _cur_mode == "growth" else "#0f172a"
+        st.markdown(
+            f'<div style="background:{g_bg};border:2px solid {g_border};border-radius:10px;'
+            f'padding:14px 18px;cursor:pointer;transition:all 0.2s">'
+            f'<div style="font-size:15px;font-weight:700;color:#4ade80">🌱 長期育成モード</div>'
+            f'<div style="font-size:12px;color:#86efac;margin-top:4px">'
+            f'ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年</div>'
+            f'<div style="font-size:11px;color:#64748b;margin-top:4px">'
+            f'PER/EPS成長/競合優位性 · 損切 -15〜20% · 目標=適正PER×予想EPS</div>'
+            f'{"<div style=margin-top:6px;font-size:11px;color:#4ade80;font-weight:600>✓ 選択中</div>" if _cur_mode == "growth" else ""}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("🌱 長期育成モードに切替", key="btn_mode_growth",
+                     type="primary" if _cur_mode == "growth" else "secondary",
+                     use_container_width=True):
+            st.session_state["trading_mode"] = "growth"
+            st.rerun()
+
+    with col_m:
+        m_border = "#f59e0b" if _cur_mode == "momentum" else "#334155"
+        m_bg     = "#1c1400" if _cur_mode == "momentum" else "#0f172a"
+        st.markdown(
+            f'<div style="background:{m_bg};border:2px solid {m_border};border-radius:10px;'
+            f'padding:14px 18px;cursor:pointer;transition:all 0.2s">'
+            f'<div style="font-size:15px;font-weight:700;color:#fbbf24">⚡ モメンタムモード</div>'
+            f'<div style="font-size:12px;color:#fcd34d;margin-top:4px">'
+            f'テクニカル重視 · 保有期間 1〜4週間</div>'
+            f'<div style="font-size:11px;color:#64748b;margin-top:4px">'
+            f'RSI/出来高/ブレイクアウト · 損切 -5〜8% · 目標=直近レジスタンス</div>'
+            f'{"<div style=margin-top:6px;font-size:11px;color:#fbbf24;font-weight:600>✓ 選択中</div>" if _cur_mode == "momentum" else ""}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("⚡ モメンタムモードに切替", key="btn_mode_momentum",
+                     type="primary" if _cur_mode == "momentum" else "secondary",
+                     use_container_width=True):
+            st.session_state["trading_mode"] = "momentum"
+            st.rerun()
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
     tab_watch, tab_signal, tab_trade, tab_pnl, tab_hist, tab_summary = st.tabs([
         "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力",
         "💰 損益・ポートフォリオ", "📈 資産推移", "💹 サマリー",
@@ -18562,6 +18660,15 @@ def render_claude_trading_project():
             is_jp = sel["market"] == "JP"
             pos_ctx = sel.get("position_ctx")
 
+            current_mode = st.session_state.get("trading_mode", "growth")
+            mode_badge = "🌱 長期育成" if current_mode == "growth" else "⚡ モメンタム"
+            mode_color = "#4ade80" if current_mode == "growth" else "#fbbf24"
+            st.markdown(
+                f'<div style="font-size:12px;color:{mode_color};margin-bottom:8px">'
+                f'現在のモード: <b>{mode_badge}</b></div>',
+                unsafe_allow_html=True,
+            )
+
             if st.button("🤖 Claude に分析させる", type="primary"):
                 with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
                     past   = _load_signals(sel["ticker"])   # 過去の分析履歴
@@ -18569,6 +18676,7 @@ def render_claude_trading_project():
                     signal = _generate_ai_trade_signal(
                         sel["ticker"], sel["name"], is_jp, data,
                         position_ctx=pos_ctx, past_signals=past,
+                        mode=current_mode,
                     )
 
                 if signal.get("error"):
