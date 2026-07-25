@@ -20524,7 +20524,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・日本株ティッカーは末尾に.T（例: 7203.T）
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
-・根拠は20字以内で端的に（モードの投資スタンスに沿った理由を記載）
+・各銘柄に以下2フィールドを必ず設ける:
+  rationale: 20字以内の短い投資テーマ（例: "AI/クラウド成長継続"）
+  thesis: 80〜120字の詳細投資根拠。「なぜ今買うのか」「直近パフォーマンスが低くても選ぶ理由」「具体的な触媒（決算・製品・政策等）」「注意すべきリスク」を含めること
+・直近1年でマイナスの銘柄は特にthesisで「なぜ下落中でも買うか」を必ず説明すること
 ・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
 
 【リスク指標の推計方法】
@@ -20536,8 +20539,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 以下のJSONのみで回答（前後のテキスト不要）:
 {{
   "portfolio": [
-    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)}, "rationale": "AI/クラウド成長継続"}},
-    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "円安恩恵・EV展開"}}
+    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)}, "rationale": "AI/クラウド成長継続", "thesis": "直近-24%で割安水準に。Azure OpenAI・Copilot課金本格化で次期決算から増益加速見込み。長期保有前提のバリュー仕込み。ドル資産分散効果も期待。"}},
+    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "円安恩恵・EV展開", "thesis": "円安継続で輸出採算改善。HEV世界シェアNo.1維持。配当利回り3%台。株価調整局面で仕込みチャンス。リスク：円急騰・EV普及遅延。"}}
   ],
   "metrics": {{
     "expected_return": 18.0,
@@ -20553,7 +20556,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
     _model_used = ""
     try:
         text, _model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=1200, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=2500, temperature=0.3
         )
         # JSONブロックを抽出（前後のテキストを除去）
         m = _re.search(r'\{[\s\S]*\}', text)
@@ -21864,6 +21867,7 @@ def render_claude_trading_project():
                             # 予算×比率で投資金額を確定（AIの計算ミスを無効化）
                             _amt    = int(_ip_bv * _alloc / 100)
                             _rat    = _item.get("rationale", "")
+                            _thesis = _item.get("thesis", "")
                             _bar_w  = min(int(_alloc), 100)
                             _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
                             _is_jp  = _tk.endswith(".T")
@@ -21939,7 +21943,7 @@ def render_claude_trading_project():
                             else:
                                 _stats_html = ""
 
-                            _row = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
+                            _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
                                              unsafe_allow_html=True)
                             _row[1].markdown(
@@ -21959,8 +21963,13 @@ def render_claude_trading_project():
                                 f'<div style="font-size:10px;color:#1e3a5f;font-weight:600">≒¥{_actual_cost:,}</div>',
                                 unsafe_allow_html=True,
                             )
+                            _thesis_html = (
+                                f'<div style="font-size:10px;color:#64748b;margin-top:3px;line-height:1.5">{_thesis}</div>'
+                                if _thesis else ""
+                            )
                             _row[4].markdown(
-                                f'<div style="font-size:11px;color:#1e3a5f">{_rat}</div>'
+                                f'<div style="font-size:11px;color:#1e3a5f;font-weight:600">{_rat}</div>'
+                                + _thesis_html
                                 + _stats_html,
                                 unsafe_allow_html=True,
                             )
