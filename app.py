@@ -20031,6 +20031,28 @@ def _save_rec_cache(date: str, mode: str, tickers_key: str, news_key: str,
 _INVEST_REC_CACHE_HEADERS = ["date", "budget", "model_type", "risk_type", "result_json", "ai_model", "created_at"]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_portfolio_prices(tickers: tuple) -> dict:
+    """ポートフォリオ銘柄の現在値とUSD/JPY為替を取得（TTL=5分）。
+    Returns: {ticker: price, "_usdjpy": rate}  price は現地通貨建て
+    """
+    import yfinance as _yf3
+    out: dict = {}
+    try:
+        _fx = _yf3.Ticker("USDJPY=X").history(period="2d")
+        out["_usdjpy"] = float(_fx["Close"].dropna().iloc[-1]) if not _fx.empty else 150.0
+    except Exception:
+        out["_usdjpy"] = 150.0
+    for _t in tickers:
+        try:
+            _h = _yf3.Ticker(_t).history(period="2d")
+            if not _h.empty:
+                out[_t] = float(_h["Close"].dropna().iloc[-1])
+        except Exception:
+            out[_t] = None
+    return out
+
+
 def _load_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: str) -> dict | None:
     import json as _json
     try:
@@ -21162,9 +21184,16 @@ def render_claude_trading_project():
                             unsafe_allow_html=True,
                         )
 
+                        # 株価取得（リアルタイム価格ベース計算用）
+                        _pf_tickers = tuple(
+                            _it.get("ticker", "") for _it in _ip_pf if _it.get("ticker")
+                        )
+                        _px = _fetch_portfolio_prices(_pf_tickers) if _pf_tickers else {}
+                        _usdjpy = _px.get("_usdjpy", 150.0)
+
                         # ポートフォリオテーブル
-                        _hdr = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
-                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "金額(円)", "根拠"]):
+                        _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
+                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "根拠"]):
                             _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
                                         unsafe_allow_html=True)
 
@@ -21177,7 +21206,32 @@ def render_claude_trading_project():
                             _rat    = _item.get("rationale", "")
                             _bar_w  = min(int(_alloc), 100)
                             _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
-                            _row = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
+                            _is_jp  = _tk.endswith(".T")
+                            _price  = _px.get(_tk)
+
+                            # 株数・必要金額を株価ベースで計算
+                            if _price and _price > 0:
+                                if _is_jp:
+                                    # 日本株: 100株単元
+                                    _lot_cost   = _price * 100
+                                    _lots       = max(1, int(_amt / _lot_cost))
+                                    _shares     = _lots * 100
+                                    _actual_cost = int(_lots * _lot_cost)
+                                    _shares_str = f"{_shares:,}株 ({_lots}単元)"
+                                    _price_str  = f"¥{_price:,.0f}/株"
+                                else:
+                                    # 米国株: 株価×為替
+                                    _price_jpy  = _price * _usdjpy
+                                    _shares     = max(1, int(_amt / _price_jpy))
+                                    _actual_cost = int(_shares * _price_jpy)
+                                    _shares_str = f"{_shares}株"
+                                    _price_str  = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                            else:
+                                _shares_str  = "—"
+                                _price_str   = "価格取得中"
+                                _actual_cost = _amt
+
+                            _row = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
                                              unsafe_allow_html=True)
                             _row[1].markdown(
@@ -21192,7 +21246,9 @@ def render_claude_trading_project():
                                 unsafe_allow_html=True,
                             )
                             _row[3].markdown(
-                                f'<div style="font-size:12px;color:#1e293b;font-weight:600">{_amt:,}</div>',
+                                f'<div style="font-size:12px;color:#0f172a;font-weight:700">{_shares_str}</div>'
+                                f'<div style="font-size:10px;color:#334155">{_price_str}</div>'
+                                f'<div style="font-size:10px;color:#1e3a5f;font-weight:600">≒¥{_actual_cost:,}</div>',
                                 unsafe_allow_html=True,
                             )
                             _row[4].markdown(
