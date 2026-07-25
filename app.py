@@ -17977,6 +17977,86 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     return result
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _compute_portfolio_history() -> pd.DataFrame:
+    """取引記録 × 日次終値でポートフォリオ資産推移を計算する。
+    Returns: DataFrame(index=date, columns=[portfolio_value, invested_cost, pnl, pnl_pct])
+    """
+    df_trades, err = _load_trades()
+    if err or df_trades.empty:
+        return pd.DataFrame()
+
+    df = df_trades.copy()
+    df["date"]     = pd.to_datetime(df["date"])
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    df["price"]    = pd.to_numeric(df["price"],    errors="coerce").fillna(0)
+    df["fee"]      = pd.to_numeric(df["fee"],      errors="coerce").fillna(0)
+    df = df.sort_values("date").reset_index(drop=True)
+
+    tickers     = df["ticker"].unique().tolist()
+    start_date  = df["date"].min() - timedelta(days=5)
+
+    # 各ティッカーの日次終値を取得
+    price_dict = {}
+    for tk in tickers:
+        try:
+            raw = yf.download(tk, start=start_date, auto_adjust=True, progress=False)
+            if raw.empty:
+                continue
+            close = raw["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            price_dict[tk] = close.rename(tk)
+        except Exception:
+            pass
+
+    if not price_dict:
+        return pd.DataFrame()
+
+    price_df = pd.concat(price_dict.values(), axis=1).ffill()
+
+    # 各営業日のポートフォリオ評価額・投資元本を計算
+    rows = []
+    for date in price_df.index:
+        trades_so_far = df[df["date"] <= date]
+        positions = {}
+        invested  = 0.0
+        for _, row in trades_so_far.iterrows():
+            tk  = row["ticker"]
+            qty = float(row["quantity"])
+            prc = float(row["price"])
+            fee = float(row["fee"])
+            if row["action"] == "BUY":
+                positions[tk] = positions.get(tk, 0.0) + qty
+                invested += qty * prc + fee
+            elif row["action"] == "SELL":
+                avg_cost = invested / sum(positions.values()) if sum(positions.values()) > 0 else prc
+                positions[tk] = positions.get(tk, 0.0) - qty
+                invested -= qty * avg_cost  # 売却した分の取得コストを差し引く
+
+        port_value = 0.0
+        for tk, qty in positions.items():
+            if qty > 0 and tk in price_df.columns:
+                p = price_df.loc[date, tk]
+                if not pd.isna(p):
+                    port_value += qty * float(p)
+
+        if port_value > 0:
+            rows.append({
+                "date":            date,
+                "portfolio_value": round(port_value, 2),
+                "invested_cost":   round(max(invested, 0), 2),
+            })
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(rows).set_index("date")
+    result["pnl"]     = result["portfolio_value"] - result["invested_cost"]
+    result["pnl_pct"] = (result["pnl"] / result["invested_cost"] * 100).where(result["invested_cost"] > 0)
+    return result
+
+
 def _get_open_positions() -> dict:
     """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
     df, _ = _load_trades()
@@ -18159,8 +18239,9 @@ def render_claude_trading_project():
         unsafe_allow_html=True,
     )
 
-    tab_watch, tab_signal, tab_trade, tab_pnl = st.tabs([
-        "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力", "💰 損益・ポートフォリオ"
+    tab_watch, tab_signal, tab_trade, tab_pnl, tab_hist = st.tabs([
+        "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力",
+        "💰 損益・ポートフォリオ", "📈 資産推移",
     ])
 
     # ── タブ①: ウォッチリスト管理 ─────────────────────────────
@@ -18483,6 +18564,116 @@ def render_claude_trading_project():
                 st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
             else:
                 st.info("現在の保有ポジションはありません（全て決済済み）。")
+
+    # ── タブ⑤: 資産推移 ────────────────────────────────────────
+    with tab_hist:
+        st.markdown("#### 📈 ポートフォリオ資産推移")
+
+        with st.spinner("資産推移を計算中..."):
+            hist_df = _compute_portfolio_history()
+
+        if hist_df.empty:
+            st.info("取引記録がないか、株価データを取得できませんでした。")
+        else:
+            # ── サマリーメトリクス ──────────────────────────────
+            latest      = hist_df.iloc[-1]
+            port_now    = latest["portfolio_value"]
+            cost_now    = latest["invested_cost"]
+            pnl_now     = latest["pnl"]
+            pnl_pct_now = latest["pnl_pct"]
+            peak        = hist_df["portfolio_value"].max()
+            drawdown    = (port_now - peak) / peak * 100 if peak > 0 else 0
+
+            m1, m2, m3, m4 = st.columns(4)
+            def _metric_card(col, label, value, sub="", color="#e2e8f0"):
+                col.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;text-align:center">'
+                    f'<div style="font-size:11px;color:#94a3b8">{label}</div>'
+                    f'<div style="font-size:20px;font-weight:700;color:{color};margin-top:4px">{value}</div>'
+                    f'<div style="font-size:11px;color:#64748b;margin-top:2px">{sub}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            _metric_card(m1, "現在評価額",   f"{port_now:,.0f}", "（USD/円混在時は参考値）")
+            _metric_card(m2, "投資元本",     f"{cost_now:,.0f}")
+            pnl_color = "#22c55e" if pnl_now >= 0 else "#ef4444"
+            _metric_card(m3, "含み損益合計", f"{pnl_now:+,.0f}",
+                         f"{pnl_pct_now:+.2f}%", color=pnl_color)
+            dd_color = "#ef4444" if drawdown < -5 else "#94a3b8"
+            _metric_card(m4, "最大からの下落", f"{drawdown:.1f}%",
+                         f"最高値 {peak:,.0f}", color=dd_color)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── 資産推移チャート ────────────────────────────────
+            import plotly.graph_objects as go
+            fig = go.Figure()
+
+            fig.add_trace(go.Scatter(
+                x=hist_df.index, y=hist_df["portfolio_value"],
+                name="ポートフォリオ時価",
+                line=dict(color="#60a5fa", width=2),
+                fill="tonexty" if False else None,
+                hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist_df.index, y=hist_df["invested_cost"],
+                name="投資元本",
+                line=dict(color="#94a3b8", width=1.5, dash="dot"),
+                hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
+            ))
+
+            # 含み損益を塗りつぶし（プラスは緑、マイナスは赤）
+            fig.add_trace(go.Scatter(
+                x=list(hist_df.index) + list(hist_df.index[::-1]),
+                y=list(hist_df["portfolio_value"]) + list(hist_df["invested_cost"][::-1]),
+                fill="toself",
+                fillcolor="rgba(34,197,94,0.12)",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+
+            fig.update_layout(
+                paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                font=dict(color="#e2e8f0"),
+                legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
+                            bordercolor="#334155", borderwidth=1),
+                xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                           title=dict(font=dict(color="#94a3b8"))),
+                yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                           title=dict(text="評価額", font=dict(color="#94a3b8"))),
+                hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                margin=dict(l=10, r=10, t=10, b=10),
+                height=340,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ── 損益率推移チャート ──────────────────────────────
+            with st.expander("📊 損益率推移（%）"):
+                fig2 = go.Figure()
+                colors = ["#22c55e" if v >= 0 else "#ef4444"
+                          for v in hist_df["pnl_pct"].fillna(0)]
+                fig2.add_trace(go.Bar(
+                    x=hist_df.index, y=hist_df["pnl_pct"].fillna(0),
+                    marker_color=colors,
+                    hovertemplate="%{x|%Y-%m-%d}<br>損益率: %{y:+.2f}%<extra></extra>",
+                ))
+                fig2.add_hline(y=0, line_color="#475569", line_width=1)
+                fig2.update_layout(
+                    paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                    font=dict(color="#e2e8f0"),
+                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                    yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                               ticksuffix="%"),
+                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=220,
+                    showlegend=False,
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+            st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
 
 
 # =====================================================
