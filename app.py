@@ -21417,6 +21417,19 @@ def render_claude_trading_project():
                 _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}"
 
                 _ip_results = {}
+                # 進捗表示用UI
+                _ip_prog_area = st.empty()
+                _ip_steps = [
+                    ("ETF混合モデル", "etf",        "📊"),
+                    ("個別株モデル",   "individual", "📈"),
+                ]
+                _ip_n_steps = sum(
+                    1 for _, _mt, _ in _ip_steps
+                    if _ip_force or not _load_invest_rec_cache(_ip_today, _ip_budget_val, _mt, _ip_cache_risk)
+                )
+                _ip_done = 0
+                _ip_t0 = time.time()
+
                 for _ip_mt in ["etf", "individual"]:
                     _cached = None
                     if not _ip_force:
@@ -21424,16 +21437,42 @@ def render_claude_trading_project():
                     if _cached:
                         _ip_results[_ip_mt] = _cached
                     else:
-                        with st.spinner(f"{'ETF混合' if _ip_mt=='etf' else '個別株'}モデルをAIが生成中…"):
-                            _r = _generate_investment_portfolio_rec(
+                        _ip_label = "ETF混合" if _ip_mt == "etf" else "個別株"
+                        # 進捗バー表示
+                        _ip_elapsed = time.time() - _ip_t0
+                        _ip_per_step = (_ip_elapsed / _ip_done) if _ip_done > 0 else 45
+                        _ip_remain   = max(0, (_ip_n_steps - _ip_done) * _ip_per_step - 0)
+                        _ip_pct      = int(_ip_done / _ip_n_steps * 100) if _ip_n_steps > 0 else 0
+                        _ip_prog_area.markdown(
+                            f'<div style="background:#0f172a;border:1px solid #334155;'
+                            f'border-radius:8px;padding:12px 16px;margin-bottom:8px">'
+                            f'<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">'
+                            f'🤖 {_ip_label}モデルをAI生成中… '
+                            f'<span style="color:#60a5fa">({_ip_done}/{_ip_n_steps}完了)</span>'
+                            + (f'&nbsp;&nbsp;⏱ 残り約 <b style="color:#fbbf24">{int(_ip_remain)}秒</b>' if _ip_done > 0 else '&nbsp;&nbsp;⏱ 生成開始中...')
+                            + f'</div>'
+                            f'<div style="background:#1e293b;border-radius:4px;height:6px">'
+                            f'<div style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);'
+                            f'width:{_ip_pct}%;height:6px;border-radius:4px;'
+                            f'transition:width 0.3s"></div></div>'
+                            f'<div style="font-size:10px;color:#475569;margin-top:4px">'
+                            f'経過: {int(_ip_elapsed)}秒 ／ Gemini→Groq→OpenRouterの順で試行</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _r = _generate_investment_portfolio_rec(
                                 _ip_budget_val, _ip_mt, _ip_risk_key,
                                 _ip_mktctx, _ip_holdings, _ip_model_pref,
                                 trading_mode=_ip_trade_mode,
                             )
+                        _ip_done += 1
                         if not _r.get("error") and _r.get("portfolio"):
                             _save_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_cache_risk,
                                                    _r, _r.get("model", ""))
                         _ip_results[_ip_mt] = _r
+
+                # 完了 → 進捗バーを消す
+                _ip_prog_area.empty()
 
                 st.session_state["_ip_results"]     = _ip_results
                 st.session_state["_ip_budget_val"]  = _ip_budget_val
