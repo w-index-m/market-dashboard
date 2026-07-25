@@ -53,6 +53,7 @@ except ImportError:
 # ── アクセス解析モジュール ────────────────────────────────
 try:
     from analytics import track_pageview, render_analytics_dashboard, inject_client_info_collector
+    from analytics import _sheets_ws as _anl_sheets_ws, _secret as _anl_secret
     ANALYTICS_AVAILABLE = True
 except ImportError:
     ANALYTICS_AVAILABLE = False
@@ -60,6 +61,10 @@ except ImportError:
         pass
     def render_analytics_dashboard():
         pass
+    def _anl_sheets_ws(tab, headers):
+        return None
+    def _anl_secret(key, default=""):
+        return default
     def inject_client_info_collector():
         pass
 
@@ -17569,47 +17574,10 @@ def render_leadlag_section():
 # 🤖 Claude 個別株トレーディングプロジェクト
 # =====================================================
 
-@st.cache_resource
-def _trading_sheets_client():
-    """Google Sheetsクライアントを返す（app.py内用）"""
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        sa_json = get_env_var("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-        if not sa_json:
-            logger.warning("[trading] GOOGLE_SERVICE_ACCOUNT_JSON が未設定")
-            return None
-        sa_info = json.loads(sa_json)
-        creds = Credentials.from_service_account_info(sa_info, scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ])
-        return gspread.authorize(creds)
-    except Exception as e:
-        logger.warning(f"[trading] Sheets初期化失敗: {e}")
-        return None
-
-
 def _trading_ws(tab: str, headers: list):
-    """指定シートを取得または新規作成"""
+    """analytics._sheets_ws を流用してシートを取得または新規作成"""
     try:
-        client = _trading_sheets_client()
-        if not client:
-            return None
-        sheets_id = get_env_var("GOOGLE_SHEETS_ID", "")
-        if not sheets_id:
-            logger.warning("[trading] GOOGLE_SHEETS_ID が未設定")
-            return None
-        sp = client.open_by_key(sheets_id)
-        try:
-            ws = sp.worksheet(tab)
-        except Exception:
-            ws = sp.add_worksheet(title=tab, rows=5000, cols=len(headers))
-            ws.append_row(headers)
-            return ws
-        if not ws.row_values(1):
-            ws.append_row(headers)
-        return ws
+        return _anl_sheets_ws(tab, headers)
     except Exception as e:
         logger.warning(f"[trading] ws({tab}) 失敗: {e}")
         return None
