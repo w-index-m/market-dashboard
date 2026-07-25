@@ -21393,6 +21393,16 @@ def render_claude_trading_project():
                 "リスクプロファイル", ["リスク先行型", "リスクリターン考慮型"],
                 key="ip_risk", horizontal=False,
             )
+
+            # 予算・リスクが変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
+            _ip_cur_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
+            _ip_cur_risk_key   = "aggressive" if "先行" in _ip_risk else "balanced"
+            if (st.session_state.get("_ip_budget_val") is not None and
+                    (st.session_state.get("_ip_budget_val") != _ip_cur_budget_val or
+                     st.session_state.get("_ip_risk_key")   != _ip_cur_risk_key)):
+                st.session_state.pop("_ip_results", None)
+                st.session_state["_ip_budget_val"] = _ip_cur_budget_val
+                st.session_state["_ip_risk_key"]   = _ip_cur_risk_key
             _ip_model_opts = {
                 "🔄 自動": "auto", "🟡 Gemini": "gemini",
                 "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
@@ -21591,7 +21601,8 @@ def render_claude_trading_project():
                         for _item in _ip_pf:
                             _flag   = _item.get("flag", "🌐")
                             _tk     = _item.get("ticker", "")
-                            _nm     = _item.get("name", _tk)
+                            # _KNOWN_NAMESを優先してAIの誤名を上書き
+                            _nm     = _KNOWN_NAMES.get(_tk) or _item.get("name", _tk) or _tk
                             _alloc  = float(_item.get("allocation", 0))
                             if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
                                 continue
