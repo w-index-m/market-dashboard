@@ -18995,6 +18995,103 @@ def _compute_portfolio_summary() -> dict:
     }
 
 
+def _generate_full_portfolio_recommendation(
+    positions: dict,
+    stock_data_map: dict,
+    market_ctx: dict,
+    mode: str = "growth",
+    model_pref: str = "auto",
+) -> dict:
+    """windex市場コンテキスト＋各銘柄のIR・テクニカルを合わせた総合推奨分析。
+    stock_data_map: {ticker: _fetch_trading_stock_data() の戻り値}
+    Returns: {"text": str, "model": str, "error": str|None}
+    """
+    if not positions:
+        return {"text": "", "model": "", "error": "保有銘柄がありません"}
+
+    mode_desc = {
+        "growth":     "長期育成（ファンダ重視・6ヶ月〜2年保有）",
+        "momentum":   "モメンタム（テクニカル重視・1〜4週間保有）",
+        "autonomous": "AI自律（分析軸をAIが自律決定）",
+    }.get(mode, "長期育成")
+
+    total_cost = sum(p.get("cost", 0) for p in positions.values())
+    total_mkt  = sum(p.get("market_value") or 0 for p in positions.values())
+
+    stock_blocks = []
+    for ticker, p in positions.items():
+        data   = stock_data_map.get(ticker, {})
+        is_jp  = ticker.endswith(".T")
+        cur    = "円" if is_jp else "USD"
+        flag   = "🇯🇵" if is_jp else "🇺🇸"
+        cost   = p.get("cost", 0)
+        mval   = p.get("market_value") or 0
+        gain   = mval - cost
+        gp     = gain / cost * 100 if cost > 0 else 0
+        alloc  = mval / total_mkt * 100 if total_mkt > 0 else 0
+        price  = data.get("price", "-")
+        rsi    = data.get("rsi", "-")
+        ma25   = data.get("ma25", "-")
+        ma75   = data.get("ma75", "-")
+        sec    = data.get("sector") or p.get("sector", "その他")
+        news_lines = [f"    ・{n}" for n in (data.get("news") or [])[:4] if n]
+        block = (
+            f"【{flag} {ticker} | {p['name']}】\n"
+            f"  現在値: {price}{cur} | RSI: {rsi} | MA25: {ma25}{cur} | MA75: {ma75}{cur}\n"
+            f"  評価額: {mval:,.0f}{cur}({alloc:.1f}%) | 含み: {gain:+,.0f}{cur}({gp:+.1f}%)\n"
+            f"  取得単価: {p.get('avg_cost',0):.1f}{cur} | 保有: {int(p.get('qty',0))}株\n"
+            f"  セクター: {sec}\n"
+        )
+        if news_lines:
+            block += "  最新IR・ニュース:\n" + "\n".join(news_lines) + "\n"
+        stock_blocks.append(block)
+
+    total_gain = total_mkt - total_cost
+    total_gp   = total_gain / total_cost * 100 if total_cost > 0 else 0
+
+    prompt = f"""あなたはプロの株式アナリストです。以下の市場モデルデータと各企業のIR・テクニカル情報を総合分析し、具体的な推奨アクションを提示してください。
+投資戦略モード: {mode_desc}
+
+━━━ 市場環境（windexモデル）━━━
+{_format_market_ctx_for_prompt(market_ctx)}
+
+━━━ 保有銘柄別 詳細情報 ━━━
+{"".join(stock_blocks)}
+ポートフォリオ合計: 評価額 {total_mkt:,.0f} | 元本 {total_cost:,.0f} | 損益 {total_gain:+,.0f}({total_gp:+.1f}%)
+
+━━━ 出力形式（必ずこの構成で日本語で回答）━━━
+
+## 📊 市場環境サマリー
+windexモデル（Fear&Greed/NAAIM/セクターRRG/Nikkei・US予測）から読み取れる現在の相場環境を3〜4文で。リスクオン/オフの判断と根拠を明記。
+
+---
+
+## 🏆 銘柄別推奨アクション
+
+各保有銘柄について必ず以下のフォーマットで記載（全銘柄を網羅すること）：
+
+### [銘柄名（ティッカー）]
+- **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い]
+- **IR・ニュース評価**: 最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文
+- **市場環境との整合性**: RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
+- **アクション水準**: 具体的な価格や条件（○○円/ドルを超えたら / 下回ったら実行）
+
+---
+
+## 🎯 総合アクションプラン
+1. **今週中にやること**: 最優先アクション（銘柄・金額・条件）
+2. **来月までに検討すること**: 中期的なポートフォリオ調整方向
+3. **市場環境が変わったらやること**: Fear&Greed/NAAIM/VIXが逆転したときのトリガーと対応
+"""
+    try:
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=2000, temperature=0.25
+        )
+        return {"text": text, "model": model_used, "error": None}
+    except Exception as e:
+        return {"text": "", "model": "", "error": str(e)}
+
+
 def render_claude_trading_project():
     """🤖 Claude 個別株トレーディングプロジェクト"""
     st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
@@ -19095,6 +19192,115 @@ def render_claude_trading_project():
         if not all_options:
             st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
         else:
+            # ── 総合AI推奨分析（Market Dashboard + 全銘柄IR）─────────────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#a78bfa;'
+                'margin:4px 0 8px">── 市場×IR 総合AI推奨分析 ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#1a0a2e;border:1px solid #4c1d95;border-radius:8px;'
+                'padding:10px 14px;margin-bottom:10px;font-size:12px;color:#c4b5fd">'
+                '📡 windexの市場予測モデル（Fear&Greed / NAAIM / セクターRRG / 日経・米国予測）と'
+                '各保有銘柄の最新IR・テクニカルを組み合わせて、AI が総合的な推奨アクションを生成します。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            _rec_model_opts = {
+                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                "🟡 Gemini（Google）":               "gemini",
+                "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
+                "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
+            }
+            _rec_model_label = st.selectbox(
+                "使用するAIモデル（総合分析）",
+                list(_rec_model_opts.keys()),
+                key="rec_model_sel",
+            )
+            _rec_model_pref = _rec_model_opts[_rec_model_label]
+
+            if st.button("🔍 市場×IR 総合AI推奨を生成", type="primary", key="btn_full_rec"):
+                _rec_mode = st.session_state.get("trading_mode", "growth")
+                _n_stocks = len(open_pos)
+                with st.spinner(f"全{_n_stocks}銘柄のデータ取得＋市場モデル取得中... （1〜2分）"):
+                    import concurrent.futures as _cf_rec
+                    _rec_mktctx = _fetch_market_context_for_trading()
+
+                    def _fetch_one(ticker_item):
+                        _t, _p = ticker_item
+                        try:
+                            return _t, _fetch_trading_stock_data(_t, _t.endswith(".T"))
+                        except Exception:
+                            return _t, {}
+
+                    _stock_data_map = {}
+                    with _cf_rec.ThreadPoolExecutor(max_workers=6) as _ex_rec:
+                        _futs = {_ex_rec.submit(_fetch_one, item): item[0]
+                                 for item in open_pos.items()}
+                        for _fut in _cf_rec.as_completed(_futs):
+                            try:
+                                _tk, _d = _fut.result()
+                                _stock_data_map[_tk] = _d
+                            except Exception:
+                                pass
+
+                with st.spinner("AI 分析中..."):
+                    _rec_result = _generate_full_portfolio_recommendation(
+                        open_pos, _stock_data_map, _rec_mktctx,
+                        mode=_rec_mode, model_pref=_rec_model_pref,
+                    )
+
+                if _rec_result.get("error"):
+                    st.error(f"AI分析エラー: {_rec_result['error']}")
+                else:
+                    st.markdown(
+                        '<div style="background:#0f172a;border:1px solid #4c1d95;border-radius:10px;'
+                        'padding:14px 18px;margin-bottom:8px">'
+                        '<div style="font-size:14px;font-weight:700;color:#a78bfa;margin-bottom:8px">'
+                        '🔍 市場×IR 総合AI推奨分析</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(_rec_result["text"])
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.caption(
+                        f"🤖 {_rec_result['model']} ｜ "
+                        f"{datetime.now(JST).strftime('%Y-%m-%d %H:%M JST')} ｜ "
+                        f"対象{_n_stocks}銘柄 + windexモデル"
+                    )
+                    # IRニュース詳細をexpanderで表示
+                    with st.expander("📰 参照したIR・ニュース一覧（全銘柄）"):
+                        for _tk, _sd in _stock_data_map.items():
+                            _ni_list = _sd.get("news_items") or []
+                            if not _ni_list:
+                                _ni_list = [{"headline": n} for n in (_sd.get("news") or [])]
+                            if _ni_list:
+                                st.markdown(
+                                    f'<div style="font-size:12px;font-weight:700;color:#94a3b8;'
+                                    f'margin:8px 0 4px">■ {_tk} — {open_pos.get(_tk, {}).get("name","")}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                for _ni in _ni_list[:4]:
+                                    _hja = _ni.get("headline_ja", "") or _ni.get("headline", "")
+                                    _url = _ni.get("url", "")
+                                    if _url:
+                                        st.markdown(
+                                            f'<div style="font-size:11px;padding:2px 0">'
+                                            f'• <a href="{_url}" target="_blank" '
+                                            f'style="color:#60a5fa;text-decoration:none">{_hja}</a></div>',
+                                            unsafe_allow_html=True,
+                                        )
+                                    else:
+                                        st.markdown(
+                                            f'<div style="font-size:11px;color:#cbd5e1;padding:2px 0">• {_hja}</div>',
+                                            unsafe_allow_html=True,
+                                        )
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── 個別銘柄分析 ────────────────────────────────────────
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#94a3b8;'
                 'margin:4px 0 6px">── 個別銘柄分析 ──</div>',
