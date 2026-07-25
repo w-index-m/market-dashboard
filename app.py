@@ -18226,6 +18226,135 @@ def _generate_ai_trade_signal(
         return {"text": "", "model": "", "error": str(e)}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_usd_jpy() -> float:
+    """USD/JPY レートを yfinance から取得。失敗時は 150.0 を返す。"""
+    try:
+        raw = yf.download("USDJPY=X", period="2d", auto_adjust=True, progress=False)
+        if not raw.empty:
+            close = raw["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            vals = close.dropna()
+            if len(vals) > 0:
+                return float(vals.iloc[-1])
+    except Exception:
+        pass
+    return 150.0
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _compute_portfolio_summary() -> dict:
+    """ポートフォリオサマリー計算。Yahoo Finance スタイルの4カードに必要なデータを返す。
+    Returns: {
+        "positions": {ticker: {name, qty, avg_cost, cost, cur_price, market_value, gain, gain_pct, is_jp, sector}},
+        "dividends": {ticker: {is_jp, divs_by_month: {YYYY-MM: amount_in_native_currency}}},
+        "usd_jpy": float,
+        "error": str | None,
+    }
+    """
+    df_trades, err = _load_trades()
+    if err:
+        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": err}
+    if df_trades.empty:
+        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": None}
+
+    usd_jpy = _fetch_usd_jpy()
+    open_pos = _get_open_positions()
+    if not open_pos:
+        return {"positions": {}, "dividends": {}, "usd_jpy": usd_jpy, "error": None}
+
+    positions = {}
+    dividends = {}
+
+    for ticker, pos in open_pos.items():
+        is_jp = ticker.endswith(".T")
+        cur_price = None
+
+        # 現在値取得
+        try:
+            fi = yf.Ticker(ticker).fast_info
+            cur_price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+        except Exception:
+            pass
+        if not cur_price:
+            try:
+                raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                if not raw.empty:
+                    close = raw["Close"]
+                    if isinstance(close, pd.DataFrame):
+                        close = close.iloc[:, 0]
+                    vals = close.dropna()
+                    if len(vals) > 0:
+                        cur_price = float(vals.iloc[-1])
+            except Exception:
+                pass
+
+        # セクター取得（失敗時は "その他"）
+        sector = "その他"
+        try:
+            info = yf.Ticker(ticker).info
+            raw_sector = info.get("sector", "") or ""
+            sector_map = {
+                "Technology": "テクノロジー",
+                "Communication Services": "通信サービス",
+                "Consumer Cyclical": "一般消費財",
+                "Consumer Defensive": "生活必需品",
+                "Healthcare": "ヘルスケア",
+                "Financial Services": "金融",
+                "Industrials": "資本財",
+                "Basic Materials": "素材",
+                "Energy": "エネルギー",
+                "Utilities": "公益",
+                "Real Estate": "不動産",
+            }
+            sector = sector_map.get(raw_sector, raw_sector or "その他")
+        except Exception:
+            pass
+
+        # 配当履歴（過去6ヶ月）
+        try:
+            tk_obj = yf.Ticker(ticker)
+            div_hist = tk_obj.dividends
+            if div_hist is not None and len(div_hist) > 0:
+                six_months_ago = pd.Timestamp.now(tz="UTC") - pd.DateOffset(months=6)
+                recent_divs = div_hist[div_hist.index >= six_months_ago]
+                divs_by_month = {}
+                for dt, amount in recent_divs.items():
+                    month_key = dt.strftime("%Y-%m")
+                    divs_by_month[month_key] = divs_by_month.get(month_key, 0.0) + float(amount) * pos["qty"]
+                dividends[ticker] = {"is_jp": is_jp, "divs_by_month": divs_by_month}
+        except Exception:
+            pass
+
+        qty        = pos["qty"]
+        avg_cost   = pos["avg_cost"]
+        cost_total = pos["cost"]
+        mkt_val    = qty * cur_price if cur_price else None
+        gain       = (mkt_val - cost_total) if mkt_val is not None else None
+        gain_pct   = (gain / cost_total * 100) if (gain is not None and cost_total > 0) else None
+
+        positions[ticker] = {
+            "name":         pos["name"],
+            "qty":          qty,
+            "avg_cost":     avg_cost,
+            "cost":         cost_total,
+            "cur_price":    cur_price,
+            "market_value": mkt_val,
+            "gain":         gain,
+            "gain_pct":     gain_pct,
+            "is_jp":        is_jp,
+            "sector":       sector,
+        }
+
+    return {
+        "positions": positions,
+        "dividends": dividends,
+        "usd_jpy":   usd_jpy,
+        "error":     None,
+    }
+
+
 def render_claude_trading_project():
     """🤖 Claude 個別株トレーディングプロジェクト"""
     st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
@@ -18239,9 +18368,9 @@ def render_claude_trading_project():
         unsafe_allow_html=True,
     )
 
-    tab_watch, tab_signal, tab_trade, tab_pnl, tab_hist = st.tabs([
+    tab_watch, tab_signal, tab_trade, tab_pnl, tab_hist, tab_summary = st.tabs([
         "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力",
-        "💰 損益・ポートフォリオ", "📈 資産推移",
+        "💰 損益・ポートフォリオ", "📈 資産推移", "💹 サマリー",
     ])
 
     # ── タブ①: ウォッチリスト管理 ─────────────────────────────
@@ -18674,6 +18803,302 @@ def render_claude_trading_project():
                 st.plotly_chart(fig2, use_container_width=True)
 
             st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
+
+    # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
+    with tab_summary:
+        st.markdown("#### 💹 ポートフォリオ サマリー")
+
+        # 通貨選択
+        currency_choice = st.radio(
+            "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"],
+            horizontal=True, key="summary_currency",
+        )
+        use_jpy = "JPY" in currency_choice
+        cur_label = "円" if use_jpy else "USD"
+
+        with st.spinner("ポートフォリオデータを取得中..."):
+            summary = _compute_portfolio_summary()
+
+        if summary["error"]:
+            st.error(f"⚠️ {summary['error']}")
+            st.caption("ページを再読み込みしてください。")
+        elif not summary["positions"]:
+            st.info("保有銘柄がまだありません。取引記録を入力してください。")
+        else:
+            positions = summary["positions"]
+            dividends = summary["dividends"]
+            usd_jpy   = summary["usd_jpy"]
+
+            def _to_display(value_native, is_jp: bool) -> float:
+                """ネイティブ通貨の値を表示通貨に変換"""
+                if value_native is None:
+                    return 0.0
+                if use_jpy:
+                    return float(value_native) if is_jp else float(value_native) * usd_jpy
+                else:
+                    return float(value_native) / usd_jpy if is_jp else float(value_native)
+
+            import plotly.graph_objects as go
+
+            # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                'padding:18px 20px;margin-bottom:18px">'
+                '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                '📊 保有株式 損益サマリー</div>',
+                unsafe_allow_html=True,
+            )
+
+            total_cost = sum(
+                _to_display(p["cost"], p["is_jp"]) for p in positions.values()
+            )
+            total_mkt = sum(
+                _to_display(p["market_value"], p["is_jp"])
+                for p in positions.values() if p["market_value"] is not None
+            )
+            total_gain  = total_mkt - total_cost
+            total_gp    = total_gain / total_cost * 100 if total_cost > 0 else 0
+            gain_color  = "#22c55e" if total_gain >= 0 else "#ef4444"
+            gain_sign   = "+" if total_gain >= 0 else ""
+
+            c_left, c_right = st.columns([3, 1])
+            with c_left:
+                # 水平バーチャート（元本 vs 評価額）
+                fig_gl = go.Figure()
+                fig_gl.add_trace(go.Bar(
+                    y=["コスト", "評価額"],
+                    x=[total_cost, total_mkt],
+                    orientation="h",
+                    marker_color=["#475569", "#3b82f6"],
+                    text=[f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"],
+                    textposition="outside",
+                    textfont=dict(color="#e2e8f0", size=12),
+                    hovertemplate="%{y}: %{x:,.0f}<extra></extra>",
+                ))
+                fig_gl.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
+                               tickformat=",.0f"),
+                    yaxis=dict(tickfont=dict(color="#e2e8f0")),
+                    margin=dict(l=10, r=60, t=5, b=5),
+                    height=100,
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_gl, use_container_width=True)
+
+            with c_right:
+                st.markdown(
+                    f'<div style="text-align:center;padding-top:10px">'
+                    f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
+                    f'{gain_sign}{cur_label} {total_gain:,.0f}</div>'
+                    f'<div style="font-size:14px;color:{gain_color}">'
+                    f'{gain_sign}{total_gp:.2f}%</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # ── カード2: 配当金 ────────────────────────────────────
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                'padding:18px 20px;margin-bottom:18px">'
+                '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                '💴 配当金（過去6ヶ月）</div>',
+                unsafe_allow_html=True,
+            )
+
+            # 月別配当を集計
+            from datetime import datetime, timedelta
+            months_6 = []
+            now = datetime.now()
+            for i in range(5, -1, -1):
+                m = (now.month - i - 1) % 12 + 1
+                y = now.year - ((now.month - i - 1) // 12 + (1 if (now.month - i - 1) < 0 else 0))
+                months_6.append(f"{y:04d}-{m:02d}")
+            months_6 = sorted(set(months_6))[-6:]
+
+            div_by_month: dict[str, float] = {m: 0.0 for m in months_6}
+            has_any_div = False
+            for ticker, div_data in dividends.items():
+                is_jp = div_data["is_jp"]
+                for month_key, amount in div_data["divs_by_month"].items():
+                    if month_key in div_by_month:
+                        div_by_month[month_key] += _to_display(amount, is_jp)
+                        has_any_div = True
+
+            if has_any_div:
+                fig_div = go.Figure()
+                fig_div.add_trace(go.Bar(
+                    x=list(div_by_month.keys()),
+                    y=list(div_by_month.values()),
+                    marker_color="#f59e0b",
+                    hovertemplate="%{x}<br>配当: %{y:,.2f}<extra></extra>",
+                    text=[f"{v:,.2f}" if v > 0 else "" for v in div_by_month.values()],
+                    textposition="outside",
+                    textfont=dict(color="#e2e8f0", size=11),
+                ))
+                fig_div.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#e2e8f0"),
+                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                    yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                               tickprefix=f"{cur_label} "),
+                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    margin=dict(l=10, r=10, t=5, b=10),
+                    height=180,
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_div, use_container_width=True)
+                total_div = sum(div_by_month.values())
+                st.caption(f"過去6ヶ月合計配当: **{cur_label} {total_div:,.2f}**")
+            else:
+                st.info("配当履歴がありません（過去6ヶ月）。")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # ── カード3 & 4 を横並び ─────────────────────────────
+            col3, col4 = st.columns(2)
+
+            # ── カード3: アセットアロケーション ─────────────────
+            with col3:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;height:100%">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '🌏 アセットアロケーション</div>',
+                    unsafe_allow_html=True,
+                )
+
+                jp_val = sum(
+                    _to_display(p["market_value"], True)
+                    for p in positions.values() if p["is_jp"] and p["market_value"] is not None
+                )
+                us_val = sum(
+                    _to_display(p["market_value"], False)
+                    for p in positions.values() if not p["is_jp"] and p["market_value"] is not None
+                )
+                total_alloc = jp_val + us_val
+
+                if total_alloc > 0:
+                    jp_pct = jp_val / total_alloc * 100
+                    us_pct = us_val / total_alloc * 100
+                    fig_alloc = go.Figure(go.Pie(
+                        labels=["🇯🇵 日本株", "🇺🇸 米国株"],
+                        values=[jp_val, us_val],
+                        marker_colors=["#f97316", "#3b82f6"],
+                        textinfo="label+percent",
+                        textfont=dict(color="#e2e8f0", size=12),
+                        hole=0.5,
+                        hovertemplate="%{label}<br>%{value:,.0f} (%{percent})<extra></extra>",
+                    ))
+                    fig_alloc.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        legend=dict(font=dict(color="#e2e8f0"), bgcolor="rgba(0,0,0,0)"),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        height=220,
+                    )
+                    st.plotly_chart(fig_alloc, use_container_width=True)
+                    st.markdown(
+                        f'<div style="display:flex;gap:16px;justify-content:center;font-size:12px">'
+                        f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% ({cur_label} {jp_val:,.0f})</span>'
+                        f'<span style="color:#3b82f6">🇺🇸 {us_pct:.1f}% ({cur_label} {us_val:,.0f})</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("データなし")
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # ── カード4: セクターアロケーション ─────────────────
+            with col4:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;height:100%">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '🏭 セクター別配分</div>',
+                    unsafe_allow_html=True,
+                )
+
+                sector_vals: dict[str, float] = {}
+                for p in positions.values():
+                    if p["market_value"] is None:
+                        continue
+                    sec = p["sector"]
+                    val = _to_display(p["market_value"], p["is_jp"])
+                    sector_vals[sec] = sector_vals.get(sec, 0.0) + val
+
+                if sector_vals:
+                    sorted_sectors = sorted(sector_vals.items(), key=lambda x: x[1], reverse=True)
+                    sec_labels = [s[0] for s in sorted_sectors]
+                    sec_values = [s[1] for s in sorted_sectors]
+
+                    sector_colors = [
+                        "#3b82f6", "#8b5cf6", "#06b6d4", "#22c55e",
+                        "#f59e0b", "#f97316", "#ef4444", "#ec4899",
+                        "#64748b", "#14b8a6", "#a855f7",
+                    ]
+
+                    fig_sec = go.Figure(go.Bar(
+                        x=sec_values,
+                        y=sec_labels,
+                        orientation="h",
+                        marker_color=sector_colors[:len(sec_labels)],
+                        text=[f"{v / sum(sec_values) * 100:.1f}%" for v in sec_values],
+                        textposition="outside",
+                        textfont=dict(color="#94a3b8", size=11),
+                        hovertemplate="%{y}<br>%{x:,.0f}<extra></extra>",
+                    ))
+                    fig_sec.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
+                                   tickformat=",.0f"),
+                        yaxis=dict(tickfont=dict(color="#e2e8f0"), autorange="reversed"),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        margin=dict(l=10, r=60, t=5, b=5),
+                        height=max(160, len(sec_labels) * 36),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_sec, use_container_width=True)
+                else:
+                    st.info("データなし")
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # ── 個別銘柄テーブル ─────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("##### 保有銘柄一覧")
+
+            rows_tbl = []
+            for ticker, p in positions.items():
+                mkt_disp  = _to_display(p["market_value"], p["is_jp"])
+                gain_disp = _to_display(p["gain"], p["is_jp"])
+                gp = p["gain_pct"] or 0.0
+                pos_sign  = "+" if gain_disp >= 0 else ""
+                gain_str = f'{pos_sign}{cur_label} {abs(gain_disp):,.0f} ({gp:+.2f}%)' if p["gain"] is not None else "—"
+                flag = "🇯🇵" if p["is_jp"] else "🇺🇸"
+                rows_tbl.append({
+                    "": flag,
+                    "ティッカー": ticker,
+                    "銘柄名": p["name"],
+                    "セクター": p["sector"],
+                    f"評価額 ({cur_label})": f"{mkt_disp:,.0f}" if p["market_value"] else "—",
+                    "含み損益": gain_str,
+                })
+            if rows_tbl:
+                st.dataframe(
+                    rows_tbl,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
 
 
 # =====================================================
