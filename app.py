@@ -20341,11 +20341,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・セクター分散も意識しつつ、上記スコアが総合的に高い銘柄を選定すること
 
 【提案ルール】
-・銘柄数: {"5〜7" if budget <= 1_000_000 else "8〜12"}銘柄{"(ETF含む)" if model_type == "etf" else ""}（予算{budget_str}に合わせた分散数）
+・銘柄数: {"5〜7" if budget <= 1_000_000 else "8〜12"}銘柄{"(ETF混合)" if model_type == "etf" else ""}（予算{budget_str}に合わせた分散数）
 ・日本株ティッカーは末尾に.T（例: 7203.T）
-・各銘柄の比率合計は100%
+・各銘柄の比率合計は100%（0%の銘柄はJSONに含めない）
 ・投資金額 = 予算 × 比率
 ・根拠は20字以内で端的に（モードの投資スタンスに沿った理由を記載）
+・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
 
 【リスク指標の推計方法】
 期待年間リターン: セクター・過去実績・市場環境から推定（%）
@@ -21532,6 +21533,8 @@ def render_claude_trading_project():
                             _tk     = _item.get("ticker", "")
                             _nm     = _item.get("name", _tk)
                             _alloc  = float(_item.get("allocation", 0))
+                            if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
+                                continue
                             _amt    = int(_item.get("amount", 0))
                             _rat    = _item.get("rationale", "")
                             _bar_w  = min(int(_alloc), 100)
