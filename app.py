@@ -20394,6 +20394,13 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
                 parsed = _json_ip.loads(_raw)
             parsed["model"] = _model_used
             parsed["error"] = None
+            # allocation合計が100%でない場合は正規化（AIが60%しか割り当てない等の不具合を修正）
+            _pf_list = [_i for _i in parsed.get("portfolio", []) if float(_i.get("allocation", 0)) > 0]
+            _alloc_sum = sum(float(_i.get("allocation", 0)) for _i in _pf_list)
+            if _alloc_sum > 0 and abs(_alloc_sum - 100) > 1:
+                _scale = 100.0 / _alloc_sum
+                for _itm in _pf_list:
+                    _itm["allocation"] = round(float(_itm["allocation"]) * _scale, 1)
             # allocation比率からamountを再計算してAIの計算ミスを修正
             for _itm in parsed.get("portfolio", []):
                 _al = float(_itm.get("allocation", 0))
@@ -21707,18 +21714,38 @@ def render_claude_trading_project():
                         # 合計・余剰資金フッター
                         _ip_cash = max(0, _ip_bv - _ip_total_actual)
                         _inv_pct = int(_ip_total_actual / _ip_bv * 100) if _ip_bv else 0
+                        # 余剰理由を動的に生成
+                        _cash_reasons = []
+                        _has_jp = any(
+                            _it.get("ticker", "").endswith(".T")
+                            for _it in _ip_pf if float(_it.get("allocation", 0)) > 0
+                        )
+                        if _has_jp:
+                            _cash_reasons.append("日本株の100株単元ロット丸め")
+                        _mktctx_fg = (st.session_state.get("_alloc_mktctx") or {}).get("fg_score", 0)
+                        if _mktctx_fg >= 70:
+                            _cash_reasons.append(f"相場が高値圏（Fear&Greed {_mktctx_fg:.0f}）のためキャッシュバッファ推奨")
+                        elif _mktctx_fg >= 55:
+                            _cash_reasons.append(f"やや強気相場（Fear&Greed {_mktctx_fg:.0f}）で追加買い余力を確保")
+                        _ai_comment = _ip_met.get("comment", "")
+                        _cash_reason_str = " ／ ".join(_cash_reasons) if _cash_reasons else "単元ロット丸めによる端数"
+                        _cash_color = "#ef4444" if _inv_pct < 60 else "#fbbf24" if _inv_pct < 85 else "#4ade80"
                         st.markdown(
                             f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
-                            f'padding:10px 14px;margin-top:8px;display:flex;gap:20px;flex-wrap:wrap;align-items:center">'
+                            f'padding:10px 14px;margin-top:8px">'
+                            f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'
                             f'<div><div style="font-size:10px;color:#64748b">合計投資金額（単元後）</div>'
                             f'<div style="font-size:15px;font-weight:800;color:#4ade80">¥{_ip_total_actual:,}</div></div>'
                             f'<div><div style="font-size:10px;color:#64748b">余剰資金（現金）</div>'
-                            f'<div style="font-size:15px;font-weight:800;color:#fbbf24">¥{_ip_cash:,}</div></div>'
+                            f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">¥{_ip_cash:,}</div></div>'
                             f'<div><div style="font-size:10px;color:#64748b">投資効率</div>'
-                            f'<div style="font-size:15px;font-weight:800;color:#94a3b8">{_inv_pct}%</div></div>'
-                            f'<div style="font-size:10px;color:#475569;margin-left:auto">予算 ¥{_ip_bv:,} ／ '
-                            f'余剰は追加銘柄または余力として保持</div>'
-                            f'</div>',
+                            f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">{_inv_pct}%</div></div>'
+                            f'<div style="font-size:10px;color:#475569;margin-left:auto">予算 ¥{_ip_bv:,}</div>'
+                            f'</div>'
+                            f'<div style="font-size:10px;color:#94a3b8;border-top:1px solid #1e293b;padding-top:6px">'
+                            f'💡 <b style="color:#e2e8f0">余剰資金の理由:</b> {_cash_reason_str}'
+                            + (f'　｜　<span style="color:#64748b">{_ai_comment}</span>' if _ai_comment else '')
+                            + f'</div></div>',
                             unsafe_allow_html=True,
                         )
 
