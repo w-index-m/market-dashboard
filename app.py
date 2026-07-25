@@ -17943,15 +17943,22 @@ def render_claude_trading_project():
         st.markdown("#### 約定後の取引記録入力")
         watchlist = _load_watchlist()
         watch_options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
-        watch_labels  = list(watch_options.keys()) if watch_options else []
+        watch_labels  = ["（直接入力）"] + list(watch_options.keys())
 
         with st.form("trade_form", clear_on_submit=True):
-            t_sel = st.selectbox("銘柄", watch_labels) if watch_labels else None
+            t_sel = st.selectbox("銘柄（ウォッチリストから選択 または 直接入力）", watch_labels)
+            if t_sel == "（直接入力）":
+                ci1, ci2 = st.columns(2)
+                t_ticker_manual = ci1.text_input("ティッカー", placeholder="例: NVDA / 7203.T")
+                t_name_manual   = ci2.text_input("銘柄名", placeholder="例: NVIDIA / トヨタ自動車")
+            else:
+                t_ticker_manual = ""
+                t_name_manual   = ""
             c1, c2, c3 = st.columns(3)
             t_date   = c1.date_input("約定日", value=datetime.now(JST).date())
             t_action = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
             t_qty    = c3.number_input("数量（株）", min_value=1, step=1, value=100)
-            c4, c5, c6 = st.columns(3)
+            c4, c5 = st.columns(2)
             t_price  = c4.number_input("約定価格", min_value=0.0, step=0.1, format="%.2f")
             t_fee    = c5.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
             c7, c8 = st.columns(2)
@@ -17960,20 +17967,27 @@ def render_claude_trading_project():
             t_memo   = st.text_input("メモ（任意）")
 
             if st.form_submit_button("💾 記録を保存", type="primary"):
-                if t_sel and t_price > 0:
-                    sel_w  = watch_options[t_sel]
+                if t_sel == "（直接入力）":
+                    trade_ticker = t_ticker_manual.strip().upper()
+                    trade_name   = t_name_manual.strip()
+                else:
+                    sel_w        = watch_options[t_sel]
+                    trade_ticker = sel_w["ticker"]
+                    trade_name   = sel_w["name"]
+
+                if trade_ticker and t_price > 0:
                     action = "BUY" if "BUY" in t_action else "SELL"
                     ok = _save_trade(
-                        str(t_date), sel_w["ticker"], sel_w["name"],
+                        str(t_date), trade_ticker, trade_name,
                         action, int(t_qty), float(t_price), float(t_fee),
                         t_memo, float(t_target), float(t_stop)
                     )
                     if ok:
-                        st.success(f"✅ {sel_w['ticker']} {action} {t_qty}株 @ {t_price}を記録しました")
+                        st.success(f"✅ {trade_ticker} {action} {t_qty}株 @ {t_price}を記録しました")
                     else:
                         st.error("❌ 保存失敗（Google Sheetsの設定を確認してください）")
                 else:
-                    st.warning("銘柄と約定価格を入力してください")
+                    st.warning("ティッカーと約定価格を入力してください")
 
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
