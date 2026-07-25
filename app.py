@@ -978,7 +978,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#macro",           "🌐 Macro"),
             ("#bear-risk",       "🐻 Bear Risk"),
             ("#momentum",        "🚀 Momentum"),
-            ("#claude-trading",  "🤖 Trading"),
+            ("?page=trading",    "💹 Trading"),
             ("#optical-semi",    "📡 Optical vs Semi"),
             ("#earnings-forecast", "📊 Index Forecast"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
@@ -994,7 +994,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#macro",           "🌐 マクロ指標"),
             ("#bear-risk",       "🐻 弱気判定"),
             ("#momentum",        "🚀 モメンタム"),
-            ("#claude-trading",  "🤖 売買プロジェクト"),
+            ("?page=trading",    "💹 売買"),
             ("#optical-semi",    "📡 光通信vs半導体"),
             ("#earnings-forecast", "📊 指数予測"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
@@ -18347,6 +18347,17 @@ def _generate_ai_trade_signal(
         if past_signals else ""
     )
 
+    # ── 売却後アクション共通セクション（全モード共通で末尾に追加）──
+    post_sell_section = """
+
+---
+
+**💰 売却後の資金配分（売却・一部利確を推奨する場合のみ回答）**
+**推奨**: [別銘柄・セクターに乗り換え / キャッシュ保有]
+- **乗り換え推奨の場合**: 上記の市場コンテキスト（Fear&Greed指数・セクターRRGのLeading/Improving・予測モデルシグナル）を踏まえ、今資金を移すべきセクターや銘柄の特性を1〜2文で具体的に。恐怖圏なら逆張り対象も言及
+- **キャッシュ保有推奨の場合**: その根拠（市場全体の転換点・VIX上昇・Fear&Greed過熱等）と、再エントリーを検討する具体的なトリガー（何がどうなったら動くか）"""
+    output_fmt += post_sell_section
+
     prompt = f"""あなたは{analyst_role}です。以下のデータを元に「{name}（{ticker}）」について{scenario}を判断してください。
 
 {analysis_focus}
@@ -20070,6 +20081,22 @@ def render_admin_changelog():
 
 
 # ===========================
+def _render_trading_page():
+    """?page=trading でアクセスされた際の専用ページ描画。
+    メインダッシュボードのデータフェッチを一切実行しないため高速に開く。
+    """
+    st.markdown(
+        '<a href="/" style="display:inline-flex;align-items:center;gap:6px;'
+        'color:#94a3b8;font-size:13px;text-decoration:none;'
+        'padding:6px 12px;background:#1e293b;border-radius:7px;'
+        'border:1px solid #334155;margin-bottom:12px;">'
+        '← windex ダッシュボードに戻る'
+        '</a>',
+        unsafe_allow_html=True,
+    )
+    render_claude_trading_project()
+
+
 def main():
     now_jst = datetime.now(JST)
 
@@ -20077,6 +20104,11 @@ def main():
     if check_country_block():
         st.error("🚫 Access Denied — このサービスはご利用いただけない地域からのアクセスが検出されました。")
         st.stop()
+        return
+
+    # ── トレーディング専用ページ（?page=trading）────────────────
+    if st.query_params.get("page") == "trading":
+        _render_trading_page()
         return
 
     # ── ② 言語自動検出（セッション初回のみ）────────────────────
@@ -20348,9 +20380,27 @@ OPENROUTER_API_KEY = "sk-or-..."
     st.divider()
 
     # ===================================================
-    # ★ Claude 個別株トレーディングプロジェクト
+    # ★ Claude 個別株トレーディングプロジェクト（専用ページ）
     # ===================================================
-    render_claude_trading_project()
+    st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;'
+        'padding:18px 22px;margin:8px 0 16px;">'
+        '<div style="font-size:17px;font-weight:700;color:#e2e8f0;margin-bottom:6px;">'
+        '💹 Claude 個別株トレーディングプロジェクト</div>'
+        '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px;">'
+        'AI分析シグナル・取引記録・損益管理・ポートフォリオ追跡を専用ページで提供しています。'
+        'メインダッシュボードとは分離しているため、高速に開きます。'
+        '</div>'
+        '<a href="?page=trading" style="display:inline-flex;align-items:center;gap:8px;'
+        'background:linear-gradient(135deg,#1e40af,#2563eb);color:#fff !important;'
+        'padding:10px 22px;border-radius:8px;text-decoration:none !important;'
+        'font-size:14px;font-weight:700;box-shadow:0 3px 12px rgba(37,99,235,0.4);">'
+        '💹 売買プロジェクトを開く →'
+        '</a>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.divider()
 
     # ===================================================
