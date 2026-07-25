@@ -17629,10 +17629,57 @@ def render_leadlag_section():
 # 🤖 Claude 個別株トレーディングプロジェクト
 # =====================================================
 
-def _trading_ws(tab: str, headers: list):
-    """analytics._sheets_ws を流用してシートを取得または新規作成"""
+@st.cache_resource(show_spinner=False)
+def _trading_sheets_client():
+    """Google Sheetsクライアント（trading専用・キャッシュ済み）"""
     try:
-        return _anl_sheets_ws(tab, headers)
+        import gspread
+        from google.oauth2.service_account import Credentials
+        sa_json = str(st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", "") or "")
+        if not sa_json:
+            return None
+        sa_info = json.loads(sa_json)
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        logger.warning(f"[trading] sheets client初期化失敗: {e}")
+        return None
+
+
+def _trading_ws(tab: str, headers: list):
+    """ワークシートを取得または作成（レースコンディション対策済み）"""
+    try:
+        import gspread
+        client = _trading_sheets_client()
+        if not client:
+            # フォールバック: analytics.pyのクライアントを使用
+            result = _anl_sheets_ws(tab, headers)
+            return result
+        sheets_id = str(st.secrets.get("GOOGLE_SHEETS_ID", "") or "")
+        if not sheets_id:
+            logger.warning("[trading] GOOGLE_SHEETS_ID 未設定")
+            return None
+        sp = client.open_by_key(sheets_id)
+        # WorksheetNotFoundのみ捕捉し、それ以外は再スロー
+        try:
+            ws = sp.worksheet(tab)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sp.add_worksheet(title=tab, rows=10000, cols=len(headers))
+            ws.append_row(headers)
+            return ws
+        row1 = ws.row_values(1)
+        if not row1:
+            ws.append_row(headers)
+        elif row1 != headers:
+            existing = set(row1)
+            for i, h in enumerate(headers):
+                if h not in existing:
+                    ws.update_cell(1, len(row1) + 1, h)
+        return ws
     except Exception as e:
         logger.warning(f"[trading] ws({tab}) 失敗: {e}")
         return None
@@ -17877,7 +17924,16 @@ def render_claude_trading_project():
     # ── タブ①: ウォッチリスト管理 ─────────────────────────────
     with tab_watch:
         st.markdown("#### 監視銘柄の管理")
-        watchlist = _load_watchlist()
+
+        # エラー/成功メッセージを session_state で永続化（clear_on_submit後も残る）
+        _ws_status = st.session_state.pop("_watch_status", None)
+        _ws_msg    = st.session_state.pop("_watch_msg", None)
+        if _ws_status == "ok":
+            st.success(f"✅ {_ws_msg}")
+        elif _ws_status == "error":
+            st.error(f"❌ 保存失敗: {_ws_msg}")
+        elif _ws_status == "warn":
+            st.warning(_ws_msg)
 
         with st.form("add_watch_form", clear_on_submit=True):
             c1, c2, c3, c4 = st.columns([2, 3, 1.5, 2])
@@ -17886,19 +17942,28 @@ def render_claude_trading_project():
             w_market = c3.selectbox("市場", ["🇯🇵 日本株", "🇺🇸 米国株"])
             w_memo   = c4.text_input("メモ", placeholder="例: AI関連, 決算待ち")
             if st.form_submit_button("＋ 追加", type="primary"):
-                if w_ticker and w_name:
+                t_val = w_ticker.strip()
+                n_val = w_name.strip()
+                if t_val and n_val:
                     is_jp = "日本株" in w_market
                     ok, err = _save_watchlist_item(
-                        w_ticker.strip().upper(), w_name.strip(),
+                        t_val.upper(), n_val,
                         "JP" if is_jp else "US", w_memo.strip()
                     )
                     if ok:
-                        st.success(f"✅ {w_ticker.upper()} を追加しました")
+                        st.session_state["_watch_status"] = "ok"
+                        st.session_state["_watch_msg"]    = f"{t_val.upper()} をウォッチリストに追加しました"
                         st.rerun()
                     else:
-                        st.error(f"❌ 保存失敗: {err}")
+                        st.session_state["_watch_status"] = "error"
+                        st.session_state["_watch_msg"]    = err
+                        st.rerun()
                 else:
-                    st.warning("ティッカーと銘柄名を入力してください")
+                    st.session_state["_watch_status"] = "warn"
+                    st.session_state["_watch_msg"]    = "ティッカーと銘柄名を入力してください"
+                    st.rerun()
+
+        watchlist = _load_watchlist()
 
         if watchlist:
             st.markdown(f"**現在の監視銘柄: {len(watchlist)}銘柄**")
@@ -17967,6 +18032,17 @@ def render_claude_trading_project():
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     with tab_trade:
         st.markdown("#### 約定後の取引記録入力")
+
+        # エラー/成功メッセージを session_state で永続化
+        _tr_status = st.session_state.pop("_trade_status", None)
+        _tr_msg    = st.session_state.pop("_trade_msg", None)
+        if _tr_status == "ok":
+            st.success(f"✅ {_tr_msg}")
+        elif _tr_status == "error":
+            st.error(f"❌ 保存失敗: {_tr_msg}")
+        elif _tr_status == "warn":
+            st.warning(_tr_msg)
+
         watchlist = _load_watchlist()
 
         # ウォッチリストがある場合はフォーム外でクイック選択
@@ -18018,11 +18094,14 @@ def render_claude_trading_project():
                     if ok:
                         st.session_state["_trade_ticker"] = ""
                         st.session_state["_trade_name"]   = ""
-                        st.success(f"✅ {trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました")
+                        st.session_state["_trade_status"] = "ok"
+                        st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
                     else:
-                        st.error(f"❌ 保存失敗: {err}")
+                        st.session_state["_trade_status"] = "error"
+                        st.session_state["_trade_msg"]    = err
                 else:
-                    st.warning("ティッカーと約定価格を入力してください")
+                    st.session_state["_trade_status"] = "warn"
+                    st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
 
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
