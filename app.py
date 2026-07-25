@@ -17569,13 +17569,15 @@ def render_leadlag_section():
 # 🤖 Claude 個別株トレーディングプロジェクト
 # =====================================================
 
+@st.cache_resource
 def _trading_sheets_client():
     """Google Sheetsクライアントを返す（app.py内用）"""
     try:
         import gspread
         from google.oauth2.service_account import Credentials
-        sa_json = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        sa_json = get_env_var("GOOGLE_SERVICE_ACCOUNT_JSON", "")
         if not sa_json:
+            logger.warning("[trading] GOOGLE_SERVICE_ACCOUNT_JSON が未設定")
             return None
         sa_info = json.loads(sa_json)
         creds = Credentials.from_service_account_info(sa_info, scopes=[
@@ -17594,8 +17596,9 @@ def _trading_ws(tab: str, headers: list):
         client = _trading_sheets_client()
         if not client:
             return None
-        sheets_id = st.secrets.get("GOOGLE_SHEETS_ID", "")
+        sheets_id = get_env_var("GOOGLE_SHEETS_ID", "")
         if not sheets_id:
+            logger.warning("[trading] GOOGLE_SHEETS_ID が未設定")
             return None
         sp = client.open_by_key(sheets_id)
         try:
@@ -17629,13 +17632,13 @@ def _save_watchlist_item(ticker: str, name: str, market: str, memo: str = ""):
     try:
         ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
         if not ws:
-            return False
+            return False, "Google Sheets接続失敗（Secretsを確認）"
         ws.append_row([ticker.upper(), name, market,
                        datetime.now(JST).strftime("%Y-%m-%d"), memo])
-        return True
+        return True, ""
     except Exception as e:
         logger.warning(f"[trading] watchlist追加失敗: {e}")
-        return False
+        return False, str(e)[:120]
 
 
 def _delete_watchlist_item(ticker: str):
@@ -17686,13 +17689,13 @@ def _save_trade(date: str, ticker: str, name: str, action: str,
             "fee", "memo", "ai_target", "ai_stoploss"
         ])
         if not ws:
-            return False
+            return False, "Google Sheets接続失敗（Secretsを確認）"
         ws.append_row([date, ticker.upper(), name, action,
                        quantity, price, fee, memo, ai_target, ai_stoploss])
-        return True
+        return True, ""
     except Exception as e:
         logger.warning(f"[trading] trade保存失敗: {e}")
-        return False
+        return False, str(e)[:120]
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -17862,7 +17865,7 @@ def render_claude_trading_project():
             if st.form_submit_button("＋ 追加", type="primary"):
                 if w_ticker and w_name:
                     is_jp = "日本株" in w_market
-                    ok = _save_watchlist_item(
+                    ok, err = _save_watchlist_item(
                         w_ticker.strip().upper(), w_name.strip(),
                         "JP" if is_jp else "US", w_memo.strip()
                     )
@@ -17870,7 +17873,7 @@ def render_claude_trading_project():
                         st.success(f"✅ {w_ticker.upper()} を追加しました")
                         st.rerun()
                     else:
-                        st.error("❌ Google Sheetsへの保存に失敗しました（Secrets設定を確認）")
+                        st.error(f"❌ 保存失敗: {err}")
                 else:
                     st.warning("ティッカーと銘柄名を入力してください")
 
@@ -17977,7 +17980,7 @@ def render_claude_trading_project():
 
                 if trade_ticker and t_price > 0:
                     action = "BUY" if "BUY" in t_action else "SELL"
-                    ok = _save_trade(
+                    ok, err = _save_trade(
                         str(t_date), trade_ticker, trade_name,
                         action, int(t_qty), float(t_price), float(t_fee),
                         t_memo, float(t_target), float(t_stop)
@@ -17985,7 +17988,7 @@ def render_claude_trading_project():
                     if ok:
                         st.success(f"✅ {trade_ticker} {action} {t_qty}株 @ {t_price}を記録しました")
                     else:
-                        st.error("❌ 保存失敗（Google Sheetsの設定を確認してください）")
+                        st.error(f"❌ 保存失敗: {err}")
                 else:
                     st.warning("ティッカーと約定価格を入力してください")
 
