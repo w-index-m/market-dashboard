@@ -21200,6 +21200,93 @@ def render_claude_trading_project():
                                 unsafe_allow_html=True,
                             )
 
+            # ── リスク-リターン比較チャート ──────────────────────────
+            if _ip_disp and any(_ip_disp.get(k, {}).get("metrics") for k in ["etf", "individual"]):
+                import plotly.graph_objects as _go2
+                _chart_pts = []
+                _COLORS = {"etf": "#38bdf8", "individual": "#a78bfa"}
+                _LABELS = {"etf": "ETF混合", "individual": "個別株"}
+                for _mk in ["etf", "individual"]:
+                    _mr = _ip_disp.get(_mk, {})
+                    _mm = _mr.get("metrics", {})
+                    if not _mm:
+                        continue
+                    _chart_pts.append({
+                        "x": float(_mm.get("risk_volatility", 0)),
+                        "y": float(_mm.get("expected_return", 0)),
+                        "label": _LABELS[_mk],
+                        "sr": float(_mm.get("sharpe_ratio", 0)),
+                        "mdd": float(_mm.get("max_drawdown_estimate", 0)),
+                        "color": _COLORS[_mk],
+                    })
+                # 参考ベンチマーク
+                _refs = [
+                    {"x": 0.0,  "y": 0.5,  "label": "現金"},
+                    {"x": 5.0,  "y": 2.0,  "label": "日本国債"},
+                    {"x": 15.0, "y": 10.0, "label": "S&P500"},
+                    {"x": 20.0, "y": 14.0, "label": "NASDAQ100"},
+                ]
+                _fig_rr = _go2.Figure()
+                # 参考点
+                _fig_rr.add_trace(_go2.Scatter(
+                    x=[r["x"] for r in _refs], y=[r["y"] for r in _refs],
+                    mode="markers+text",
+                    marker=dict(size=9, color="#475569", symbol="diamond"),
+                    text=[r["label"] for r in _refs],
+                    textposition="top center",
+                    textfont=dict(size=10, color="#94a3b8"),
+                    name="参考",
+                    hovertemplate="%{text}<br>リスク: %{x:.1f}%<br>リターン: %{y:.1f}%<extra></extra>",
+                ))
+                # ポートフォリオ点
+                for _pt in _chart_pts:
+                    _fig_rr.add_trace(_go2.Scatter(
+                        x=[_pt["x"]], y=[_pt["y"]],
+                        mode="markers+text",
+                        marker=dict(size=16, color=_pt["color"],
+                                    line=dict(width=2, color="#ffffff")),
+                        text=[_pt["label"]],
+                        textposition="top center",
+                        textfont=dict(size=11, color=_pt["color"], family="Arial Black"),
+                        name=_pt["label"],
+                        hovertemplate=(
+                            f"<b>{_pt['label']}</b><br>"
+                            f"リスク(ボラ): {_pt['x']:.1f}%<br>"
+                            f"期待リターン: {_pt['y']:+.1f}%<br>"
+                            f"シャープ: {_pt['sr']:.2f}<br>"
+                            f"最大DD推定: {_pt['mdd']:.0f}%<extra></extra>"
+                        ),
+                    ))
+                # シャープレシオ1.0の参照線 (return = 1.5 + vol)
+                _vx = list(range(0, 41, 5))
+                _fig_rr.add_trace(_go2.Scatter(
+                    x=_vx, y=[1.5 + v for v in _vx],
+                    mode="lines",
+                    line=dict(dash="dot", color="#334155", width=1),
+                    name="SR=1.0ライン",
+                    hoverinfo="skip",
+                ))
+                _fig_rr.update_layout(
+                    paper_bgcolor="#0f172a", plot_bgcolor="#0d1117",
+                    font=dict(color="#e2e8f0"),
+                    height=300, margin=dict(l=40, r=20, t=36, b=40),
+                    title=dict(text="📐 リスク-リターン マップ", font=dict(size=13, color="#94a3b8"), x=0),
+                    xaxis=dict(
+                        title="リスク（年率ボラティリティ %）",
+                        tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
+                        gridcolor="#1e293b", range=[-2, 42],
+                    ),
+                    yaxis=dict(
+                        title="期待リターン（年率 %）",
+                        tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
+                        gridcolor="#1e293b",
+                    ),
+                    legend=dict(font=dict(color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
+                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    showlegend=True,
+                )
+                st.plotly_chart(_fig_rr, use_container_width=True)
+
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
                 unsafe_allow_html=True,
