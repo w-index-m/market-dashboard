@@ -18364,6 +18364,83 @@ def _calc_allocation_recommendations(
     return result
 
 
+def _generate_replacement_rec(
+    sold_ticker: str,
+    sold_name: str,
+    freed_jpy: int,
+    existing_holdings: list,
+    market_ctx: dict,
+    trading_mode: str = "growth",
+    model_pref: str = "auto",
+) -> dict:
+    """売却後の代替銘柄候補をAIが提案。
+    Returns: {"candidates": [...], "model": str, "error": str|None}
+    """
+    import json as _json, re as _re
+    fg_sc    = market_ctx.get("fg_score", 50) or 50
+    fg_lbl   = market_ctx.get("fg_label", "")
+    leading  = market_ctx.get("sector_quad", {}).get("Leading", [])
+    leading_str = " / ".join(leading[:4]) if leading else "不明"
+    hold_str = " / ".join([t for t in existing_holdings if t != sold_ticker][:8]) or "なし"
+    _mode_guide = {
+        "growth":     "ファンダメンタルズ重視・長期育成（PER/EPS成長率・配当安定性）",
+        "momentum":   "テクニカル重視・上昇トレンド継続中の銘柄（RSI/ブレイクアウト）",
+        "autonomous": "AIが最適スタイルを自律判断（成長・モメンタム・決算プレイ等）",
+    }.get(trading_mode, "ファンダメンタルズ重視")
+    freed_str = f"約¥{freed_jpy:,}"
+    prompt = f"""あなたは日米株式の投資アドバイザーです。
+以下の状況で{sold_name}（{sold_ticker}）を売却しました。
+解放資金で買うべき代替銘柄を3〜5銘柄提案してください。
+
+【売却情報】
+・売却銘柄: {sold_name}（{sold_ticker}）
+・解放資金: {freed_str}
+・継続保有中: {hold_str}（重複は避ける）
+
+【投資スタンス】
+・モード: {_mode_guide}
+・Fear&Greed: {fg_sc:.0f}（{fg_lbl}）
+・RRGリーディング: {leading_str}
+
+【注目候補（参考）】
+光通信・AIインフラ: CIEN, COHR, LITE, VIAV, AAOI, GLW, APH, VRT
+日本光ファイバー: 5803.T（フジクラ）, 5812.T（古河電工）
+半導体: NVDA, AMD, AVGO, MU, AMAT, LRCX
+その他成長: META, AMZN, MSFT, TSM, PLTR
+
+【制約】
+・解放資金 {freed_str} で実際に購入可能な価格帯の銘柄を優先
+・日本株は最低100株単元。株価×100が解放資金以内のものを優先
+・根拠は20字以内で端的に
+
+以下のJSONのみで回答:
+{{
+  "candidates": [
+    {{"ticker": "CIEN", "name": "Ciena", "flag": "🇺🇸", "rationale": "光NW需要継続・モメンタム最強"}},
+    {{"ticker": "5803.T", "name": "フジクラ", "flag": "🇯🇵", "rationale": "光ファイバー需要急増"}}
+  ]
+}}"""
+    _err = "生成失敗（原因不明）"
+    _model_used = ""
+    try:
+        text, _model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=600, temperature=0.3
+        )
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if not m:
+            _err = f"AIがJSON形式で返答しませんでした: {text[:200]}"
+        else:
+            parsed = _json.loads(m.group())
+            parsed["model"] = _model_used
+            parsed["error"] = None
+            return parsed
+    except ValueError as e:
+        _err = f"JSON解析失敗: {str(e)[:100]}"
+    except Exception as e:
+        _err = f"AI呼び出し失敗: {str(e)[:100]}"
+    return {"candidates": [], "model": _model_used, "error": _err}
+
+
 def _generate_switch_recommendations(
     alloc_result: dict,
     stock_data_map: dict,
@@ -21563,6 +21640,117 @@ def render_claude_trading_project():
 
                     # 分析結果を Google Sheets に自動保存
                     _save_signal(sel["ticker"], sel["name"], signal, data)
+
+                    # ── 売却判断なら代替銘柄推奨ボタンを表示 ──────────────────
+                    import re as _re_sig
+                    _sig_jdg = ""
+                    for _sl in signal["text"].splitlines():
+                        if "判断" in _sl and ("**" in _sl or "：" in _sl or ":" in _sl):
+                            _sig_jdg = _sl
+                            break
+                    _is_sell = any(kw in _sig_jdg for kw in ["損切", "利確", "売却", "SELL", "Exit"])
+                    if _is_sell and pos_ctx:
+                        _freed_jpy = 0
+                        try:
+                            _cur_price = float(data.get("price") or pos_ctx.get("avg_cost") or 0)
+                            _qty       = float(pos_ctx.get("qty", 0))
+                            if sel["market"] == "JP":
+                                _freed_jpy = int(_cur_price * _qty)
+                            else:
+                                _fx = _fetch_portfolio_prices(("USDJPY=X",)).get("_usdjpy", 150.0)
+                                _freed_jpy = int(_cur_price * _qty * _fx)
+                        except Exception:
+                            pass
+                        _freed_jpy = _freed_jpy or int(pos_ctx.get("cost", 0))
+
+                        st.markdown(
+                            f'<div style="background:#1a0a0a;border:1px solid #dc2626;border-radius:8px;'
+                            f'padding:10px 14px;margin:10px 0">'
+                            f'<span style="color:#ef4444;font-weight:700">⚠️ 売却推奨</span>'
+                            f'<span style="color:#94a3b8;font-size:12px;margin-left:8px">'
+                            f'売却後の解放資金: 約¥{_freed_jpy:,}円</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                        _rep_col1, _rep_col2 = st.columns([3, 1])
+                        _rep_model_opts = {
+                            "🔄 自動": "auto", "🟡 Gemini": "gemini",
+                            "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
+                        }
+                        _rep_model_sel = _rep_col1.selectbox(
+                            "代替推奨モデル", list(_rep_model_opts.keys()),
+                            key=f"rep_model_{sel['ticker']}", label_visibility="collapsed",
+                        )
+                        if _rep_col2.button("🔄 代替銘柄を探す", key=f"btn_rep_{sel['ticker']}", type="primary"):
+                            _rep_mctx = _fetch_market_context_for_trading()
+                            _rep_mode = st.session_state.get("trading_mode", "growth")
+                            _rep_holdings = list(open_pos.keys())
+                            with st.spinner(f"{sel['ticker']}売却後の代替銘柄をAIが分析中…"):
+                                _rep_res = _generate_replacement_rec(
+                                    sel["ticker"], sel["name"], _freed_jpy,
+                                    _rep_holdings, _rep_mctx, _rep_mode,
+                                    model_pref=_rep_model_opts[_rep_model_sel],
+                                )
+                            st.session_state[f"_rep_result_{sel['ticker']}"] = _rep_res
+
+                        _rep_result = st.session_state.get(f"_rep_result_{sel['ticker']}")
+                        if _rep_result:
+                            if _rep_result.get("error"):
+                                st.error(f"代替推奨エラー: {_rep_result['error']}")
+                            else:
+                                _rep_cands = _rep_result.get("candidates", [])
+                                _rep_tickers = tuple(c.get("ticker","") for c in _rep_cands if c.get("ticker"))
+                                _rep_px = _fetch_portfolio_prices(_rep_tickers) if _rep_tickers else {}
+                                _rep_usdjpy = _rep_px.get("_usdjpy", 150.0)
+                                st.markdown(
+                                    f'<div style="font-size:13px;font-weight:700;color:#38bdf8;margin:8px 0 6px">'
+                                    f'💡 {sel["name"]}売却後（約¥{_freed_jpy:,}）の代替候補</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                for _rc in _rep_cands:
+                                    _rt  = _rc.get("ticker", "")
+                                    _rn  = _rc.get("name", _rt)
+                                    _rfl = _rc.get("flag", "🌐")
+                                    _rra = _rc.get("rationale", "")
+                                    _rjp = _rt.endswith(".T")
+                                    _rpx = _rep_px.get(_rt) or {}
+                                    _rpr = _rpx.get("price") if isinstance(_rpx, dict) else None
+                                    # 株数計算
+                                    if _rpr and _rpr > 0:
+                                        if _rjp:
+                                            _rlots = max(1, int(_freed_jpy / (_rpr * 100)))
+                                            _rshares_str = f"{_rlots*100:,}株({_rlots}単元)"
+                                            _rcost_str   = f"≒¥{int(_rlots*_rpr*100):,}"
+                                        else:
+                                            _rpjpy   = _rpr * _rep_usdjpy
+                                            _rshares = max(1, int(_freed_jpy / _rpjpy))
+                                            _rshares_str = f"{_rshares}株"
+                                            _rcost_str   = f"${_rpr:.2f}=¥{int(_rpjpy):,}/株 ≒¥{int(_rshares*_rpjpy):,}"
+                                    else:
+                                        _rshares_str = "—"
+                                        _rcost_str   = "価格取得中"
+                                    # リターン表示
+                                    _r1y = _rpx.get("ret_1y") if isinstance(_rpx, dict) else None
+                                    _r6m = _rpx.get("ret_6m") if isinstance(_rpx, dict) else None
+                                    _r3m = _rpx.get("ret_3m") if isinstance(_rpx, dict) else None
+                                    def _rc2(v): return "#16a34a" if (v or 0) >= 0 else "#dc2626"
+                                    def _rv2(v): return f"{v:+.1f}%" if v is not None else "—"
+                                    _ret_html = (
+                                        f'<span style="color:{_rc2(_r3m)}">3m:{_rv2(_r3m)}</span> '
+                                        f'<span style="color:{_rc2(_r6m)}">6m:{_rv2(_r6m)}</span> '
+                                        f'<span style="color:{_rc2(_r1y)}">1y:{_rv2(_r1y)}</span>'
+                                    ) if any(v is not None for v in [_r1y, _r6m, _r3m]) else ""
+                                    st.markdown(
+                                        f'<div style="background:#0f172a;border:1px solid #1e293b;'
+                                        f'border-radius:8px;padding:10px 14px;margin-bottom:8px">'
+                                        f'<div style="font-size:14px;font-weight:700;color:#e2e8f0">'
+                                        f'{_rfl} {_rt} <span style="color:#94a3b8;font-size:12px;font-weight:400">— {_rn}</span></div>'
+                                        f'<div style="font-size:12px;color:#38bdf8;margin:3px 0">{_rshares_str} &nbsp; {_rcost_str}</div>'
+                                        f'<div style="font-size:11px;color:#fbbf24;margin-bottom:3px">{_rra}</div>'
+                                        + (f'<div style="font-size:11px">{_ret_html}</div>' if _ret_html else "")
+                                        + f'</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                st.caption(f"🤖 {_rep_result.get('model','')}")
 
                     if data.get("news_items"):
                         with st.expander(f"📰 参照したニュース・開示（{len(data['news_items'])}件）"):
