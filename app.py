@@ -18068,28 +18068,56 @@ def _compute_portfolio_history() -> pd.DataFrame:
     return result
 
 
+def _delete_trade_row(sheet_row_num: int) -> bool:
+    """Google Sheetsの指定行（1始まり、ヘッダー=1）を削除する。"""
+    try:
+        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
+        if not ws:
+            return False
+        ws.delete_rows(sheet_row_num)
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] trade削除失敗 row={sheet_row_num}: {e}")
+        return False
+
+
+def _calc_positions_from_df(df: "pd.DataFrame") -> dict:
+    """取引記録 DataFrame から保有ポジションを計算する（平均取得単価法）。
+    SELL時は平均取得コストを比例削減し avg_cost が正確になるよう修正済み。
+    Returns: {ticker: {name, qty, cost, avg_cost}}
+    """
+    positions: dict = {}
+    for _, row in df.iterrows():
+        t     = str(row.get("ticker", "")).strip()
+        qty   = float(row.get("quantity", 0) or 0)
+        price = float(row.get("price", 0) or 0)
+        fee   = float(row.get("fee", 0) or 0)
+        if not t or qty <= 0:
+            continue
+        if row["action"] == "BUY":
+            if t not in positions:
+                positions[t] = {"name": str(row.get("name", t)), "qty": 0.0, "cost": 0.0}
+            positions[t]["qty"]  += qty
+            positions[t]["cost"] += qty * price + fee
+        elif row["action"] == "SELL" and t in positions and positions[t]["qty"] > 0:
+            held = positions[t]["qty"]
+            sell_qty = min(qty, held)
+            # 平均取得単価分だけコストを減らす（avg_cost が変わらないように）
+            cost_per_share = positions[t]["cost"] / held
+            positions[t]["cost"] -= cost_per_share * sell_qty
+            positions[t]["qty"]  -= sell_qty
+    return {
+        t: {**v, "avg_cost": v["cost"] / v["qty"] if v["qty"] > 0 else 0}
+        for t, v in positions.items() if v["qty"] > 0
+    }
+
+
 def _get_open_positions() -> dict:
     """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
     df, _ = _load_trades()
     if df.empty:
         return {}
-    positions = {}
-    for _, row in df.iterrows():
-        t     = row["ticker"]
-        qty   = float(row.get("quantity", 0) or 0)
-        price = float(row.get("price", 0) or 0)
-        fee   = float(row.get("fee", 0) or 0)
-        if row["action"] == "BUY":
-            if t not in positions:
-                positions[t] = {"name": row["name"], "qty": 0.0, "cost": 0.0}
-            positions[t]["qty"]  += qty
-            positions[t]["cost"] += qty * price + fee
-        elif row["action"] == "SELL" and t in positions:
-            positions[t]["qty"] -= qty
-    return {
-        t: {**v, "avg_cost": v["cost"] / v["qty"] if v["qty"] > 0 else 0}
-        for t, v in positions.items() if v["qty"] > 0
-    }
+    return _calc_positions_from_df(df)
 
 
 def _fmt_past_signals(past_signals: list | None) -> str:
@@ -19141,29 +19169,52 @@ def render_claude_trading_project():
         elif df_trades.empty:
             st.info("取引記録がまだありません。")
         else:
-            st.markdown("**取引履歴**")
-            st.dataframe(
-                df_trades[["date", "ticker", "name", "action", "quantity", "price", "fee", "memo"]],
-                hide_index=True, use_container_width=True
-            )
+            # ── 取引履歴（削除ボタン付き）──────────────────────────
+            st.markdown("**取引履歴**　<span style='font-size:11px;color:#64748b'>🗑️ ボタンで誤記録を削除できます</span>",
+                        unsafe_allow_html=True)
+            _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
+            for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ",""], _hdr):
+                _c.markdown(f"<span style='font-size:11px;color:#64748b;font-weight:700'>{_lbl}</span>",
+                            unsafe_allow_html=True)
+            st.markdown('<hr style="margin:4px 0;border-color:#334155">', unsafe_allow_html=True)
 
-            # 保有ポジションを計算（BUY - SELL）
-            positions = {}
-            for _, row in df_trades.iterrows():
-                t = row["ticker"]
-                qty   = float(row.get("quantity", 0) or 0)
-                price = float(row.get("price", 0) or 0)
-                fee   = float(row.get("fee", 0) or 0)
-                if row["action"] == "BUY":
-                    if t not in positions:
-                        positions[t] = {"name": row["name"], "qty": 0, "cost": 0.0}
-                    positions[t]["qty"]  += qty
-                    positions[t]["cost"] += qty * price + fee
-                elif row["action"] == "SELL":
-                    if t in positions:
-                        positions[t]["qty"] -= qty
+            _del_requested = None
+            for _seq, (_, _row) in enumerate(df_trades.iterrows()):
+                _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
+                _c[0].markdown(f"<span style='font-size:12px'>{str(_row.get('date',''))[:10]}</span>",
+                               unsafe_allow_html=True)
+                _c[1].markdown(f"<span style='font-size:12px;font-weight:700'>{_row.get('ticker','')}</span>",
+                               unsafe_allow_html=True)
+                _c[2].markdown(f"<span style='font-size:12px'>{_row.get('name','')}</span>",
+                               unsafe_allow_html=True)
+                _act = str(_row.get("action",""))
+                _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
+                _c[3].markdown(f"<span style='font-size:12px;color:{_act_color};font-weight:700'>{_act}</span>",
+                               unsafe_allow_html=True)
+                _c[4].markdown(f"<span style='font-size:12px'>{int(_row.get('quantity',0)):,}</span>",
+                               unsafe_allow_html=True)
+                _c[5].markdown(f"<span style='font-size:12px'>{float(_row.get('price',0)):,.1f}</span>",
+                               unsafe_allow_html=True)
+                _c[6].markdown(f"<span style='font-size:12px'>{int(_row.get('fee',0)):,}</span>",
+                               unsafe_allow_html=True)
+                _c[7].markdown(f"<span style='font-size:12px;color:#94a3b8'>{str(_row.get('memo',''))[:20]}</span>",
+                               unsafe_allow_html=True)
+                if _c[8].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
+                    _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
 
-            open_pos = {t: v for t, v in positions.items() if v["qty"] > 0}
+            if _del_requested is not None:
+                with st.spinner("削除中..."):
+                    if _delete_trade_row(_del_requested):
+                        st.success("削除しました")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("削除に失敗しました。再試行してください。")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # 保有ポジションを計算（平均取得単価法：SELL時にコスト比例削減）
+            open_pos = _calc_positions_from_df(df_trades)
 
             if open_pos:
                 st.markdown("**保有中ポジション（現在値・含み損益）**")
@@ -19984,6 +20035,21 @@ def main():
         t(f"最終更新: {now_jst:%Y-%m-%d %H:%M:%S} JST | フォント: {FONT_NAME}",
           f"Last updated: {now_jst:%Y-%m-%d %H:%M:%S} JST | Font: {FONT_NAME}")
     )
+
+    # ── トレーディングプロジェクトへのショートカット ───────────────
+    st.markdown(
+        '<a href="?page=trading" style="'
+        'display:inline-flex;align-items:center;gap:8px;'
+        'background:linear-gradient(135deg,#1e3a5f,#1e40af);'
+        'color:#93c5fd !important;text-decoration:none !important;'
+        'padding:7px 16px;border-radius:8px;border:1px solid #2563eb;'
+        'font-size:13px;font-weight:700;margin-bottom:4px;'
+        'box-shadow:0 2px 8px rgba(37,99,235,0.35);">'
+        '💹 Claude 個別株トレーディングプロジェクトへ →'
+        '</a>',
+        unsafe_allow_html=True,
+    )
+
     render_admin_changelog()
 
     # ── Google翻訳ウィジェット ──────────────────────────────────
