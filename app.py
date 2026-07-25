@@ -21856,18 +21856,29 @@ def render_claude_trading_project():
                             # 株数・必要金額を株価ベースで計算
                             if _price and _price > 0:
                                 if _is_jp:
-                                    _lot_cost    = _price * 100
-                                    _lots        = max(1, int(_amt / _lot_cost))
-                                    _shares      = _lots * 100
-                                    _actual_cost = int(_lots * _lot_cost)
-                                    _shares_str  = f"{_shares:,}株 ({_lots}単元)"
-                                    _price_str   = f"¥{_price:,.0f}/株"
+                                    _lot_cost = _price * 100
+                                    _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
+                                    if _lots == 0:
+                                        # 1単元が配分予算を超える場合は予算外表示
+                                        _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
+                                        _price_str   = f"¥{_price:,.0f}/株"
+                                        _actual_cost = 0
+                                    else:
+                                        _shares      = _lots * 100
+                                        _actual_cost = int(_lots * _lot_cost)
+                                        _shares_str  = f"{_shares:,}株 ({_lots}単元)"
+                                        _price_str   = f"¥{_price:,.0f}/株"
                                 else:
-                                    _price_jpy   = _price * _usdjpy
-                                    _shares      = max(1, int(_amt / _price_jpy))
-                                    _actual_cost = int(_shares * _price_jpy)
-                                    _shares_str  = f"{_shares}株"
-                                    _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                                    _price_jpy = _price * _usdjpy
+                                    _shares    = int(_amt / _price_jpy)  # max(1)なし
+                                    if _shares == 0:
+                                        _shares_str  = f"⚠️ 予算外（1株¥{_price_jpy:,.0f}）"
+                                        _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                                        _actual_cost = 0
+                                    else:
+                                        _actual_cost = int(_shares * _price_jpy)
+                                        _shares_str  = f"{_shares}株"
+                                        _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
                             else:
                                 _shares_str  = "—"
                                 _price_str   = "価格取得中"
