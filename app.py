@@ -18227,6 +18227,91 @@ def _generate_ai_trade_signal(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _fetch_daily_changes_for_tickers(tickers_tuple: tuple) -> dict:
+    """各ティッカーの本日騰落率・騰落額を返す。
+    Returns: {ticker: {cur_price, prev_close, day_change, day_change_pct}}
+    """
+    result = {}
+    for ticker in tickers_tuple:
+        try:
+            raw = yf.download(ticker, period="5d", auto_adjust=True, progress=False)
+            if raw.empty:
+                continue
+            close = raw["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            close = close.dropna()
+            if len(close) < 2:
+                continue
+            prev = float(close.iloc[-2])
+            cur  = float(close.iloc[-1])
+            result[ticker] = {
+                "cur_price":      cur,
+                "prev_close":     prev,
+                "day_change":     cur - prev,
+                "day_change_pct": (cur - prev) / prev * 100 if prev > 0 else 0.0,
+            }
+        except Exception:
+            pass
+    return result
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _generate_portfolio_ai_comment(positions_key: str, changes_json: str) -> dict:
+    """AI によるポートフォリオ日次コメントを生成（JSON形式）。
+    Args:
+        positions_key: キャッシュキー用のティッカー文字列
+        changes_json: JSON文字列 {ticker: {day_change_pct, cur_price, ...}}
+    Returns:
+        {"narrative": str, "bullets": [str, ...], "error": str|None}
+    """
+    import json as _json
+    try:
+        changes = _json.loads(changes_json)
+    except Exception:
+        return {"narrative": "", "bullets": [], "error": "データ解析失敗"}
+
+    lines = []
+    for ticker, chg in sorted(changes.items(), key=lambda x: x[1].get("day_change_pct", 0)):
+        pct = chg.get("day_change_pct", 0)
+        lines.append(f"  {ticker}: {pct:+.2f}%")
+
+    if not lines:
+        return {"narrative": "", "bullets": [], "error": "騰落データなし"}
+
+    prompt = (
+        "あなたはプロのポートフォリオアナリストです。\n"
+        "以下の保有銘柄の本日騰落データを分析し、投資家向けの日本語コメントを生成してください。\n\n"
+        "本日の各銘柄騰落:\n"
+        + "\n".join(lines)
+        + "\n\n"
+        "以下のJSON形式のみ返してください（コードブロック・余分なテキスト不要）:\n"
+        '{\n'
+        '  "narrative": "ポートフォリオ全体の動きを3〜4文で説明。どのセクター・銘柄が牽引/足を引っ張ったか具体的に。",\n'
+        '  "bullets": [\n'
+        '    "一目でわかるポイント1（銘柄名と数字を含む）",\n'
+        '    "一目でわかるポイント2",\n'
+        '    "一目でわかるポイント3"\n'
+        '  ]\n'
+        '}'
+    )
+
+    res = call_ai_with_fallback(prompt, max_tokens=700, temperature=0.3)
+    if res.get("error"):
+        return {"narrative": "", "bullets": [], "error": res["error"]}
+
+    import re as _re
+    text = res.get("text", "")
+    m = _re.search(r'\{[\s\S]*\}', text)
+    if m:
+        try:
+            return _json.loads(m.group())
+        except Exception:
+            pass
+    return {"narrative": text, "bullets": [], "error": None}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _fetch_usd_jpy() -> float:
     """USD/JPY レートを yfinance から取得。失敗時は 150.0 を返す。"""
     try:
@@ -18704,7 +18789,10 @@ def render_claude_trading_project():
         if hist_df.empty:
             st.info("取引記録がないか、株価データを取得できませんでした。")
         else:
-            # ── サマリーメトリクス ──────────────────────────────
+            import plotly.graph_objects as go
+            from datetime import date as _date
+
+            # ── 全期間メトリクス（常に全期間ベース）─────────────
             latest      = hist_df.iloc[-1]
             port_now    = latest["portfolio_value"]
             cost_now    = latest["invested_cost"]
@@ -18713,7 +18801,14 @@ def render_claude_trading_project():
             peak        = hist_df["portfolio_value"].max()
             drawdown    = (port_now - peak) / peak * 100 if peak > 0 else 0
 
-            m1, m2, m3, m4 = st.columns(4)
+            # 1日騰落（hist_df が2行以上あれば計算）
+            if len(hist_df) >= 2:
+                prev_val    = hist_df.iloc[-2]["portfolio_value"]
+                day_chg     = port_now - prev_val
+                day_chg_pct = day_chg / prev_val * 100 if prev_val > 0 else 0
+            else:
+                day_chg = day_chg_pct = 0.0
+
             def _metric_card(col, label, value, sub="", color="#e2e8f0"):
                 col.markdown(
                     f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;text-align:center">'
@@ -18723,46 +18818,74 @@ def render_claude_trading_project():
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-            _metric_card(m1, "現在評価額",   f"{port_now:,.0f}", "（USD/円混在時は参考値）")
-            _metric_card(m2, "投資元本",     f"{cost_now:,.0f}")
+
+            m1, m2, m3, m4 = st.columns(4)
+            _metric_card(m1, "現在評価額", f"{port_now:,.0f}", "（USD/円混在時は参考値）")
+            dc_color = "#22c55e" if day_chg >= 0 else "#ef4444"
+            _metric_card(m2, "本日の騰落",
+                         f"{day_chg:+,.0f}", f"{day_chg_pct:+.2f}%", color=dc_color)
             pnl_color = "#22c55e" if pnl_now >= 0 else "#ef4444"
-            _metric_card(m3, "含み損益合計", f"{pnl_now:+,.0f}",
-                         f"{pnl_pct_now:+.2f}%", color=pnl_color)
+            _metric_card(m3, "含み損益合計",
+                         f"{pnl_now:+,.0f}", f"{pnl_pct_now:+.2f}%", color=pnl_color)
             dd_color = "#ef4444" if drawdown < -5 else "#94a3b8"
-            _metric_card(m4, "最大からの下落", f"{drawdown:.1f}%",
-                         f"最高値 {peak:,.0f}", color=dd_color)
+            _metric_card(m4, "最大からの下落",
+                         f"{drawdown:.1f}%", f"最高値 {peak:,.0f}", color=dd_color)
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── 資産推移チャート ────────────────────────────────
-            import plotly.graph_objects as go
-            fig = go.Figure()
+            # ── 期間セレクタ ────────────────────────────────────
+            _PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "全期間"]
+            sel_period = st.radio(
+                "表示期間", _PERIODS, index=5,
+                horizontal=True, key="hist_period",
+                label_visibility="collapsed",
+            )
 
+            today = pd.Timestamp.today().normalize()
+            if sel_period == "1D":
+                chart_df = hist_df.iloc[-2:] if len(hist_df) >= 2 else hist_df
+            elif sel_period == "5D":
+                chart_df = hist_df.iloc[-5:] if len(hist_df) >= 5 else hist_df
+            elif sel_period == "1M":
+                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=1)]
+            elif sel_period == "6M":
+                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=6)]
+            elif sel_period == "YTD":
+                chart_df = hist_df[hist_df.index >= pd.Timestamp(today.year, 1, 1)]
+            elif sel_period == "1Y":
+                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=1)]
+            else:
+                chart_df = hist_df
+            if chart_df.empty:
+                chart_df = hist_df
+
+            # ── 資産推移チャート ────────────────────────────────
+            # 損益の塗りつぶし色（期間内で全体的にプラスかマイナスか）
+            period_gain = chart_df["pnl"].mean() if "pnl" in chart_df.columns else 0
+            fill_color  = "rgba(34,197,94,0.12)" if period_gain >= 0 else "rgba(239,68,68,0.10)"
+
+            fig = go.Figure()
             fig.add_trace(go.Scatter(
-                x=hist_df.index, y=hist_df["portfolio_value"],
+                x=chart_df.index, y=chart_df["portfolio_value"],
                 name="ポートフォリオ時価",
                 line=dict(color="#60a5fa", width=2),
-                fill="tonexty" if False else None,
                 hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
             ))
             fig.add_trace(go.Scatter(
-                x=hist_df.index, y=hist_df["invested_cost"],
+                x=chart_df.index, y=chart_df["invested_cost"],
                 name="投資元本",
                 line=dict(color="#94a3b8", width=1.5, dash="dot"),
                 hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
             ))
-
-            # 含み損益を塗りつぶし（プラスは緑、マイナスは赤）
             fig.add_trace(go.Scatter(
-                x=list(hist_df.index) + list(hist_df.index[::-1]),
-                y=list(hist_df["portfolio_value"]) + list(hist_df["invested_cost"][::-1]),
+                x=list(chart_df.index) + list(chart_df.index[::-1]),
+                y=list(chart_df["portfolio_value"]) + list(chart_df["invested_cost"][::-1]),
                 fill="toself",
-                fillcolor="rgba(34,197,94,0.12)",
+                fillcolor=fill_color,
                 line=dict(width=0),
                 showlegend=False,
                 hoverinfo="skip",
             ))
-
             fig.update_layout(
                 paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
                 font=dict(color="#e2e8f0"),
@@ -18774,18 +18897,18 @@ def render_claude_trading_project():
                            title=dict(text="評価額", font=dict(color="#94a3b8"))),
                 hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                 margin=dict(l=10, r=10, t=10, b=10),
-                height=340,
+                height=320,
             )
             st.plotly_chart(fig, use_container_width=True)
 
             # ── 損益率推移チャート ──────────────────────────────
             with st.expander("📊 損益率推移（%）"):
                 fig2 = go.Figure()
-                colors = ["#22c55e" if v >= 0 else "#ef4444"
-                          for v in hist_df["pnl_pct"].fillna(0)]
+                colors2 = ["#22c55e" if v >= 0 else "#ef4444"
+                           for v in chart_df["pnl_pct"].fillna(0)]
                 fig2.add_trace(go.Bar(
-                    x=hist_df.index, y=hist_df["pnl_pct"].fillna(0),
-                    marker_color=colors,
+                    x=chart_df.index, y=chart_df["pnl_pct"].fillna(0),
+                    marker_color=colors2,
                     hovertemplate="%{x|%Y-%m-%d}<br>損益率: %{y:+.2f}%<extra></extra>",
                 ))
                 fig2.add_hline(y=0, line_color="#475569", line_width=1)
@@ -18797,12 +18920,120 @@ def render_claude_trading_project():
                                ticksuffix="%"),
                     hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                     margin=dict(l=10, r=10, t=10, b=10),
-                    height=220,
-                    showlegend=False,
+                    height=220, showlegend=False,
                 )
                 st.plotly_chart(fig2, use_container_width=True)
 
             st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── AI ポートフォリオ コメント ──────────────────────
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;border-radius:12px;'
+                'padding:20px 24px;margin-top:8px">'
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
+                '<span style="font-size:20px">🤖</span>'
+                '<div>'
+                '<div style="font-size:14px;font-weight:700;color:#e2e8f0">'
+                '今日のポートフォリオはどうですか？</div>'
+                '<div style="font-size:11px;color:#64748b">AI分析 · 自動更新（1時間キャッシュ）</div>'
+                '</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            # 保有銘柄の日次騰落を取得
+            open_pos_for_ai = _get_open_positions()
+            ai_comment_data = {}
+            ai_tickers_gainers = []
+            ai_tickers_losers  = []
+
+            if open_pos_for_ai:
+                tickers_tuple = tuple(sorted(open_pos_for_ai.keys()))
+                with st.spinner("銘柄騰落を取得中..."):
+                    daily_chg = _fetch_daily_changes_for_tickers(tickers_tuple)
+
+                if daily_chg:
+                    import json as _json
+                    changes_json = _json.dumps(daily_chg)
+                    positions_key = ",".join(tickers_tuple)
+
+                    with st.spinner("AIコメント生成中..."):
+                        ai_comment_data = _generate_portfolio_ai_comment(
+                            positions_key, changes_json
+                        )
+
+                    # 上昇・下落ランキング
+                    sorted_chg = sorted(
+                        daily_chg.items(),
+                        key=lambda x: x[1].get("day_change_pct", 0),
+                        reverse=True,
+                    )
+                    ai_tickers_gainers = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) > 0]
+                    ai_tickers_losers  = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) < 0]
+
+            narrative = ai_comment_data.get("narrative", "")
+            bullets   = ai_comment_data.get("bullets", [])
+            ai_err    = ai_comment_data.get("error")
+
+            if ai_err and not narrative:
+                st.warning(f"AIコメント取得失敗: {ai_err}")
+            else:
+                col_narr, col_bullets = st.columns([3, 2])
+                with col_narr:
+                    if narrative:
+                        st.markdown(
+                            f'<p style="color:#cbd5e1;font-size:13.5px;line-height:1.7;'
+                            f'margin:0">{narrative}</p>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            '<p style="color:#64748b;font-size:13px">取引記録を入力するとAI分析が表示されます。</p>',
+                            unsafe_allow_html=True,
+                        )
+
+                with col_bullets:
+                    if bullets:
+                        st.markdown(
+                            '<div style="font-size:12px;font-weight:700;color:#94a3b8;'
+                            'margin-bottom:8px">一目でわかる</div>',
+                            unsafe_allow_html=True,
+                        )
+                        for b in bullets:
+                            st.markdown(
+                                f'<div style="display:flex;gap:8px;margin-bottom:6px">'
+                                f'<span style="color:#3b82f6;flex-shrink:0">•</span>'
+                                f'<span style="color:#cbd5e1;font-size:13px">{b}</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+
+            # 上昇・下落チップ
+            if ai_tickers_gainers or ai_tickers_losers:
+                st.markdown("<div style='margin-top:14px'>", unsafe_allow_html=True)
+                chip_html = '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px">上昇・下落銘柄</div><div style="display:flex;flex-wrap:wrap;gap:8px">'
+                # 上昇（緑）
+                for ticker, d in ai_tickers_gainers[:3]:
+                    pct = d.get("day_change_pct", 0)
+                    chip_html += (
+                        f'<span style="background:#052e16;border:1px solid #166534;'
+                        f'color:#4ade80;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
+                        f'{ticker} +{pct:.2f}%</span>'
+                    )
+                # 下落（赤）
+                for ticker, d in reversed(ai_tickers_losers[-3:]):
+                    pct = d.get("day_change_pct", 0)
+                    chip_html += (
+                        f'<span style="background:#450a0a;border:1px solid #991b1b;'
+                        f'color:#f87171;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
+                        f'{ticker} {pct:.2f}%</span>'
+                    )
+                chip_html += '</div></div>'
+                st.markdown(chip_html, unsafe_allow_html=True)
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
     with tab_summary:
