@@ -17854,18 +17854,153 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
         return list(headlines_tuple)
 
 
-_STOCK_CACHE_HEADERS = ["date", "ticker", "data_json", "updated_at"]
+_STOCK_CACHE_HEADERS    = ["date", "ticker", "data_json", "updated_at"]
+_AI_SCORE_CACHE_HEADERS = ["date", "tickers_key", "mode", "scores_json", "model", "created_at"]
+
+
+def _load_ai_score_cache(date: str, tickers_key: str, mode: str) -> dict | None:
+    """AIスコアキャッシュをSheetsから取得"""
+    import json as _json
+    try:
+        ws = _trading_ws("ai_score_cache", _AI_SCORE_CACHE_HEADERS)
+        if not ws:
+            return None
+        rows = ws.get_all_records()
+        for r in reversed(rows):
+            if (r.get("date") == date and
+                    r.get("tickers_key") == tickers_key and
+                    r.get("mode") == mode):
+                raw = r.get("scores_json", "")
+                return {"scores": _json.loads(raw), "model": r.get("model", "")} if raw else None
+    except Exception as e:
+        logger.warning(f"[trading] ai_score_cache読込失敗: {e}")
+    return None
+
+
+def _save_ai_score_cache(date: str, tickers_key: str, mode: str,
+                          scores: dict, model: str) -> bool:
+    """AIスコアをSheetsにキャッシュ保存"""
+    import json as _json
+    try:
+        ws = _trading_ws("ai_score_cache", _AI_SCORE_CACHE_HEADERS)
+        if not ws:
+            return False
+        ws.append_row([
+            date, tickers_key, mode,
+            _json.dumps(scores, ensure_ascii=False),
+            model,
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] ai_score_cache保存失敗: {e}")
+        return False
+
+
+def _generate_ai_allocation_scores(
+    positions: dict,
+    stock_data_map: dict,
+    market_ctx: dict,
+    mode: str = "growth",
+    model_pref: str = "auto",
+) -> dict:
+    """全保有銘柄を一括でAI評価し、各銘柄に -5〜+5 のスコアを返す。
+    Returns: {
+        ticker: {"score": float, "key_factors": [str,...], "reasoning": str},
+        "_model": str
+    }
+    """
+    import json as _json, re as _re
+
+    mode_desc = {
+        "growth":     "長期育成（ファンダ重視・6ヶ月〜2年）",
+        "momentum":   "モメンタム（テクニカル重視・1〜4週間）",
+        "autonomous": "AI自律（分析軸をAI決定）",
+    }.get(mode, "長期育成")
+
+    # 銘柄サマリー
+    stock_blocks = []
+    for ticker, pos in positions.items():
+        data   = stock_data_map.get(ticker, {})
+        is_jp  = ticker.endswith(".T")
+        cur    = "円" if is_jp else "USD"
+        flag   = "🇯🇵" if is_jp else "🇺🇸"
+        price  = data.get("price", "-")
+        rsi    = data.get("rsi", "-")
+        ma25   = data.get("ma25", "-")
+        ma75   = data.get("ma75", "-")
+        ret_20d= data.get("ret_20d")
+        sec    = data.get("sector") or pos.get("sector", "その他")
+        news   = (data.get("news") or [])[:3]
+        news_str = " / ".join(n[:50] for n in news if n) or "なし"
+        mval   = pos.get("market_value") or 0
+        cost   = pos.get("cost") or 0
+        gp     = (mval - cost) / cost * 100 if cost > 0 else 0
+        ret_str = f"{ret_20d:+.1f}%" if ret_20d is not None else "?"
+        stock_blocks.append(
+            f"{flag} {ticker}({pos['name']}) | "
+            f"株価:{price}{cur} RSI:{rsi} MA25:{ma25}{cur} MA75:{ma75}{cur} | "
+            f"20日:{ret_str} 含み:{gp:+.1f}% | セクター:{sec} | "
+            f"IR/ニュース: {news_str}"
+        )
+
+    prompt = f"""あなたはプロの株式アナリストです。以下の保有銘柄を評価し、
+投資戦略モード「{mode_desc}」の観点で各銘柄に -5〜+5 のスコアを付けてください。
+
+スコア基準:
++5: 強い買い増し（テクニカル・ファンダ・市場環境すべて強気）
++3〜+4: 買い増し推奨
++1〜+2: やや強気・保有継続
+ 0: 中立
+-1〜-2: やや弱気・比重軽減
+-3〜-4: 削減推奨
+-5: 即売却
+
+【市場環境】
+{_format_market_ctx_for_prompt(market_ctx)}
+
+【保有銘柄データ】
+{chr(10).join(stock_blocks)}
+
+必ず以下のJSONのみ返してください（コードブロックや説明文は不要）:
+{{
+  "scores": {{
+    "<ticker>": {{
+      "score": <float -5〜5>,
+      "key_factors": ["<判断根拠1>", "<判断根拠2>", "<判断根拠3>"],
+      "reasoning": "<50字以内の一言>"
+    }}
+  }}
+}}
+"""
+    try:
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=800, temperature=0.2
+        )
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            parsed = _json.loads(m.group())
+            scores = parsed.get("scores", {})
+            scores["_model"] = model_used
+            return scores
+    except Exception as e:
+        logger.warning(f"[trading] AI allocation score生成失敗: {e}")
+    return {"_model": ""}
 
 
 def _calc_allocation_recommendations(
     positions: dict,
     stock_data_map: dict,
     market_ctx: dict,
+    ai_scores: dict | None = None,   # {ticker: {"score": float, "key_factors": [...], "reasoning": str}}
+    ai_blend: float = 0.5,           # AIスコアの重み（0=ルールのみ, 1=AIのみ, 0.5=均等ブレンド）
 ) -> dict:
-    """テクニカル・セクターRRG・F&Gシグナルから推奨アロケーション比率を算出。
+    """テクニカル・セクターRRG・F&G + オプションでAIスコアをブレンドして推奨アロケーションを算出。
+    ai_scores: _generate_ai_allocation_scores() の戻り値（任意）
+    ai_blend: 0.0〜1.0。AIスコアの重み（0=ルールのみ、0.5=均等）
     Returns: {
-        ticker: {score, adjusted_score, signals, current_alloc, rec_alloc, delta, sector},
-        "_meta": {fg_score, fg_label, fg_mult, fg_desc, total_mkt}
+        ticker: {score, adjusted_score, ai_score, combined_score, signals, current_alloc, rec_alloc, delta, sector},
+        "_meta": {fg_score, fg_label, fg_mult, fg_desc, total_mkt, has_ai}
     }
     """
     total_mkt = sum(p.get("market_value") or 0 for p in positions.values())
@@ -18010,17 +18145,60 @@ def _calc_allocation_recommendations(
                 allocs[t] = (raw_weights[t] / non_floored_w * remaining
                              if non_floored_w > 0 else floor_pp)
 
-    for ticker in result:
-        rec = round(allocs.get(ticker, 0), 1)
-        result[ticker]["rec_alloc"] = rec
-        result[ticker]["delta"]     = round(rec - result[ticker]["current_alloc"], 1)
+    # ── AIスコアブレンド（ai_scores が渡された場合） ─────────────
+    has_ai = bool(ai_scores and any(t in ai_scores for t in positions))
+    if has_ai and 0 < ai_blend <= 1.0:
+        # AIスコア(-5〜+5) → ルールスコアと同スケールに正規化（÷5×7 で ±7 相当に）
+        ai_norm_factor = 7.0 / 5.0
+        combined_weights: dict = {}
+        for ticker in result:
+            rule_adj = result[ticker]["adjusted_score"]
+            ai_entry = (ai_scores or {}).get(ticker, {})
+            ai_raw   = float(ai_entry.get("score", 0)) if isinstance(ai_entry, dict) else 0.0
+            ai_norm  = ai_raw * ai_norm_factor
+            combined = rule_adj * (1 - ai_blend) + ai_norm * ai_blend
+            result[ticker]["ai_score"]      = round(ai_raw, 1)
+            result[ticker]["ai_reasoning"]  = ai_entry.get("reasoning", "") if isinstance(ai_entry, dict) else ""
+            result[ticker]["ai_factors"]    = ai_entry.get("key_factors", []) if isinstance(ai_entry, dict) else []
+            result[ticker]["combined_score"]= round(combined, 2)
+            combined_weights[ticker]        = max(combined + 6.0, 0.5)
+
+        # ブレンドスコアでアロケーション再計算
+        total_cw = sum(combined_weights.values())
+        new_allocs = {t: combined_weights[t] / total_cw * 100 for t in combined_weights}
+        floored2 = {t for t, a in new_allocs.items() if a < floor_pp}
+        if floored2:
+            fl_sum2 = len(floored2) * floor_pp
+            rem2    = 100.0 - fl_sum2
+            nf_w2   = sum(combined_weights[t] for t in combined_weights if t not in floored2)
+            for t in new_allocs:
+                if t in floored2:
+                    new_allocs[t] = floor_pp
+                else:
+                    new_allocs[t] = combined_weights[t] / nf_w2 * rem2 if nf_w2 > 0 else floor_pp
+        for ticker in result:
+            rec = round(new_allocs.get(ticker, 0), 1)
+            result[ticker]["rec_alloc"] = rec
+            result[ticker]["delta"]     = round(rec - result[ticker]["current_alloc"], 1)
+    else:
+        # AIなし → ルールベースのアロケーションをそのまま使用
+        for ticker in result:
+            rec = round(allocs.get(ticker, 0), 1)
+            result[ticker]["rec_alloc"] = rec
+            result[ticker]["delta"]     = round(rec - result[ticker]["current_alloc"], 1)
+            result[ticker]["ai_score"]     = None
+            result[ticker]["ai_reasoning"] = ""
+            result[ticker]["ai_factors"]   = []
+            result[ticker]["combined_score"] = result[ticker]["adjusted_score"]
 
     result["_meta"] = {
-        "fg_score": fg_sc,
-        "fg_label": fg_lbl,
-        "fg_mult":  fg_mult,
-        "fg_desc":  fg_desc,
+        "fg_score":  fg_sc,
+        "fg_label":  fg_lbl,
+        "fg_mult":   fg_mult,
+        "fg_desc":   fg_desc,
         "total_mkt": total_mkt,
+        "has_ai":    has_ai,
+        "ai_blend":  ai_blend,
     }
     return result
 
@@ -19888,7 +20066,8 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
-            if st.button("📊 アロケーション試算を実行", key="btn_alloc", type="secondary"):
+            _ab1, _ab2 = st.columns([2, 1])
+            if _ab1.button("📊 アロケーション試算を実行", key="btn_alloc", type="secondary"):
                 with st.spinner("市場データ・銘柄スコア計算中..."):
                     _alloc_mktctx = _fetch_market_context_for_trading()
                     _pf_alloc = st.session_state.get("_prefetched_stock_data", {})
@@ -19914,101 +20093,200 @@ def render_claude_trading_project():
                             except Exception:
                                 pass
 
+                # AIスコアなしでまず試算
                 _alloc_result = _calc_allocation_recommendations(
                     open_pos, _alloc_data_map, _alloc_mktctx
                 )
-                st.session_state["_alloc_result"] = _alloc_result
+                st.session_state["_alloc_result"]   = _alloc_result
+                st.session_state["_alloc_data_map"] = _alloc_data_map
+                st.session_state["_alloc_mktctx"]   = _alloc_mktctx
+                # AIスコアは別途リセット
+                st.session_state.pop("_ai_scores", None)
 
-            # アロケーション結果表示（セッション保持）
+            # 「🤖 AIスコアを統合」ボタン（試算後にのみ表示）
             _alloc_res = st.session_state.get("_alloc_result")
             if _alloc_res:
-                _meta = _alloc_res.get("_meta", {})
-                fg_sc   = _meta.get("fg_score", 50)
-                fg_desc = _meta.get("fg_desc", "")
-                fg_mult = _meta.get("fg_mult", 1.0)
+                _ai_sc_existing = st.session_state.get("_ai_scores")
+                _ai_btn_label = (
+                    "🔄 AIスコアを再生成" if _ai_sc_existing else "🤖 AIスコアを統合（ニュース・ファンダも評価）"
+                )
+                _ai_model_sel = st.session_state.get("rec_model_sel", "🔄 自動（Gemini→Groq→OpenRouter）")
+                _ai_mp = {
+                    "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                    "🟡 Gemini（Google）":               "gemini",
+                    "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
+                    "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
+                }.get(_ai_mp if isinstance((_ai_mp := st.session_state.get("rec_model_sel","🔄 自動（Gemini→Groq→OpenRouter）")), str) else "", "auto")
+
+                _ai_btn_col1, _ai_btn_col2 = st.columns([2, 1])
+                _ai_blend_val = _ai_btn_col2.slider(
+                    "AIスコアの重み", 0.0, 1.0, 0.5, 0.1,
+                    key="ai_blend_slider",
+                    help="0=ルールのみ / 0.5=均等ブレンド / 1.0=AIのみ",
+                )
+                if _ai_btn_col1.button(_ai_btn_label, key="btn_ai_score", type="primary"):
+                    _cur_mode_alloc = st.session_state.get("trading_mode", "growth")
+                    _tk_key_alloc   = ",".join(sorted(open_pos.keys()))
+                    _today_alloc    = datetime.now(JST).strftime("%Y-%m-%d")
+
+                    # キャッシュ確認
+                    _cached_ai = _load_ai_score_cache(_today_alloc, _tk_key_alloc, _cur_mode_alloc)
+                    if _cached_ai:
+                        _ai_scores_raw = _cached_ai["scores"]
+                        _ai_model_name = _cached_ai["model"] + " 📋"
+                        st.info("📋 本日のAIスコアキャッシュを使用")
+                    else:
+                        with st.spinner("AI が各銘柄を評価中..."):
+                            _adm = st.session_state.get("_alloc_data_map", {})
+                            _amc = st.session_state.get("_alloc_mktctx", {})
+                            _ai_scores_raw = _generate_ai_allocation_scores(
+                                open_pos, _adm, _amc,
+                                mode=_cur_mode_alloc,
+                                model_pref=_ai_mp,
+                            )
+                            _ai_model_name = _ai_scores_raw.pop("_model", "")
+                            # キャッシュ保存
+                            _save_ai_score_cache(
+                                _today_alloc, _tk_key_alloc, _cur_mode_alloc,
+                                _ai_scores_raw, _ai_model_name,
+                            )
+
+                    st.session_state["_ai_scores"]      = _ai_scores_raw
+                    st.session_state["_ai_model_name"]  = _ai_model_name
+                    # AIスコアをブレンドして再計算
+                    _adm2 = st.session_state.get("_alloc_data_map", {})
+                    _amc2 = st.session_state.get("_alloc_mktctx", {})
+                    _new_alloc = _calc_allocation_recommendations(
+                        open_pos, _adm2, _amc2,
+                        ai_scores=_ai_scores_raw,
+                        ai_blend=_ai_blend_val,
+                    )
+                    st.session_state["_alloc_result"] = _new_alloc
+
+            # ─── アロケーション結果表示 ────────────────────────────────
+            _alloc_res = st.session_state.get("_alloc_result")
+            if _alloc_res:
+                _meta    = _alloc_res.get("_meta", {})
+                fg_sc    = _meta.get("fg_score", 50)
+                fg_desc  = _meta.get("fg_desc", "")
+                fg_mult  = _meta.get("fg_mult", 1.0)
+                has_ai   = _meta.get("has_ai", False)
+                ai_blend = _meta.get("ai_blend", 0.5)
 
                 # F&G バー
                 fg_color = ("#ef4444" if fg_sc < 25 else
                             "#f97316" if fg_sc < 45 else
                             "#eab308" if fg_sc < 55 else
                             "#22c55e" if fg_sc < 75 else "#a3e635")
+                _ai_badge = (
+                    f'<span style="font-size:11px;color:#a78bfa;margin-left:10px">'
+                    f'🤖 AI統合済（重み{ai_blend:.0%}）'
+                    f' — {st.session_state.get("_ai_model_name","")}</span>'
+                    if has_ai else ""
+                )
                 st.markdown(
                     f'<div style="background:#0f172a;border:1px solid {fg_color}44;'
                     f'border-radius:8px;padding:8px 14px;margin-bottom:10px">'
                     f'<span style="font-size:12px;color:{fg_color};font-weight:700">'
                     f'😰 Fear&Greed: {fg_sc:.0f}</span>'
                     f'<span style="font-size:11px;color:#94a3b8;margin-left:8px">{fg_desc}</span>'
-                    f'<span style="font-size:11px;color:#64748b;margin-left:8px">'
-                    f'スコア乗数: ×{fg_mult:.2f}</span>'
+                    f'<span style="font-size:11px;color:#64748b;margin-left:8px">×{fg_mult:.2f}</span>'
+                    f'{_ai_badge}'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
 
-                # 銘柄スコアカード
+                # 銘柄テーブル
                 _alloc_tickers = [t for t in _alloc_res if t != "_meta"]
-                _alloc_sorted  = sorted(
+                _sort_key = "combined_score" if has_ai else "adjusted_score"
+                _alloc_sorted = sorted(
                     _alloc_tickers,
-                    key=lambda t: _alloc_res[t]["adjusted_score"],
+                    key=lambda t: _alloc_res[t].get(_sort_key, 0),
                     reverse=True,
                 )
 
                 # ヘッダー
-                _hcols = st.columns([2.5, 1, 1, 1, 1, 3.5])
-                for _h, _lbl in zip(_hcols, ["銘柄", "現在%", "推奨%", "差分", "スコア", "シグナル"]):
+                _hdr_cols = st.columns([2.2, 1, 1, 1, 1.4, 1.4, 2.8] if has_ai
+                                       else [2.5, 1, 1, 1, 1, 3.5])
+                _hdr_labels = (["銘柄", "現在%", "推奨%", "差分", "ルール", "AI", "シグナル"] if has_ai
+                               else ["銘柄", "現在%", "推奨%", "差分", "スコア", "シグナル"])
+                for _h, _lbl in zip(_hdr_cols, _hdr_labels):
                     _h.markdown(
                         f'<div style="font-size:11px;color:#64748b;font-weight:600">{_lbl}</div>',
                         unsafe_allow_html=True,
                     )
 
                 for _atk in _alloc_sorted:
-                    _ar = _alloc_res[_atk]
-                    _delta = _ar["delta"]
-                    _delta_color = "#4ade80" if _delta > 1 else "#ef4444" if _delta < -1 else "#94a3b8"
-                    _delta_icon  = "▲" if _delta > 1 else "▼" if _delta < -1 else "─"
-                    _score_color = ("#4ade80" if _ar["adjusted_score"] > 2
-                                    else "#fbbf24" if _ar["adjusted_score"] > 0
-                                    else "#ef4444")
-                    _score_bar_w = min(max(int((_ar["adjusted_score"] + 7) / 14 * 100), 5), 100)
+                    _ar      = _alloc_res[_atk]
+                    _delta   = _ar["delta"]
+                    _dc      = "#4ade80" if _delta > 1 else "#ef4444" if _delta < -1 else "#94a3b8"
+                    _di      = "▲" if _delta > 1 else "▼" if _delta < -1 else "─"
+                    _rule_sc = _ar.get("adjusted_score", 0)
+                    _ai_sc   = _ar.get("ai_score")
+                    _comb_sc = _ar.get("combined_score", _rule_sc)
+                    _sc_color= ("#4ade80" if _comb_sc > 2 else
+                                "#fbbf24" if _comb_sc > 0 else "#ef4444")
+                    _bar_w   = min(max(int((_comb_sc + 7) / 14 * 100), 5), 100)
 
-                    _cols = st.columns([2.5, 1, 1, 1, 1, 3.5])
+                    if has_ai:
+                        _cols = st.columns([2.2, 1, 1, 1, 1.4, 1.4, 2.8])
+                    else:
+                        _cols = st.columns([2.5, 1, 1, 1, 1, 3.5])
+
                     # 銘柄名
-                    _pos_name = open_pos.get(_atk, {}).get("name", _atk)
                     _cols[0].markdown(
                         f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_atk}</div>'
                         f'<div style="font-size:10px;color:#64748b">{_ar.get("sector","")[:16]}</div>',
                         unsafe_allow_html=True,
                     )
-                    # 現在
                     _cols[1].markdown(
                         f'<div style="font-size:13px;color:#94a3b8">{_ar["current_alloc"]:.1f}%</div>',
                         unsafe_allow_html=True,
                     )
-                    # 推奨
                     _cols[2].markdown(
                         f'<div style="font-size:13px;font-weight:700;color:#38bdf8">{_ar["rec_alloc"]:.1f}%</div>',
                         unsafe_allow_html=True,
                     )
-                    # 差分
                     _cols[3].markdown(
-                        f'<div style="font-size:13px;font-weight:700;color:{_delta_color}">'
-                        f'{_delta_icon}{abs(_delta):.1f}pp</div>',
+                        f'<div style="font-size:13px;font-weight:700;color:{_dc}">'
+                        f'{_di}{abs(_delta):.1f}pp</div>',
                         unsafe_allow_html=True,
                     )
-                    # スコアバー
+                    # ルールスコア
                     _cols[4].markdown(
-                        f'<div style="font-size:11px;color:{_score_color};font-weight:700">'
-                        f'{_ar["adjusted_score"]:+.1f}</div>'
+                        f'<div style="font-size:11px;color:{_sc_color};font-weight:700">'
+                        f'{_rule_sc:+.1f}</div>'
                         f'<div style="background:#1e293b;border-radius:3px;height:4px;margin-top:3px">'
-                        f'<div style="background:{_score_color};width:{_score_bar_w}%;height:4px;border-radius:3px"></div>'
+                        f'<div style="background:{_sc_color};width:{_bar_w}%;height:4px;border-radius:3px"></div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
-                    # シグナルチップ
-                    _chip_str = "  ".join(_ar["signals"][:4])
-                    _cols[5].markdown(
-                        f'<div style="font-size:10px;color:#94a3b8;line-height:1.6">{_chip_str}</div>',
-                        unsafe_allow_html=True,
-                    )
+                    if has_ai:
+                        # AIスコア
+                        _ai_color = ("#4ade80" if (_ai_sc or 0) > 1
+                                     else "#ef4444" if (_ai_sc or 0) < -1 else "#94a3b8")
+                        _ai_txt = f'{_ai_sc:+.1f}' if _ai_sc is not None else "─"
+                        _ai_reason = _ar.get("ai_reasoning", "")
+                        _cols[5].markdown(
+                            f'<div style="font-size:11px;color:{_ai_color};font-weight:700" '
+                            f'title="{_ai_reason}">{_ai_txt}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        # シグナル + AI根拠
+                        _sig_str  = "  ".join(_ar["signals"][:3])
+                        _aif_str  = " / ".join(_ar.get("ai_factors", [])[:2])
+                        _cols[6].markdown(
+                            f'<div style="font-size:10px;color:#94a3b8;line-height:1.5">{_sig_str}</div>'
+                            + (f'<div style="font-size:10px;color:#a78bfa;line-height:1.5">🤖 {_aif_str}</div>'
+                               if _aif_str else ""),
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        _chip_str = "  ".join(_ar["signals"][:4])
+                        _cols[5].markdown(
+                            f'<div style="font-size:10px;color:#94a3b8;line-height:1.6">{_chip_str}</div>',
+                            unsafe_allow_html=True,
+                        )
 
                 # リバランシングサマリー
                 _inc = [(t, _alloc_res[t]["delta"]) for t in _alloc_tickers if _alloc_res[t]["delta"] > 1]
