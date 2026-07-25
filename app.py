@@ -19669,12 +19669,24 @@ def _fetch_market_context_for_trading() -> dict:
             pass
         return None
 
-    with _cf.ThreadPoolExecutor(max_workers=5) as ex:
+    def _vix_direct():
+        """^VIX を yfinance から直接取得（compute_us_prediction のスナップショット文字列に依存しない）"""
+        try:
+            import yfinance as _yf2
+            _v = _yf2.Ticker("^VIX").history(period="5d")
+            if not _v.empty:
+                return float(_v["Close"].iloc[-1])
+        except Exception:
+            pass
+        return None
+
+    with _cf.ThreadPoolExecutor(max_workers=6) as ex:
         fg_f    = ex.submit(_fg)
         naaim_f = ex.submit(_naaim)
         sec_f   = ex.submit(_sector)
         nik_f   = ex.submit(_nikkei)
         us_f    = ex.submit(_us)
+        vix_f   = ex.submit(_vix_direct)
         _fg_r = fg_f.result() or {}
         _fg_score = float(_fg_r.get("score") or 50)
         _fg_rating = _fg_r.get("rating") or "Neutral"
@@ -19709,29 +19721,16 @@ def _fetch_market_context_for_trading() -> dict:
         _us_r      = us_f.result() or {}
         _naaim_exp = float(_naaim_r.get("exposure") or 0)
         _us_comp   = float(_us_r.get("composite") or 0)
-        # VIXは文字列 "18.50" として来るのでパース、失敗時はyfinanceから直接取得
-        try:
-            _vix_raw = str(_us_r.get("vix") or "0").replace(",", "").replace("%", "")
-            _vix_val = float(_vix_raw) if _vix_raw not in ("0", "N/A", "?", "") else 0.0
-        except (ValueError, TypeError):
-            _vix_val = 0.0
-        if _vix_val <= 0:
+        # VIX: 並列取得済みの直接値を優先、なければ us_pred のスナップショット文字列から補完
+        _vix_direct_val = vix_f.result()
+        if _vix_direct_val and _vix_direct_val > 0:
+            _vix_val = float(_vix_direct_val)
+        else:
             try:
-                import yfinance as _yf_vix
-                _vix_tk = _yf_vix.Ticker("^VIX")
-                _vix_hist = _vix_tk.history(period="2d")
-                if not _vix_hist.empty:
-                    _vix_val = float(_vix_hist["Close"].iloc[-1])
-            except Exception:
+                _vix_raw = str(_us_r.get("vix") or "0").replace(",", "").replace("%", "")
+                _vix_val = float(_vix_raw) if _vix_raw not in ("0", "N/A", "?", "") else 0.0
+            except (ValueError, TypeError):
                 _vix_val = 0.0
-        # NAIIMも0なら fetch_naaim_data を再度試みる
-        if _naaim_exp <= 0:
-            try:
-                _nd2 = fetch_naaim_data()
-                if _nd2 is not None and not _nd2.empty:
-                    _naaim_exp = float(_nd2.iloc[-1]["NAAIM"])
-            except Exception:
-                pass
 
         # ━━━ クラッシュリスクスコア (0〜10) ━━━
         # リーマン前兆: NAAIM高・VIX上昇・F&G過熱
