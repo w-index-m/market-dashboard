@@ -17857,6 +17857,174 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
 _STOCK_CACHE_HEADERS = ["date", "ticker", "data_json", "updated_at"]
 
 
+def _calc_allocation_recommendations(
+    positions: dict,
+    stock_data_map: dict,
+    market_ctx: dict,
+) -> dict:
+    """テクニカル・セクターRRG・F&Gシグナルから推奨アロケーション比率を算出。
+    Returns: {
+        ticker: {score, adjusted_score, signals, current_alloc, rec_alloc, delta, sector},
+        "_meta": {fg_score, fg_label, fg_mult, fg_desc, total_mkt}
+    }
+    """
+    total_mkt = sum(p.get("market_value") or 0 for p in positions.values())
+
+    # ── Fear & Greed 乗数 ─────────────────────────────────────────
+    fg      = (market_ctx.get("fear_greed") or {})
+    fg_sc   = float(fg.get("score") or 50)
+    fg_lbl  = fg.get("rating") or "Neutral"
+    if fg_sc < 25:
+        fg_mult, fg_desc = 1.15, f"極度の恐怖({fg_sc:.0f}) — 逆張り機会・リスクオン"
+    elif fg_sc < 45:
+        fg_mult, fg_desc = 1.05, f"恐怖({fg_sc:.0f}) — 積極買い寄り"
+    elif fg_sc < 55:
+        fg_mult, fg_desc = 1.00, f"中立({fg_sc:.0f})"
+    elif fg_sc < 75:
+        fg_mult, fg_desc = 0.92, f"強欲({fg_sc:.0f}) — やや慎重"
+    else:
+        fg_mult, fg_desc = 0.82, f"極度の強欲({fg_sc:.0f}) — リスク低減推奨"
+
+    # ── セクターRRG ───────────────────────────────────────────────
+    sector_quad = market_ctx.get("sector_quad") or {}
+    _sq_leading   = sector_quad.get("Leading", [])
+    _sq_improving = sector_quad.get("Improving", [])
+    _sq_weakening = sector_quad.get("Weakening", [])
+    _sq_lagging   = sector_quad.get("Lagging", [])
+
+    def _sector_score_and_label(sec: str):
+        if not sec:
+            return 0.0, ""
+        sl = sec.lower()
+        for s in _sq_leading:
+            if sl in s.lower() or s.lower() in sl:
+                return 2.0, f"🟢 RRG Leading"
+        for s in _sq_improving:
+            if sl in s.lower() or s.lower() in sl:
+                return 1.0, f"🔵 RRG Improving"
+        for s in _sq_weakening:
+            if sl in s.lower() or s.lower() in sl:
+                return -1.0, f"🟡 RRG Weakening"
+        for s in _sq_lagging:
+            if sl in s.lower() or s.lower() in sl:
+                return -2.0, f"🔴 RRG Lagging"
+        return 0.0, ""
+
+    # ── 銘柄別スコア計算 ─────────────────────────────────────────
+    raw_weights: dict = {}
+    result: dict      = {}
+
+    for ticker, pos in positions.items():
+        data    = stock_data_map.get(ticker, {})
+        score   = 0.0
+        signals = []
+
+        price   = float(data.get("price")   or 0)
+        ma25    = float(data.get("ma25")    or 0)
+        ma75    = float(data.get("ma75")    or 0)
+        rsi     = float(data.get("rsi")     or 50)
+        ret_5d  = float(data.get("ret_5d")  or 0)
+        ret_20d = float(data.get("ret_20d") or 0)
+        sector  = data.get("sector") or pos.get("sector", "")
+
+        # 1. 株価 vs MA25
+        if price and ma25:
+            pct = (price / ma25 - 1) * 100
+            if price > ma25:
+                score += 1.0
+                signals.append(f"📈 株価 > MA25({pct:+.1f}%)")
+            else:
+                score -= 1.0
+                signals.append(f"📉 株価 < MA25({pct:+.1f}%)")
+
+        # 2. MA25 vs MA75（ゴールデン/デッドクロス）
+        if ma25 and ma75:
+            if ma25 > ma75:
+                score += 1.0
+                signals.append("✨ ゴールデンクロス(MA25>MA75)")
+            else:
+                score -= 1.5
+                signals.append("☠️ デッドクロス(MA25<MA75)")
+
+        # 3. RSI
+        if rsi:
+            if rsi < 30:
+                score += 2.0; signals.append(f"💙 RSI売られ過ぎ({rsi:.0f})")
+            elif rsi < 45:
+                score += 1.0; signals.append(f"🟢 RSI低め({rsi:.0f})")
+            elif rsi < 60:
+                score += 0.5; signals.append(f"🟡 RSI適正({rsi:.0f})")
+            elif rsi < 70:
+                score += 0.0; signals.append(f"🟠 RSI高め({rsi:.0f})")
+            else:
+                score -= 1.0; signals.append(f"🔴 RSI過熱({rsi:.0f})")
+
+        # 4. 20日モメンタム
+        if ret_20d:
+            if ret_20d > 10:
+                score += 1.5; signals.append(f"🚀 20日強騰({ret_20d:+.1f}%)")
+            elif ret_20d > 3:
+                score += 0.5; signals.append(f"↗ 20日{ret_20d:+.1f}%")
+            elif ret_20d < -10:
+                score -= 1.5; signals.append(f"⚠️ 20日急落({ret_20d:+.1f}%)")
+            elif ret_20d < -3:
+                score -= 0.5; signals.append(f"↘ 20日{ret_20d:+.1f}%")
+
+        # 5. セクターRRG
+        sec_sc, sec_sig = _sector_score_and_label(sector)
+        score += sec_sc
+        if sec_sig:
+            signals.append(sec_sig)
+
+        # F&G乗数適用
+        adjusted = score * fg_mult
+
+        cur_mval  = float(pos.get("market_value") or 0)
+        cur_alloc = cur_mval / total_mkt * 100 if total_mkt > 0 else 0
+
+        result[ticker] = {
+            "score":          round(score, 2),
+            "adjusted_score": round(adjusted, 2),
+            "signals":        signals,
+            "current_alloc":  round(cur_alloc, 1),
+            "sector":         sector,
+        }
+        raw_weights[ticker] = max(adjusted + 6.0, 0.5)  # +6でスコア最低値でも正値保証
+
+    # ── アロケーション正規化（フロア付き）────────────────────────
+    n        = len(positions)
+    floor_pp = max(100 / n * 0.4, 3.0)   # 等分配の40%を最低フロア（最低3%）
+    total_w  = sum(raw_weights.values())
+    allocs   = {t: raw_weights[t] / total_w * 100 for t in raw_weights}
+
+    # フロア未満の銘柄をフロアにクランプし、残りを再配分
+    floored = {t for t, a in allocs.items() if a < floor_pp}
+    if floored:
+        floor_sum = len(floored) * floor_pp
+        remaining = 100.0 - floor_sum
+        non_floored_w = sum(raw_weights[t] for t in raw_weights if t not in floored)
+        for t in allocs:
+            if t in floored:
+                allocs[t] = floor_pp
+            else:
+                allocs[t] = (raw_weights[t] / non_floored_w * remaining
+                             if non_floored_w > 0 else floor_pp)
+
+    for ticker in result:
+        rec = round(allocs.get(ticker, 0), 1)
+        result[ticker]["rec_alloc"] = rec
+        result[ticker]["delta"]     = round(rec - result[ticker]["current_alloc"], 1)
+
+    result["_meta"] = {
+        "fg_score": fg_sc,
+        "fg_label": fg_lbl,
+        "fg_mult":  fg_mult,
+        "fg_desc":  fg_desc,
+        "total_mkt": total_mkt,
+    }
+    return result
+
+
 def _load_stock_data_cache(ticker: str, date: str) -> dict | None:
     """Google Sheetsから当日の銘柄データキャッシュを取得。
     Returns: _fetch_trading_stock_data() と同形式の dict、なければ None
@@ -19702,6 +19870,162 @@ def render_claude_trading_project():
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:6px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── アロケーション試算 ───────────────────────────────────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+                'margin:4px 0 8px">── 推奨アロケーション試算 ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+                '📊 株価位置（MA25/75）・モメンタム・RSI・セクターRRGの強さ・Fear&Greed を数値スコア化して'
+                '推奨配分比率を自動計算します。あくまで参考値です。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            if st.button("📊 アロケーション試算を実行", key="btn_alloc", type="secondary"):
+                with st.spinner("市場データ・銘柄スコア計算中..."):
+                    _alloc_mktctx = _fetch_market_context_for_trading()
+                    _pf_alloc = st.session_state.get("_prefetched_stock_data", {})
+
+                    def _alloc_fetch_one(t_item):
+                        _t, _p = t_item
+                        try:
+                            if _t in _pf_alloc:
+                                return _t, _pf_alloc[_t]
+                            return _t, _fetch_trading_stock_data_with_cache(_t, _t.endswith(".T"))
+                        except Exception:
+                            return _t, {}
+
+                    import concurrent.futures as _cf_alloc
+                    _alloc_data_map = {}
+                    with _cf_alloc.ThreadPoolExecutor(max_workers=6) as _ex_alloc:
+                        _futs_alloc = {_ex_alloc.submit(_alloc_fetch_one, item): item[0]
+                                       for item in open_pos.items()}
+                        for _fut_alloc in _cf_alloc.as_completed(_futs_alloc):
+                            try:
+                                _at, _ad = _fut_alloc.result()
+                                _alloc_data_map[_at] = _ad
+                            except Exception:
+                                pass
+
+                _alloc_result = _calc_allocation_recommendations(
+                    open_pos, _alloc_data_map, _alloc_mktctx
+                )
+                st.session_state["_alloc_result"] = _alloc_result
+
+            # アロケーション結果表示（セッション保持）
+            _alloc_res = st.session_state.get("_alloc_result")
+            if _alloc_res:
+                _meta = _alloc_res.get("_meta", {})
+                fg_sc   = _meta.get("fg_score", 50)
+                fg_desc = _meta.get("fg_desc", "")
+                fg_mult = _meta.get("fg_mult", 1.0)
+
+                # F&G バー
+                fg_color = ("#ef4444" if fg_sc < 25 else
+                            "#f97316" if fg_sc < 45 else
+                            "#eab308" if fg_sc < 55 else
+                            "#22c55e" if fg_sc < 75 else "#a3e635")
+                st.markdown(
+                    f'<div style="background:#0f172a;border:1px solid {fg_color}44;'
+                    f'border-radius:8px;padding:8px 14px;margin-bottom:10px">'
+                    f'<span style="font-size:12px;color:{fg_color};font-weight:700">'
+                    f'😰 Fear&Greed: {fg_sc:.0f}</span>'
+                    f'<span style="font-size:11px;color:#94a3b8;margin-left:8px">{fg_desc}</span>'
+                    f'<span style="font-size:11px;color:#64748b;margin-left:8px">'
+                    f'スコア乗数: ×{fg_mult:.2f}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # 銘柄スコアカード
+                _alloc_tickers = [t for t in _alloc_res if t != "_meta"]
+                _alloc_sorted  = sorted(
+                    _alloc_tickers,
+                    key=lambda t: _alloc_res[t]["adjusted_score"],
+                    reverse=True,
+                )
+
+                # ヘッダー
+                _hcols = st.columns([2.5, 1, 1, 1, 1, 3.5])
+                for _h, _lbl in zip(_hcols, ["銘柄", "現在%", "推奨%", "差分", "スコア", "シグナル"]):
+                    _h.markdown(
+                        f'<div style="font-size:11px;color:#64748b;font-weight:600">{_lbl}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                for _atk in _alloc_sorted:
+                    _ar = _alloc_res[_atk]
+                    _delta = _ar["delta"]
+                    _delta_color = "#4ade80" if _delta > 1 else "#ef4444" if _delta < -1 else "#94a3b8"
+                    _delta_icon  = "▲" if _delta > 1 else "▼" if _delta < -1 else "─"
+                    _score_color = ("#4ade80" if _ar["adjusted_score"] > 2
+                                    else "#fbbf24" if _ar["adjusted_score"] > 0
+                                    else "#ef4444")
+                    _score_bar_w = min(max(int((_ar["adjusted_score"] + 7) / 14 * 100), 5), 100)
+
+                    _cols = st.columns([2.5, 1, 1, 1, 1, 3.5])
+                    # 銘柄名
+                    _pos_name = open_pos.get(_atk, {}).get("name", _atk)
+                    _cols[0].markdown(
+                        f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_atk}</div>'
+                        f'<div style="font-size:10px;color:#64748b">{_ar.get("sector","")[:16]}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # 現在
+                    _cols[1].markdown(
+                        f'<div style="font-size:13px;color:#94a3b8">{_ar["current_alloc"]:.1f}%</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # 推奨
+                    _cols[2].markdown(
+                        f'<div style="font-size:13px;font-weight:700;color:#38bdf8">{_ar["rec_alloc"]:.1f}%</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # 差分
+                    _cols[3].markdown(
+                        f'<div style="font-size:13px;font-weight:700;color:{_delta_color}">'
+                        f'{_delta_icon}{abs(_delta):.1f}pp</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # スコアバー
+                    _cols[4].markdown(
+                        f'<div style="font-size:11px;color:{_score_color};font-weight:700">'
+                        f'{_ar["adjusted_score"]:+.1f}</div>'
+                        f'<div style="background:#1e293b;border-radius:3px;height:4px;margin-top:3px">'
+                        f'<div style="background:{_score_color};width:{_score_bar_w}%;height:4px;border-radius:3px"></div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    # シグナルチップ
+                    _chip_str = "  ".join(_ar["signals"][:4])
+                    _cols[5].markdown(
+                        f'<div style="font-size:10px;color:#94a3b8;line-height:1.6">{_chip_str}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                # リバランシングサマリー
+                _inc = [(t, _alloc_res[t]["delta"]) for t in _alloc_tickers if _alloc_res[t]["delta"] > 1]
+                _dec = [(t, _alloc_res[t]["delta"]) for t in _alloc_tickers if _alloc_res[t]["delta"] < -1]
+                _inc_str = " / ".join(f"{t}(+{d:.1f}pp)" for t, d in sorted(_inc, key=lambda x:-x[1]))
+                _dec_str = " / ".join(f"{t}({d:.1f}pp)" for t, d in sorted(_dec, key=lambda x:x[1]))
+                st.markdown(
+                    f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-top:10px;'
+                    f'border:1px solid #1e293b;font-size:12px">'
+                    + (f'<div style="color:#4ade80;margin-bottom:4px">▲ 増やす推奨: {_inc_str}</div>' if _inc_str else '')
+                    + (f'<div style="color:#ef4444">▼ 減らす推奨: {_dec_str}</div>' if _dec_str else '')
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
                 unsafe_allow_html=True,
             )
 
