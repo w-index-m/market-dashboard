@@ -18368,6 +18368,8 @@ def _generate_ai_trade_signal(
 
 **核心的な根拠**: （あなたが最も重要と判断した視点から150〜300字で）
 
+**テクニカル評価**: RSI={rsi}（過熱/適正/売られ過ぎの判定）| MA25={ma25}{currency}に対する株価位置 | トレンド方向
+
 **最も注目すべき指標/データ**: このデータセットの中でこの銘柄の評価に決定的な情報を2〜3点
 
 **目標株価**: X{currency}（+Y%）｜あなた独自の根拠
@@ -18399,6 +18401,9 @@ def _generate_ai_trade_signal(
         stop_line    = f"**損切りライン（広め）**: X{currency}（-15〜20%）｜ファンダが崩れる水準"
         period_line  = "**保有期間目安**: 6ヶ月〜2年（決算ごとに再評価）"
         extra_section = (
+            f"**テクニカル評価**: RSI={rsi}（70↑過熱/30↓売られ過ぎ）"
+            f" | MA25={ma25}{currency}に対し株価は上/下"
+            f" | MA75={ma75}{currency}との位置関係とトレンド方向をコメント\n"
             f"**バリュエーション評価**: 現在PER {trailing_pe or '不明'}倍は割安/適正/割高か。過去PER推移と比較した見解\n"
             "**成長ドライバー**: 今後2年で業績を牽引する要因を1〜2点\n"
             "**リスク要因**: ビジネスモデルを脅かす競合・規制・マクロ要因"
@@ -19082,15 +19087,24 @@ def _generate_full_portfolio_recommendation(
         gain   = mval - cost
         gp     = gain / cost * 100 if cost > 0 else 0
         alloc  = mval / total_mkt * 100 if total_mkt > 0 else 0
-        price  = data.get("price", "-")
-        rsi    = data.get("rsi", "-")
-        ma25   = data.get("ma25", "-")
-        ma75   = data.get("ma75", "-")
-        sec    = data.get("sector") or p.get("sector", "その他")
+        price   = data.get("price", "-")
+        rsi     = data.get("rsi", "-")
+        ma25    = data.get("ma25", "-")
+        ma75    = data.get("ma75", "-")
+        ret_1d  = data.get("ret_1d")
+        ret_5d  = data.get("ret_5d")
+        vol_r   = data.get("vol_ratio")
+        sec     = data.get("sector") or p.get("sector", "その他")
+        ret_str_parts = []
+        if ret_1d is not None: ret_str_parts.append(f"1日:{ret_1d:+.1f}%")
+        if ret_5d is not None: ret_str_parts.append(f"5日:{ret_5d:+.1f}%")
+        if vol_r  is not None: ret_str_parts.append(f"出来高比:{vol_r:.1f}倍")
+        ret_str = " | ".join(ret_str_parts) or "-"
         news_lines = [f"    ・{n}" for n in (data.get("news") or [])[:4] if n]
         block = (
             f"【{flag} {ticker} | {p['name']}】\n"
             f"  現在値: {price}{cur} | RSI: {rsi} | MA25: {ma25}{cur} | MA75: {ma75}{cur}\n"
+            f"  リターン: {ret_str}\n"
             f"  評価額: {mval:,.0f}{cur}({alloc:.1f}%) | 含み: {gain:+,.0f}{cur}({gp:+.1f}%)\n"
             f"  取得単価: {p.get('avg_cost',0):.1f}{cur} | 保有: {int(p.get('qty',0))}株\n"
             f"  セクター: {sec}\n"
@@ -19115,7 +19129,7 @@ def _generate_full_portfolio_recommendation(
 ━━━ 出力形式（必ずこの構成で日本語で回答）━━━
 
 ## 📊 市場環境サマリー
-windexモデル（Fear&Greed/NAAIM/セクターRRG/Nikkei・US予測）から読み取れる現在の相場環境を3〜4文で。リスクオン/オフの判断と根拠を明記。
+Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体的な数値を引用しながら、現在の相場環境（リスクオン/中立/リスクオフ）を3〜4文で説明すること。
 
 ---
 
@@ -19125,8 +19139,9 @@ windexモデル（Fear&Greed/NAAIM/セクターRRG/Nikkei・US予測）から読
 
 ### [銘柄名（ティッカー）]
 - **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い]
+- **テクニカル評価**: RSI=XX（70↑過熱/30↓売られ過ぎ）| MA25に対して株価は上/下 | 5日リターンとモメンタム方向
 - **IR・ニュース評価**: 最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文
-- **市場環境との整合性**: RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
+- **市場環境との整合性**: Fear&Greed・RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
 - **アクション水準**: 具体的な価格や条件（○○円/ドルを超えたら / 下回ったら実行）
 
 ---
