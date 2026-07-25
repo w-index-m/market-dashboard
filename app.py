@@ -18906,7 +18906,32 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                         seen_titles.add(_t)
                         news_items.append(_ni)
 
-            # ④ 全ソース合わせて3件未満なら yfinance
+            # ④ Yahoo Finance Japan RSS（日本株専用フォールバック）
+            if len(news_items) < 4:
+                try:
+                    _yj_url = f"https://finance.yahoo.co.jp/rss/news?code={code}"
+                    _yj_resp = requests.get(_yj_url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+                    if _yj_resp.status_code == 200:
+                        from xml.etree import ElementTree as _ET
+                        _yj_root = _ET.fromstring(_yj_resp.text)
+                        _yj_ns   = {"atom": "http://www.w3.org/2005/Atom"}
+                        # RSS 2.0
+                        for _item in _yj_root.iter("item"):
+                            _ttl = (_item.findtext("title") or "").strip()
+                            _lnk = (_item.findtext("link") or "").strip()
+                            if _ttl and _ttl not in seen_titles and len(news_items) < 5:
+                                seen_titles.add(_ttl)
+                                news_items.append({
+                                    "headline":    _ttl,
+                                    "headline_ja": _ttl,
+                                    "url":         _lnk,
+                                    "date":        (_item.findtext("pubDate") or "")[:10],
+                                    "source":      "Yahoo!ファイナンス",
+                                })
+                except Exception:
+                    pass
+
+            # ⑤ 全ソース合わせて3件未満なら yfinance
             if len(news_items) < 3:
                 try:
                     yf_news = yf.Ticker(ticker).news or []
@@ -20778,27 +20803,40 @@ def render_claude_trading_project():
                             _ni_list = _sd.get("news_items") or []
                             if not _ni_list:
                                 _ni_list = [{"headline": n} for n in (_sd.get("news") or [])]
+                            _tk_disp = _get_stock_display_name(_tk)
+                            _src_tags = list({_ni.get("source","") for _ni in _ni_list if _ni.get("source")})
+                            _src_str  = " / ".join(_src_tags) if _src_tags else ""
+                            st.markdown(
+                                f'<div style="font-size:12px;font-weight:700;color:#94a3b8;'
+                                f'margin:10px 0 4px">■ {_tk} — {_tk_disp}'
+                                + (f' <span style="font-size:10px;color:#475569">({_src_str})</span>' if _src_str else '')
+                                + f'</div>',
+                                unsafe_allow_html=True,
+                            )
                             if _ni_list:
-                                st.markdown(
-                                    f'<div style="font-size:12px;font-weight:700;color:#94a3b8;'
-                                    f'margin:8px 0 4px">■ {_tk} — {open_pos.get(_tk, {}).get("name","")}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                                for _ni in _ni_list[:4]:
+                                for _ni in _ni_list[:5]:
                                     _hja = _ni.get("headline_ja", "") or _ni.get("headline", "")
                                     _url = _ni.get("url", "")
+                                    _dt  = _ni.get("date", "")[:10]
+                                    _dt_str = f'<span style="color:#475569;margin-right:4px">{_dt}</span>' if _dt else ""
                                     if _url:
                                         st.markdown(
                                             f'<div style="font-size:11px;padding:2px 0">'
-                                            f'• <a href="{_url}" target="_blank" '
+                                            f'• {_dt_str}<a href="{_url}" target="_blank" '
                                             f'style="color:#60a5fa;text-decoration:none">{_hja}</a></div>',
                                             unsafe_allow_html=True,
                                         )
                                     else:
                                         st.markdown(
-                                            f'<div style="font-size:11px;color:#cbd5e1;padding:2px 0">• {_hja}</div>',
+                                            f'<div style="font-size:11px;color:#cbd5e1;padding:2px 0">• {_dt_str}{_hja}</div>',
                                             unsafe_allow_html=True,
                                         )
+                            else:
+                                st.markdown(
+                                    '<div style="font-size:11px;color:#475569;padding:2px 0 6px">'
+                                    '📭 ニュース・IR未取得（みんかぶ/EDINET/TDnet/Yahoo!F未ヒット）</div>',
+                                    unsafe_allow_html=True,
+                                )
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
