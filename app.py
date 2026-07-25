@@ -19041,7 +19041,6 @@ def render_claude_trading_project():
             st.info("取引記録がないか、株価データを取得できませんでした。")
         else:
             import plotly.graph_objects as go
-            from datetime import date as _date
 
             # ── 全期間メトリクス（常に全期間ベース）─────────────
             latest      = hist_df.iloc[-1]
@@ -19393,7 +19392,6 @@ def render_claude_trading_project():
             )
 
             # 月別配当を集計
-            from datetime import datetime, timedelta
             months_6 = []
             now = datetime.now()
             for i in range(5, -1, -1):
