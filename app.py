@@ -17854,6 +17854,103 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
         return list(headlines_tuple)
 
 
+_EDINET_DOC_LABELS = {
+    "020": "大量保有報告書",
+    "030": "変更報告書（大量保有）",
+    "070": "公開買付届出書",
+    "072": "公開買付（訂正）",
+    "076": "意見表明報告書",
+    "120": "有価証券報告書",
+    "130": "訂正有価証券報告書",
+    "140": "四半期報告書",
+    "150": "訂正四半期報告書",
+    "160": "臨時報告書",
+    "161": "訂正臨時報告書",
+    "180": "自己株券買付状況報告書",
+}
+# 投資家にとって重要度の高い書類種別コード
+_EDINET_PRIORITY_CODES = {"160", "161", "140", "150", "120", "070", "072", "020", "030"}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_edinet_docs_for_date(date_str: str) -> list:
+    """EDINET API v2 から指定日の全書類メタデータを取得（TTL=1h）。
+    date_str: "YYYY-MM-DD"
+    Returns: [{"secCode", "filerName", "docID", "docTypeCode", "docDescription",
+               "submitDateTime", "currentReportReason"}]
+    """
+    try:
+        resp = requests.get(
+            "https://disclosure.edinet-fsa.go.jp/api/v2/documents.json",
+            params={"date": date_str, "type": "2"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        results = data.get("results") or []
+        return [
+            {
+                "secCode":             r.get("secCode", ""),
+                "filerName":           r.get("filerName", ""),
+                "docID":               r.get("docID", ""),
+                "docTypeCode":         r.get("docTypeCode", ""),
+                "docDescription":      r.get("docDescription", ""),
+                "submitDateTime":      r.get("submitDateTime", ""),
+                "currentReportReason": r.get("currentReportReason") or "",
+            }
+            for r in results
+            if r.get("secCode") and r.get("docTypeCode") in _EDINET_PRIORITY_CODES
+        ]
+    except Exception as e:
+        logger.warning(f"[trading] EDINET {date_str} fetch失敗: {e}")
+        return []
+
+
+def _fetch_edinet_news(code: str, days: int = 30, max_items: int = 5) -> list:
+    """EDINET APIから指定銘柄の直近書類を取得。
+    code: .T を除いたコード（例: "7203"）→ EDINETのsecCodeは末尾に"0"付加
+    Returns: [{headline, headline_ja, url, date, source}]
+    """
+    # EDINETのsecCodeは4桁コード+"0"（例: "72030"）。英数混在コード(285A)も同様
+    sec_code_edinet = code + "0"
+    results = []
+    seen: set = set()
+
+    for days_ago in range(0, days):
+        if len(results) >= max_items:
+            break
+        date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        docs = _fetch_edinet_docs_for_date(date_str)
+        for doc in docs:
+            if doc["secCode"] != sec_code_edinet:
+                continue
+            doc_id    = doc["docID"]
+            type_code = doc["docTypeCode"]
+            type_lbl  = _EDINET_DOC_LABELS.get(type_code, f"書類({type_code})")
+            desc      = doc.get("docDescription") or type_lbl
+            reason    = doc.get("currentReportReason") or ""
+            title     = f"【{type_lbl}】{desc}" + (f"（{reason}）" if reason else "")
+            if title in seen:
+                continue
+            seen.add(title)
+            # EDINETの書類閲覧URL
+            view_url = f"https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?{doc_id},,"
+            dt_str   = doc.get("submitDateTime", "")[:10]  # "YYYY-MM-DD HH:MM" → 日付のみ
+            results.append({
+                "headline":    title,
+                "headline_ja": title,
+                "url":         view_url,
+                "date":        dt_str,
+                "source":      "EDINET",
+            })
+            if len(results) >= max_items:
+                break
+
+    return results
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
     """みんかぶの銘柄ニュースページから適時開示・ニュースを取得（TTL=30分）。
@@ -18087,28 +18184,32 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                 for i, n in enumerate(news_items):
                     n["headline_ja"] = ja_list[i] if i < len(ja_list) else n["headline"]
         else:
-            # 日本株: みんかぶ優先 → TDnet フォールバック
+            # 日本株: みんかぶ + EDINET + TDnet を並列取得してマージ
+            import concurrent.futures as _cf_news
             code = ticker.replace(".T", "")
 
-            # ① みんかぶから取得
-            news_items = _fetch_minkabu_jp_news(code, max_items=6)
+            def _get_minkabu():
+                return _fetch_minkabu_jp_news(code, max_items=6)
 
-            # ② みんかぶで取れなかった場合は TDnet 30日分を補完
-            if len(news_items) < 3:
+            def _get_edinet():
+                return _fetch_edinet_news(code, days=30, max_items=4)
+
+            def _get_tdnet():
+                items = []
                 for days_ago in range(0, 30):
-                    if len(news_items) >= 5:
+                    if len(items) >= 4:
                         break
                     date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
                     try:
                         tdnet_items = fetch_tdnet_items_for_date(date_str)
                         matched = [it for it in tdnet_items if code in (it.get("code") or "")]
                         for it in matched[:2]:
-                            if len(news_items) >= 5:
+                            if len(items) >= 4:
                                 break
                             title = it.get("title", "")
                             if title:
                                 ymd = date_str
-                                news_items.append({
+                                items.append({
                                     "headline":    title,
                                     "headline_ja": title,
                                     "url":         it.get("pdf_url", ""),
@@ -18117,15 +18218,35 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                                 })
                     except Exception:
                         pass
+                return items
 
-            # ③ それでも足りなければ yfinance
+            # 3ソースを並列取得（最大10秒待機）
+            with _cf_news.ThreadPoolExecutor(max_workers=3) as _ex_news:
+                _f_mk  = _ex_news.submit(_get_minkabu)
+                _f_ed  = _ex_news.submit(_get_edinet)
+                _f_td  = _ex_news.submit(_get_tdnet)
+                mk_items = _f_mk.result(timeout=12) or []
+                ed_items = _f_ed.result(timeout=12) or []
+                td_items = _f_td.result(timeout=12) or []
+
+            # マージ: みんかぶ優先（重複タイトルを除外）、次にEDINET、TDnet
+            seen_titles: set = set()
+            for _src_list in [mk_items, ed_items, td_items]:
+                for _ni in _src_list:
+                    _t = _ni.get("headline", "")
+                    if _t and _t not in seen_titles:
+                        seen_titles.add(_t)
+                        news_items.append(_ni)
+
+            # ④ 全ソース合わせて3件未満なら yfinance
             if len(news_items) < 3:
                 try:
                     yf_news = yf.Ticker(ticker).news or []
                     for article in yf_news[:max(0, 5 - len(news_items))]:
                         title = article.get("title", "")
                         link  = article.get("link", "")
-                        if title:
+                        if title and title not in seen_titles:
+                            seen_titles.add(title)
                             news_items.append({
                                 "headline":    title,
                                 "headline_ja": title,
