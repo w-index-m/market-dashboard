@@ -835,6 +835,58 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
     return ("⚠️ AI APIが設定されていません。", "none")
 
 
+def _call_ai_for_trading(
+    prompt: str,
+    model_pref: str = "auto",
+    max_output_tokens: int = 900,
+    temperature: float = 0.3,
+) -> tuple:
+    """トレーディング分析用AI呼び出し。model_pref でプロバイダーを指定できる。
+    model_pref: "auto" | "gemini" | "groq" | "openrouter"
+    Returns: (text: str, model_label: str)
+    """
+    if model_pref == "groq":
+        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"Groq ({model})"
+        # Groq 失敗時は OpenRouter へ
+        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        return (text, f"OpenRouter ({model}) ※Groq失敗") if model else ("⚠️ Groq/OpenRouter 失敗", "none")
+
+    elif model_pref == "openrouter":
+        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"OpenRouter ({model})"
+        # OpenRouter 失敗時は Groq へ
+        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        return (text, f"Groq ({model}) ※OpenRouter失敗") if model else ("⚠️ OpenRouter/Groq 失敗", "none")
+
+    elif model_pref == "gemini":
+        # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
+        if GENAI_AVAILABLE and GEMINI_API_KEY:
+            for model_name in MODEL_FALLBACKS:
+                try:
+                    genai.configure(api_key=GEMINI_API_KEY)
+                    gm = genai.GenerativeModel(model_name)
+                    resp = gm.generate_content(
+                        prompt,
+                        generation_config=genai.types.GenerationConfig(
+                            max_output_tokens=max_output_tokens,
+                            temperature=temperature,
+                        )
+                    )
+                    if hasattr(resp, "text") and resp.text:
+                        return resp.text.strip(), f"Gemini ({model_name})"
+                except Exception as e:
+                    if is_gemini_quota_error(e):
+                        return "⚠️ Gemini quota超過。モデルを切り替えてください。", "none"
+                    continue
+        return "⚠️ Gemini APIエラー", "none"
+
+    else:  # auto
+        return call_ai_with_fallback(prompt, max_output_tokens, temperature)
+
+
 # ===========================
 # 関連ダッシュボードリンク HTML
 # ===========================
@@ -18105,9 +18157,11 @@ def _generate_ai_trade_signal(
     position_ctx: dict | None = None,
     past_signals: list | None = None,
     mode: str = "growth",
+    model_pref: str = "auto",
 ) -> dict:
     """AIによる売買シグナルを生成。
-    mode: "growth" = 長期育成（ファンダ重視）/ "momentum" = モメンタム（テクニカル重視）
+    mode: "growth" | "momentum" | "autonomous"
+    model_pref: "auto" | "gemini" | "groq" | "openrouter"
     """
     price    = data.get("price", "不明")
     ma25     = data.get("ma25", "不明")
@@ -18175,9 +18229,9 @@ def _generate_ai_trade_signal(
 
     # ── モード別プロンプト分岐 ────────────────────────────────
     if mode == "momentum":
-        mode_header = "📈 モメンタム追跡モード（タイムフレーム: 日足 + 週足）"
+        mode_header  = "⚡ モメンタム追跡モード（タイムフレーム: 日足 + 週足）"
         analyst_role = "プロの短期トレーダー・モメンタムアナリスト"
-        scenario = f"{base_scenario}（モメンタム戦略：1〜4週間の価格上昇モメンタムを捉える）"
+        scenario     = f"{base_scenario}（モメンタム戦略：1〜4週間の価格上昇モメンタムを捉える）"
         analysis_focus = """
 【分析の優先順位（モメンタムモード）】
 1. 価格モメンタム: RSI・20日リターン・52週高値からの乖離・直近ブレイクアウト有無
@@ -18186,19 +18240,72 @@ def _generate_ai_trade_signal(
 4. 相対強度: 市場全体 vs この銘柄の強弱
 5. ニュース触媒: 決算サプライズ・製品発表・アップグレードなど即時反応を起こすイベント
 ※ PER・PBR等のバリュエーションは補助情報として参照する程度でよい"""
-        target_line = f"**利確目標（モメンタム）**: X{currency}（+Y%）｜直近レジスタンス or 目標水準"
-        stop_line   = f"**損切りライン（タイト）**: X{currency}（-5〜8%以内）｜サポート割れで即撤退"
-        period_line = "**保有期間目安**: 1〜4週間（モメンタム喪失で即撤退）"
+        target_line  = f"**利確目標（モメンタム）**: X{currency}（+Y%）｜直近レジスタンス or 目標水準"
+        stop_line    = f"**損切りライン（タイト）**: X{currency}（-5〜8%以内）｜サポート割れで即撤退"
+        period_line  = "**保有期間目安**: 1〜4週間（モメンタム喪失で即撤退）"
         extra_section = """
 **モメンタム強度**: RSI・出来高・価格位置から「強い / 中程度 / 弱い」を判定
 **エントリータイミング**: 今すぐ / 押し目待ち（何円台まで待つか） / ブレイクアウト確認後
 **モメンタム終了シグナル**: どういう状態になったら撤退すべきか（出来高急減・RSI過熱 など）"""
-        reason_note = "テクニカル（モメンタム・出来高・価格位置）中心に200字以内で"
+        reason_note  = "テクニカル（モメンタム・出来高・価格位置）中心に200字以内で"
+        output_fmt   = f"""🏷️ モード: {mode_header}
 
-    else:  # growth モード
-        mode_header = "🌱 長期育成モード（タイムフレーム: 月足 + 週足）"
+{judgment}
+
+**理由**: （{reason_note}）
+
+{extra_section}
+
+{target_line}
+
+{stop_line}
+
+{period_line}
+
+**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点"""
+
+    elif mode == "autonomous":
+        mode_header  = "🤖 AI自律モード（分析軸・フレームワークはAIが自律決定）"
+        analyst_role = "完全自律型の株式アナリスト"
+        scenario     = f"{base_scenario}"
+        analysis_focus = """
+【あなたへの指示】
+提供されたデータを全て俯瞰し、この銘柄を「今どのような視点で見るべきか」を自分で判断してください。
+- 長期成長株として保有すべきか
+- 短期モメンタムで乗るべきか
+- バリュー株・ターンアラウンドとして評価すべきか
+- 決算プレイとして短期勝負すべきか
+- または今は見送りが最善か
+
+最初にあなたが選んだ「分析フレームワーク」を明示し、そのフレームで判断してください。
+自由な視点で、あなたが最も投資家の意思決定に役立つと考える観点を優先してください。"""
+        output_fmt = f"""🏷️ モード: {mode_header}
+
+**あなたが選んだ分析フレームワーク**: （成長株/モメンタム/バリュー/決算プレイ/その他）とその理由を1文で
+
+{judgment}
+
+**核心的な根拠**: （あなたが最も重要と判断した視点から150〜300字で）
+
+**最も注目すべき指標/データ**: このデータセットの中でこの銘柄の評価に決定的な情報を2〜3点
+
+**目標株価**: X{currency}（+Y%）｜あなた独自の根拠
+
+**損切りライン**: X{currency}（-Y%）｜このフレームが崩れる水準
+
+**推奨保有期間**: （あなたが選んだフレームに応じて自由に設定）
+
+**AIとしての独自見解**: 人間のアナリストが見落としがちな、データから読み取れる非線形なシグナルや反直感的な観点を1点
+
+**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点"""
+        analysis_focus = analysis_focus  # already set above
+        # autonomous は output_fmt 直接使用するので他の変数は不要
+        extra_section = reason_note = target_line = stop_line = period_line = ""
+
+    else:  # growth モード（デフォルト）
+        mode_header  = "🌱 長期育成モード（タイムフレーム: 月足 + 週足）"
         analyst_role = "プロの長期成長株アナリスト"
-        scenario = f"{base_scenario}（長期育成戦略：6ヶ月〜2年かけてファンダメンタル価値に収束させる）"
+        scenario     = f"{base_scenario}（長期育成戦略：6ヶ月〜2年かけてファンダメンタル価値に収束させる）"
         analysis_focus = """
 【分析の優先順位（長期育成モード）】
 1. 成長性: EPS成長率・売上成長率・次回決算の予想サプライズ
@@ -18207,14 +18314,30 @@ def _generate_ai_trade_signal(
 4. 財務健全性: PEG・自己資本比率・フリーキャッシュフロー
 5. テクニカル: 押し目での仕込み機会・トレンドの方向性（補助として使用）
 ※ 短期の株価変動よりも「2年後の企業価値」で判断する"""
-        target_line = f"**目標株価（長期）**: X{currency}（+Y%）｜予想EPS × 適正PER倍率で算出"
-        stop_line   = f"**損切りライン（広め）**: X{currency}（-15〜20%）｜ファンダが崩れる水準"
-        period_line = "**保有期間目安**: 6ヶ月〜2年（決算ごとに再評価）"
-        extra_section = """
-**バリュエーション評価**: 現在PER {trailing_pe}倍は割安/適正/割高か。過去PER推移と比較した見解
-**成長ドライバー**: 今後2年で業績を牽引する要因を1〜2点
-**リスク要因**: ビジネスモデルを脅かす競合・規制・マクロ要因""".format(trailing_pe=trailing_pe or "不明")
-        reason_note = "ファンダメンタルズ・バリュエーション・成長性を中心に250字以内で"
+        target_line  = f"**目標株価（長期）**: X{currency}（+Y%）｜予想EPS × 適正PER倍率で算出"
+        stop_line    = f"**損切りライン（広め）**: X{currency}（-15〜20%）｜ファンダが崩れる水準"
+        period_line  = "**保有期間目安**: 6ヶ月〜2年（決算ごとに再評価）"
+        extra_section = (
+            f"**バリュエーション評価**: 現在PER {trailing_pe or '不明'}倍は割安/適正/割高か。過去PER推移と比較した見解\n"
+            "**成長ドライバー**: 今後2年で業績を牽引する要因を1〜2点\n"
+            "**リスク要因**: ビジネスモデルを脅かす競合・規制・マクロ要因"
+        )
+        reason_note  = "ファンダメンタルズ・バリュエーション・成長性を中心に250字以内で"
+        output_fmt   = f"""🏷️ モード: {mode_header}
+
+{judgment}
+
+**理由**: （{reason_note}）
+
+{extra_section}
+
+{target_line}
+
+{stop_line}
+
+{period_line}
+
+**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点"""
 
     past_change_line = (
         "\n**前回との変化**: 前回分析からPER・株価・業績予想がどう変わったか1〜2文で"
@@ -18227,7 +18350,7 @@ def _generate_ai_trade_signal(
 
 【テクニカルデータ】
 - 現在株価: {price} {currency}
-- 25日移動平均: {ma25} {currency}（乖離: 株価との差に注目）
+- 25日移動平均: {ma25} {currency}
 - 75日移動平均: {ma75} {currency}
 - RSI(14): {rsi}
 - 直近1日リターン: {ret_1d}%
@@ -18252,25 +18375,13 @@ def _generate_ai_trade_signal(
 
 【出力形式】必ず以下の形式で回答してください：
 
-🏷️ モード: {mode_header}
-
-{judgment}
-
-**理由**: （{reason_note}）
-
-{extra_section}
-
-{target_line}
-
-{stop_line}
-
-{period_line}
-
-**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点
+{output_fmt}
 {past_change_line}
 """
     try:
-        text, model_used = call_ai_with_fallback(prompt, max_output_tokens=900, temperature=0.3)
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=950, temperature=0.3
+        )
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
@@ -18506,47 +18617,60 @@ def render_claude_trading_project():
     # ── 投資戦略モード切替 ─────────────────────────────────────
     _cur_mode = st.session_state.get("trading_mode", "growth")
 
-    col_g, col_m = st.columns(2)
-    with col_g:
-        g_border = "#22c55e" if _cur_mode == "growth" else "#334155"
-        g_bg     = "#052e16" if _cur_mode == "growth" else "#0f172a"
-        st.markdown(
-            f'<div style="background:{g_bg};border:2px solid {g_border};border-radius:10px;'
-            f'padding:14px 18px;cursor:pointer;transition:all 0.2s">'
-            f'<div style="font-size:15px;font-weight:700;color:#4ade80">🌱 長期育成モード</div>'
-            f'<div style="font-size:12px;color:#86efac;margin-top:4px">'
-            f'ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年</div>'
-            f'<div style="font-size:11px;color:#64748b;margin-top:4px">'
-            f'PER/EPS成長/競合優位性 · 損切 -15〜20% · 目標=適正PER×予想EPS</div>'
-            f'{"<div style=margin-top:6px;font-size:11px;color:#4ade80;font-weight:600>✓ 選択中</div>" if _cur_mode == "growth" else ""}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        if st.button("🌱 長期育成モードに切替", key="btn_mode_growth",
-                     type="primary" if _cur_mode == "growth" else "secondary",
-                     use_container_width=True):
-            st.session_state["trading_mode"] = "growth"
-            st.rerun()
+    _MODE_DEFS = [
+        {
+            "key":    "growth",
+            "emoji":  "🌱",
+            "label":  "長期育成モード",
+            "sub":    "ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年",
+            "detail": "PER/EPS成長/競合優位性 · 損切 -15〜20% · 目標=適正PER×予想EPS",
+            "color":  "#4ade80", "sub_color": "#86efac",
+            "border": "#22c55e", "bg": "#052e16",
+        },
+        {
+            "key":    "momentum",
+            "emoji":  "⚡",
+            "label":  "モメンタムモード",
+            "sub":    "テクニカル重視 · 保有期間 1〜4週間",
+            "detail": "RSI/出来高/ブレイクアウト · 損切 -5〜8% · 目標=直近レジスタンス",
+            "color":  "#fbbf24", "sub_color": "#fcd34d",
+            "border": "#f59e0b", "bg": "#1c1400",
+        },
+        {
+            "key":    "autonomous",
+            "emoji":  "🤖",
+            "label":  "AI自律モード",
+            "sub":    "AIが分析軸を自律決定 · 保有期間は状況次第",
+            "detail": "成長/モメンタム/バリュー/決算プレイ etc. を最適選択 · 独自見解あり",
+            "color":  "#a78bfa", "sub_color": "#c4b5fd",
+            "border": "#8b5cf6", "bg": "#1e0040",
+        },
+    ]
 
-    with col_m:
-        m_border = "#f59e0b" if _cur_mode == "momentum" else "#334155"
-        m_bg     = "#1c1400" if _cur_mode == "momentum" else "#0f172a"
-        st.markdown(
-            f'<div style="background:{m_bg};border:2px solid {m_border};border-radius:10px;'
-            f'padding:14px 18px;cursor:pointer;transition:all 0.2s">'
-            f'<div style="font-size:15px;font-weight:700;color:#fbbf24">⚡ モメンタムモード</div>'
-            f'<div style="font-size:12px;color:#fcd34d;margin-top:4px">'
-            f'テクニカル重視 · 保有期間 1〜4週間</div>'
-            f'<div style="font-size:11px;color:#64748b;margin-top:4px">'
-            f'RSI/出来高/ブレイクアウト · 損切 -5〜8% · 目標=直近レジスタンス</div>'
-            f'{"<div style=margin-top:6px;font-size:11px;color:#fbbf24;font-weight:600>✓ 選択中</div>" if _cur_mode == "momentum" else ""}'
-            f'</div>',
+    mode_cols = st.columns(3)
+    for _md, _col in zip(_MODE_DEFS, mode_cols):
+        _is_sel = _cur_mode == _md["key"]
+        _border = _md["border"] if _is_sel else "#334155"
+        _bg     = _md["bg"]     if _is_sel else "#0f172a"
+        _check  = (f'<div style="margin-top:6px;font-size:11px;color:{_md["color"]};font-weight:600">✓ 選択中</div>'
+                   if _is_sel else "")
+        _col.markdown(
+            f'<div style="background:{_bg};border:2px solid {_border};border-radius:10px;'
+            f'padding:12px 14px">'
+            f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
+            f'{_md["emoji"]} {_md["label"]}</div>'
+            f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
+            f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
+            f'{_check}</div>',
             unsafe_allow_html=True,
         )
-        if st.button("⚡ モメンタムモードに切替", key="btn_mode_momentum",
-                     type="primary" if _cur_mode == "momentum" else "secondary",
-                     use_container_width=True):
-            st.session_state["trading_mode"] = "momentum"
+        if _col.button(
+            f'{_md["emoji"]} {"選択中" if _is_sel else "切替"}',
+            key=f'btn_mode_{_md["key"]}',
+            type="primary" if _is_sel else "secondary",
+            use_container_width=True,
+        ):
+            st.session_state["trading_mode"] = _md["key"]
             st.rerun()
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -18661,22 +18785,41 @@ def render_claude_trading_project():
             pos_ctx = sel.get("position_ctx")
 
             current_mode = st.session_state.get("trading_mode", "growth")
-            mode_badge = "🌱 長期育成" if current_mode == "growth" else "⚡ モメンタム"
-            mode_color = "#4ade80" if current_mode == "growth" else "#fbbf24"
+            _mode_meta = {
+                "growth":     ("🌱 長期育成", "#4ade80"),
+                "momentum":   ("⚡ モメンタム", "#fbbf24"),
+                "autonomous": ("🤖 AI自律", "#a78bfa"),
+            }
+            mode_badge, mode_color = _mode_meta.get(current_mode, ("🌱 長期育成", "#4ade80"))
             st.markdown(
-                f'<div style="font-size:12px;color:{mode_color};margin-bottom:8px">'
+                f'<div style="font-size:12px;color:{mode_color};margin-bottom:6px">'
                 f'現在のモード: <b>{mode_badge}</b></div>',
                 unsafe_allow_html=True,
             )
 
-            if st.button("🤖 Claude に分析させる", type="primary"):
+            # モデル選択
+            _model_opts = {
+                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                "🟡 Gemini（Google）":               "gemini",
+                "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
+                "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
+            }
+            sel_model_label = st.selectbox(
+                "使用するAIモデル",
+                list(_model_opts.keys()),
+                key="signal_model_sel",
+                help="Groqは最速。自動はGeminiを最優先で試行し失敗時にフォールバック。",
+            )
+            current_model_pref = _model_opts[sel_model_label]
+
+            if st.button("🤖 AIに分析させる", type="primary"):
                 with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
                     past   = _load_signals(sel["ticker"])   # 過去の分析履歴
                     data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
                     signal = _generate_ai_trade_signal(
                         sel["ticker"], sel["name"], is_jp, data,
                         position_ctx=pos_ctx, past_signals=past,
-                        mode=current_mode,
+                        mode=current_mode, model_pref=current_model_pref,
                     )
 
                 if signal.get("error"):
