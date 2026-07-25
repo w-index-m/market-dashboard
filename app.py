@@ -17855,6 +17855,156 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
+    """みんかぶの銘柄ニュースページから適時開示・ニュースを取得（TTL=30分）。
+    code: .T を除いた銘柄コード（例: "7203", "8306", "285A"）
+    Returns: [{headline, headline_ja, url, date, source}] | []（失敗時）
+    """
+    import re as _re
+    try:
+        from bs4 import BeautifulSoup as _BS
+    except ImportError:
+        return []
+    try:
+        url = f"https://minkabu.jp/stock/{code}/news"
+        resp = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/17.0 Mobile/15E148 Safari/604.1"
+                ),
+                "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+                "Referer":         "https://minkabu.jp/",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[trading] minkabu {code} → HTTP {resp.status_code}")
+            return []
+
+        soup = _BS(resp.text, "html.parser")
+        results = []
+        seen_titles: set = set()
+
+        def _norm_date(raw: str) -> str:
+            """日付テキストを YYYY-MM-DD 形式へ正規化"""
+            m = _re.search(r"(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})", raw)
+            if m:
+                return f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+            # MM/DD 形式（年なし）→ 当年補完
+            m2 = _re.search(r"(\d{1,2})[/月](\d{1,2})", raw)
+            if m2:
+                from datetime import datetime as _dt
+                yr = _dt.now().year
+                return f"{yr}-{m2.group(1).zfill(2)}-{m2.group(2).zfill(2)}"
+            return raw.strip()[:10]
+
+        def _is_valid_title(t: str) -> bool:
+            if not t or len(t) < 5:
+                return False
+            # 株価数字・記号のみの要素を除外
+            if _re.fullmatch(r"[\d,.\s円$%+\-()]+", t):
+                return False
+            return True
+
+        # ── 戦略1: <time> 要素から逆引きで記事リンクを探す ──────────
+        for time_el in soup.find_all("time"):
+            raw_date = time_el.get("datetime") or time_el.get_text(strip=True)
+            date_str = _norm_date(raw_date)
+
+            # 親要素を最大5階層辿って <a> を探す
+            node = time_el.parent
+            a_el  = None
+            for _ in range(6):
+                if not node:
+                    break
+                a_el = node.find("a", href=True)
+                if a_el and _is_valid_title(a_el.get_text(strip=True)):
+                    break
+                a_el = None
+                node = node.parent
+
+            if not a_el:
+                continue
+            title = a_el.get_text(strip=True)
+            if not _is_valid_title(title) or title in seen_titles:
+                continue
+
+            href = a_el["href"]
+            full_url = href if href.startswith("http") else f"https://minkabu.jp{href}"
+
+            # カテゴリラベル（適時開示, 決算 など）を探す
+            node2   = time_el.parent
+            cat_txt = ""
+            for _ in range(4):
+                if not node2:
+                    break
+                for cls_kw in ["category", "tag", "label", "badge", "type"]:
+                    cat_el = node2.find(class_=lambda c: c and cls_kw in " ".join(c).lower() if isinstance(c, list) else cls_kw in (c or "").lower())
+                    if cat_el:
+                        cat_txt = cat_el.get_text(strip=True)
+                        break
+                if cat_txt:
+                    break
+                node2 = node2.parent
+
+            source = f"みんかぶ{'｜' + cat_txt if cat_txt else ''}"
+            seen_titles.add(title)
+            results.append({
+                "headline":    title,
+                "headline_ja": title,
+                "url":         full_url,
+                "date":        date_str,
+                "source":      source,
+            })
+            if len(results) >= max_items:
+                break
+
+        # ── 戦略2: articleList / news-list 系クラスのリスト要素を探す ─
+        if len(results) < 2:
+            for container in soup.find_all(
+                class_=lambda c: c and any(
+                    kw in " ".join(c).lower() if isinstance(c, list) else kw in (c or "").lower()
+                    for kw in ["articlelist", "newslist", "news_list", "article-list", "ly_article"]
+                )
+            ):
+                for item in container.find_all(["li", "article", "div"], recursive=False):
+                    a_el = item.find("a", href=True)
+                    if not a_el:
+                        continue
+                    title = a_el.get_text(strip=True)
+                    if not _is_valid_title(title) or title in seen_titles:
+                        continue
+                    href     = a_el["href"]
+                    full_url = href if href.startswith("http") else f"https://minkabu.jp{href}"
+                    time_el2 = item.find("time")
+                    date_str = _norm_date(
+                        (time_el2.get("datetime") or time_el2.get_text(strip=True)) if time_el2 else ""
+                    )
+                    seen_titles.add(title)
+                    results.append({
+                        "headline":    title,
+                        "headline_ja": title,
+                        "url":         full_url,
+                        "date":        date_str,
+                        "source":      "みんかぶ",
+                    })
+                    if len(results) >= max_items:
+                        break
+                if len(results) >= max_items:
+                    break
+
+        return results[:max_items]
+
+    except Exception as e:
+        logger.warning(f"[trading] minkabu fetch失敗 {code}: {e}")
+        return []
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     """個別銘柄の分析データを取得（テクニカル + ニュース）"""
     result = {}
@@ -17937,31 +18087,38 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                 for i, n in enumerate(news_items):
                     n["headline_ja"] = ja_list[i] if i < len(ja_list) else n["headline"]
         else:
-            # 日本株: TDnet 30日分を集約（全マッチを収集）
+            # 日本株: みんかぶ優先 → TDnet フォールバック
             code = ticker.replace(".T", "")
-            for days_ago in range(0, 30):
-                if len(news_items) >= 5:
-                    break
-                date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
-                try:
-                    tdnet_items = fetch_tdnet_items_for_date(date_str)
-                    matched = [it for it in tdnet_items if code in (it.get("code") or "")]
-                    for it in matched[:2]:
-                        if len(news_items) >= 5:
-                            break
-                        title = it.get("title", "")
-                        if title:
-                            ymd = date_str
-                            news_items.append({
-                                "headline":    title,
-                                "headline_ja": title,
-                                "url":         it.get("pdf_url", ""),
-                                "date":        f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}",
-                                "source":      "TDnet",
-                            })
-                except Exception:
-                    pass
-            # yfinanceのニュースをフォールバック（TDnetで足りない場合）
+
+            # ① みんかぶから取得
+            news_items = _fetch_minkabu_jp_news(code, max_items=6)
+
+            # ② みんかぶで取れなかった場合は TDnet 30日分を補完
+            if len(news_items) < 3:
+                for days_ago in range(0, 30):
+                    if len(news_items) >= 5:
+                        break
+                    date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
+                    try:
+                        tdnet_items = fetch_tdnet_items_for_date(date_str)
+                        matched = [it for it in tdnet_items if code in (it.get("code") or "")]
+                        for it in matched[:2]:
+                            if len(news_items) >= 5:
+                                break
+                            title = it.get("title", "")
+                            if title:
+                                ymd = date_str
+                                news_items.append({
+                                    "headline":    title,
+                                    "headline_ja": title,
+                                    "url":         it.get("pdf_url", ""),
+                                    "date":        f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}",
+                                    "source":      "TDnet",
+                                })
+                    except Exception:
+                        pass
+
+            # ③ それでも足りなければ yfinance
             if len(news_items) < 3:
                 try:
                     yf_news = yf.Ticker(ticker).news or []
