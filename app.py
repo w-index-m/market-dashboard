@@ -20025,6 +20025,143 @@ def _save_rec_cache(date: str, mode: str, tickers_key: str, news_key: str,
         return False
 
 
+_INVEST_REC_CACHE_HEADERS = ["date", "budget", "model_type", "risk_type", "result_json", "ai_model", "created_at"]
+
+
+def _load_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: str) -> dict | None:
+    try:
+        ws = _trading_ws("invest_rec_cache", _INVEST_REC_CACHE_HEADERS)
+        if not ws:
+            return None
+        for r in reversed(ws.get_all_records()):
+            if (r.get("date") == date and str(r.get("budget")) == str(budget)
+                    and r.get("model_type") == model_type and r.get("risk_type") == risk_type):
+                raw = r.get("result_json", "")
+                if raw:
+                    return _json.loads(raw)
+    except Exception as e:
+        logger.warning(f"[trading] invest_rec_cache読込失敗: {e}")
+    return None
+
+
+def _save_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: str,
+                           result: dict, ai_model: str) -> bool:
+    try:
+        ws = _trading_ws("invest_rec_cache", _INVEST_REC_CACHE_HEADERS)
+        if not ws:
+            return False
+        js = _json.dumps(result, ensure_ascii=False, default=str)
+        ws.append_row([date, budget, model_type, risk_type, js[:49000], ai_model,
+                       datetime.now(JST).strftime("%Y-%m-%d %H:%M")])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] invest_rec_cache保存失敗: {e}")
+        return False
+
+
+def _generate_investment_portfolio_rec(
+    budget: int,
+    model_type: str,       # "etf" | "individual"
+    risk_type: str,        # "aggressive" | "balanced"
+    market_ctx: dict,
+    existing_holdings: list | None = None,
+    model_pref: str = "auto",
+) -> dict:
+    """予算・モデル・リスクプロファイルに応じた新規投資推奨ポートフォリオをAIが生成。
+    Returns: {"portfolio": [...], "metrics": {...}, "model": str, "error": str|None}
+    """
+    fg_sc   = market_ctx.get("fg_score", 50) or 50
+    fg_lbl  = market_ctx.get("fg_label", "")
+    nk_pred = market_ctx.get("nikkei_pred_label", "")
+    us_pred = market_ctx.get("us_pred_label", "")
+    leading = market_ctx.get("sector_quad", {}).get("Leading", [])
+    improving = market_ctx.get("sector_quad", {}).get("Improving", [])
+    leading_str = " / ".join(leading[:4]) if leading else "不明"
+    improving_str = " / ".join(improving[:3]) if improving else "不明"
+
+    budget_str = f"{budget:,}円"
+    model_desc = {
+        "etf":        "ETF混合モデル（ETF＋個別株、分散重視）",
+        "individual": "個別株モデル（ETF不使用、5〜8銘柄の個別株のみ・日米問わず）",
+    }.get(model_type, model_type)
+    risk_desc = {
+        "aggressive": "リスク先行型（高成長・高ボラティリティ許容、期待リターン最大化）",
+        "balanced":   "リスクリターン考慮型（シャープレシオ重視、最大ドローダウン抑制）",
+    }.get(risk_type, risk_type)
+
+    holdings_str = "なし（新規投資）"
+    if existing_holdings:
+        holdings_str = " / ".join(existing_holdings[:8])
+
+    etf_note = ""
+    if model_type == "etf":
+        etf_note = """
+ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融),
+  SOXX(半導体), SMH(半導体), IWM(小型株), EWJ/1321.T(日経), 2558.T(S&P500 JPY),
+  2244.T(NASDAQ100 JPY), 1476.T(iSharesコアJリート)"""
+    else:
+        etf_note = "\n個別株のみ選定。ETF・投資信託は不可。日本株(.T)・米国株の両方を検討。"
+
+    prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です。
+以下の条件で最適な投資ポートフォリオを提案してください。
+
+【投資条件】
+・投資予算: {budget_str}
+・モデル: {model_desc}
+・リスクプロファイル: {risk_desc}
+・既存保有銘柄（重複避けること推奨）: {holdings_str}
+{etf_note}
+
+【現在の市場環境】
+・Fear&Greed: {fg_sc:.0f} ({fg_lbl})
+・日経225予測: {nk_pred}
+・米国市場予測: {us_pred}
+・RRGリーディングセクター: {leading_str}
+・RRGインプルービングセクター: {improving_str}
+
+【提案ルール】
+・銘柄数: {5 if model_type == "individual" else 4}〜8銘柄/ETF
+・日本株ティッカーは末尾に.T（例: 8306.T）
+・各銘柄の比率合計は100%
+・投資金額 = 予算 × 比率
+・根拠は20字以内で端的に
+
+【リスク指標の推計方法】
+期待年間リターン: セクター・過去実績・市場環境から推定（%）
+リスク(ボラティリティ): 年率標準偏差の推定（%）
+シャープレシオ: (期待リターン - 1.5%) / ボラティリティ
+最大ドローダウン推定: 過去の市場危機時の想定下落率（%、マイナス値）
+
+以下のJSONのみで回答（前後のテキスト不要）:
+{{
+  "portfolio": [
+    {{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 25, "amount": {int(budget*0.25)}, "rationale": "AI半導体独占・成長最大"}},
+    {{"ticker": "8306.T", "name": "三菱UFJ", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)}, "rationale": "金利上昇恩恵・配当安定"}}
+  ],
+  "metrics": {{
+    "expected_return": 18.0,
+    "risk_volatility": 22.0,
+    "sharpe_ratio": 0.75,
+    "max_drawdown_estimate": -28.0,
+    "comment": "ポートフォリオの特徴と注意点を50字以内で"
+  }}
+}}"""
+
+    try:
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=900, temperature=0.3
+        )
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            parsed = _json.loads(m.group())
+            parsed["model"] = model_used
+            parsed["error"] = None
+            return parsed
+    except Exception as e:
+        logger.warning(f"[trading] invest_portfolio生成失敗: {e}")
+    return {"portfolio": [], "metrics": {}, "model": "", "error": str(e) if 'e' in dir() else "生成失敗"}
+
+
 def _generate_full_portfolio_recommendation(
     positions: dict,
     stock_data_map: dict,
@@ -20837,6 +20974,168 @@ def render_claude_trading_project():
                                     '📭 ニュース・IR未取得（みんかぶ/EDINET/TDnet/Yahoo!F未ヒット）</div>',
                                     unsafe_allow_html=True,
                                 )
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── 新規投資推奨ポートフォリオ ──────────────────────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#34d399;'
+                'margin:4px 0 8px">── 💼 新規投資推奨ポートフォリオ（AI） ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#0a1f18;border:1px solid #065f46;border-radius:8px;'
+                'padding:8px 14px;margin-bottom:10px;font-size:12px;color:#6ee7b7">'
+                '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を提案します。'
+                'ETF混合モデルと個別株モデル、リスクプロファイル別に生成します。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            # コントロール行
+            _ip_c1, _ip_c2, _ip_c3, _ip_c4 = st.columns([1.5, 1.5, 1.5, 1.5])
+            _ip_budget = _ip_c1.radio(
+                "投資予算", ["100万円", "500万円"],
+                key="ip_budget", horizontal=True,
+            )
+            _ip_risk = _ip_c2.radio(
+                "リスクプロファイル", ["リスク先行型", "リスクリターン考慮型"],
+                key="ip_risk", horizontal=False,
+            )
+            _ip_model_opts = {
+                "🔄 自動": "auto", "🟡 Gemini": "gemini",
+                "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
+            }
+            _ip_model_sel = _ip_c3.selectbox(
+                "AIモデル", list(_ip_model_opts.keys()),
+                key="ip_model_sel", label_visibility="visible",
+            )
+            _ip_force = _ip_c4.checkbox(
+                "🔄 再生成（キャッシュ無視）", key="ip_force_regen",
+            )
+
+            if st.button("💼 推奨ポートフォリオを生成（ETF混合 & 個別株）", type="primary", key="btn_invest_portfolio"):
+                _ip_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
+                _ip_risk_key   = "aggressive" if "先行" in _ip_risk else "balanced"
+                _ip_model_pref = _ip_model_opts[_ip_model_sel]
+                _ip_today      = datetime.now(JST).strftime("%Y-%m-%d")
+                _ip_holdings   = list(open_pos.keys()) if open_pos else []
+                _ip_mktctx     = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
+
+                _ip_results = {}
+                for _ip_mt in ["etf", "individual"]:
+                    _cached = None
+                    if not _ip_force:
+                        _cached = _load_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_risk_key)
+                    if _cached:
+                        _ip_results[_ip_mt] = _cached
+                    else:
+                        with st.spinner(f"{'ETF混合' if _ip_mt=='etf' else '個別株'}モデルをAIが生成中…"):
+                            _r = _generate_investment_portfolio_rec(
+                                _ip_budget_val, _ip_mt, _ip_risk_key,
+                                _ip_mktctx, _ip_holdings, _ip_model_pref,
+                            )
+                        if not _r.get("error") and _r.get("portfolio"):
+                            _save_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_risk_key,
+                                                   _r, _r.get("model", ""))
+                        _ip_results[_ip_mt] = _r
+
+                st.session_state["_ip_results"]     = _ip_results
+                st.session_state["_ip_budget_val"]  = _ip_budget_val
+                st.session_state["_ip_risk_key"]    = _ip_risk_key
+
+            # 結果表示
+            _ip_disp = st.session_state.get("_ip_results", {})
+            if _ip_disp:
+                _ip_bv  = st.session_state.get("_ip_budget_val", 1_000_000)
+                _ip_rk  = st.session_state.get("_ip_risk_key", "balanced")
+                _ip_rlbl = "🔥 リスク先行型" if _ip_rk == "aggressive" else "⚖️ リスクリターン考慮型"
+
+                _tab_etf, _tab_ind = st.tabs(["📊 ETF混合モデル", "📈 個別株モデル"])
+                for _tab_obj, _ip_mt in [(_tab_etf, "etf"), (_tab_ind, "individual")]:
+                    with _tab_obj:
+                        _ip_r = _ip_disp.get(_ip_mt, {})
+                        if _ip_r.get("error") or not _ip_r.get("portfolio"):
+                            st.error(f"生成失敗: {_ip_r.get('error','不明')}")
+                            continue
+
+                        _ip_pf  = _ip_r.get("portfolio", [])
+                        _ip_met = _ip_r.get("metrics", {})
+                        _ai_mdl = _ip_r.get("model", "")
+
+                        # リスク指標カード
+                        _er   = _ip_met.get("expected_return", 0)
+                        _rv   = _ip_met.get("risk_volatility", 0)
+                        _sr   = _ip_met.get("sharpe_ratio", 0)
+                        _mdd  = _ip_met.get("max_drawdown_estimate", 0)
+                        _cmt  = _ip_met.get("comment", "")
+                        _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
+                        _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
+                        st.markdown(
+                            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                            f'padding:12px 16px;margin-bottom:10px">'
+                            f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
+                            f'{_ip_rlbl} ｜ 予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
+                            f'<div style="display:flex;gap:16px;flex-wrap:wrap">'
+                            f'<div style="text-align:center">'
+                            f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div></div>'
+                            f'<div style="text-align:center">'
+                            f'<div style="font-size:11px;color:#64748b">ボラティリティ</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div></div>'
+                            f'<div style="text-align:center">'
+                            f'<div style="font-size:11px;color:#64748b">シャープレシオ</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div></div>'
+                            f'<div style="text-align:center">'
+                            f'<div style="font-size:11px;color:#64748b">最大DD推定</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div></div>'
+                            f'</div>'
+                            + (f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;border-top:1px solid #1e293b;'
+                               f'padding-top:6px">💬 {_cmt}</div>' if _cmt else '')
+                            + f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        # ポートフォリオテーブル
+                        _hdr = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
+                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "金額(円)", "根拠"]):
+                            _h.markdown(f'<div style="font-size:11px;color:#64748b;font-weight:600">{_lbl}</div>',
+                                        unsafe_allow_html=True)
+
+                        for _item in _ip_pf:
+                            _flag   = _item.get("flag", "🌐")
+                            _tk     = _item.get("ticker", "")
+                            _nm     = _item.get("name", _tk)
+                            _alloc  = float(_item.get("allocation", 0))
+                            _amt    = int(_item.get("amount", 0))
+                            _rat    = _item.get("rationale", "")
+                            _bar_w  = min(int(_alloc), 100)
+                            _a_c    = ("#38bdf8" if _alloc >= 20 else "#818cf8" if _alloc >= 10 else "#64748b")
+                            _row = st.columns([0.6, 2.0, 1.2, 1.3, 3.0])
+                            _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
+                                             unsafe_allow_html=True)
+                            _row[1].markdown(
+                                f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}</div>'
+                                f'<div style="font-size:10px;color:#64748b">{_nm}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            _row[2].markdown(
+                                f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
+                                f'<div style="background:#1e293b;border-radius:3px;height:4px;margin-top:3px">'
+                                f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
+                                unsafe_allow_html=True,
+                            )
+                            _row[3].markdown(
+                                f'<div style="font-size:12px;color:#94a3b8">{_amt:,}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            _row[4].markdown(
+                                f'<div style="font-size:11px;color:#cbd5e1">{_rat}</div>',
+                                unsafe_allow_html=True,
+                            )
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
