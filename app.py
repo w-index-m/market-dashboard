@@ -21287,10 +21287,11 @@ def render_claude_trading_project():
                 _fig_rr.add_trace(_go2.Scatter(
                     x=[r["x"] for r in _refs], y=[r["y"] for r in _refs],
                     mode="markers+text",
-                    marker=dict(size=9, color="#475569", symbol="diamond"),
+                    marker=dict(size=11, color="#64748b", symbol="diamond",
+                                line=dict(width=1, color="#cbd5e1")),
                     text=[r["label"] for r in _refs],
                     textposition="top center",
-                    textfont=dict(size=10, color="#94a3b8"),
+                    textfont=dict(size=11, color="#cbd5e1"),
                     name="参考",
                     hovertemplate="%{text}<br>リスク: %{x:.1f}%<br>リターン: %{y:.1f}%<extra></extra>",
                 ))
@@ -21314,11 +21315,11 @@ def render_claude_trading_project():
                         ),
                     ))
                 # シャープレシオ1.0の参照線 (return = 1.5 + vol)
-                _vx = list(range(0, 41, 5))
+                _vx = list(range(0, 41, 2))
                 _fig_rr.add_trace(_go2.Scatter(
                     x=_vx, y=[1.5 + v for v in _vx],
                     mode="lines",
-                    line=dict(dash="dot", color="#334155", width=1),
+                    line=dict(dash="dash", color="#f59e0b", width=2),
                     name="SR=1.0ライン",
                     hoverinfo="skip",
                 ))
