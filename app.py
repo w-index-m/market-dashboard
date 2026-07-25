@@ -692,7 +692,7 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
-    for model_name in GROQ_MODELS:
+    for _attempt, model_name in enumerate(GROQ_MODELS):
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
@@ -702,9 +702,13 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
         try:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers, json=payload, timeout=30,
+                headers=headers, json=payload, timeout=60,
             )
             if resp.status_code == 429:
+                # レート制限: Retry-After ヘッダーがあれば従い、なければ指数バックオフ
+                _wait = float(resp.headers.get("Retry-After", 3 * (2 ** _attempt)))
+                logger.warning(f"Groq 429 ({model_name}): {_wait}s 待機後リトライ")
+                time.sleep(min(_wait, 30))
                 continue
             if resp.status_code == 404:
                 continue
@@ -713,6 +717,7 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
             if text:
                 return text, model_name
         except requests.exceptions.Timeout:
+            logger.warning(f"Groq timeout ({model_name})")
             continue
         except Exception as e:
             logger.error(f"Groq error ({model_name}): {e}")
@@ -20358,7 +20363,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
     _model_used = ""
     try:
         text, _model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=1400, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=1200, temperature=0.3
         )
         # JSONブロックを抽出（前後のテキストを除去）
         m = _re.search(r'\{[\s\S]*\}', text)
