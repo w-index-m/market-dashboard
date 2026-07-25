@@ -21233,6 +21233,17 @@ def render_claude_trading_project():
                         _usdjpy = _px.get("_usdjpy", 150.0)
 
                         # ポートフォリオテーブル
+                        st.markdown(
+                            '<div style="font-size:10px;color:#64748b;background:#f8fafc;'
+                            'border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px">'
+                            '📖 <b>指標の見方</b>　'
+                            '<b>3m/6m/1y</b>: 過去3ヶ月・6ヶ月・1年の株価リターン（騰落率）　'
+                            '<b>ボラ</b>: 年率ボラティリティ（値動きの荒さ、低いほど安定）　'
+                            '<b>SR</b>: シャープレシオ（リスク1%あたりのリターン、1.0以上が優秀）　'
+                            '<b>DD</b>: 最大ドローダウン（直近1年の最大下落幅、マイナスが大きいほどリスク高）'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
                         _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 2.8])
                         for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "根拠"]):
                             _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
