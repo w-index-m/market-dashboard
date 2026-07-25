@@ -20559,6 +20559,27 @@ def render_claude_trading_project():
         _trades_df, _trades_err = _load_trades()
         open_pos = _calc_positions_from_df(_trades_df) if not _trades_df.empty else {}
 
+        # Google Sheets接続失敗時の自動リトライ（最大10回、3秒間隔）
+        _SIG_RETRY_KEY = "_signal_tab_gs_retry"
+        _SIG_MAX_RETRY = 10
+        if _trades_err and _trades_df.empty:
+            _sig_retry_n = st.session_state.get(_SIG_RETRY_KEY, 0)
+            if _sig_retry_n < _SIG_MAX_RETRY:
+                st.session_state[_SIG_RETRY_KEY] = _sig_retry_n + 1
+                st.info(
+                    f"⟳ Google Sheets に接続中... 自動リトライ {_sig_retry_n + 1}/{_SIG_MAX_RETRY}"
+                )
+                time.sleep(3)
+                st.rerun()
+            else:
+                # 10回失敗したら手動ボタンを表示
+                st.warning(f"⚠️ 取引記録の読み込みに失敗しました: {_trades_err}")
+                if st.button("🔄 再読み込み", key="btn_reload_trades_signal"):
+                    st.session_state[_SIG_RETRY_KEY] = 0
+                    st.rerun()
+        else:
+            st.session_state[_SIG_RETRY_KEY] = 0  # 成功時はリセット
+
         # 選択肢: 保有銘柄のみ
         all_options = {}
         if open_pos:
@@ -20578,11 +20599,7 @@ def render_claude_trading_project():
                 }
 
         if not all_options:
-            if _trades_err:
-                st.warning(f"⚠️ 取引記録の読み込みに失敗しました: {_trades_err}")
-                if st.button("🔄 再読み込み", key="btn_reload_trades_signal"):
-                    st.rerun()
-            else:
+            if not _trades_err:
                 st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
         else:
             # ── 銘柄データキャッシュ状態バー ────────────────────────────────
