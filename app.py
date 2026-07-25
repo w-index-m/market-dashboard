@@ -7547,6 +7547,31 @@ _NDX_STOCKS = {
     "ABNB": "Airbnb",       "DXCM": "DexCom",
 }
 
+# NASDAQ-100 構成銘柄入れ替え履歴（出典: Nasdaq公式・各種報道）
+_NDX100_CHANGES = [
+    {
+        "date": "2024-12-23",
+        "label": "2024年12月 年次入れ替え",
+        "type": "annual",
+        "added":   [("PLTR", "Palantir Technologies"), ("AXON", "Axon Enterprise"), ("MSTR", "Strategy (MicroStrategy)")],
+        "removed": [("ILMN", "Illumina"), ("SMCI", "Super Micro Computer"), ("MRNA", "Moderna")],
+    },
+    {
+        "date": "2024-09-23",
+        "label": "2024年9月 四半期入れ替え",
+        "type": "quarterly",
+        "added":   [("CDW", "CDW Corp"), ("CSCO", "Cisco Systems")],
+        "removed": [("ODFL", "Old Dominion Freight"), ("FAST", "Fastenal")],
+    },
+    {
+        "date": "2023-12-18",
+        "label": "2023年12月 年次入れ替え",
+        "type": "annual",
+        "added":   [("SMCI", "Super Micro Computer"), ("MRVL", "Marvell Technology"), ("AAON", "AAON Inc")],
+        "removed": [("SIRI", "SiriusXM"), ("LCID", "Lucid Group"), ("ENPH", "Enphase Energy")],
+    },
+]
+
 _SP500_STOCKS = {
     "JPM":  "JPMorgan Chase",  "V":    "Visa",
     "MA":   "Mastercard",      "UNH":  "UnitedHealth",
@@ -9470,6 +9495,36 @@ def render_momentum_ranking():
         with st.spinner("NASDAQ100データを取得中..."):
             df_ndx = _fetch_momentum_ranking("nasdaq")
         _render_cards(df_ndx)
+
+        with st.expander("📅 NASDAQ100 構成銘柄 入れ替え履歴（直近）"):
+            for chg in _NDX100_CHANGES:
+                st.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                    f'padding:10px 14px;margin-bottom:8px;">'
+                    f'<div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px">'
+                    f'{"🔄" if chg["type"]=="annual" else "↔️"} {chg["label"]} '
+                    f'<span style="color:#64748b">({chg["date"]})</span></div>'
+                    f'<div style="display:flex;gap:16px;">'
+                    f'<div style="flex:1">'
+                    f'<div style="font-size:11px;color:#22c55e;font-weight:600;margin-bottom:3px">▲ 新規採用</div>'
+                    + "".join(
+                        f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
+                        f'<span style="color:#22c55e;font-weight:700">{t}</span>'
+                        f' <span style="color:#94a3b8">{n}</span></div>'
+                        for t, n in chg["added"]
+                    )
+                    + f'</div><div style="flex:1">'
+                    f'<div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:3px">▼ 除外</div>'
+                    + "".join(
+                        f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
+                        f'<span style="color:#ef4444;font-weight:700">{t}</span>'
+                        f' <span style="color:#94a3b8">{n}</span></div>'
+                        for t, n in chg["removed"]
+                    )
+                    + f'</div></div></div>',
+                    unsafe_allow_html=True,
+                )
+            st.caption("※ 出典: Nasdaq公式発表・各種報道。最新情報は nasdaq.com でご確認ください。")
 
     with tab_sp:
         with st.spinner("S&P500データを取得中..."):
@@ -18005,11 +18060,24 @@ def render_claude_trading_project():
                 st.markdown("**保有中ポジション（現在値・含み損益）**")
                 pnl_rows = []
                 for ticker, pos in open_pos.items():
+                    cur_price = None
                     try:
-                        cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
-                        cur_price = float(cur_raw["Close"].dropna().iloc[-1]) if not cur_raw.empty else None
+                        info = yf.Ticker(ticker).fast_info
+                        cur_price = float(info.get("lastPrice") or info.get("last_price") or 0) or None
                     except Exception:
-                        cur_price = None
+                        pass
+                    if not cur_price:
+                        try:
+                            cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                            if not cur_raw.empty:
+                                close_col = cur_raw["Close"]
+                                if isinstance(close_col, pd.DataFrame):
+                                    close_col = close_col.iloc[:, 0]
+                                vals = close_col.dropna()
+                                if len(vals) > 0:
+                                    cur_price = float(vals.iloc[-1])
+                        except Exception:
+                            pass
 
                     avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
                     pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
@@ -18035,6 +18103,26 @@ def render_claude_trading_project():
 # =====================================================
 
 _CHANGELOG = [
+    {
+        "date": "2026-07-25",
+        "title": "📅 NASDAQ100 構成銘柄入れ替え履歴を追加",
+        "items": [
+            "モメンタムランキングのNASDAQ100タブに入れ替え銘柄一覧（追加・除外）を表示",
+            "2023〜2024年の年次・四半期入れ替え履歴を収録",
+        ],
+        "tag": "新機能",
+        "color": "#06b6d4",
+    },
+    {
+        "date": "2026-07-25",
+        "title": "💰 損益タブの現在株価取得を改善",
+        "items": [
+            "yf.Ticker.fast_infoを最優先で使用し取得成功率を向上",
+            "MultiIndexのフォールバック処理を追加",
+        ],
+        "tag": "バグ修正",
+        "color": "#ef4444",
+    },
     {
         "date": "2026-07-25",
         "title": "🤖 Claude 個別株トレーディングプロジェクト",
