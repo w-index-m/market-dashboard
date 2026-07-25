@@ -18418,6 +18418,10 @@ def _generate_replacement_rec(
   ⑤ PEG比率: バリュエーションの妥当性確認
 ・セクター分散を意識しつつ、上記で総合スコアが高い銘柄を選定すること
 
+【必須スクリーニング条件】
+・3年連続増収増益: 過去3期連続で売上高・営業利益がともに前年比プラスの企業のみ
+  ※ 一時的特別損失等で実態成長中の場合は例外可（根拠を明記すること）
+
 【制約】
 ・解放資金 {freed_str} で実際に購入可能な価格帯の銘柄を優先
 ・日本株は最低100株単元。株価×100が解放資金以内のものを優先
@@ -19071,7 +19075,8 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         result["rev_growth"]    = round(rev_growth * 100, 1) if rev_growth else None
         result["earn_growth"]   = round(earn_growth * 100, 1) if earn_growth else None
         result["sector"]        = info.get("sector") or info.get("industry")
-        result["name"]          = (info.get("shortName") or info.get("longName") or "").strip()
+        _yf_name = (info.get("shortName") or info.get("longName") or "").strip()
+        result["name"] = _KNOWN_NAMES.get(ticker) or _yf_name or ticker
 
         # 次回決算日
         try:
@@ -20327,6 +20332,11 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 
   ⑤ バリュエーション妥当性
      PEG比率（PER÷EPS成長率）が合理的な水準か確認
+
+【必須スクリーニング条件（これを満たさない銘柄は選定しない）】
+・3年連続増収増益: 過去3期連続で売上高・営業利益がともに前年比プラスであること
+  ※ 1期でも減収または減益の企業は原則除外（ただし一時的な特別損失等で実態成長中の場合は例外可・根拠を明記）
+・直近決算で増収増益継続が確認できること（最新の決算発表ベース）
 
 ・セクター分散も意識しつつ、上記スコアが総合的に高い銘柄を選定すること
 
