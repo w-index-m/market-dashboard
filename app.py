@@ -17692,48 +17692,6 @@ def _trading_ws(tab: str, headers: list):
         return None
 
 
-def _load_watchlist() -> list:
-    """ウォッチリストをGoogle Sheetsから読み込む。接続失敗は None を返す。"""
-    try:
-        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
-        if not ws:
-            return None  # 接続失敗を呼び出し側で検知できるよう None
-        rows = ws.get_all_records()
-        return [r for r in rows if r.get("ticker")]
-    except Exception as e:
-        logger.warning(f"[trading] watchlist読込失敗: {e}")
-        return None
-
-
-def _save_watchlist_item(ticker: str, name: str, market: str, memo: str = ""):
-    """ウォッチリストに銘柄を追加"""
-    try:
-        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
-        if not ws:
-            return False, "Google Sheets接続失敗（Secretsを確認）"
-        ws.append_row([ticker.upper(), name, market,
-                       datetime.now(JST).strftime("%Y-%m-%d"), memo])
-        return True, ""
-    except Exception as e:
-        logger.warning(f"[trading] watchlist追加失敗: {e}")
-        return False, str(e)[:120]
-
-
-def _delete_watchlist_item(ticker: str):
-    """ウォッチリストから銘柄を削除"""
-    try:
-        ws = _trading_ws("claude_watchlist", ["ticker", "name", "market", "added_date", "memo"])
-        if not ws:
-            return False
-        records = ws.get_all_records()
-        for i, r in enumerate(records, start=2):
-            if r.get("ticker", "").upper() == ticker.upper():
-                ws.delete_rows(i)
-                return True
-        return False
-    except Exception as e:
-        logger.warning(f"[trading] watchlist削除失敗: {e}")
-        return False
 
 
 _TRADES_HEADERS = [
@@ -18977,141 +18935,17 @@ def render_claude_trading_project():
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    tab_watch, tab_signal, tab_trade, tab_pnl, tab_hist, tab_summary = st.tabs([
-        "📋 ウォッチリスト", "🤖 AI分析・シグナル", "✏️ 取引記録入力",
+    tab_signal, tab_trade, tab_pnl, tab_hist, tab_summary = st.tabs([
+        "🤖 AI分析・シグナル", "✏️ 取引記録入力",
         "💰 損益・ポートフォリオ", "📈 資産推移", "💹 サマリー",
     ])
 
-    # ── タブ①: ウォッチリスト管理 ─────────────────────────────
-    with tab_watch:
-        st.markdown("#### 監視銘柄の管理")
-
-        # エラー/成功メッセージを session_state で永続化（clear_on_submit後も残る）
-        _ws_status = st.session_state.pop("_watch_status", None)
-        _ws_msg    = st.session_state.pop("_watch_msg", None)
-        if _ws_status == "ok":
-            st.success(f"✅ {_ws_msg}")
-        elif _ws_status == "error":
-            st.error(f"❌ 保存失敗: {_ws_msg}")
-        elif _ws_status == "warn":
-            st.warning(_ws_msg)
-
-        with st.form("add_watch_form", clear_on_submit=True):
-            c1, c2, c3, c4 = st.columns([2, 3, 1.5, 2])
-            w_ticker = c1.text_input("ティッカー", placeholder="例: 7203.T / NVDA")
-            w_name   = c2.text_input("銘柄名", placeholder="例: トヨタ自動車 / NVIDIA")
-            w_market = c3.selectbox("市場", ["🇯🇵 日本株", "🇺🇸 米国株"])
-            w_memo   = c4.text_input("メモ", placeholder="例: AI関連, 決算待ち")
-            if st.form_submit_button("＋ 追加", type="primary"):
-                t_val = w_ticker.strip()
-                n_val = w_name.strip()
-                if t_val and n_val:
-                    is_jp = "日本株" in w_market
-                    ok, err = _save_watchlist_item(
-                        t_val.upper(), n_val,
-                        "JP" if is_jp else "US", w_memo.strip()
-                    )
-                    if ok:
-                        st.session_state["_watch_status"] = "ok"
-                        st.session_state["_watch_msg"]    = f"{t_val.upper()} をウォッチリストに追加しました"
-                        st.rerun()
-                    else:
-                        st.session_state["_watch_status"] = "error"
-                        st.session_state["_watch_msg"]    = err
-                        st.rerun()
-                else:
-                    st.session_state["_watch_status"] = "warn"
-                    st.session_state["_watch_msg"]    = "ティッカーと銘柄名を入力してください"
-                    st.rerun()
-
-        watchlist = _load_watchlist()
-
-        if watchlist is None:
-            st.error("⚠️ Google Sheets接続失敗。ページを再読み込みしてください。")
-            st.caption("データは保存されています。接続エラーで一時的に表示できない状態です。")
-        elif watchlist:
-            st.markdown(f"**現在の監視銘柄: {len(watchlist)}銘柄**")
-            for item in watchlist:
-                col_t, col_n, col_m, col_mk, col_d, col_del = st.columns([1.5, 2.5, 2, 1, 1.5, 1])
-                col_t.markdown(f"**{item['ticker']}**")
-                col_n.markdown(item["name"])
-                col_m.markdown(f"_{item.get('memo', '')}_")
-                col_mk.markdown("🇯🇵" if item.get("market") == "JP" else "🇺🇸")
-                col_d.markdown(f"<span style='font-size:11px;color:#94a3b8'>{item.get('added_date','')}</span>",
-                               unsafe_allow_html=True)
-                if col_del.button("🗑️", key=f"del_{item['ticker']}"):
-                    if _delete_watchlist_item(item["ticker"]):
-                        st.rerun()
-        else:
-            st.info("監視銘柄がまだありません。上のフォームから追加してください。")
-
-    # ── タブ②: AI分析・シグナル ────────────────────────────────
+    # ── タブ①: AI分析・シグナル ────────────────────────────────
     with tab_signal:
-        open_pos  = _get_open_positions()           # 保有中ポジション
-        watchlist = _load_watchlist() or []         # ウォッチリスト（None時は空リスト）
+        open_pos = _get_open_positions()            # 保有中ポジション
 
-        # ── ポートフォリオ全体AI分析 ────────────────────────
-        if open_pos:
-            st.markdown(
-                '<div style="background:linear-gradient(135deg,#0a1628,#0d1f3c);'
-                'border:1px solid #1e3a5f;border-radius:10px;padding:14px 18px;margin-bottom:14px">'
-                '<div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px">'
-                '📊 ポートフォリオ全体AI分析</div>'
-                '<div style="font-size:12px;color:#94a3b8">'
-                '全保有銘柄を一括で分析 → リスク診断 + アクション優先順位TOP3</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            _wide_model_opts = {
-                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
-                "🟡 Gemini（Google）":              "gemini",
-                "⚡ Groq（高速）":                  "groq",
-                "🌐 OpenRouter":                    "openrouter",
-            }
-            _wide_col1, _wide_col2 = st.columns([3, 1])
-            _wide_model_label = _wide_col1.selectbox(
-                "全体分析用AIモデル", list(_wide_model_opts.keys()),
-                key="wide_model_sel", label_visibility="collapsed",
-            )
-            _wide_model_pref = _wide_model_opts[_wide_model_label]
-
-            if _wide_col2.button("🔍 全体分析", type="primary", use_container_width=True):
-                _wide_mode = st.session_state.get("trading_mode", "growth")
-                with st.spinner("全保有銘柄のデータ取得・AI分析中...（30〜60秒）"):
-                    # サマリーデータ取得
-                    _wide_summary = _compute_portfolio_summary()
-                    _wide_positions = _wide_summary.get("positions", {})
-                    # 日次騰落
-                    _wide_tickers = tuple(sorted(_wide_positions.keys()))
-                    _wide_changes  = _fetch_daily_changes_for_tickers(_wide_tickers) if _wide_tickers else {}
-                    # windex市場コンテキスト（Fear&Greed / NAAIM / RRG / 予測モデル）
-                    _wide_mktctx   = _fetch_market_context_for_trading()
-                    _wide_result   = _generate_portfolio_wide_analysis(
-                        _wide_positions, _wide_changes,
-                        mode=_wide_mode, model_pref=_wide_model_pref,
-                        market_ctx=_wide_mktctx,
-                    )
-                st.session_state["_wide_analysis"] = _wide_result
-
-            # 結果表示
-            _wide_res = st.session_state.get("_wide_analysis")
-            if _wide_res:
-                if _wide_res.get("error"):
-                    st.error(f"分析エラー: {_wide_res['error']}")
-                else:
-                    st.markdown(
-                        f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
-                        f'🤖 {_wide_res.get("model", "")} ｜ '
-                        f'{datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(_wide_res["text"])
-                    st.divider()
-
-        # 選択肢を構築: 保有銘柄 → ウォッチリスト の順
-        all_options = {}  # label → {ticker, name, market, position_ctx}
-
+        # 選択肢: 保有銘柄のみ
+        all_options = {}
         if open_pos:
             for ticker, pos in open_pos.items():
                 is_jp_pos = ticker.endswith(".T")
@@ -19124,26 +18958,16 @@ def render_claude_trading_project():
                     "position_ctx": pos,
                 }
 
-        if watchlist:
-            for w in watchlist:
-                lbl = f"👀 {w['ticker']} — {w['name']}"
-                if lbl not in all_options:
-                    all_options[lbl] = {
-                        "ticker": w["ticker"], "name": w["name"],
-                        "market": w.get("market", "US"),
-                        "position_ctx": None,
-                    }
-
         if not all_options:
-            st.info("まず「ウォッチリスト」タブに銘柄を追加するか、取引記録を入力してください。")
+            st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
         else:
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#94a3b8;'
-                'margin:8px 0 6px">── 個別銘柄分析 ──</div>',
+                'margin:4px 0 6px">── 個別銘柄分析 ──</div>',
                 unsafe_allow_html=True,
             )
             if open_pos:
-                st.caption("📂 保有中の銘柄は「追加買い / 保有継続 / 利確 / 損切り」の観点でAIが判断します。👀 はウォッチリスト（新規エントリー候補）です。")
+                st.caption("📂 保有中の銘柄を選択。追加買い / 保有継続 / 利確 / 損切りの観点でAIが判断します。")
 
             sel_label = st.selectbox("分析する銘柄を選択", list(all_options.keys()))
             sel = all_options[sel_label]
@@ -19263,25 +19087,8 @@ def render_claude_trading_project():
         elif _tr_status == "warn":
             st.warning(_tr_msg)
 
-        watchlist = _load_watchlist() or []  # None時は空リスト
-
-        # ウォッチリストがある場合はフォーム外でクイック選択
-        if watchlist:
-            watch_options = {f"{w['ticker']} — {w['name']}": w for w in watchlist}
-            sel_quick = st.selectbox(
-                "ウォッチリストから銘柄を選んで自動入力（任意）",
-                ["－ 選択しない －"] + list(watch_options.keys()),
-                key="trade_quick_sel"
-            )
-            if sel_quick != "－ 選択しない －":
-                st.session_state["_trade_ticker"] = watch_options[sel_quick]["ticker"]
-                st.session_state["_trade_name"]   = watch_options[sel_quick]["name"]
-            else:
-                st.session_state.setdefault("_trade_ticker", "")
-                st.session_state.setdefault("_trade_name", "")
-        else:
-            st.session_state.setdefault("_trade_ticker", "")
-            st.session_state.setdefault("_trade_name", "")
+        st.session_state.setdefault("_trade_ticker", "")
+        st.session_state.setdefault("_trade_name", "")
 
         with st.form("trade_form", clear_on_submit=True):
             ci1, ci2 = st.columns(2)
@@ -19396,6 +19203,60 @@ def render_claude_trading_project():
                     })
 
                 st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+
+                # ── ポートフォリオ全体AI分析 ──────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown(
+                    '<div style="background:linear-gradient(135deg,#0a1628,#0d1f3c);'
+                    'border:1px solid #1e3a5f;border-radius:10px;padding:14px 18px;margin-bottom:14px">'
+                    '<div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px">'
+                    '📊 ポートフォリオ全体AI分析</div>'
+                    '<div style="font-size:12px;color:#94a3b8">'
+                    '全保有銘柄を一括分析 → リスク診断 + アクション優先順位TOP3 + 売却後の資金配分</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                _pnl_model_opts = {
+                    "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                    "🟡 Gemini（Google）":              "gemini",
+                    "⚡ Groq（高速）":                  "groq",
+                    "🌐 OpenRouter":                    "openrouter",
+                }
+                _pnl_col1, _pnl_col2 = st.columns([3, 1])
+                _pnl_model_label = _pnl_col1.selectbox(
+                    "全体分析用AIモデル", list(_pnl_model_opts.keys()),
+                    key="pnl_wide_model_sel", label_visibility="collapsed",
+                )
+                _pnl_model_pref = _pnl_model_opts[_pnl_model_label]
+
+                if _pnl_col2.button("🔍 全体分析", type="primary", use_container_width=True, key="pnl_wide_btn"):
+                    _pnl_mode = st.session_state.get("trading_mode", "growth")
+                    with st.spinner("全保有銘柄のデータ取得・AI分析中...（30〜60秒）"):
+                        _pnl_summary   = _compute_portfolio_summary()
+                        _pnl_positions = _pnl_summary.get("positions", {})
+                        _pnl_tickers   = tuple(sorted(_pnl_positions.keys()))
+                        _pnl_changes   = _fetch_daily_changes_for_tickers(_pnl_tickers) if _pnl_tickers else {}
+                        _pnl_mktctx    = _fetch_market_context_for_trading()
+                        _pnl_result    = _generate_portfolio_wide_analysis(
+                            _pnl_positions, _pnl_changes,
+                            mode=_pnl_mode, model_pref=_pnl_model_pref,
+                            market_ctx=_pnl_mktctx,
+                        )
+                    st.session_state["_wide_analysis"] = _pnl_result
+
+                _pnl_wide_res = st.session_state.get("_wide_analysis")
+                if _pnl_wide_res:
+                    if _pnl_wide_res.get("error"):
+                        st.error(f"分析エラー: {_pnl_wide_res['error']}")
+                    else:
+                        st.markdown(
+                            f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
+                            f'🤖 {_pnl_wide_res.get("model", "")} ｜ '
+                            f'{datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(_pnl_wide_res["text"])
+
             else:
                 st.info("現在の保有ポジションはありません（全て決済済み）。")
 
@@ -19979,10 +19840,10 @@ _CHANGELOG = [
         "date": "2026-07-25",
         "title": "🤖 Claude 個別株トレーディングプロジェクト",
         "items": [
-            "ウォッチリスト管理（Google Sheets永続保存）",
             "AI売買シグナル生成（テクニカル＋TDnet決算＋Finnhubニュース）",
             "取引記録入力フォーム（約定後に手動入力）",
             "損益・ポートフォリオ追跡（含み損益リアルタイム計算）",
+            "ポートフォリオ全体AI分析（リスク診断・アクション優先順位TOP3）",
         ],
         "tag": "新機能",
         "color": "#3b82f6",
