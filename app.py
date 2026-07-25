@@ -20528,7 +20528,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
   rationale: 20字以内の短い投資テーマ
   merits: メリット2〜4点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
   demerits: デメリット2〜3点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
-  conclusion: 現在の投資モード（{mode_name}）での結論を60字以内で（「なぜ選ぶか or 除外すべきか」）
+  conclusion: 現在の投資モード（{_mode_label}）での結論を60字以内で（「なぜ選ぶか or 除外すべきか」）
 ・直近1年マイナスの銘柄はmeritsに「なぜ今下落中でも買うか」の観点を必ず含めること
 ・demeritsは実際のリスクを正直に記載（過小評価禁止）
 ・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
@@ -21697,11 +21697,15 @@ def render_claude_trading_project():
                     _ip_result_box = [None]
 
                     def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt):
-                        box[0] = _generate_investment_portfolio_rec(
-                            _ip_budget_val, mt, _ip_risk_key,
-                            _ip_mktctx, _ip_holdings, _ip_model_pref,
-                            trading_mode=_ip_trade_mode,
-                        )
+                        try:
+                            box[0] = _generate_investment_portfolio_rec(
+                                _ip_budget_val, mt, _ip_risk_key,
+                                _ip_mktctx, _ip_holdings, _ip_model_pref,
+                                trading_mode=_ip_trade_mode,
+                            )
+                        except Exception as _wex:
+                            logger.error(f"[trading] portfolio worker crash ({mt}): {_wex}", exc_info=True)
+                            box[0] = {"portfolio": [], "metrics": {}, "model": "", "error": f"内部エラー: {str(_wex)[:200]}"}
 
                     _ip_th = _ipth.Thread(target=_ip_gen_worker, daemon=True)
                     _ip_th.start()
