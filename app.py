@@ -17854,6 +17854,90 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
         return list(headlines_tuple)
 
 
+_STOCK_CACHE_HEADERS = ["date", "ticker", "data_json", "updated_at"]
+
+
+def _load_stock_data_cache(ticker: str, date: str) -> dict | None:
+    """Google Sheetsから当日の銘柄データキャッシュを取得。
+    Returns: _fetch_trading_stock_data() と同形式の dict、なければ None
+    """
+    import json as _json
+    try:
+        ws = _trading_ws("stock_data_cache", _STOCK_CACHE_HEADERS)
+        if not ws:
+            return None
+        rows = ws.get_all_records()
+        for r in reversed(rows):
+            if r.get("date") == date and r.get("ticker", "").upper() == ticker.upper():
+                raw = r.get("data_json", "")
+                if raw:
+                    return _json.loads(raw)
+    except Exception as e:
+        logger.warning(f"[trading] stock_cache読込失敗 {ticker}: {e}")
+    return None
+
+
+def _save_stock_data_cache(ticker: str, date: str, data: dict) -> bool:
+    """銘柄データをGoogle Sheetsにキャッシュ保存。
+    close_series/close_dates は除外してJSONサイズを削減。
+    """
+    import json as _json
+    try:
+        ws = _trading_ws("stock_data_cache", _STOCK_CACHE_HEADERS)
+        if not ws:
+            return False
+        # チャート用の長いリストは除外（AIには不要）
+        slim = {k: v for k, v in data.items() if k not in ("close_series", "close_dates")}
+        data_json = _json.dumps(slim, ensure_ascii=False, default=str)
+        if len(data_json) > 49000:
+            data_json = data_json[:49000]  # Sheetsセル上限50,000文字
+        ws.append_row([
+            date,
+            ticker.upper(),
+            data_json,
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] stock_cache保存失敗 {ticker}: {e}")
+        return False
+
+
+def _get_stock_cache_status(tickers: list) -> dict:
+    """保有銘柄のキャッシュ状態を一括取得。
+    Returns: {ticker: {"cached": bool, "updated_at": str}}
+    """
+    try:
+        ws = _trading_ws("stock_data_cache", _STOCK_CACHE_HEADERS)
+        if not ws:
+            return {}
+        rows = ws.get_all_records()
+        today = datetime.now(JST).strftime("%Y-%m-%d")
+        status: dict = {t.upper(): {"cached": False, "updated_at": ""} for t in tickers}
+        for r in rows:
+            t = r.get("ticker", "").upper()
+            if t in status and r.get("date") == today:
+                status[t] = {"cached": True, "updated_at": r.get("updated_at", "")[:16]}
+        return status
+    except Exception as e:
+        logger.warning(f"[trading] stock_cache状態取得失敗: {e}")
+        return {}
+
+
+def _fetch_trading_stock_data_with_cache(ticker: str, is_jp: bool) -> dict:
+    """キャッシュ対応版 _fetch_trading_stock_data。
+    今日のキャッシュがSheetsにあれば即返却、なければフェッチしてSheets保存。
+    """
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    cached = _load_stock_data_cache(ticker, today)
+    if cached:
+        return cached
+    data = _fetch_trading_stock_data(ticker, is_jp)
+    if data:
+        _save_stock_data_cache(ticker, today, data)
+    return data
+
+
 _EDINET_DOC_LABELS = {
     "020": "大量保有報告書",
     "030": "変更報告書（大量保有）",
@@ -19538,6 +19622,89 @@ def render_claude_trading_project():
         if not all_options:
             st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
         else:
+            # ── 銘柄データキャッシュ状態バー ────────────────────────────────
+            _today_str  = datetime.now(JST).strftime("%Y-%m-%d")
+            _cache_stat = _get_stock_cache_status(list(open_pos.keys()))
+            _all_cached = all(v["cached"] for v in _cache_stat.values()) if _cache_stat else False
+            _n_cached   = sum(1 for v in _cache_stat.values() if v["cached"])
+            _n_total    = len(open_pos)
+            _last_upd   = max(
+                (v["updated_at"] for v in _cache_stat.values() if v["cached"]),
+                default="",
+            )
+            _cache_color = "#4ade80" if _all_cached else ("#fbbf24" if _n_cached > 0 else "#ef4444")
+            st.markdown(
+                f'<div style="background:#0f172a;border:1px solid {_cache_color}33;'
+                f'border-radius:8px;padding:8px 14px;margin-bottom:8px;'
+                f'display:flex;align-items:center;gap:10px;">'
+                f'<span style="font-size:12px;color:{_cache_color};font-weight:700">'
+                f'📦 キャッシュ: {_n_cached}/{_n_total}銘柄</span>'
+                + (f'<span style="font-size:11px;color:#64748b">最終更新: {_last_upd}</span>' if _last_upd else '')
+                + f'<span style="font-size:11px;color:#475569">（本日のデータをSheets保存・AI分析時に即利用）</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            _cache_col1, _cache_col2 = st.columns([2, 1])
+            if _cache_col1.button(
+                "📡 全保有銘柄データをキャッシュ更新",
+                key="btn_cache_update",
+                help="みんかぶ・EDINET・TDnetから全銘柄を並列取得してGoogle Sheetsに保存",
+                type="secondary" if _all_cached else "primary",
+            ):
+                import concurrent.futures as _cf_cache
+                _prog = st.progress(0, text="銘柄データ取得中...")
+                _results_cache = {}
+
+                def _fetch_and_cache(t_item):
+                    _t, _p = t_item
+                    _d = _fetch_trading_stock_data(_t, _t.endswith(".T"))
+                    if _d:
+                        _save_stock_data_cache(_t, _today_str, _d)
+                    return _t, _d
+
+                with _cf_cache.ThreadPoolExecutor(max_workers=5) as _ex_c:
+                    _futs_c = {_ex_c.submit(_fetch_and_cache, item): item[0]
+                               for item in open_pos.items()}
+                    _done_c = 0
+                    for _fut_c in _cf_cache.as_completed(_futs_c):
+                        try:
+                            _t2, _d2 = _fut_c.result()
+                            _results_cache[_t2] = _d2
+                        except Exception:
+                            pass
+                        _done_c += 1
+                        _prog.progress(_done_c / _n_total,
+                                       text=f"取得完了: {_done_c}/{_n_total}銘柄")
+                _prog.empty()
+                st.success(f"✅ {len(_results_cache)}銘柄のデータをキャッシュしました")
+                st.session_state["_prefetched_stock_data"] = _results_cache
+                st.rerun()
+
+            # 銘柄別キャッシュ状態をチップで表示
+            _chip_html = ""
+            for _tk in open_pos:
+                _cs = _cache_stat.get(_tk.upper(), {})
+                _c_ok = _cs.get("cached", False)
+                _chip_color  = "#166534" if _c_ok else "#7f1d1d"
+                _chip_border = "#4ade80" if _c_ok else "#ef4444"
+                _chip_icon   = "✓" if _c_ok else "✗"
+                _chip_html += (
+                    f'<span style="background:{_chip_color};border:1px solid {_chip_border};'
+                    f'border-radius:4px;padding:2px 7px;font-size:11px;color:#f1f5f9;'
+                    f'margin-right:4px">{_chip_icon} {_tk}</span>'
+                )
+            if _chip_html:
+                st.markdown(
+                    f'<div style="margin-bottom:10px">{_chip_html}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:6px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
             # ── 総合AI推奨分析（Market Dashboard + 全銘柄IR）─────────────────
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#a78bfa;'
@@ -19581,10 +19748,15 @@ def render_claude_trading_project():
                     import concurrent.futures as _cf_rec
                     _rec_mktctx = _fetch_market_context_for_trading()
 
+                    # キャッシュ済みデータを優先使用（session_state → Sheets → 新規フェッチ）
+                    _prefetched = st.session_state.get("_prefetched_stock_data", {})
+
                     def _fetch_one(ticker_item):
                         _t, _p = ticker_item
                         try:
-                            return _t, _fetch_trading_stock_data(_t, _t.endswith(".T"))
+                            if _t in _prefetched:
+                                return _t, _prefetched[_t]
+                            return _t, _fetch_trading_stock_data_with_cache(_t, _t.endswith(".T"))
                         except Exception:
                             return _t, {}
 
@@ -19730,10 +19902,28 @@ def render_claude_trading_project():
             )
             current_model_pref = _model_opts[sel_model_label]
 
+            # キャッシュ済みかどうか表示
+            _sel_ticker = sel["ticker"]
+            _sel_cs = _cache_stat.get(_sel_ticker.upper(), {})
+            if _sel_cs.get("cached"):
+                st.caption(f"📦 キャッシュ済み（{_sel_cs['updated_at']}）— データ取得をスキップしてAIに渡します")
+            else:
+                st.caption("⬜ 未キャッシュ — ボタン押下時にデータ取得します")
+
             if st.button("🤖 AIに分析させる", type="primary"):
-                with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
+                _spin_msg = (
+                    f"{sel['ticker']} AI分析中...（キャッシュ利用）"
+                    if _sel_cs.get("cached")
+                    else f"{sel['ticker']} データ取得・AI分析中...（30秒程度）"
+                )
+                with st.spinner(_spin_msg):
                     past   = _load_signals(sel["ticker"])   # 過去の分析履歴
-                    data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
+                    # キャッシュ対応フェッチ（session_state → Sheets → 新規取得）
+                    _pf = st.session_state.get("_prefetched_stock_data", {})
+                    data = (
+                        _pf.get(sel["ticker"])
+                        or _fetch_trading_stock_data_with_cache(sel["ticker"], is_jp)
+                    )
                     # windex市場コンテキスト（キャッシュ済みなら即返却）
                     _sig_mktctx = _fetch_market_context_for_trading()
                     signal = _generate_ai_trade_signal(
