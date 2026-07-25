@@ -20218,6 +20218,15 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・RRGリーディングセクター: {leading_str}
 ・RRGインプルービングセクター: {improving_str}
 
+【注目セクター（NASDAQ100非構成だが高成長）】
+・光通信・AIインフラ関連（米国）: CIEN(Ciena/光NW), COHR(Coherent/光部品),
+  LITE(Lumentum/光部品), VIAV(Viavi/光試験), AAOI(Applied Optoelectronics/トランシーバ),
+  GLW(Corning/光ファイバー), APH(Amphenol/コネクタ), VRT(Vertiv/AIインフラ電源)
+  ※AIデータセンター向け光接続需要急増で直近1年+100〜700%超の銘柄群。QQQ非採用だが成長継続中。
+・光通信関連（日本株）: 5803.T(フジクラ), 5812.T(古河電気工業)
+  ※日本の光ファイバーケーブルメーカー。海底・陸上ケーブル需要急増。
+※ 上記セクターは予算・リスクプロファイル・モードに合う場合に積極的に採用すること。
+
 【提案ルール】
 ・銘柄数: {5 if model_type == "individual" else 4}〜8銘柄/ETF
 ・日本株ティッカーは末尾に.T（例: 8306.T）

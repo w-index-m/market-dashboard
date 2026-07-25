@@ -29,7 +29,11 @@ import streamlit as st
 import requests
 
 logger = logging.getLogger(__name__)
-JST = pytz.timezone("Asia/Tokyo")
+try:
+    JST = pytz.timezone("Asia/Tokyo")
+except Exception:
+    import datetime as _dt
+    JST = _dt.timezone(_dt.timedelta(hours=9))
 
 _SESSION_KEY = "_anl_session_id"
 _TRACKED_KEY = "_anl_tracked"
