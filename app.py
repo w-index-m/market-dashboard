@@ -17812,6 +17812,48 @@ def _save_signal(ticker: str, name: str, signal: dict, data: dict) -> bool:
         return False
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_jp_long_name(ticker: str) -> str | None:
+    """日本株の正式社名をyfinanceから取得（TTL=1日）"""
+    try:
+        info = yf.Ticker(ticker).info or {}
+        return info.get("longName") or info.get("shortName")
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
+    """英語ニュース見出しを一括で日本語に翻訳する（Groq高速モデル使用、TTL=1h）。
+    tuple型を受け取るのは st.cache_data がリストを受け付けないため。
+    Returns: list[str] （入力と同じ長さ）
+    """
+    if not headlines_tuple:
+        return []
+    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines_tuple))
+    prompt = (
+        "以下の英語ニュース見出しを自然な日本語に翻訳してください。\n"
+        "企業名・人名・製品名はカタカナまたは原文のまま。\n"
+        "番号付きリスト（1. 〜\\n2. 〜）の形式で翻訳のみ返してください。余分な説明不要。\n\n"
+        + numbered
+    )
+    try:
+        text, _ = _call_ai_for_trading(
+            prompt, model_pref="groq", max_output_tokens=500, temperature=0.1
+        )
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        result = []
+        for line in lines:
+            m = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+            if m:
+                result.append(m.group(1))
+        while len(result) < len(headlines_tuple):
+            result.append(headlines_tuple[len(result)])
+        return result[:len(headlines_tuple)]
+    except Exception:
+        return list(headlines_tuple)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     """個別銘柄の分析データを取得（テクニカル + ニュース）"""
@@ -17860,40 +17902,90 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     except Exception as e:
         logger.warning(f"[trading] price fetch失敗 {ticker}: {e}")
 
-    # ニュース（Finnhub / yfinance）
-    news_texts = []
+    # ── ニュース取得（リンク + 日本語訳付き） ──────────────────────
+    news_items = []  # [{headline, headline_ja, url, date, source}]
     try:
         if not is_jp:
+            # 米国株: Finnhub
             api_key = FINNHUB_API_KEY
             if api_key:
                 from_dt = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
                 to_dt   = datetime.now().strftime("%Y-%m-%d")
-                r = requests.get(
+                resp = requests.get(
                     "https://finnhub.io/api/v1/company-news",
                     params={"symbol": ticker, "from": from_dt, "to": to_dt, "token": api_key},
                     timeout=8,
                 )
-                if r.status_code == 200:
-                    for item in r.json()[:5]:
-                        news_texts.append(item.get("headline", ""))
+                if resp.status_code == 200:
+                    for item in resp.json()[:6]:
+                        headline = item.get("headline", "")
+                        if not headline:
+                            continue
+                        ts = item.get("datetime", 0)
+                        date_s = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else ""
+                        news_items.append({
+                            "headline":    headline,
+                            "headline_ja": "",
+                            "url":         item.get("url", ""),
+                            "date":        date_s,
+                            "source":      item.get("source", ""),
+                        })
+            # 一括翻訳（Groq, キャッシュ済みなら即返却）
+            if news_items:
+                en_headlines = tuple(n["headline"] for n in news_items)
+                ja_list = _translate_headlines_to_ja(en_headlines)
+                for i, n in enumerate(news_items):
+                    n["headline_ja"] = ja_list[i] if i < len(ja_list) else n["headline"]
         else:
-            # 日本株: TDnetから直近の開示を検索
-            for days_ago in range(0, 10):
+            # 日本株: TDnet 30日分を集約（全マッチを収集）
+            code = ticker.replace(".T", "")
+            for days_ago in range(0, 30):
+                if len(news_items) >= 5:
+                    break
                 date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
                 try:
-                    items = fetch_tdnet_items_for_date(date_str)
-                    code = ticker.replace(".T", "")
-                    matched = [it for it in items if code in it.get("code", "")]
-                    for it in matched[:3]:
-                        news_texts.append(it.get("title", ""))
-                    if matched:
-                        break
+                    tdnet_items = fetch_tdnet_items_for_date(date_str)
+                    matched = [it for it in tdnet_items if code in (it.get("code") or "")]
+                    for it in matched[:2]:
+                        if len(news_items) >= 5:
+                            break
+                        title = it.get("title", "")
+                        if title:
+                            ymd = date_str
+                            news_items.append({
+                                "headline":    title,
+                                "headline_ja": title,
+                                "url":         it.get("pdf_url", ""),
+                                "date":        f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}",
+                                "source":      "TDnet",
+                            })
+                except Exception:
+                    pass
+            # yfinanceのニュースをフォールバック（TDnetで足りない場合）
+            if len(news_items) < 3:
+                try:
+                    yf_news = yf.Ticker(ticker).news or []
+                    for article in yf_news[:max(0, 5 - len(news_items))]:
+                        title = article.get("title", "")
+                        link  = article.get("link", "")
+                        if title:
+                            news_items.append({
+                                "headline":    title,
+                                "headline_ja": title,
+                                "url":         link,
+                                "date":        "",
+                                "source":      "yfinance",
+                            })
                 except Exception:
                     pass
     except Exception as e:
         logger.warning(f"[trading] news fetch失敗 {ticker}: {e}")
 
-    result["news"] = news_texts
+    result["news_items"] = news_items
+    # AI プロンプト用に日本語優先のテキストリストも保持（後方互換）
+    result["news"] = [
+        n.get("headline_ja") or n.get("headline") for n in news_items
+    ]
 
     # ── ファンダメンタルズ: PER推移・決算 ─────────────────────
     try:
@@ -18854,10 +18946,24 @@ def _compute_portfolio_summary() -> dict:
                 six_months_ago = pd.Timestamp.now(tz="UTC") - pd.DateOffset(months=6)
                 recent_divs = div_hist[div_hist.index >= six_months_ago]
                 divs_by_month = {}
-                for dt, amount in recent_divs.items():
-                    month_key = dt.strftime("%Y-%m")
-                    divs_by_month[month_key] = divs_by_month.get(month_key, 0.0) + float(amount) * pos["qty"]
-                dividends[ticker] = {"is_jp": is_jp, "divs_by_month": divs_by_month}
+                divs_detail = []
+                for _dt, _amount in recent_divs.items():
+                    _per_share = float(_amount)
+                    _total     = _per_share * pos["qty"]
+                    month_key  = _dt.strftime("%Y-%m")
+                    divs_by_month[month_key] = divs_by_month.get(month_key, 0.0) + _total
+                    divs_detail.append({
+                        "date":      _dt.strftime("%Y-%m-%d"),
+                        "per_share": _per_share,
+                        "total":     _total,
+                        "qty":       pos["qty"],
+                    })
+                dividends[ticker] = {
+                    "is_jp":       is_jp,
+                    "name":        pos["name"],
+                    "divs_by_month": divs_by_month,
+                    "divs_detail": divs_detail,
+                }
         except Exception:
             pass
 
@@ -19078,7 +19184,45 @@ def render_claude_trading_project():
                     # 分析結果を Google Sheets に自動保存
                     _save_signal(sel["ticker"], sel["name"], signal, data)
 
-                    if data.get("news"):
+                    if data.get("news_items"):
+                        with st.expander(f"📰 参照したニュース・開示（{len(data['news_items'])}件）"):
+                            for _ni in data["news_items"]:
+                                _hja  = _ni.get("headline_ja", "") or _ni.get("headline", "")
+                                _hen  = _ni.get("headline", "")
+                                _url  = _ni.get("url", "")
+                                _date = _ni.get("date", "")
+                                _src  = _ni.get("source", "")
+                                # タイトル行（リンク付き）
+                                if _url:
+                                    _title_html = (
+                                        f'<a href="{_url}" target="_blank" rel="noopener noreferrer" '
+                                        f'style="color:#60a5fa;text-decoration:none;font-size:13px;font-weight:600">'
+                                        f'{_hja}</a>'
+                                    )
+                                else:
+                                    _title_html = (
+                                        f'<span style="color:#e2e8f0;font-size:13px;font-weight:600">'
+                                        f'{_hja}</span>'
+                                    )
+                                # 原文（英語の場合のみ）
+                                _en_html = ""
+                                if _hen and _hja and _hen != _hja:
+                                    _en_html = (
+                                        f'<div style="font-size:11px;color:#64748b;margin-top:2px">'
+                                        f'{_hen}</div>'
+                                    )
+                                # 日付・ソース
+                                _meta = " ｜ ".join(x for x in [_date, _src] if x)
+                                _meta_html = (
+                                    f'<div style="font-size:10px;color:#475569;margin-top:2px">{_meta}</div>'
+                                    if _meta else ""
+                                )
+                                st.markdown(
+                                    f'<div style="padding:8px 2px;border-bottom:1px solid #1e293b">'
+                                    f'• {_title_html}{_en_html}{_meta_html}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                    elif data.get("news"):
                         with st.expander("📰 参照したニュース・開示"):
                             for n in data["news"]:
                                 st.markdown(f"・{n}")
@@ -19681,40 +19825,87 @@ def render_claude_trading_project():
                 months_6.append(f"{y:04d}-{m:02d}")
             months_6 = sorted(set(months_6))[-6:]
 
-            div_by_month: dict[str, float] = {m: 0.0 for m in months_6}
+            # ティッカー別に月次配当を集計（スタック棒グラフ用）
+            ticker_month_div: dict[str, dict[str, float]] = {}
+            detail_rows = []  # 明細テーブル用
             has_any_div = False
-            for ticker, div_data in dividends.items():
-                is_jp = div_data["is_jp"]
-                for month_key, amount in div_data["divs_by_month"].items():
-                    if month_key in div_by_month:
-                        div_by_month[month_key] += _to_display(amount, is_jp)
+
+            _ticker_colors = [
+                "#f59e0b", "#60a5fa", "#34d399", "#f87171",
+                "#a78bfa", "#fb923c", "#38bdf8", "#4ade80",
+            ]
+            for _ci, (_tk, _dd) in enumerate(dividends.items()):
+                _is_jp = _dd["is_jp"]
+                _name  = _dd.get("name", _tk)
+                _label = f"{_tk}（{_name}）" if _name != _tk else _tk
+                ticker_month_div[_label] = {m: 0.0 for m in months_6}
+                for month_key, amount in _dd["divs_by_month"].items():
+                    if month_key in months_6:
+                        ticker_month_div[_label][month_key] += _to_display(amount, _is_jp)
                         has_any_div = True
+                # 明細行
+                for ev in _dd.get("divs_detail", []):
+                    _disp = _to_display(ev["total"], _is_jp)
+                    _ps   = _to_display(ev["per_share"], _is_jp)
+                    detail_rows.append({
+                        "銘柄":     _label,
+                        "権利落日": ev["date"],
+                        "1株配当":  f"{_ps:,.4f} {cur_label}",
+                        "保有株数": int(ev["qty"]),
+                        "受取配当": f"{_disp:,.2f} {cur_label}",
+                    })
 
             if has_any_div:
+                import plotly.graph_objects as go
                 fig_div = go.Figure()
-                fig_div.add_trace(go.Bar(
-                    x=list(div_by_month.keys()),
-                    y=list(div_by_month.values()),
-                    marker_color="#f59e0b",
-                    hovertemplate="%{x}<br>配当: %{y:,.2f}<extra></extra>",
-                    text=[f"{v:,.2f}" if v > 0 else "" for v in div_by_month.values()],
-                    textposition="outside",
-                    textfont=dict(color="#e2e8f0", size=11),
-                ))
+                for _ci, (_label, _mvals) in enumerate(ticker_month_div.items()):
+                    _color = _ticker_colors[_ci % len(_ticker_colors)]
+                    fig_div.add_trace(go.Bar(
+                        name=_label,
+                        x=list(_mvals.keys()),
+                        y=list(_mvals.values()),
+                        marker_color=_color,
+                        hovertemplate=f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>",
+                    ))
                 fig_div.update_layout(
+                    barmode="stack",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     font=dict(color="#e2e8f0"),
                     xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                     yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
                                tickprefix=f"{cur_label} "),
                     hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                    margin=dict(l=10, r=10, t=5, b=10),
-                    height=180,
-                    showlegend=False,
+                    legend=dict(font=dict(color="#e2e8f0", size=11),
+                                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    height=220,
                 )
                 st.plotly_chart(fig_div, use_container_width=True)
-                total_div = sum(div_by_month.values())
-                st.caption(f"過去6ヶ月合計配当: **{cur_label} {total_div:,.2f}**")
+
+                # 明細テーブル
+                if detail_rows:
+                    detail_rows_sorted = sorted(detail_rows, key=lambda r: r["権利落日"], reverse=True)
+                    total_div = sum(
+                        float(r["受取配当"].split()[0].replace(",", ""))
+                        for r in detail_rows_sorted
+                    )
+                    for dr in detail_rows_sorted:
+                        st.markdown(
+                            f'<div style="display:flex;justify-content:space-between;'
+                            f'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
+                            f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
+                            f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
+                            f'<span style="color:#64748b">{dr["1株配当"]}</span>'
+                            f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
+                            f'<span style="color:#f59e0b;font-weight:700">{dr["受取配当"]}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown(
+                        f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
+                        f'過去6ヶ月合計: <b style="color:#f59e0b">{cur_label} {total_div:,.2f}</b></div>',
+                        unsafe_allow_html=True,
+                    )
             else:
                 st.info("配当履歴がありません（過去6ヶ月）。")
 
