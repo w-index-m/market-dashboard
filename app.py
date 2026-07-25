@@ -20394,6 +20394,11 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
                 parsed = _json_ip.loads(_raw)
             parsed["model"] = _model_used
             parsed["error"] = None
+            # allocation比率からamountを再計算してAIの計算ミスを修正
+            for _itm in parsed.get("portfolio", []):
+                _al = float(_itm.get("allocation", 0))
+                if _al > 0:
+                    _itm["amount"] = int(budget * _al / 100)
             return parsed
     except ValueError as e:
         _err = f"JSON解析失敗: {str(e)[:120]}"
@@ -21598,6 +21603,7 @@ def render_claude_trading_project():
                             _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
                                         unsafe_allow_html=True)
 
+                        _ip_total_actual = 0  # 合計実際投資額の集計用
                         for _item in _ip_pf:
                             _flag   = _item.get("flag", "🌐")
                             _tk     = _item.get("ticker", "")
@@ -21606,7 +21612,8 @@ def render_claude_trading_project():
                             _alloc  = float(_item.get("allocation", 0))
                             if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
                                 continue
-                            _amt    = int(_item.get("amount", 0))
+                            # 予算×比率で投資金額を確定（AIの計算ミスを無効化）
+                            _amt    = int(_ip_bv * _alloc / 100)
                             _rat    = _item.get("rationale", "")
                             _bar_w  = min(int(_alloc), 100)
                             _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
@@ -21633,6 +21640,7 @@ def render_claude_trading_project():
                                 _shares_str  = "—"
                                 _price_str   = "価格取得中"
                                 _actual_cost = _amt
+                            _ip_total_actual += _actual_cost
 
                             # パフォーマンス指標
                             _tdat   = _px.get(_tk) or {}
@@ -21696,6 +21704,24 @@ def render_claude_trading_project():
                                 + _stats_html,
                                 unsafe_allow_html=True,
                             )
+
+                        # 合計・余剰資金フッター
+                        _ip_cash = max(0, _ip_bv - _ip_total_actual)
+                        _inv_pct = int(_ip_total_actual / _ip_bv * 100) if _ip_bv else 0
+                        st.markdown(
+                            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                            f'padding:10px 14px;margin-top:8px;display:flex;gap:20px;flex-wrap:wrap;align-items:center">'
+                            f'<div><div style="font-size:10px;color:#64748b">合計投資金額（単元後）</div>'
+                            f'<div style="font-size:15px;font-weight:800;color:#4ade80">¥{_ip_total_actual:,}</div></div>'
+                            f'<div><div style="font-size:10px;color:#64748b">余剰資金（現金）</div>'
+                            f'<div style="font-size:15px;font-weight:800;color:#fbbf24">¥{_ip_cash:,}</div></div>'
+                            f'<div><div style="font-size:10px;color:#64748b">投資効率</div>'
+                            f'<div style="font-size:15px;font-weight:800;color:#94a3b8">{_inv_pct}%</div></div>'
+                            f'<div style="font-size:10px;color:#475569;margin-left:auto">予算 ¥{_ip_bv:,} ／ '
+                            f'余剰は追加銘柄または余力として保持</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
 
             # ── リスク-リターン比較チャート ──────────────────────────
             if _ip_disp and any(_ip_disp.get(k, {}).get("metrics") for k in ["etf", "individual"]):
