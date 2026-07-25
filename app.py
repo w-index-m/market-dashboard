@@ -17682,14 +17682,20 @@ def render_leadlag_section():
 # =====================================================
 
 def _trading_ws(tab: str, headers: list):
-    """analytics._sheets_ws を流用（毎回フレッシュな接続で安定性を確保）"""
-    # NOTE: @st.cache_resource でクライアントをキャッシュすると長時間処理後に
-    # トークンが stale になり接続失敗するため、analytics.py と同じく毎回生成する
-    try:
-        return _anl_sheets_ws(tab, headers)
-    except Exception as e:
-        logger.warning(f"[trading] ws({tab}) 失敗: {e}")
-        return None
+    """analytics._sheets_ws を流用（リトライ付き）。
+    一時的な接続失敗に備えて最大3回試行し、指数バックオフ(1s,2s)で待機する。
+    """
+    for _attempt in range(3):
+        try:
+            ws = _anl_sheets_ws(tab, headers)
+            if ws is not None:
+                return ws
+        except Exception as e:
+            logger.warning(f"[trading] ws({tab}) 試行{_attempt+1}/3 失敗: {e}")
+        if _attempt < 2:
+            time.sleep(1.0 * (_attempt + 1))  # 1s → 2s
+    logger.warning(f"[trading] ws({tab}) 3回とも失敗")
+    return None
 
 
 
@@ -17704,7 +17710,7 @@ def _load_trades() -> tuple[pd.DataFrame, str | None]:
     try:
         ws = _trading_ws("claude_trades", _TRADES_HEADERS)
         if not ws:
-            return pd.DataFrame(), "Google Sheets接続失敗（ページを再読み込みしてください）"
+            return pd.DataFrame(), "Google Sheets接続失敗（3回リトライ後も接続できませんでした）"
         rows = ws.get_all_records()
         if not rows:
             return pd.DataFrame(), None
@@ -20969,8 +20975,11 @@ def render_claude_trading_project():
         df_trades, trades_err = _load_trades()
 
         if trades_err:
-            st.error(f"⚠️ {trades_err}")
-            st.caption("データは Google Sheets に保存されています。ページを再読み込みすると表示されます。")
+            _err_c1, _err_c2 = st.columns([4, 1])
+            _err_c1.error(f"⚠️ {trades_err}")
+            if _err_c2.button("🔄 再試行", key="retry_load_trades"):
+                st.rerun()
+            st.caption("Google Sheets への接続が一時的に失敗しました。「再試行」を押すか、しばらく待ってから再読み込みしてください。")
         elif df_trades.empty:
             st.info("取引記録がまだありません。")
         else:
