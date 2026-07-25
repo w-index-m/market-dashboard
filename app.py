@@ -18417,6 +18417,130 @@ def _fetch_daily_changes_for_tickers(tickers_tuple: tuple) -> dict:
     return result
 
 
+def _generate_portfolio_wide_analysis(
+    positions: dict,
+    daily_changes: dict,
+    mode: str = "growth",
+    model_pref: str = "auto",
+) -> dict:
+    """全保有銘柄を一括でAIに渡してポートフォリオ全体分析を生成する。
+    Returns: {"text": str, "model": str, "error": str|None}
+    """
+    if not positions:
+        return {"text": "", "model": "", "error": "保有銘柄がありません"}
+
+    # ── 銘柄サマリーを作成 ───────────────────────────────────
+    total_cost = sum(p["cost"] for p in positions.values())
+    total_mkt  = sum(p["market_value"] for p in positions.values() if p.get("market_value"))
+    total_gain = total_mkt - total_cost
+    total_gp   = total_gain / total_cost * 100 if total_cost > 0 else 0
+
+    # セクター集計
+    sector_vals: dict[str, float] = {}
+    for p in positions.values():
+        sec = p.get("sector", "その他")
+        val = p.get("market_value") or 0
+        sector_vals[sec] = sector_vals.get(sec, 0.0) + val
+
+    sector_lines = []
+    for sec, val in sorted(sector_vals.items(), key=lambda x: -x[1]):
+        pct = val / total_mkt * 100 if total_mkt > 0 else 0
+        sector_lines.append(f"  {sec}: {pct:.1f}% ({val:,.0f})")
+
+    # 銘柄別詳細
+    pos_lines = []
+    for ticker, p in positions.items():
+        cur   = p.get("market_value") or 0
+        cost  = p.get("cost") or 0
+        gain  = cur - cost
+        gp    = gain / cost * 100 if cost > 0 else 0
+        cur_price = p.get("cur_price") or 0
+        flag  = "🇯🇵" if p.get("is_jp") else "🇺🇸"
+        sec   = p.get("sector", "その他")
+        alloc = cur / total_mkt * 100 if total_mkt > 0 else 0
+        day_chg = daily_changes.get(ticker, {}).get("day_change_pct", None)
+        day_str = f"本日{day_chg:+.2f}%" if day_chg is not None else ""
+        pos_lines.append(
+            f"  {flag} {ticker} ({p['name']}) | "
+            f"現在値: {cur_price:,.1f} | "
+            f"評価額: {cur:,.0f} ({alloc:.1f}%) | "
+            f"含み損益: {gain:+,.0f} ({gp:+.1f}%) | "
+            f"セクター: {sec} {day_str}"
+        )
+
+    mode_desc = {
+        "growth":     "長期育成（ファンダ重視・6ヶ月〜2年保有）",
+        "momentum":   "モメンタム（テクニカル重視・1〜4週間保有）",
+        "autonomous": "AI自律（分析軸をAIが自律決定）",
+    }.get(mode, "長期育成")
+
+    prompt = f"""あなたはプロのポートフォリオマネージャーです。以下の保有ポートフォリオ全体を分析し、具体的なアクション提言を行ってください。
+
+投資戦略モード: {mode_desc}
+
+【保有ポジション一覧】
+{chr(10).join(pos_lines)}
+
+【ポートフォリオ全体サマリー】
+- 合計評価額: {total_mkt:,.0f}
+- 合計投資元本: {total_cost:,.0f}
+- 含み損益合計: {total_gain:+,.0f} ({total_gp:+.1f}%)
+- 保有銘柄数: {len(positions)}銘柄
+
+【セクター配分】
+{chr(10).join(sector_lines)}
+
+【出力形式】必ず以下の構成で回答してください：
+
+## 🔍 リスク診断
+
+**集中リスク**: セクター・銘柄・地域の偏りとそのリスク水準（高/中/低）
+
+**相関リスク**: 保有銘柄間の値動きの相関（同じ方向に動くリスクがあるか）
+
+**バランス評価**: 現在のポートフォリオ構成は{mode_desc}の戦略に対して適切か
+
+**総合リスクスコア**: X/10（10が最高リスク）とその根拠
+
+---
+
+## ⚡ アクション優先順位 TOP3
+
+今すぐ動くべき銘柄を優先順位をつけて3つ挙げてください（保有銘柄内で最も重要なアクションから順に）。
+
+### 1位: [銘柄名 (ティッカー)]
+- **推奨アクション**: [全株売却 / 一部利確（半分） / 追加買い / 保有継続]
+- **理由**: 100字以内
+- **具体的な水準**: 〇〇円/ドルを超えたら / 下回ったら実行
+
+### 2位: [銘柄名 (ティッカー)]
+- **推奨アクション**: ...
+- **理由**: ...
+- **具体的な水準**: ...
+
+### 3位: [銘柄名 (ティッカー)]
+- **推奨アクション**: ...
+- **理由**: ...
+- **具体的な水準**: ...
+
+---
+
+## 📋 ポートフォリオ改善提案
+
+**最優先で改善すべき点**: 1〜2文
+**追加検討すべき銘柄の方向性**: 現在のポートフォリオの弱点を補う銘柄の特性（具体的な銘柄名は不要）
+**次回見直しタイミング**: いつ、何をトリガーにポートフォリオ全体を再評価すべきか
+"""
+
+    try:
+        text, model_used = _call_ai_for_trading(
+            prompt, model_pref=model_pref, max_output_tokens=1200, temperature=0.3
+        )
+        return {"text": text, "model": model_used, "error": None}
+    except Exception as e:
+        return {"text": "", "model": "", "error": str(e)}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _generate_portfolio_ai_comment(positions_key: str, changes_json: str) -> dict:
     """AI によるポートフォリオ日次コメントを生成（JSON形式）。
@@ -18748,6 +18872,62 @@ def render_claude_trading_project():
         open_pos  = _get_open_positions()           # 保有中ポジション
         watchlist = _load_watchlist() or []         # ウォッチリスト（None時は空リスト）
 
+        # ── ポートフォリオ全体AI分析 ────────────────────────
+        if open_pos:
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#0a1628,#0d1f3c);'
+                'border:1px solid #1e3a5f;border-radius:10px;padding:14px 18px;margin-bottom:14px">'
+                '<div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px">'
+                '📊 ポートフォリオ全体AI分析</div>'
+                '<div style="font-size:12px;color:#94a3b8">'
+                '全保有銘柄を一括で分析 → リスク診断 + アクション優先順位TOP3</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            _wide_model_opts = {
+                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                "🟡 Gemini（Google）":              "gemini",
+                "⚡ Groq（高速）":                  "groq",
+                "🌐 OpenRouter":                    "openrouter",
+            }
+            _wide_col1, _wide_col2 = st.columns([3, 1])
+            _wide_model_label = _wide_col1.selectbox(
+                "全体分析用AIモデル", list(_wide_model_opts.keys()),
+                key="wide_model_sel", label_visibility="collapsed",
+            )
+            _wide_model_pref = _wide_model_opts[_wide_model_label]
+
+            if _wide_col2.button("🔍 全体分析", type="primary", use_container_width=True):
+                _wide_mode = st.session_state.get("trading_mode", "growth")
+                with st.spinner("全保有銘柄のデータ取得・AI分析中...（30〜60秒）"):
+                    # サマリーデータ取得
+                    _wide_summary = _compute_portfolio_summary()
+                    _wide_positions = _wide_summary.get("positions", {})
+                    # 日次騰落
+                    _wide_tickers = tuple(sorted(_wide_positions.keys()))
+                    _wide_changes  = _fetch_daily_changes_for_tickers(_wide_tickers) if _wide_tickers else {}
+                    _wide_result   = _generate_portfolio_wide_analysis(
+                        _wide_positions, _wide_changes,
+                        mode=_wide_mode, model_pref=_wide_model_pref,
+                    )
+                st.session_state["_wide_analysis"] = _wide_result
+
+            # 結果表示
+            _wide_res = st.session_state.get("_wide_analysis")
+            if _wide_res:
+                if _wide_res.get("error"):
+                    st.error(f"分析エラー: {_wide_res['error']}")
+                else:
+                    st.markdown(
+                        f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
+                        f'🤖 {_wide_res.get("model", "")} ｜ '
+                        f'{datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(_wide_res["text"])
+                    st.divider()
+
         # 選択肢を構築: 保有銘柄 → ウォッチリスト の順
         all_options = {}  # label → {ticker, name, market, position_ctx}
 
@@ -18776,6 +18956,11 @@ def render_claude_trading_project():
         if not all_options:
             st.info("まず「ウォッチリスト」タブに銘柄を追加するか、取引記録を入力してください。")
         else:
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#94a3b8;'
+                'margin:8px 0 6px">── 個別銘柄分析 ──</div>',
+                unsafe_allow_html=True,
+            )
             if open_pos:
                 st.caption("📂 保有中の銘柄は「追加買い / 保有継続 / 利確 / 損切り」の観点でAIが判断します。👀 はウォッチリスト（新規エントリー候補）です。")
 
