@@ -18036,6 +18036,114 @@ def render_claude_trading_project():
                 st.info("現在の保有ポジションはありません（全て決済済み）。")
 
 
+# =====================================================
+# 🔐 管理者用チェンジログ（パスワード保護）
+# =====================================================
+
+_CHANGELOG = [
+    {
+        "date": "2026-07-25",
+        "title": "🤖 Claude 個別株トレーディングプロジェクト",
+        "items": [
+            "ウォッチリスト管理（Google Sheets永続保存）",
+            "AI売買シグナル生成（テクニカル＋TDnet決算＋Finnhubニュース）",
+            "取引記録入力フォーム（約定後に手動入力）",
+            "損益・ポートフォリオ追跡（含み損益リアルタイム計算）",
+        ],
+        "tag": "新機能",
+        "color": "#3b82f6",
+    },
+    {
+        "date": "2026-07-25",
+        "title": "🚀 モメンタムランキングにNASDAQ100・S&P500を追加",
+        "items": [
+            "S&P500構成銘柄30銘柄のリストを新規追加",
+            "ラジオボタン切り替え → タブ（日経225 / NASDAQ100 / S&P500）に変更",
+        ],
+        "tag": "機能改善",
+        "color": "#8b5cf6",
+    },
+    {
+        "date": "2026-07-25",
+        "title": "📡 光通信バスケットのグラフ急変を修正",
+        "items": [
+            "廃止・合併済み銘柄（IIVI/FNSR/SNDK/ATXI）をバスケットから削除",
+            "ffill()を正規化前に適用し東証休場日等の欠損によるスパイクを解消",
+        ],
+        "tag": "バグ修正",
+        "color": "#ef4444",
+    },
+    {
+        "date": "2026-07-25",
+        "title": "🌐 PCE/Core PCEの取得元をBLS API → FRED CSVに変更",
+        "items": [
+            "api.bls.govのタイムアウト頻発を解消",
+            "FRED CSVエンドポイント（APIキー不要）でPCEPI・PCEPILFEを取得",
+        ],
+        "tag": "バグ修正",
+        "color": "#ef4444",
+    },
+    {
+        "date": "2026-07-25",
+        "title": "🔧 5項目のバグ修正",
+        "items": [
+            "gemini-pro（廃止モデル）→ gemini-1.5-flash-8bに変更",
+            "OECD CLI URL を廃止済みstats.oecd.org → 新sdmx.oecd.orgに更新",
+            "BLS API endyearに来年を指定していたバグを修正",
+            "@st.cache_dataの重複デコレータを削除",
+            "JPX空売りURLデッドコードを削除",
+        ],
+        "tag": "バグ修正",
+        "color": "#ef4444",
+    },
+]
+
+
+def render_admin_changelog():
+    """パスワード保護付き管理者チェンジログ"""
+    admin_pw = st.secrets.get("ADMIN_PASSWORD", "windex2024")
+
+    if not st.session_state.get("_admin_authed"):
+        with st.expander("🔐 管理者メニュー", expanded=False):
+            pw_input = st.text_input("パスワード", type="password",
+                                     key="admin_pw_input", label_visibility="collapsed",
+                                     placeholder="パスワードを入力")
+            if st.button("ログイン", key="admin_login_btn"):
+                if pw_input == admin_pw:
+                    st.session_state["_admin_authed"] = True
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います")
+        return
+
+    with st.expander("🔐 管理者メニュー — 更新履歴", expanded=True):
+        if st.button("🔒 ログアウト", key="admin_logout_btn"):
+            st.session_state["_admin_authed"] = False
+            st.rerun()
+
+        st.markdown("### 📋 最近の更新履歴")
+        for entry in _CHANGELOG:
+            tag_color = entry["color"]
+            items_html = "".join(
+                f'<li style="color:#cbd5e1;font-size:13px;margin:3px 0">{it}</li>'
+                for it in entry["items"]
+            )
+            st.markdown(
+                f'<div style="background:#1e293b;border-left:4px solid {tag_color};'
+                f'border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px;">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+                f'<span style="background:{tag_color};color:#fff;font-size:11px;'
+                f'font-weight:700;padding:2px 8px;border-radius:4px">{entry["tag"]}</span>'
+                f'<span style="color:#94a3b8;font-size:12px">{entry["date"]}</span>'
+                f'</div>'
+                f'<div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:6px">'
+                f'{entry["title"]}</div>'
+                f'<ul style="margin:0;padding-left:18px">{items_html}</ul>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+
 # ===========================
 def main():
     now_jst = datetime.now(JST)
@@ -18058,6 +18166,7 @@ def main():
         t(f"最終更新: {now_jst:%Y-%m-%d %H:%M:%S} JST | フォント: {FONT_NAME}",
           f"Last updated: {now_jst:%Y-%m-%d %H:%M:%S} JST | Font: {FONT_NAME}")
     )
+    render_admin_changelog()
 
     # ── Google翻訳ウィジェット ──────────────────────────────────
     # components.html だと Streamlit 再描画のたびに iframe がリセットされて消える。
