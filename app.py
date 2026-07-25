@@ -20478,7 +20478,8 @@ def render_claude_trading_project():
 
     # ── タブ①: AI分析・シグナル ────────────────────────────────
     with tab_signal:
-        open_pos = _get_open_positions()            # 保有中ポジション
+        _trades_df, _trades_err = _load_trades()
+        open_pos = _calc_positions_from_df(_trades_df) if not _trades_df.empty else {}
 
         # 選択肢: 保有銘柄のみ
         all_options = {}
@@ -20499,7 +20500,12 @@ def render_claude_trading_project():
                 }
 
         if not all_options:
-            st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
+            if _trades_err:
+                st.warning(f"⚠️ 取引記録の読み込みに失敗しました: {_trades_err}")
+                if st.button("🔄 再読み込み", key="btn_reload_trades_signal"):
+                    st.rerun()
+            else:
+                st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
         else:
             # ── 銘柄データキャッシュ状態バー ────────────────────────────────
             _today_str  = datetime.now(JST).strftime("%Y-%m-%d")
