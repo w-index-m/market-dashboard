@@ -17705,6 +17705,58 @@ _TRADES_HEADERS = [
     "fee", "memo", "ai_target", "ai_stoploss"
 ]
 
+# 既知銘柄名マスタ（yfinance が返さない/遅い場合のフォールバック）
+_KNOWN_NAMES: dict = {
+    "MU":      "Micron Technology",
+    "NVDA":    "NVIDIA",
+    "AMD":     "Advanced Micro Devices",
+    "INTC":    "Intel",
+    "AVGO":    "Broadcom",
+    "QCOM":    "Qualcomm",
+    "AAPL":    "Apple",
+    "MSFT":    "Microsoft",
+    "GOOGL":   "Alphabet",
+    "META":    "Meta Platforms",
+    "AMZN":    "Amazon",
+    "TSLA":    "Tesla",
+    "TSM":     "TSMC",
+    "ASML":    "ASML Holding",
+    "AMAT":    "Applied Materials",
+    "LRCX":    "Lam Research",
+    "KLAC":    "KLA Corporation",
+    "TXN":     "Texas Instruments",
+    "ARM":     "Arm Holdings",
+    "MRVL":    "Marvell Technology",
+    "SMCI":    "Super Micro Computer",
+    "285A.T":  "キオクシアHD",
+    "8306.T":  "三菱UFJフィナンシャル・グループ",
+    "8316.T":  "三井住友フィナンシャルグループ",
+    "8411.T":  "みずほフィナンシャルグループ",
+    "7203.T":  "トヨタ自動車",
+    "6758.T":  "ソニーグループ",
+    "6861.T":  "キーエンス",
+    "9984.T":  "ソフトバンクグループ",
+    "7974.T":  "任天堂",
+    "4063.T":  "信越化学工業",
+    "6367.T":  "ダイキン工業",
+    "8035.T":  "東京エレクトロン",
+}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _get_stock_display_name(ticker: str) -> str:
+    """ティッカーから銘柄表示名を取得（既知マスタ→yfinance shortName の順）。
+    取得失敗時はティッカーをそのまま返す。TTL=24h。
+    """
+    if ticker in _KNOWN_NAMES:
+        return _KNOWN_NAMES[ticker]
+    try:
+        info = yf.Ticker(ticker).info or {}
+        name = (info.get("shortName") or info.get("longName") or "").strip()
+        return name if name else ticker
+    except Exception:
+        return ticker
+
 def _load_trades() -> tuple[pd.DataFrame, str | None]:
     """取引記録をGoogle Sheetsから読み込む。(DataFrame, error_msg) を返す。"""
     try:
@@ -17943,8 +17995,11 @@ def _generate_ai_allocation_scores(
         cost   = pos.get("cost") or 0
         gp     = (mval - cost) / cost * 100 if cost > 0 else 0
         ret_str = f"{ret_20d:+.1f}%" if ret_20d is not None else "?"
+        _disp = data.get("name") or pos.get("name") or ticker
+        if _disp == ticker:
+            _disp = _get_stock_display_name(ticker)
         stock_blocks.append(
-            f"{flag} {ticker}({pos['name']}) | "
+            f"{flag} {ticker}({_disp}) | "
             f"株価:{price}{cur} RSI:{rsi} MA25:{ma25}{cur} MA75:{ma75}{cur} | "
             f"20日:{ret_str} 含み:{gp:+.1f}% | セクター:{sec} | "
             f"IR/ニュース: {news_str}"
@@ -18901,6 +18956,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         result["rev_growth"]    = round(rev_growth * 100, 1) if rev_growth else None
         result["earn_growth"]   = round(earn_growth * 100, 1) if earn_growth else None
         result["sector"]        = info.get("sector") or info.get("industry")
+        result["name"]          = (info.get("shortName") or info.get("longName") or "").strip()
 
         # 次回決算日
         try:
@@ -20141,9 +20197,13 @@ def render_claude_trading_project():
                 is_jp_pos = ticker.endswith(".T")
                 cur = "円" if is_jp_pos else "USD"
                 avg = pos.get("avg_cost", 0)
-                lbl = f"📂 {ticker} — {pos['name']}（取得単価 {avg:.1f}{cur}）"
+                # pos["name"] がティッカーと同じ（未入力）なら正式名称を取得
+                _disp_name = pos.get("name") or ticker
+                if _disp_name == ticker or not _disp_name:
+                    _disp_name = _get_stock_display_name(ticker)
+                lbl = f"📂 {ticker} — {_disp_name}（取得単価 {avg:.1f}{cur}）"
                 all_options[lbl] = {
-                    "ticker": ticker, "name": pos["name"],
+                    "ticker": ticker, "name": _disp_name,
                     "market": "JP" if is_jp_pos else "US",
                     "position_ctx": pos,
                 }
@@ -20809,8 +20869,11 @@ def render_claude_trading_project():
                     )
                     # windex市場コンテキスト（キャッシュ済みなら即返却）
                     _sig_mktctx = _fetch_market_context_for_trading()
+                    _sig_name = (data.get("name") or sel["name"] or sel["ticker"])
+                    if _sig_name == sel["ticker"]:
+                        _sig_name = _get_stock_display_name(sel["ticker"])
                     signal = _generate_ai_trade_signal(
-                        sel["ticker"], sel["name"], is_jp, data,
+                        sel["ticker"], _sig_name, is_jp, data,
                         position_ctx=pos_ctx, past_signals=past,
                         mode=current_mode, model_pref=current_model_pref,
                         market_ctx=_sig_mktctx,
@@ -21057,8 +21120,11 @@ def render_claude_trading_project():
                     pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
                     pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
 
+                    _pnl_name = pos.get("name") or ticker
+                    if _pnl_name == ticker:
+                        _pnl_name = _get_stock_display_name(ticker)
                     pnl_rows.append({
-                        "銘柄":    pos["name"],
+                        "銘柄":    _pnl_name,
                         "コード":  ticker,
                         "保有株数": int(pos["qty"]),
                         "平均取得単価": round(avg_cost, 2),
