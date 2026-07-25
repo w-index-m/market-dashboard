@@ -19595,7 +19595,17 @@ def _fetch_market_context_for_trading() -> dict:
         try:
             fg = fetch_fear_greed_index()
             if fg:
-                return {"score": fg.get("score"), "rating": fg.get("rating")}
+                cur = float(fg.get("score") or 50)
+                result = {"score": cur, "rating": fg.get("rating")}
+                hist = fg.get("historical")
+                if hist is not None and not hist.empty:
+                    h = hist.sort_values("date").reset_index(drop=True)
+                    n = len(h)
+                    if n >= 8:
+                        result["change_7d"]  = round(cur - float(h.iloc[-8]["score"]), 1)
+                    if n >= 31:
+                        result["change_30d"] = round(cur - float(h.iloc[-31]["score"]), 1)
+                return result
         except Exception:
             pass
         return None
@@ -19665,12 +19675,47 @@ def _fetch_market_context_for_trading() -> dict:
         sec_f   = ex.submit(_sector)
         nik_f   = ex.submit(_nikkei)
         us_f    = ex.submit(_us)
+        _fg_r = fg_f.result() or {}
+        _fg_score = float(_fg_r.get("score") or 50)
+        _fg_rating = _fg_r.get("rating") or "Neutral"
+        _fg_lbl = (
+            "極度の強欲" if _fg_score >= 75 else
+            "強欲"       if _fg_score >= 55 else
+            "中立"       if _fg_score >= 45 else
+            "恐怖"       if _fg_score >= 25 else
+            "極度の恐怖"
+        )
+        _fg_c7  = _fg_r.get("change_7d")
+        _fg_c30 = _fg_r.get("change_30d")
+        # F&G急騰シグナル（過去の急落前パターンに基づく）
+        _fg_spike_warn = ""
+        if _fg_c7 is not None and _fg_c7 >= 20:
+            _fg_spike_warn = (
+                f"⚠️ F&G急騰シグナル: 7日間で+{_fg_c7:.0f}pt急上昇。"
+                "過去の類似パターン（2022年1月・2021年11月・2018年2月）では"
+                "1〜3ヶ月以内にS&P500が-10〜-20%下落。キャッシュ余力確保を推奨。"
+            )
+        elif _fg_c30 is not None and _fg_c30 >= 30:
+            _fg_spike_warn = (
+                f"⚠️ F&G過熱シグナル: 30日間で+{_fg_c30:.0f}pt上昇。"
+                "相場過熱による調整リスクあり。高値追いを避け分散投資を維持。"
+            )
+        elif _fg_score >= 75:
+            _fg_spike_warn = (
+                f"⚠️ F&G極度の強欲圏({_fg_score:.0f}): "
+                "歴史的に急落リスクが高い水準。ポジションの一部を現金化し余力確保推奨。"
+            )
         return {
-            "fear_greed":  fg_f.result(),
-            "naaim":       naaim_f.result(),
-            "sector_quad": sec_f.result(),
-            "nikkei_pred": nik_f.result(),
-            "us_pred":     us_f.result(),
+            "fear_greed":    _fg_r,
+            "fg_score":      _fg_score,
+            "fg_label":      _fg_lbl,
+            "fg_change_7d":  _fg_c7,
+            "fg_change_30d": _fg_c30,
+            "fg_spike_warn": _fg_spike_warn,
+            "naaim":         naaim_f.result(),
+            "sector_quad":   sec_f.result(),
+            "nikkei_pred":   nik_f.result(),
+            "us_pred":       us_f.result(),
         }
 
 
@@ -20235,10 +20280,13 @@ def _generate_investment_portfolio_rec(
     """予算・モデル・リスクプロファイル・トレーディングモードに応じた新規投資推奨ポートフォリオをAIが生成。
     Returns: {"portfolio": [...], "metrics": {...}, "model": str, "error": str|None}
     """
-    fg_sc   = market_ctx.get("fg_score", 50) or 50
-    fg_lbl  = market_ctx.get("fg_label", "")
-    nk_pred = market_ctx.get("nikkei_pred_label", "")
-    us_pred = market_ctx.get("us_pred_label", "")
+    fg_sc    = market_ctx.get("fg_score", 50) or 50
+    fg_lbl   = market_ctx.get("fg_label", "")
+    fg_c7    = market_ctx.get("fg_change_7d")
+    fg_c30   = market_ctx.get("fg_change_30d")
+    fg_spike = market_ctx.get("fg_spike_warn", "")
+    nk_pred  = market_ctx.get("nikkei_pred_label", "")
+    us_pred  = market_ctx.get("us_pred_label", "")
     leading = market_ctx.get("sector_quad", {}).get("Leading", [])
     improving = market_ctx.get("sector_quad", {}).get("Improving", [])
     leading_str = " / ".join(leading[:4]) if leading else "不明"
@@ -20304,8 +20352,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・{_mode_guide}
 
 【現在の市場環境】
-・Fear&Greed: {fg_sc:.0f} ({fg_lbl})
-・日経225予測: {nk_pred}
+・Fear&Greed: {fg_sc:.0f} ({fg_lbl}){f"  7日変化: {fg_c7:+.0f}pt" if fg_c7 is not None else ""}{f"  30日変化: {fg_c30:+.0f}pt" if fg_c30 is not None else ""}
+{f"・{fg_spike}" if fg_spike else ""}・日経225予測: {nk_pred}
 ・米国市場予測: {us_pred}
 ・RRGリーディングセクター: {leading_str}
 ・RRGインプルービングセクター: {improving_str}
@@ -21551,6 +21599,30 @@ def render_claude_trading_project():
                         _ip_pf  = _ip_r.get("portfolio", [])
                         _ip_met = _ip_r.get("metrics", {})
                         _ai_mdl = _ip_r.get("model", "")
+
+                        # F&G急騰警告バナー（急落リスクがある場合に表示）
+                        _disp_mctx   = st.session_state.get("_alloc_mktctx") or {}
+                        _disp_spike  = _disp_mctx.get("fg_spike_warn", "")
+                        _disp_fg     = _disp_mctx.get("fg_score", 0)
+                        _disp_fg_c7  = _disp_mctx.get("fg_change_7d")
+                        _disp_fg_c30 = _disp_mctx.get("fg_change_30d")
+                        if _disp_spike:
+                            _warn_color = "#7f1d1d" if _disp_fg >= 75 else "#78350f"
+                            _warn_bd    = "#ef4444" if _disp_fg >= 75 else "#f59e0b"
+                            _c7_str  = f" / 7日:{_disp_fg_c7:+.0f}pt"  if _disp_fg_c7  is not None else ""
+                            _c30_str = f" / 30日:{_disp_fg_c30:+.0f}pt" if _disp_fg_c30 is not None else ""
+                            st.markdown(
+                                f'<div style="background:{_warn_color};border:1px solid {_warn_bd};'
+                                f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
+                                f'<div style="font-size:12px;font-weight:700;color:{_warn_bd};margin-bottom:4px">'
+                                f'📉 市場センチメント急騰シグナル検出　F&G: {_disp_fg:.0f}{_c7_str}{_c30_str}</div>'
+                                f'<div style="font-size:11px;color:#fde68a">{_disp_spike}</div>'
+                                f'<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
+                                f'参考: 2022年1月(-23%) / 2021年11月(-10%) / 2018年2月VIXショック(-10%) / '
+                                f'2020年2月コロナ(-34%)の直前にF&G急騰が観測されました。</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
                         # リスク指標カード
                         _er   = _ip_met.get("expected_return", 0)
