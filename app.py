@@ -17959,6 +17959,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         result["eps_fwd"]       = round(eps_fwd, 2) if eps_fwd else None
         result["rev_growth"]    = round(rev_growth * 100, 1) if rev_growth else None
         result["earn_growth"]   = round(earn_growth * 100, 1) if earn_growth else None
+        result["sector"]        = info.get("sector") or info.get("industry")
 
         # 次回決算日
         try:
@@ -18158,10 +18159,12 @@ def _generate_ai_trade_signal(
     past_signals: list | None = None,
     mode: str = "growth",
     model_pref: str = "auto",
+    market_ctx: dict | None = None,
 ) -> dict:
     """AIによる売買シグナルを生成。
     mode: "growth" | "momentum" | "autonomous"
     model_pref: "auto" | "gemini" | "groq" | "openrouter"
+    market_ctx: _fetch_market_context_for_trading() の戻り値（任意）。
     """
     price    = data.get("price", "不明")
     ma25     = data.get("ma25", "不明")
@@ -18370,6 +18373,9 @@ def _generate_ai_trade_signal(
 【直近ニュース・開示】
 {news_str}
 
+【市場コンテキスト（windexモデル）】
+{_format_market_ctx_for_prompt(market_ctx or {}, ticker_sector=data.get("sector"))}
+
 【過去のAI分析履歴（同銘柄・新しい順）】
 {_fmt_past_signals(past_signals)}
 
@@ -18417,13 +18423,171 @@ def _fetch_daily_changes_for_tickers(tickers_tuple: tuple) -> dict:
     return result
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_market_context_for_trading() -> dict:
+    """windex予測モデルの主要指標を集約してトレーディングAI用コンテキストを返す（TTL=30分）。
+    Returns: {fear_greed, naaim, sector_quad, nikkei_pred, us_pred}
+    """
+    import concurrent.futures as _cf
+
+    def _fg():
+        try:
+            fg = fetch_fear_greed_index()
+            if fg:
+                return {"score": fg.get("score"), "rating": fg.get("rating")}
+        except Exception:
+            pass
+        return None
+
+    def _naaim():
+        try:
+            df = fetch_naaim_data()
+            if df is not None and not df.empty:
+                latest = df.iloc[-1]
+                return {"date": str(latest["Date"])[:10], "exposure": float(latest["NAAIM"])}
+        except Exception:
+            pass
+        return None
+
+    def _sector():
+        try:
+            sr = compute_sector_rotation()
+            if sr.get("ok"):
+                quadrants = {"Leading": [], "Weakening": [], "Improving": [], "Lagging": []}
+                for _sym, s in sr["sectors"].items():
+                    q = s.get("quadrant", "")
+                    if q in quadrants:
+                        quadrants[q].append(s["name"])
+                return quadrants
+        except Exception:
+            pass
+        return None
+
+    def _nikkei():
+        try:
+            nr = compute_nikkei_prediction()
+            if nr.get("ok"):
+                snap = nr.get("snapshot", {})
+                return {
+                    "composite":        nr.get("composite"),
+                    "prob_up_tomorrow": nr.get("prob_up_tomorrow"),
+                    "prob_up_week":     nr.get("prob_up_week"),
+                    "nikkei":           snap.get("日経平均", "?"),
+                    "usdjpy":           snap.get("USD/JPY", "?"),
+                    "vix":              snap.get("VIX", "?"),
+                }
+        except Exception:
+            pass
+        return None
+
+    def _us():
+        try:
+            ur = compute_us_prediction("SP500")
+            if ur.get("ok"):
+                snap = ur.get("snapshot", {})
+                return {
+                    "composite":        ur.get("composite"),
+                    "prob_up_tomorrow": ur.get("prob_up_tomorrow"),
+                    "prob_up_week":     ur.get("prob_up_week"),
+                    "sp500":            snap.get("S&P500", "?"),
+                    "nasdaq":           snap.get("NASDAQ", "?"),
+                    "vix":              snap.get("VIX", "?"),
+                    "us10y":            snap.get("米10年金利", "?"),
+                }
+        except Exception:
+            pass
+        return None
+
+    with _cf.ThreadPoolExecutor(max_workers=5) as ex:
+        fg_f    = ex.submit(_fg)
+        naaim_f = ex.submit(_naaim)
+        sec_f   = ex.submit(_sector)
+        nik_f   = ex.submit(_nikkei)
+        us_f    = ex.submit(_us)
+        return {
+            "fear_greed":  fg_f.result(),
+            "naaim":       naaim_f.result(),
+            "sector_quad": sec_f.result(),
+            "nikkei_pred": nik_f.result(),
+            "us_pred":     us_f.result(),
+        }
+
+
+def _format_market_ctx_for_prompt(ctx: dict, ticker_sector: str | None = None) -> str:
+    """market context dict → プロンプト埋め込み用テキスト。
+    ticker_sector: 個別銘柄のセクター名（日本語）。指定時はRRGで該当セクターを強調。
+    """
+    if not ctx:
+        return "  取得できませんでした"
+    lines = []
+
+    us  = ctx.get("us_pred")
+    nik = ctx.get("nikkei_pred")
+    if us:
+        lines.append(
+            f"  S&P500: {us.get('sp500','?')}  NASDAQ: {us.get('nasdaq','?')}"
+            f"  VIX: {us.get('vix','?')}  米10年金利: {us.get('us10y','?')}"
+        )
+        comp = us.get("composite") or 0
+        p_up = us.get("prob_up_tomorrow")
+        p_wk = us.get("prob_up_week")
+        if p_up is not None and p_wk is not None:
+            lines.append(
+                f"  米国株予測モデル合成シグナル: {comp:+.2f}"
+                f"  明日↑確率: {p_up:.0f}%  来週↑確率: {p_wk:.0f}%"
+            )
+    if nik:
+        lines.append(f"  日経平均: {nik.get('nikkei','?')}  USD/JPY: {nik.get('usdjpy','?')}")
+        comp = nik.get("composite") or 0
+        p_up = nik.get("prob_up_tomorrow")
+        p_wk = nik.get("prob_up_week")
+        if p_up is not None and p_wk is not None:
+            lines.append(
+                f"  日経予測モデル合成シグナル: {comp:+.2f}"
+                f"  明日↑確率: {p_up:.0f}%  来週↑確率: {p_wk:.0f}%"
+            )
+
+    fg = ctx.get("fear_greed")
+    if fg:
+        score = fg.get("score")
+        score_str = f"{score:.0f}" if score is not None else "?"
+        lines.append(f"  Fear & Greed指数: {score_str}/100（{fg.get('rating','?')}）")
+
+    naaim = ctx.get("naaim")
+    if naaim:
+        exp = naaim.get("exposure")
+        exp_str = f"{exp:.1f}" if exp is not None else "?"
+        lines.append(f"  NAAIM機関投資家エクスポージャー: {exp_str}%（{naaim.get('date','')}時点）")
+
+    sq = ctx.get("sector_quad")
+    if sq:
+        lines.append("  セクターローテーション（RRGモデル）:")
+        for label_jp, key in [
+            ("Leading（強い）",       "Leading"),
+            ("Weakening（勢い衰退）", "Weakening"),
+            ("Improving（回復中）",   "Improving"),
+            ("Lagging（弱い）",       "Lagging"),
+        ]:
+            names = sq.get(key, [])
+            if names:
+                marker = ""
+                if ticker_sector:
+                    if any(ticker_sector in n or n in ticker_sector for n in names):
+                        marker = f"  ← ★{ticker_sector}"
+                lines.append(f"    {label_jp}: {', '.join(names[:4])}{marker}")
+
+    return "\n".join(lines) if lines else "  取得できませんでした"
+
+
 def _generate_portfolio_wide_analysis(
     positions: dict,
     daily_changes: dict,
     mode: str = "growth",
     model_pref: str = "auto",
+    market_ctx: dict | None = None,
 ) -> dict:
     """全保有銘柄を一括でAIに渡してポートフォリオ全体分析を生成する。
+    market_ctx: _fetch_market_context_for_trading() の戻り値（任意）。
     Returns: {"text": str, "model": str, "error": str|None}
     """
     if not positions:
@@ -18489,6 +18653,9 @@ def _generate_portfolio_wide_analysis(
 
 【セクター配分】
 {chr(10).join(sector_lines)}
+
+【市場コンテキスト（windexモデル）】
+{_format_market_ctx_for_prompt(market_ctx or {})}
 
 【出力形式】必ず以下の構成で回答してください：
 
@@ -18907,9 +19074,12 @@ def render_claude_trading_project():
                     # 日次騰落
                     _wide_tickers = tuple(sorted(_wide_positions.keys()))
                     _wide_changes  = _fetch_daily_changes_for_tickers(_wide_tickers) if _wide_tickers else {}
+                    # windex市場コンテキスト（Fear&Greed / NAAIM / RRG / 予測モデル）
+                    _wide_mktctx   = _fetch_market_context_for_trading()
                     _wide_result   = _generate_portfolio_wide_analysis(
                         _wide_positions, _wide_changes,
                         mode=_wide_mode, model_pref=_wide_model_pref,
+                        market_ctx=_wide_mktctx,
                     )
                 st.session_state["_wide_analysis"] = _wide_result
 
@@ -19001,10 +19171,13 @@ def render_claude_trading_project():
                 with st.spinner(f"{sel['ticker']} のデータ取得・AI分析中...（30秒程度）"):
                     past   = _load_signals(sel["ticker"])   # 過去の分析履歴
                     data   = _fetch_trading_stock_data(sel["ticker"], is_jp)
+                    # windex市場コンテキスト（キャッシュ済みなら即返却）
+                    _sig_mktctx = _fetch_market_context_for_trading()
                     signal = _generate_ai_trade_signal(
                         sel["ticker"], sel["name"], is_jp, data,
                         position_ctx=pos_ctx, past_signals=past,
                         mode=current_mode, model_pref=current_model_pref,
+                        market_ctx=_sig_mktctx,
                     )
 
                 if signal.get("error"):
