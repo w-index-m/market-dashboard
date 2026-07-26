@@ -24016,6 +24016,7 @@ def main():
     )
 
     # ── アクセス計測（1セッション1回）────────────────────────
+    _anl_page = st.query_params.get("page", "market_dashboard")
     if is_ipad_or_ios_safari():
         # iPad/iOS Safari: JSリロードを使わずサーバー側でIP取得
         if not st.session_state.get("_anl_client_collected"):
@@ -24030,11 +24031,11 @@ def main():
             st.session_state["_user_agent"]  = ua
             st.session_state["_anl_client_collected"] = True
             logger.info(f"[analytics] iPad/iOS: {info['country']}/{info['city']}")
-        track_pageview()
+        track_pageview(page=_anl_page)
     else:
         # PC/Android: JS経由でIP・UAを取得（URLリダイレクト方式）
         inject_client_info_collector()
-        track_pageview()
+        track_pageview(page=_anl_page)
 
     # ── streamlit-analytics2 計測開始 ────────────────────────
     if ANALYTICS2_AVAILABLE:
