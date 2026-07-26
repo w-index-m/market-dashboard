@@ -20791,7 +20791,9 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         f'"rationale": "AI半導体独占",'
         f'"merits": [{{"point": "ROIC卓越", "detail": "ROIC 45%・WACC 10%→スプレッド35%"}}],'
         f'"demerits": [{{"point": "高PERリスク", "detail": "PER 40倍超。成長鈍化で大幅下落リスク"}}],'
-        f'"conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。"}}'
+        f'"conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。",'
+        f'"entry_price": 130.0,'
+        f'"entry_note": "MA50付近の押し目。直近サポート$125-130を下回ったら撤退。"}}'
     )
 
     # ── Agent A+B が揃っている場合は短縮プロンプト（Agent C モード）─────────
@@ -20852,6 +20854,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
+・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
+・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）
 
 以下のJSONのみで回答（前後テキスト不要）:
 {{"portfolio": [{_json_example}],
@@ -20916,6 +20920,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・各銘柄に rationale(20字)・merits(2〜3点)・demerits(1〜2点)・conclusion(60字)を必ず設ける
 ・meritsにROIC-WACC・ROE・DOEが優れる場合は数値とともに記載
 ・直近1年マイナス銘柄はmeritsに「なぜ今買うか」を必ず含めること
+・entry_price: 推奨エントリー価格（米国株USD・日本株円。現値±10%以内）
+・entry_note: エントリー根拠・損切ライン・目標を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）
 ・既存保有銘柄はJSONに含めないこと
 
 以下のJSONのみで回答（前後のテキスト不要）:
@@ -21969,14 +21975,14 @@ def render_claude_trading_project():
             st.markdown(
                 '<div style="background:#0a1f18;border:1px solid #065f46;border-radius:8px;'
                 'padding:8px 14px;margin-bottom:10px;font-size:12px;color:#6ee7b7">'
-                '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を提案します。'
-                'ETF混合モデルと個別株モデル、リスクプロファイル別に生成します。'
+                '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を1ポートフォリオで提案します。'
+                'Agent A（マクロ分析）→ Agent B（銘柄分析）→ Agent C（組み立て）の3段階で生成。'
                 '</div>',
                 unsafe_allow_html=True,
             )
 
             # コントロール行
-            _ip_c1, _ip_c2, _ip_c3, _ip_c4 = st.columns([1.5, 1.5, 1.5, 1.5])
+            _ip_c1, _ip_c2, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.4, 1.2, 1.2, 1.2])
             _ip_budget = _ip_c1.radio(
                 "投資予算", ["100万円", "500万円"],
                 key="ip_budget", horizontal=True,
@@ -21985,6 +21991,7 @@ def render_claude_trading_project():
                 "リスクプロファイル", ["リスク先行型", "リスクリターン考慮型"],
                 key="ip_risk", horizontal=False,
             )
+            _ip_etf_ok = _ip_c5.checkbox("ETF可（日本ETF含む）", value=True, key="ip_etf_ok")
 
             # 予算・リスクが変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
             _ip_cur_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
@@ -22007,7 +22014,7 @@ def render_claude_trading_project():
                 "🔄 再生成（キャッシュ無視）", key="ip_force_regen",
             )
 
-            if st.button("💼 推奨ポートフォリオを生成（ETF混合 & 個別株）", type="primary", key="btn_invest_portfolio"):
+            if st.button("💼 推奨ポートフォリオを生成", type="primary", key="btn_invest_portfolio"):
                 _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
                 _ip_risk_key    = "aggressive" if "先行" in _ip_risk else "balanced"
                 _ip_model_pref  = _ip_model_opts[_ip_model_sel]
@@ -22015,20 +22022,19 @@ def render_claude_trading_project():
                 _ip_holdings    = list(open_pos.keys()) if open_pos else []
                 _ip_mktctx      = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
                 _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
+                _ip_model_type  = "etf" if st.session_state.get("ip_etf_ok", True) else "individual"
                 # 候補銘柄の実株価モメンタムデータを当日キャッシュで取得
                 _ip_cand_perf   = _fetch_candidate_performance(_ip_today)
-                # キャッシュキーにモードを含めて、モード違いのキャッシュが混在しないようにする
-                _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}"
+                # キャッシュキーにモード・ETF可否を含める
+                _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}_{_ip_model_type}"
 
                 _ip_results = {}
                 _ip_prog_area = st.empty()
                 _ip_done  = 0
                 _ip_t0    = time.time()
-                _IP_EST   = 55  # 1モデルあたり推定秒数（Groqリトライ込み）
-                _ip_n_steps = sum(
-                    1 for _mt in ["etf", "individual"]
-                    if _ip_force or not _load_invest_rec_cache(_ip_today, _ip_budget_val, _mt, _ip_cache_risk)
-                )
+                _IP_EST   = 40  # Agent C 1回あたり推定秒数
+                _ip_n_steps = 1 if (_ip_force or not _load_invest_rec_cache(
+                    _ip_today, _ip_budget_val, "unified", _ip_cache_risk)) else 0
 
                 def _ip_render_progress(label, done, n_steps, elapsed, inner_elapsed):
                     """進捗バーHTMLを更新する"""
@@ -22095,20 +22101,19 @@ def render_claude_trading_project():
                 _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
                 logger.info(f"[trading] Agent B完了: {_ip_b_count}銘柄 via {_ip_b_model}")
 
-                for _ip_mt in ["etf", "individual"]:
-                    _cached = None
-                    if not _ip_force:
-                        _cached = _load_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_cache_risk)
-                    if _cached:
-                        _ip_results[_ip_mt] = _cached
-                        continue
-
-                    _ip_label   = "ETF混合" if _ip_mt == "etf" else "個別株"
+                # ── Agent C: ポートフォリオ組み立て（1回のみ）────────────
+                _cached_unified = None
+                if not _ip_force:
+                    _cached_unified = _load_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk)
+                if _cached_unified:
+                    _ip_results["unified"] = _cached_unified
+                else:
                     _ip_step_t0 = time.time()
                     _ip_result_box = [None]
 
-                    def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt, cp=_ip_cand_perf,
-                                       ag_a=_ip_agent_a, ag_b=_ip_agent_b):
+                    def _ip_gen_worker(box=_ip_result_box, cp=_ip_cand_perf,
+                                       ag_a=_ip_agent_a, ag_b=_ip_agent_b,
+                                       mt=_ip_model_type):
                         try:
                             box[0] = _generate_investment_portfolio_rec(
                                 _ip_budget_val, mt, _ip_risk_key,
@@ -22119,16 +22124,15 @@ def render_claude_trading_project():
                                 agent_b=ag_b,
                             )
                         except Exception as _wex:
-                            logger.error(f"[trading] portfolio worker crash ({mt}): {_wex}", exc_info=True)
+                            logger.error(f"[trading] portfolio worker crash: {_wex}", exc_info=True)
                             box[0] = {"portfolio": [], "metrics": {}, "model": "", "error": f"内部エラー: {str(_wex)[:200]}"}
 
                     _ip_th = _ipth.Thread(target=_ip_gen_worker, daemon=True)
                     _ip_th.start()
 
-                    # スレッド完了まで1秒ごとに進捗更新
                     while _ip_th.is_alive():
                         _ip_render_progress(
-                            _ip_label, _ip_done, _ip_n_steps,
+                            "統合", _ip_done, max(_ip_n_steps, 1),
                             time.time() - _ip_t0,
                             time.time() - _ip_step_t0,
                         )
@@ -22138,9 +22142,9 @@ def render_claude_trading_project():
                     _r = _ip_result_box[0] or {"error": "生成失敗", "portfolio": None, "model": ""}
                     _ip_done += 1
                     if not _r.get("error") and _r.get("portfolio"):
-                        _save_invest_rec_cache(_ip_today, _ip_budget_val, _ip_mt, _ip_cache_risk,
+                        _save_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk,
                                                _r, _r.get("model", ""))
-                    _ip_results[_ip_mt] = _r
+                    _ip_results["unified"] = _r
 
                 # 完了 → 進捗バーを消す
                 _ip_prog_area.empty()
@@ -22193,10 +22197,10 @@ def render_claude_trading_project():
                     unsafe_allow_html=True,
                 )
 
-                _tab_etf, _tab_ind = st.tabs(["📊 ETF混合モデル", "📈 個別株モデル"])
-                for _tab_obj, _ip_mt in [(_tab_etf, "etf"), (_tab_ind, "individual")]:
-                    with _tab_obj:
-                        _ip_r = _ip_disp.get(_ip_mt, {})
+                if True:  # 旧タブ統合 — unified キーで1ポートフォリオ表示
+                    _tab_obj = st  # st に直接描画
+                    if True:
+                        _ip_r = _ip_disp.get("unified", _ip_disp.get("etf", _ip_disp.get("individual", {})))
                         if _ip_r.get("error") or not _ip_r.get("portfolio"):
                             _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
                             if "quota" in _ip_err_msg or "Groq失敗" in _ip_err_msg:
@@ -22458,11 +22462,28 @@ def render_claude_trading_project():
                             )
 
                             # メリット・デメリット expander
-                            _merits   = _item.get("merits", [])
-                            _demerits = _item.get("demerits", [])
-                            _conc     = _item.get("conclusion", "") or _item.get("thesis", "")
-                            if _merits or _demerits or _conc:
+                            _merits    = _item.get("merits", [])
+                            _demerits  = _item.get("demerits", [])
+                            _conc      = _item.get("conclusion", "") or _item.get("thesis", "")
+                            _entry_px  = _item.get("entry_price")
+                            _entry_nt  = _item.get("entry_note", "")
+                            if _merits or _demerits or _conc or _entry_px:
                                 with st.expander(f"📊 {_tk} 投資根拠 — {_rat}", expanded=False):
+                                    # エントリー価格バナー
+                                    if _entry_px:
+                                        _is_jp_entry = _tk.endswith(".T")
+                                        _ep_cur = "円" if _is_jp_entry else "USD"
+                                        _ep_fmt = f"¥{_entry_px:,.0f}" if _is_jp_entry else f"${_entry_px:.2f}"
+                                        st.markdown(
+                                            f'<div style="background:#0f2027;border:1px solid #0284c7;'
+                                            f'border-radius:6px;padding:8px 12px;margin-bottom:8px">'
+                                            f'<div style="font-size:11px;font-weight:700;color:#38bdf8;margin-bottom:3px">'
+                                            f'📍 推奨エントリー価格: {_ep_fmt} {_ep_cur}</div>'
+                                            + (f'<div style="font-size:10px;color:#94a3b8">{_entry_nt}</div>'
+                                               if _entry_nt else '')
+                                            + f'</div>',
+                                            unsafe_allow_html=True,
+                                        )
                                     _col_m, _col_d = st.columns(2)
                                     if _merits:
                                         _col_m.markdown(
