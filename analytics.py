@@ -548,35 +548,17 @@ def track_pageview(page: str = "market_dashboard"):
         st.session_state[_PV_LOG_KEY] = []
     st.session_state[_PV_LOG_KEY].append(row)
 
-    backend = _detect_backend()
-    if backend == "sheets":
-        try:
-            _write_pv_sheets(row, sid)
-            st.session_state["_anl_sheets_status"] = "✅ 書き込み成功"
-        except Exception as e:
-            st.session_state["_anl_sheets_status"] = f"❌ 書き込みエラー: {e}"
-            logger.warning(f"[analytics] PV書き込みエラー: {e}")
-
-    # ── 指定シートにも必ず書き込む（設定に依存しない） ──
+    # access_log に一本化（pageviews タブへの重複書き込みを廃止）
     try:
         ok = _write_access_log_to_target(row, sid)
-        st.session_state["_anl_target_status"] = (
-            "✅ access_log シート書き込み成功" if ok
-            else "❌ access_log 書き込み失敗（ログ確認）"
-        )
+        status = "✅ access_log 書き込み成功" if ok else "❌ access_log 書き込み失敗"
+        st.session_state["_anl_sheets_status"] = status
+        st.session_state["_anl_target_status"] = status
     except Exception as e:
-        st.session_state["_anl_target_status"] = f"❌ access_log エラー: {e}"
-        logger.warning(f"[analytics] target sheets エラー: {e}")
-
-    if backend != "sheets":
-        sheets_id   = _secret("GOOGLE_SHEETS_ID")
-        sheets_json = _secret("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not sheets_id:
-            st.session_state["_anl_sheets_status"] = "⚠️ GOOGLE_SHEETS_ID 未設定"
-        elif not sheets_json:
-            st.session_state["_anl_sheets_status"] = "⚠️ GOOGLE_SERVICE_ACCOUNT_JSON 未設定"
-        else:
-            st.session_state["_anl_sheets_status"] = "⚠️ セッションのみ記録"
+        msg = f"❌ access_log エラー: {e}"
+        st.session_state["_anl_sheets_status"] = msg
+        st.session_state["_anl_target_status"] = msg
+        logger.warning(f"[analytics] access_log 書き込みエラー: {e}")
 
 
 # ── 指定スプレッドシートへの直接書き込み ─────────────────
@@ -646,6 +628,22 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
         ]
         ws.insert_row(data_row, index=2, value_input_option="USER_ENTERED")
         logger.info(f"[access_log] 書き込み成功: {row.get('country','')} {row.get('city','')}")
+
+        # realtime タブも更新（アクティブセッション追跡）
+        try:
+            rt_ws = sp.worksheet("realtime")
+            now_str = row.get("ts", "")
+            updated = False
+            for i, rec in enumerate(rt_ws.get_all_records(), start=2):
+                if rec.get("session_id") == sid:
+                    rt_ws.update_cell(i, 2, now_str)
+                    updated = True
+                    break
+            if not updated:
+                rt_ws.append_row([sid, now_str])
+        except Exception:
+            pass  # realtime タブ未作成でも無視
+
         return True
 
     except Exception as e:
