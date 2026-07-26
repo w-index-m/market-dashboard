@@ -23245,876 +23245,904 @@ def render_claude_trading_project():
 
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     with tab_trade:
-        st.markdown("#### 約定後の取引記録入力")
-
-        # エラー/成功メッセージを session_state で永続化
-        _tr_status = st.session_state.pop("_trade_status", None)
-        _tr_msg    = st.session_state.pop("_trade_msg", None)
-        if _tr_status == "ok":
-            st.success(f"✅ {_tr_msg}")
-        elif _tr_status == "error":
-            st.error(f"❌ 保存失敗: {_tr_msg}")
-        elif _tr_status == "warn":
-            st.warning(_tr_msg)
-
-        st.session_state.setdefault("_trade_ticker", "")
-        st.session_state.setdefault("_trade_name", "")
-
-        with st.form("trade_form", clear_on_submit=True):
-            ci1, ci2 = st.columns(2)
-            t_ticker = ci1.text_input("ティッカー", value=st.session_state.get("_trade_ticker", ""),
-                                      placeholder="例: NVDA / 7203.T")
-            t_name   = ci2.text_input("銘柄名", value=st.session_state.get("_trade_name", ""),
-                                      placeholder="例: NVIDIA / トヨタ自動車")
-            c1, c2, c3 = st.columns(3)
-            t_date   = c1.date_input("約定日", value=datetime.now(JST).date())
-            t_action = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
-            t_qty    = c3.number_input("数量（株）", min_value=1, step=1, value=100)
-            c4, c5 = st.columns(2)
-            t_price  = c4.number_input("約定価格", min_value=0.0, step=0.1, format="%.2f")
-            t_fee    = c5.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
-            c7, c8 = st.columns(2)
-            t_target = c7.number_input("AIの目標株価（参考）", min_value=0.0, step=0.1, format="%.2f")
-            t_stop   = c8.number_input("AIの損切りライン（参考）", min_value=0.0, step=0.1, format="%.2f")
-            t_memo   = st.text_input("メモ（任意）")
-
-            if st.form_submit_button("💾 記録を保存", type="primary"):
-                trade_ticker = t_ticker.strip().upper()
-                trade_name   = t_name.strip() or trade_ticker
-                if trade_ticker and t_price > 0:
-                    action = "BUY" if "BUY" in t_action else "SELL"
-                    ok, err = _save_trade(
-                        str(t_date), trade_ticker, trade_name,
-                        action, int(t_qty), float(t_price), float(t_fee),
-                        t_memo, float(t_target), float(t_stop)
-                    )
-                    if ok:
-                        st.session_state["_trade_ticker"] = ""
-                        st.session_state["_trade_name"]   = ""
-                        st.session_state["_trade_status"] = "ok"
-                        st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if not _usr:
+            _lc, _ = st.columns([1, 2])
+            with _lc:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;'
+                    'border-radius:10px;padding:20px 24px;">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
+                    '🔐 ログインが必要です</div>',
+                    unsafe_allow_html=True,
+                )
+                _u = st.text_input("ユーザー名", key="tl_u_trade")
+                _p = st.text_input("パスワード", type="password", key="tl_p_trade")
+                if st.button("ログイン", type="primary", key="tl_b_trade"):
+                    if _auth_validate(_u, _p):
+                        st.query_params["token"] = _auth_create_session(_u)
+                        st.rerun()
                     else:
-                        st.session_state["_trade_status"] = "error"
-                        st.session_state["_trade_msg"]    = err
-                else:
-                    st.session_state["_trade_status"] = "warn"
-                    st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
+                        st.error("ユーザー名またはパスワードが違います")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("#### 約定後の取引記録入力")
+
+            # エラー/成功メッセージを session_state で永続化
+            _tr_status = st.session_state.pop("_trade_status", None)
+            _tr_msg    = st.session_state.pop("_trade_msg", None)
+            if _tr_status == "ok":
+                st.success(f"✅ {_tr_msg}")
+            elif _tr_status == "error":
+                st.error(f"❌ 保存失敗: {_tr_msg}")
+            elif _tr_status == "warn":
+                st.warning(_tr_msg)
+
+            st.session_state.setdefault("_trade_ticker", "")
+            st.session_state.setdefault("_trade_name", "")
+
+            with st.form("trade_form", clear_on_submit=True):
+                ci1, ci2 = st.columns(2)
+                t_ticker = ci1.text_input("ティッカー", value=st.session_state.get("_trade_ticker", ""),
+                                          placeholder="例: NVDA / 7203.T")
+                t_name   = ci2.text_input("銘柄名", value=st.session_state.get("_trade_name", ""),
+                                          placeholder="例: NVIDIA / トヨタ自動車")
+                c1, c2, c3 = st.columns(3)
+                t_date   = c1.date_input("約定日", value=datetime.now(JST).date())
+                t_action = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
+                t_qty    = c3.number_input("数量（株）", min_value=1, step=1, value=100)
+                c4, c5 = st.columns(2)
+                t_price  = c4.number_input("約定価格", min_value=0.0, step=0.1, format="%.2f")
+                t_fee    = c5.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
+                c7, c8 = st.columns(2)
+                t_target = c7.number_input("AIの目標株価（参考）", min_value=0.0, step=0.1, format="%.2f")
+                t_stop   = c8.number_input("AIの損切りライン（参考）", min_value=0.0, step=0.1, format="%.2f")
+                t_memo   = st.text_input("メモ（任意）")
+
+                if st.form_submit_button("💾 記録を保存", type="primary"):
+                    trade_ticker = t_ticker.strip().upper()
+                    trade_name   = t_name.strip() or trade_ticker
+                    if trade_ticker and t_price > 0:
+                        action = "BUY" if "BUY" in t_action else "SELL"
+                        ok, err = _save_trade(
+                            str(t_date), trade_ticker, trade_name,
+                            action, int(t_qty), float(t_price), float(t_fee),
+                            t_memo, float(t_target), float(t_stop)
+                        )
+                        if ok:
+                            st.session_state["_trade_ticker"] = ""
+                            st.session_state["_trade_name"]   = ""
+                            st.session_state["_trade_status"] = "ok"
+                            st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
+                        else:
+                            st.session_state["_trade_status"] = "error"
+                            st.session_state["_trade_msg"]    = err
+                    else:
+                        st.session_state["_trade_status"] = "warn"
+                        st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
 
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
-        st.markdown("#### ポートフォリオ損益")
-        df_trades, trades_err = _load_trades()
-
-        if trades_err:
-            _err_c1, _err_c2 = st.columns([4, 1])
-            _err_c1.error(f"⚠️ {trades_err}")
-            if _err_c2.button("🔄 再試行", key="retry_load_trades"):
-                st.rerun()
-            st.caption("Google Sheets への接続が一時的に失敗しました。「再試行」を押すか、しばらく待ってから再読み込みしてください。")
-        elif df_trades.empty:
-            st.info("取引記録がまだありません。")
-        else:
-            # ── 取引履歴（削除ボタン付き）──────────────────────────
-            st.markdown("**取引履歴**　<span style='font-size:11px;color:#64748b'>🗑️ ボタンで誤記録を削除できます</span>",
-                        unsafe_allow_html=True)
-            _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
-            for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ",""], _hdr):
-                _c.markdown(f"<span style='font-size:11px;color:#64748b;font-weight:700'>{_lbl}</span>",
-                            unsafe_allow_html=True)
-            st.markdown('<hr style="margin:4px 0;border-color:#334155">', unsafe_allow_html=True)
-
-            _del_requested = None
-            for _seq, (_, _row) in enumerate(df_trades.iterrows()):
-                _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
-                _c[0].markdown(f"<span style='font-size:12px'>{str(_row.get('date',''))[:10]}</span>",
-                               unsafe_allow_html=True)
-                _c[1].markdown(f"<span style='font-size:12px;font-weight:700'>{_row.get('ticker','')}</span>",
-                               unsafe_allow_html=True)
-                _c[2].markdown(f"<span style='font-size:12px'>{_row.get('name','')}</span>",
-                               unsafe_allow_html=True)
-                _act = str(_row.get("action",""))
-                _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
-                _c[3].markdown(f"<span style='font-size:12px;color:{_act_color};font-weight:700'>{_act}</span>",
-                               unsafe_allow_html=True)
-                _c[4].markdown(f"<span style='font-size:12px'>{int(_row.get('quantity',0)):,}</span>",
-                               unsafe_allow_html=True)
-                _c[5].markdown(f"<span style='font-size:12px'>{float(_row.get('price',0)):,.1f}</span>",
-                               unsafe_allow_html=True)
-                _c[6].markdown(f"<span style='font-size:12px'>{int(_row.get('fee',0)):,}</span>",
-                               unsafe_allow_html=True)
-                _c[7].markdown(f"<span style='font-size:12px;color:#94a3b8'>{str(_row.get('memo',''))[:20]}</span>",
-                               unsafe_allow_html=True)
-                if _c[8].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
-                    _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
-
-            if _del_requested is not None:
-                with st.spinner("削除中..."):
-                    if _delete_trade_row(_del_requested):
-                        st.success("削除しました")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error("削除に失敗しました。再試行してください。")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # 保有ポジションを計算（平均取得単価法：SELL時にコスト比例削減）
-            open_pos = _calc_positions_from_df(df_trades)
-
-            if open_pos:
-                st.markdown("**保有中ポジション（現在値・含み損益）**")
-                pnl_rows = []
-                for ticker, pos in open_pos.items():
-                    cur_price = None
-                    try:
-                        info = yf.Ticker(ticker).fast_info
-                        cur_price = float(info.get("lastPrice") or info.get("last_price") or 0) or None
-                    except Exception:
-                        pass
-                    if not cur_price:
-                        try:
-                            cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
-                            if not cur_raw.empty:
-                                close_col = cur_raw["Close"]
-                                if isinstance(close_col, pd.DataFrame):
-                                    close_col = close_col.iloc[:, 0]
-                                vals = close_col.dropna()
-                                if len(vals) > 0:
-                                    cur_price = float(vals.iloc[-1])
-                        except Exception:
-                            pass
-
-                    avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
-                    pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
-                    pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
-
-                    _pnl_name = pos.get("name") or ticker
-                    if _pnl_name == ticker:
-                        _pnl_name = _get_stock_display_name(ticker)
-                    pnl_rows.append({
-                        "銘柄":    _pnl_name,
-                        "コード":  ticker,
-                        "保有株数": int(pos["qty"]),
-                        "平均取得単価": round(avg_cost, 2),
-                        "現在株価": round(cur_price, 2) if cur_price else "取得失敗",
-                        "含み損益": f"{pnl:+,.0f}" if pnl is not None else "-",
-                        "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
-                    })
-
-                st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
-
-                # ── ポートフォリオ全体AI分析 ──────────────────────
-                st.markdown("<br>", unsafe_allow_html=True)
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if not _usr:
+            _lc, _ = st.columns([1, 2])
+            with _lc:
                 st.markdown(
-                    '<div style="background:linear-gradient(135deg,#0a1628,#0d1f3c);'
-                    'border:1px solid #1e3a5f;border-radius:10px;padding:14px 18px;margin-bottom:14px">'
-                    '<div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px">'
-                    '📊 ポートフォリオ全体AI分析</div>'
-                    '<div style="font-size:12px;color:#94a3b8">'
-                    '全保有銘柄を一括分析 → リスク診断 + アクション優先順位TOP3 + 売却後の資金配分</div>'
-                    '</div>',
+                    '<div style="background:#1e293b;border:1px solid #334155;'
+                    'border-radius:10px;padding:20px 24px;">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
+                    '🔐 ログインが必要です</div>',
                     unsafe_allow_html=True,
                 )
-                _pnl_model_opts = {
-                    "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
-                    "🟡 Gemini（Google）":              "gemini",
-                    "⚡ Groq（高速）":                  "groq",
-                    "🌐 OpenRouter":                    "openrouter",
-                }
-                _pnl_col1, _pnl_col2 = st.columns([3, 1])
-                _pnl_model_label = _pnl_col1.selectbox(
-                    "全体分析用AIモデル", list(_pnl_model_opts.keys()),
-                    key="pnl_wide_model_sel", label_visibility="collapsed",
-                )
-                _pnl_model_pref = _pnl_model_opts[_pnl_model_label]
-
-                if _pnl_col2.button("🔍 全体分析", type="primary", use_container_width=True, key="pnl_wide_btn"):
-                    _pnl_mode = st.session_state.get("trading_mode", "growth")
-                    with st.spinner("全保有銘柄のデータ取得・AI分析中...（30〜60秒）"):
-                        _pnl_summary   = _compute_portfolio_summary()
-                        _pnl_positions = _pnl_summary.get("positions", {})
-                        _pnl_tickers   = tuple(sorted(_pnl_positions.keys()))
-                        _pnl_changes   = _fetch_daily_changes_for_tickers(_pnl_tickers) if _pnl_tickers else {}
-                        _pnl_mktctx    = _fetch_market_context_for_trading()
-                        _pnl_result    = _generate_portfolio_wide_analysis(
-                            _pnl_positions, _pnl_changes,
-                            mode=_pnl_mode, model_pref=_pnl_model_pref,
-                            market_ctx=_pnl_mktctx,
-                        )
-                    st.session_state["_wide_analysis"] = _pnl_result
-
-                _pnl_wide_res = st.session_state.get("_wide_analysis")
-                if _pnl_wide_res:
-                    if _pnl_wide_res.get("error"):
-                        st.error(f"分析エラー: {_pnl_wide_res['error']}")
+                _u = st.text_input("ユーザー名", key="tl_u_pnl")
+                _p = st.text_input("パスワード", type="password", key="tl_p_pnl")
+                if st.button("ログイン", type="primary", key="tl_b_pnl"):
+                    if _auth_validate(_u, _p):
+                        st.query_params["token"] = _auth_create_session(_u)
+                        st.rerun()
                     else:
-                        st.markdown(
-                            f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
-                            f'🤖 {_pnl_wide_res.get("model", "")} ｜ '
-                            f'{datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")}</div>',
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(_pnl_wide_res["text"])
+                        st.error("ユーザー名またはパスワードが違います")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("#### ポートフォリオ損益")
+            df_trades, trades_err = _load_trades()
 
+            if trades_err:
+                _err_c1, _err_c2 = st.columns([4, 1])
+                _err_c1.error(f"⚠️ {trades_err}")
+                if _err_c2.button("🔄 再試行", key="retry_load_trades"):
+                    st.rerun()
+                st.caption("Google Sheets への接続が一時的に失敗しました。「再試行」を押すか、しばらく待ってから再読み込みしてください。")
+            elif df_trades.empty:
+                st.info("取引記録がまだありません。")
             else:
-                st.info("現在の保有ポジションはありません（全て決済済み）。")
+                # ── 取引履歴（削除ボタン付き）──────────────────────────
+                st.markdown("**取引履歴**　<span style='font-size:11px;color:#64748b'>🗑️ ボタンで誤記録を削除できます</span>",
+                            unsafe_allow_html=True)
+                _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
+                for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ",""], _hdr):
+                    _c.markdown(f"<span style='font-size:11px;color:#64748b;font-weight:700'>{_lbl}</span>",
+                                unsafe_allow_html=True)
+                st.markdown('<hr style="margin:4px 0;border-color:#334155">', unsafe_allow_html=True)
+
+                _del_requested = None
+                for _seq, (_, _row) in enumerate(df_trades.iterrows()):
+                    _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
+                    _c[0].markdown(f"<span style='font-size:12px'>{str(_row.get('date',''))[:10]}</span>",
+                                   unsafe_allow_html=True)
+                    _c[1].markdown(f"<span style='font-size:12px;font-weight:700'>{_row.get('ticker','')}</span>",
+                                   unsafe_allow_html=True)
+                    _c[2].markdown(f"<span style='font-size:12px'>{_row.get('name','')}</span>",
+                                   unsafe_allow_html=True)
+                    _act = str(_row.get("action",""))
+                    _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
+                    _c[3].markdown(f"<span style='font-size:12px;color:{_act_color};font-weight:700'>{_act}</span>",
+                                   unsafe_allow_html=True)
+                    _c[4].markdown(f"<span style='font-size:12px'>{int(_row.get('quantity',0)):,}</span>",
+                                   unsafe_allow_html=True)
+                    _c[5].markdown(f"<span style='font-size:12px'>{float(_row.get('price',0)):,.1f}</span>",
+                                   unsafe_allow_html=True)
+                    _c[6].markdown(f"<span style='font-size:12px'>{int(_row.get('fee',0)):,}</span>",
+                                   unsafe_allow_html=True)
+                    _c[7].markdown(f"<span style='font-size:12px;color:#94a3b8'>{str(_row.get('memo',''))[:20]}</span>",
+                                   unsafe_allow_html=True)
+                    if _c[8].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
+                        _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
+
+                if _del_requested is not None:
+                    with st.spinner("削除中..."):
+                        if _delete_trade_row(_del_requested):
+                            st.success("削除しました")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("削除に失敗しました。再試行してください。")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # 保有ポジションを計算（平均取得単価法：SELL時にコスト比例削減）
+                open_pos = _calc_positions_from_df(df_trades)
+
+                if open_pos:
+                    st.markdown("**保有中ポジション（現在値・含み損益）**")
+                    pnl_rows = []
+                    for ticker, pos in open_pos.items():
+                        cur_price = None
+                        try:
+                            info = yf.Ticker(ticker).fast_info
+                            cur_price = float(info.get("lastPrice") or info.get("last_price") or 0) or None
+                        except Exception:
+                            pass
+                        if not cur_price:
+                            try:
+                                cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                                if not cur_raw.empty:
+                                    close_col = cur_raw["Close"]
+                                    if isinstance(close_col, pd.DataFrame):
+                                        close_col = close_col.iloc[:, 0]
+                                    vals = close_col.dropna()
+                                    if len(vals) > 0:
+                                        cur_price = float(vals.iloc[-1])
+                            except Exception:
+                                pass
+
+                        avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
+                        pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
+                        pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
+
+                        _pnl_name = pos.get("name") or ticker
+                        if _pnl_name == ticker:
+                            _pnl_name = _get_stock_display_name(ticker)
+                        pnl_rows.append({
+                            "銘柄":    _pnl_name,
+                            "コード":  ticker,
+                            "保有株数": int(pos["qty"]),
+                            "平均取得単価": round(avg_cost, 2),
+                            "現在株価": round(cur_price, 2) if cur_price else "取得失敗",
+                            "含み損益": f"{pnl:+,.0f}" if pnl is not None else "-",
+                            "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
+                        })
+
+                    st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+
+                    # ── ポートフォリオ全体AI分析 ──────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown(
+                        '<div style="background:linear-gradient(135deg,#0a1628,#0d1f3c);'
+                        'border:1px solid #1e3a5f;border-radius:10px;padding:14px 18px;margin-bottom:14px">'
+                        '<div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:4px">'
+                        '📊 ポートフォリオ全体AI分析</div>'
+                        '<div style="font-size:12px;color:#94a3b8">'
+                        '全保有銘柄を一括分析 → リスク診断 + アクション優先順位TOP3 + 売却後の資金配分</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _pnl_model_opts = {
+                        "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                        "🟡 Gemini（Google）":              "gemini",
+                        "⚡ Groq（高速）":                  "groq",
+                        "🌐 OpenRouter":                    "openrouter",
+                    }
+                    _pnl_col1, _pnl_col2 = st.columns([3, 1])
+                    _pnl_model_label = _pnl_col1.selectbox(
+                        "全体分析用AIモデル", list(_pnl_model_opts.keys()),
+                        key="pnl_wide_model_sel", label_visibility="collapsed",
+                    )
+                    _pnl_model_pref = _pnl_model_opts[_pnl_model_label]
+
+                    if _pnl_col2.button("🔍 全体分析", type="primary", use_container_width=True, key="pnl_wide_btn"):
+                        _pnl_mode = st.session_state.get("trading_mode", "growth")
+                        with st.spinner("全保有銘柄のデータ取得・AI分析中...（30〜60秒）"):
+                            _pnl_summary   = _compute_portfolio_summary()
+                            _pnl_positions = _pnl_summary.get("positions", {})
+                            _pnl_tickers   = tuple(sorted(_pnl_positions.keys()))
+                            _pnl_changes   = _fetch_daily_changes_for_tickers(_pnl_tickers) if _pnl_tickers else {}
+                            _pnl_mktctx    = _fetch_market_context_for_trading()
+                            _pnl_result    = _generate_portfolio_wide_analysis(
+                                _pnl_positions, _pnl_changes,
+                                mode=_pnl_mode, model_pref=_pnl_model_pref,
+                                market_ctx=_pnl_mktctx,
+                            )
+                        st.session_state["_wide_analysis"] = _pnl_result
+
+                    _pnl_wide_res = st.session_state.get("_wide_analysis")
+                    if _pnl_wide_res:
+                        if _pnl_wide_res.get("error"):
+                            st.error(f"分析エラー: {_pnl_wide_res['error']}")
+                        else:
+                            st.markdown(
+                                f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
+                                f'🤖 {_pnl_wide_res.get("model", "")} ｜ '
+                                f'{datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(_pnl_wide_res["text"])
+
+                else:
+                    st.info("現在の保有ポジションはありません（全て決済済み）。")
 
     # ── タブ⑤: 資産推移 ────────────────────────────────────────
     with tab_hist:
-        st.markdown("#### 📈 ポートフォリオ資産推移")
-
-        with st.spinner("資産推移を計算中..."):
-            hist_df = _compute_portfolio_history()
-
-        if hist_df.empty:
-            st.info("取引記録がないか、株価データを取得できませんでした。")
-        else:
-            import plotly.graph_objects as go
-
-            # ── 全期間メトリクス（常に全期間ベース）─────────────
-            latest      = hist_df.iloc[-1]
-            port_now    = latest["portfolio_value"]
-            cost_now    = latest["invested_cost"]
-            pnl_now     = latest["pnl"]
-            pnl_pct_now = latest["pnl_pct"]
-            peak        = hist_df["portfolio_value"].max()
-            drawdown    = (port_now - peak) / peak * 100 if peak > 0 else 0
-
-            # 1日騰落（hist_df が2行以上あれば計算）
-            if len(hist_df) >= 2:
-                prev_val    = hist_df.iloc[-2]["portfolio_value"]
-                day_chg     = port_now - prev_val
-                day_chg_pct = day_chg / prev_val * 100 if prev_val > 0 else 0
-            else:
-                day_chg = day_chg_pct = 0.0
-
-            def _metric_card(col, label, value, sub="", color="#e2e8f0"):
-                col.markdown(
-                    f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;text-align:center">'
-                    f'<div style="font-size:11px;color:#94a3b8">{label}</div>'
-                    f'<div style="font-size:20px;font-weight:700;color:{color};margin-top:4px">{value}</div>'
-                    f'<div style="font-size:11px;color:#64748b;margin-top:2px">{sub}</div>'
-                    f'</div>',
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if not _usr:
+            _lc, _ = st.columns([1, 2])
+            with _lc:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;'
+                    'border-radius:10px;padding:20px 24px;">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
+                    '🔐 ログインが必要です</div>',
                     unsafe_allow_html=True,
                 )
-
-            m1, m2, m3, m4 = st.columns(4)
-            _metric_card(m1, "現在評価額", f"{port_now:,.0f}", "（USD/円混在時は参考値）")
-            dc_color = "#22c55e" if day_chg >= 0 else "#ef4444"
-            _metric_card(m2, "本日の騰落",
-                         f"{day_chg:+,.0f}", f"{day_chg_pct:+.2f}%", color=dc_color)
-            pnl_color = "#22c55e" if pnl_now >= 0 else "#ef4444"
-            _metric_card(m3, "含み損益合計",
-                         f"{pnl_now:+,.0f}", f"{pnl_pct_now:+.2f}%", color=pnl_color)
-            dd_color = "#ef4444" if drawdown < -5 else "#94a3b8"
-            _metric_card(m4, "最大からの下落",
-                         f"{drawdown:.1f}%", f"最高値 {peak:,.0f}", color=dd_color)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── 期間セレクタ ────────────────────────────────────
-            _PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "全期間"]
-            sel_period = st.radio(
-                "表示期間", _PERIODS, index=5,
-                horizontal=True, key="hist_period",
-                label_visibility="collapsed",
-            )
-
-            today = pd.Timestamp.today().normalize()
-            if sel_period == "1D":
-                chart_df = hist_df.iloc[-2:] if len(hist_df) >= 2 else hist_df
-            elif sel_period == "5D":
-                chart_df = hist_df.iloc[-5:] if len(hist_df) >= 5 else hist_df
-            elif sel_period == "1M":
-                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=1)]
-            elif sel_period == "6M":
-                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=6)]
-            elif sel_period == "YTD":
-                chart_df = hist_df[hist_df.index >= pd.Timestamp(today.year, 1, 1)]
-            elif sel_period == "1Y":
-                chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=1)]
-            else:
-                chart_df = hist_df
-            if chart_df.empty:
-                chart_df = hist_df
-
-            # ── 資産推移チャート ────────────────────────────────
-            # 損益の塗りつぶし色（期間内で全体的にプラスかマイナスか）
-            period_gain = chart_df["pnl"].mean() if "pnl" in chart_df.columns else 0
-            fill_color  = "rgba(34,197,94,0.12)" if period_gain >= 0 else "rgba(239,68,68,0.10)"
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=chart_df.index, y=chart_df["portfolio_value"],
-                name="ポートフォリオ時価",
-                line=dict(color="#60a5fa", width=2),
-                hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
-            ))
-            fig.add_trace(go.Scatter(
-                x=chart_df.index, y=chart_df["invested_cost"],
-                name="投資元本",
-                line=dict(color="#94a3b8", width=1.5, dash="dot"),
-                hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
-            ))
-            fig.add_trace(go.Scatter(
-                x=list(chart_df.index) + list(chart_df.index[::-1]),
-                y=list(chart_df["portfolio_value"]) + list(chart_df["invested_cost"][::-1]),
-                fill="toself",
-                fillcolor=fill_color,
-                line=dict(width=0),
-                showlegend=False,
-                hoverinfo="skip",
-            ))
-            fig.update_layout(
-                paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-                font=dict(color="#e2e8f0"),
-                legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
-                            bordercolor="#334155", borderwidth=1),
-                xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                           title=dict(font=dict(color="#94a3b8"))),
-                yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                           title=dict(text="評価額", font=dict(color="#94a3b8"))),
-                hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                margin=dict(l=10, r=10, t=10, b=10),
-                height=320,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # ── 損益率推移チャート ──────────────────────────────
-            with st.expander("📊 損益率推移（%）"):
-                fig2 = go.Figure()
-                colors2 = ["#22c55e" if v >= 0 else "#ef4444"
-                           for v in chart_df["pnl_pct"].fillna(0)]
-                fig2.add_trace(go.Bar(
-                    x=chart_df.index, y=chart_df["pnl_pct"].fillna(0),
-                    marker_color=colors2,
-                    hovertemplate="%{x|%Y-%m-%d}<br>損益率: %{y:+.2f}%<extra></extra>",
-                ))
-                fig2.add_hline(y=0, line_color="#475569", line_width=1)
-                fig2.update_layout(
-                    paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-                    font=dict(color="#e2e8f0"),
-                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
-                    yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                               ticksuffix="%"),
-                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    height=220, showlegend=False,
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-
-            st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # ── AI ポートフォリオ コメント ──────────────────────
-            st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;border-radius:12px;'
-                'padding:20px 24px;margin-top:8px">'
-                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
-                '<span style="font-size:20px">🤖</span>'
-                '<div>'
-                '<div style="font-size:14px;font-weight:700;color:#e2e8f0">'
-                '今日のポートフォリオはどうですか？</div>'
-                '<div style="font-size:11px;color:#64748b">AI分析 · 自動更新（1時間キャッシュ）</div>'
-                '</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            # 保有銘柄の日次騰落を取得
-            open_pos_for_ai = _get_open_positions()
-            ai_comment_data = {}
-            ai_tickers_gainers = []
-            ai_tickers_losers  = []
-
-            if open_pos_for_ai:
-                tickers_tuple = tuple(sorted(open_pos_for_ai.keys()))
-                with st.spinner("銘柄騰落を取得中..."):
-                    daily_chg = _fetch_daily_changes_for_tickers(tickers_tuple)
-
-                if daily_chg:
-                    import json as _json
-                    changes_json = _json.dumps(daily_chg)
-                    positions_key = ",".join(tickers_tuple)
-
-                    with st.spinner("AIコメント生成中..."):
-                        ai_comment_data = _generate_portfolio_ai_comment(
-                            positions_key, changes_json
-                        )
-
-                    # 上昇・下落ランキング
-                    sorted_chg = sorted(
-                        daily_chg.items(),
-                        key=lambda x: x[1].get("day_change_pct", 0),
-                        reverse=True,
-                    )
-                    ai_tickers_gainers = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) > 0]
-                    ai_tickers_losers  = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) < 0]
-
-            narrative = ai_comment_data.get("narrative", "")
-            bullets   = ai_comment_data.get("bullets", [])
-            ai_err    = ai_comment_data.get("error")
-
-            if ai_err and not narrative:
-                st.warning(f"AIコメント取得失敗: {ai_err}")
-            else:
-                col_narr, col_bullets = st.columns([3, 2])
-                with col_narr:
-                    if narrative:
-                        st.markdown(
-                            f'<p style="color:#cbd5e1;font-size:13.5px;line-height:1.7;'
-                            f'margin:0">{narrative}</p>',
-                            unsafe_allow_html=True,
-                        )
+                _u = st.text_input("ユーザー名", key="tl_u_hist")
+                _p = st.text_input("パスワード", type="password", key="tl_p_hist")
+                if st.button("ログイン", type="primary", key="tl_b_hist"):
+                    if _auth_validate(_u, _p):
+                        st.query_params["token"] = _auth_create_session(_u)
+                        st.rerun()
                     else:
-                        st.markdown(
-                            '<p style="color:#64748b;font-size:13px">取引記録を入力するとAI分析が表示されます。</p>',
-                            unsafe_allow_html=True,
-                        )
-
-                with col_bullets:
-                    if bullets:
-                        st.markdown(
-                            '<div style="font-size:12px;font-weight:700;color:#94a3b8;'
-                            'margin-bottom:8px">一目でわかる</div>',
-                            unsafe_allow_html=True,
-                        )
-                        for b in bullets:
-                            st.markdown(
-                                f'<div style="display:flex;gap:8px;margin-bottom:6px">'
-                                f'<span style="color:#3b82f6;flex-shrink:0">•</span>'
-                                f'<span style="color:#cbd5e1;font-size:13px">{b}</span>'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
-
-            # 上昇・下落チップ
-            if ai_tickers_gainers or ai_tickers_losers:
-                st.markdown("<div style='margin-top:14px'>", unsafe_allow_html=True)
-                chip_html = '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px">上昇・下落銘柄</div><div style="display:flex;flex-wrap:wrap;gap:8px">'
-                # 上昇（緑）
-                for ticker, d in ai_tickers_gainers[:3]:
-                    pct = d.get("day_change_pct", 0)
-                    chip_html += (
-                        f'<span style="background:#052e16;border:1px solid #166534;'
-                        f'color:#4ade80;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
-                        f'{ticker} +{pct:.2f}%</span>'
-                    )
-                # 下落（赤）
-                for ticker, d in reversed(ai_tickers_losers[-3:]):
-                    pct = d.get("day_change_pct", 0)
-                    chip_html += (
-                        f'<span style="background:#450a0a;border:1px solid #991b1b;'
-                        f'color:#f87171;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
-                        f'{ticker} {pct:.2f}%</span>'
-                    )
-                chip_html += '</div></div>'
-                st.markdown(chip_html, unsafe_allow_html=True)
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
-    with tab_summary:
-        st.markdown("#### 💹 ポートフォリオ サマリー")
-
-        # 通貨選択
-        currency_choice = st.radio(
-            "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"],
-            horizontal=True, key="summary_currency",
-        )
-        use_jpy = "JPY" in currency_choice
-        cur_label = "円" if use_jpy else "USD"
-
-        with st.spinner("ポートフォリオデータを取得中..."):
-            summary = _compute_portfolio_summary()
-
-        if summary["error"]:
-            st.error(f"⚠️ {summary['error']}")
-            st.caption("ページを再読み込みしてください。")
-        elif not summary["positions"]:
-            st.info("保有銘柄がまだありません。取引記録を入力してください。")
+                        st.error("ユーザー名またはパスワードが違います")
+                st.markdown("</div>", unsafe_allow_html=True)
         else:
-            positions = summary["positions"]
-            dividends = summary["dividends"]
-            usd_jpy   = summary["usd_jpy"]
+            st.markdown("#### 📈 ポートフォリオ資産推移")
 
-            def _to_display(value_native, is_jp: bool) -> float:
-                """ネイティブ通貨の値を表示通貨に変換"""
-                if value_native is None:
-                    return 0.0
-                if use_jpy:
-                    return float(value_native) if is_jp else float(value_native) * usd_jpy
-                else:
-                    return float(value_native) / usd_jpy if is_jp else float(value_native)
+            with st.spinner("資産推移を計算中..."):
+                hist_df = _compute_portfolio_history()
 
-            import plotly.graph_objects as go
-
-            # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
-            st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
-                'padding:18px 20px;margin-bottom:18px">'
-                '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                '📊 保有株式 損益サマリー</div>',
-                unsafe_allow_html=True,
-            )
-
-            total_cost = sum(
-                _to_display(p["cost"], p["is_jp"]) for p in positions.values()
-            )
-            total_mkt = sum(
-                _to_display(p["market_value"], p["is_jp"])
-                for p in positions.values() if p["market_value"] is not None
-            )
-            total_gain  = total_mkt - total_cost
-            total_gp    = total_gain / total_cost * 100 if total_cost > 0 else 0
-            gain_color  = "#22c55e" if total_gain >= 0 else "#ef4444"
-            gain_sign   = "+" if total_gain >= 0 else ""
-
-            c_left, c_right = st.columns([3, 1])
-            with c_left:
-                # 水平バーチャート（元本 vs 評価額）
-                fig_gl = go.Figure()
-                fig_gl.add_trace(go.Bar(
-                    y=["コスト", "評価額"],
-                    x=[total_cost, total_mkt],
-                    orientation="h",
-                    marker_color=["#475569", "#3b82f6"],
-                    text=[f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"],
-                    textposition="outside",
-                    textfont=dict(color="#e2e8f0", size=12),
-                    hovertemplate="%{y}: %{x:,.0f}<extra></extra>",
-                ))
-                fig_gl.update_layout(
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0"),
-                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
-                               tickformat=",.0f"),
-                    yaxis=dict(tickfont=dict(color="#e2e8f0")),
-                    margin=dict(l=10, r=60, t=5, b=5),
-                    height=100,
-                    showlegend=False,
-                )
-                st.plotly_chart(fig_gl, use_container_width=True)
-
-            with c_right:
-                st.markdown(
-                    f'<div style="text-align:center;padding-top:10px">'
-                    f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
-                    f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
-                    f'{gain_sign}{cur_label} {total_gain:,.0f}</div>'
-                    f'<div style="font-size:14px;color:{gain_color}">'
-                    f'{gain_sign}{total_gp:.2f}%</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            # ── カード2: 配当金 ────────────────────────────────────
-            st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
-                'padding:18px 20px;margin-bottom:18px">'
-                '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                '💴 配当金（過去6ヶ月）</div>',
-                unsafe_allow_html=True,
-            )
-
-            # 月別配当を集計
-            months_6 = []
-            now = datetime.now()
-            for i in range(5, -1, -1):
-                m = (now.month - i - 1) % 12 + 1
-                y = now.year - ((now.month - i - 1) // 12 + (1 if (now.month - i - 1) < 0 else 0))
-                months_6.append(f"{y:04d}-{m:02d}")
-            months_6 = sorted(set(months_6))[-6:]
-
-            # ティッカー別に月次配当を集計（スタック棒グラフ用）
-            ticker_month_div: dict[str, dict[str, float]] = {}
-            detail_rows = []  # 明細テーブル用
-            has_any_div = False
-
-            _ticker_colors = [
-                "#f59e0b", "#60a5fa", "#34d399", "#f87171",
-                "#a78bfa", "#fb923c", "#38bdf8", "#4ade80",
-            ]
-            for _ci, (_tk, _dd) in enumerate(dividends.items()):
-                _is_jp = _dd["is_jp"]
-                _name  = _dd.get("name", _tk)
-                _label = f"{_tk}（{_name}）" if _name != _tk else _tk
-                ticker_month_div[_label] = {m: 0.0 for m in months_6}
-                for month_key, amount in _dd["divs_by_month"].items():
-                    if month_key in months_6:
-                        ticker_month_div[_label][month_key] += _to_display(amount, _is_jp)
-                        has_any_div = True
-                # 明細行
-                for ev in _dd.get("divs_detail", []):
-                    _disp = _to_display(ev["total"], _is_jp)
-                    _ps   = _to_display(ev["per_share"], _is_jp)
-                    detail_rows.append({
-                        "銘柄":     _label,
-                        "権利落日": ev["date"],
-                        "1株配当":  f"{_ps:,.4f} {cur_label}",
-                        "保有株数": int(ev["qty"]),
-                        "受取配当": f"{_disp:,.2f} {cur_label}",
-                    })
-
-            if has_any_div:
-                import plotly.graph_objects as go
-                fig_div = go.Figure()
-                for _ci, (_label, _mvals) in enumerate(ticker_month_div.items()):
-                    _color = _ticker_colors[_ci % len(_ticker_colors)]
-                    fig_div.add_trace(go.Bar(
-                        name=_label,
-                        x=list(_mvals.keys()),
-                        y=list(_mvals.values()),
-                        marker_color=_color,
-                        hovertemplate=f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>",
-                    ))
-                fig_div.update_layout(
-                    barmode="stack",
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e2e8f0"),
-                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
-                    yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                               tickprefix=f"{cur_label} "),
-                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                    legend=dict(font=dict(color="#e2e8f0", size=11),
-                                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                    margin=dict(l=10, r=10, t=40, b=10),
-                    height=220,
-                )
-                st.plotly_chart(fig_div, use_container_width=True)
-
-                # 明細テーブル
-                if detail_rows:
-                    detail_rows_sorted = sorted(detail_rows, key=lambda r: r["権利落日"], reverse=True)
-                    total_div = sum(
-                        float(r["受取配当"].split()[0].replace(",", ""))
-                        for r in detail_rows_sorted
-                    )
-                    for dr in detail_rows_sorted:
-                        st.markdown(
-                            f'<div style="display:flex;justify-content:space-between;'
-                            f'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
-                            f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
-                            f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
-                            f'<span style="color:#64748b">{dr["1株配当"]}</span>'
-                            f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
-                            f'<span style="color:#f59e0b;font-weight:700">{dr["受取配当"]}</span>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown(
-                        f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
-                        f'過去6ヶ月合計: <b style="color:#f59e0b">{cur_label} {total_div:,.2f}</b></div>',
-                        unsafe_allow_html=True,
-                    )
+            if hist_df.empty:
+                st.info("取引記録がないか、株価データを取得できませんでした。")
             else:
-                st.info("配当履歴がありません（過去6ヶ月）。")
+                import plotly.graph_objects as go
 
-            st.markdown("</div>", unsafe_allow_html=True)
+                # ── 全期間メトリクス（常に全期間ベース）─────────────
+                latest      = hist_df.iloc[-1]
+                port_now    = latest["portfolio_value"]
+                cost_now    = latest["invested_cost"]
+                pnl_now     = latest["pnl"]
+                pnl_pct_now = latest["pnl_pct"]
+                peak        = hist_df["portfolio_value"].max()
+                drawdown    = (port_now - peak) / peak * 100 if peak > 0 else 0
 
-            # ── カード3 & 4 を横並び ─────────────────────────────
-            col3, col4 = st.columns(2)
+                # 1日騰落（hist_df が2行以上あれば計算）
+                if len(hist_df) >= 2:
+                    prev_val    = hist_df.iloc[-2]["portfolio_value"]
+                    day_chg     = port_now - prev_val
+                    day_chg_pct = day_chg / prev_val * 100 if prev_val > 0 else 0
+                else:
+                    day_chg = day_chg_pct = 0.0
 
-            # ── カード3: アセットアロケーション ─────────────────
-            with col3:
-                st.markdown(
-                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
-                    'padding:18px 20px;height:100%">'
-                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                    '🌏 アセットアロケーション</div>',
-                    unsafe_allow_html=True,
-                )
-
-                jp_val = sum(
-                    _to_display(p["market_value"], True)
-                    for p in positions.values() if p["is_jp"] and p["market_value"] is not None
-                )
-                us_val = sum(
-                    _to_display(p["market_value"], False)
-                    for p in positions.values() if not p["is_jp"] and p["market_value"] is not None
-                )
-                total_alloc = jp_val + us_val
-
-                if total_alloc > 0:
-                    jp_pct = jp_val / total_alloc * 100
-                    us_pct = us_val / total_alloc * 100
-                    fig_alloc = go.Figure(go.Pie(
-                        labels=["🇯🇵 日本株", "🇺🇸 米国株"],
-                        values=[jp_val, us_val],
-                        marker_colors=["#f97316", "#3b82f6"],
-                        textinfo="label+percent",
-                        textfont=dict(color="#e2e8f0", size=12),
-                        hole=0.5,
-                        hovertemplate="%{label}<br>%{value:,.0f} (%{percent})<extra></extra>",
-                    ))
-                    fig_alloc.update_layout(
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        font=dict(color="#e2e8f0"),
-                        legend=dict(font=dict(color="#e2e8f0"), bgcolor="rgba(0,0,0,0)"),
-                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        height=220,
-                    )
-                    st.plotly_chart(fig_alloc, use_container_width=True)
-                    st.markdown(
-                        f'<div style="display:flex;gap:16px;justify-content:center;font-size:12px">'
-                        f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% ({cur_label} {jp_val:,.0f})</span>'
-                        f'<span style="color:#3b82f6">🇺🇸 {us_pct:.1f}% ({cur_label} {us_val:,.0f})</span>'
+                def _metric_card(col, label, value, sub="", color="#e2e8f0"):
+                    col.markdown(
+                        f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;text-align:center">'
+                        f'<div style="font-size:11px;color:#94a3b8">{label}</div>'
+                        f'<div style="font-size:20px;font-weight:700;color:{color};margin-top:4px">{value}</div>'
+                        f'<div style="font-size:11px;color:#64748b;margin-top:2px">{sub}</div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
+
+                m1, m2, m3, m4 = st.columns(4)
+                _metric_card(m1, "現在評価額", f"{port_now:,.0f}", "（USD/円混在時は参考値）")
+                dc_color = "#22c55e" if day_chg >= 0 else "#ef4444"
+                _metric_card(m2, "本日の騰落",
+                             f"{day_chg:+,.0f}", f"{day_chg_pct:+.2f}%", color=dc_color)
+                pnl_color = "#22c55e" if pnl_now >= 0 else "#ef4444"
+                _metric_card(m3, "含み損益合計",
+                             f"{pnl_now:+,.0f}", f"{pnl_pct_now:+.2f}%", color=pnl_color)
+                dd_color = "#ef4444" if drawdown < -5 else "#94a3b8"
+                _metric_card(m4, "最大からの下落",
+                             f"{drawdown:.1f}%", f"最高値 {peak:,.0f}", color=dd_color)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── 期間セレクタ ────────────────────────────────────
+                _PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "全期間"]
+                sel_period = st.radio(
+                    "表示期間", _PERIODS, index=5,
+                    horizontal=True, key="hist_period",
+                    label_visibility="collapsed",
+                )
+
+                today = pd.Timestamp.today().normalize()
+                if sel_period == "1D":
+                    chart_df = hist_df.iloc[-2:] if len(hist_df) >= 2 else hist_df
+                elif sel_period == "5D":
+                    chart_df = hist_df.iloc[-5:] if len(hist_df) >= 5 else hist_df
+                elif sel_period == "1M":
+                    chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=1)]
+                elif sel_period == "6M":
+                    chart_df = hist_df[hist_df.index >= today - pd.DateOffset(months=6)]
+                elif sel_period == "YTD":
+                    chart_df = hist_df[hist_df.index >= pd.Timestamp(today.year, 1, 1)]
+                elif sel_period == "1Y":
+                    chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=1)]
                 else:
-                    st.info("データなし")
+                    chart_df = hist_df
+                if chart_df.empty:
+                    chart_df = hist_df
 
-                st.markdown("</div>", unsafe_allow_html=True)
+                # ── 資産推移チャート ────────────────────────────────
+                # 損益の塗りつぶし色（期間内で全体的にプラスかマイナスか）
+                period_gain = chart_df["pnl"].mean() if "pnl" in chart_df.columns else 0
+                fill_color  = "rgba(34,197,94,0.12)" if period_gain >= 0 else "rgba(239,68,68,0.10)"
 
-            # ── カード4: セクターアロケーション ─────────────────
-            with col4:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=chart_df.index, y=chart_df["portfolio_value"],
+                    name="ポートフォリオ時価",
+                    line=dict(color="#60a5fa", width=2),
+                    hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
+                ))
+                fig.add_trace(go.Scatter(
+                    x=chart_df.index, y=chart_df["invested_cost"],
+                    name="投資元本",
+                    line=dict(color="#94a3b8", width=1.5, dash="dot"),
+                    hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
+                ))
+                fig.add_trace(go.Scatter(
+                    x=list(chart_df.index) + list(chart_df.index[::-1]),
+                    y=list(chart_df["portfolio_value"]) + list(chart_df["invested_cost"][::-1]),
+                    fill="toself",
+                    fillcolor=fill_color,
+                    line=dict(width=0),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+                fig.update_layout(
+                    paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                    font=dict(color="#e2e8f0"),
+                    legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
+                                bordercolor="#334155", borderwidth=1),
+                    xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                               title=dict(font=dict(color="#94a3b8"))),
+                    yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                               title=dict(text="評価額", font=dict(color="#94a3b8"))),
+                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=320,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # ── 損益率推移チャート ──────────────────────────────
+                with st.expander("📊 損益率推移（%）"):
+                    fig2 = go.Figure()
+                    colors2 = ["#22c55e" if v >= 0 else "#ef4444"
+                               for v in chart_df["pnl_pct"].fillna(0)]
+                    fig2.add_trace(go.Bar(
+                        x=chart_df.index, y=chart_df["pnl_pct"].fillna(0),
+                        marker_color=colors2,
+                        hovertemplate="%{x|%Y-%m-%d}<br>損益率: %{y:+.2f}%<extra></extra>",
+                    ))
+                    fig2.add_hline(y=0, line_color="#475569", line_width=1)
+                    fig2.update_layout(
+                        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        font=dict(color="#e2e8f0"),
+                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                   ticksuffix="%"),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        height=220, showlegend=False,
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── AI ポートフォリオ コメント ──────────────────────
                 st.markdown(
-                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
-                    'padding:18px 20px;height:100%">'
-                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                    '🏭 セクター別配分</div>',
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:12px;'
+                    'padding:20px 24px;margin-top:8px">'
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
+                    '<span style="font-size:20px">🤖</span>'
+                    '<div>'
+                    '<div style="font-size:14px;font-weight:700;color:#e2e8f0">'
+                    '今日のポートフォリオはどうですか？</div>'
+                    '<div style="font-size:11px;color:#64748b">AI分析 · 自動更新（1時間キャッシュ）</div>'
+                    '</div>'
+                    '</div>',
                     unsafe_allow_html=True,
                 )
 
-                sector_vals: dict[str, float] = {}
-                for p in positions.values():
-                    if p["market_value"] is None:
-                        continue
-                    sec = p["sector"]
-                    val = _to_display(p["market_value"], p["is_jp"])
-                    sector_vals[sec] = sector_vals.get(sec, 0.0) + val
+                # 保有銘柄の日次騰落を取得
+                open_pos_for_ai = _get_open_positions()
+                ai_comment_data = {}
+                ai_tickers_gainers = []
+                ai_tickers_losers  = []
 
-                if sector_vals:
-                    sorted_sectors = sorted(sector_vals.items(), key=lambda x: x[1], reverse=True)
-                    sec_labels = [s[0] for s in sorted_sectors]
-                    sec_values = [s[1] for s in sorted_sectors]
+                if open_pos_for_ai:
+                    tickers_tuple = tuple(sorted(open_pos_for_ai.keys()))
+                    with st.spinner("銘柄騰落を取得中..."):
+                        daily_chg = _fetch_daily_changes_for_tickers(tickers_tuple)
 
-                    sector_colors = [
-                        "#3b82f6", "#8b5cf6", "#06b6d4", "#22c55e",
-                        "#f59e0b", "#f97316", "#ef4444", "#ec4899",
-                        "#64748b", "#14b8a6", "#a855f7",
-                    ]
+                    if daily_chg:
+                        import json as _json
+                        changes_json = _json.dumps(daily_chg)
+                        positions_key = ",".join(tickers_tuple)
 
-                    fig_sec = go.Figure(go.Bar(
-                        x=sec_values,
-                        y=sec_labels,
+                        with st.spinner("AIコメント生成中..."):
+                            ai_comment_data = _generate_portfolio_ai_comment(
+                                positions_key, changes_json
+                            )
+
+                        # 上昇・下落ランキング
+                        sorted_chg = sorted(
+                            daily_chg.items(),
+                            key=lambda x: x[1].get("day_change_pct", 0),
+                            reverse=True,
+                        )
+                        ai_tickers_gainers = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) > 0]
+                        ai_tickers_losers  = [(t, d) for t, d in sorted_chg if d.get("day_change_pct", 0) < 0]
+
+                narrative = ai_comment_data.get("narrative", "")
+                bullets   = ai_comment_data.get("bullets", [])
+                ai_err    = ai_comment_data.get("error")
+
+                if ai_err and not narrative:
+                    st.warning(f"AIコメント取得失敗: {ai_err}")
+                else:
+                    col_narr, col_bullets = st.columns([3, 2])
+                    with col_narr:
+                        if narrative:
+                            st.markdown(
+                                f'<p style="color:#cbd5e1;font-size:13.5px;line-height:1.7;'
+                                f'margin:0">{narrative}</p>',
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(
+                                '<p style="color:#64748b;font-size:13px">取引記録を入力するとAI分析が表示されます。</p>',
+                                unsafe_allow_html=True,
+                            )
+
+                    with col_bullets:
+                        if bullets:
+                            st.markdown(
+                                '<div style="font-size:12px;font-weight:700;color:#94a3b8;'
+                                'margin-bottom:8px">一目でわかる</div>',
+                                unsafe_allow_html=True,
+                            )
+                            for b in bullets:
+                                st.markdown(
+                                    f'<div style="display:flex;gap:8px;margin-bottom:6px">'
+                                    f'<span style="color:#3b82f6;flex-shrink:0">•</span>'
+                                    f'<span style="color:#cbd5e1;font-size:13px">{b}</span>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                # 上昇・下落チップ
+                if ai_tickers_gainers or ai_tickers_losers:
+                    st.markdown("<div style='margin-top:14px'>", unsafe_allow_html=True)
+                    chip_html = '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px">上昇・下落銘柄</div><div style="display:flex;flex-wrap:wrap;gap:8px">'
+                    # 上昇（緑）
+                    for ticker, d in ai_tickers_gainers[:3]:
+                        pct = d.get("day_change_pct", 0)
+                        chip_html += (
+                            f'<span style="background:#052e16;border:1px solid #166534;'
+                            f'color:#4ade80;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
+                            f'{ticker} +{pct:.2f}%</span>'
+                        )
+                    # 下落（赤）
+                    for ticker, d in reversed(ai_tickers_losers[-3:]):
+                        pct = d.get("day_change_pct", 0)
+                        chip_html += (
+                            f'<span style="background:#450a0a;border:1px solid #991b1b;'
+                            f'color:#f87171;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">'
+                            f'{ticker} {pct:.2f}%</span>'
+                        )
+                    chip_html += '</div></div>'
+                    st.markdown(chip_html, unsafe_allow_html=True)
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
+    with tab_summary:
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if not _usr:
+            _lc, _ = st.columns([1, 2])
+            with _lc:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;'
+                    'border-radius:10px;padding:20px 24px;">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
+                    '🔐 ログインが必要です</div>',
+                    unsafe_allow_html=True,
+                )
+                _u = st.text_input("ユーザー名", key="tl_u_summary")
+                _p = st.text_input("パスワード", type="password", key="tl_p_summary")
+                if st.button("ログイン", type="primary", key="tl_b_summary"):
+                    if _auth_validate(_u, _p):
+                        st.query_params["token"] = _auth_create_session(_u)
+                        st.rerun()
+                    else:
+                        st.error("ユーザー名またはパスワードが違います")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("#### 💹 ポートフォリオ サマリー")
+
+            # 通貨選択
+            currency_choice = st.radio(
+                "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"],
+                horizontal=True, key="summary_currency",
+            )
+            use_jpy = "JPY" in currency_choice
+            cur_label = "円" if use_jpy else "USD"
+
+            with st.spinner("ポートフォリオデータを取得中..."):
+                summary = _compute_portfolio_summary()
+
+            if summary["error"]:
+                st.error(f"⚠️ {summary['error']}")
+                st.caption("ページを再読み込みしてください。")
+            elif not summary["positions"]:
+                st.info("保有銘柄がまだありません。取引記録を入力してください。")
+            else:
+                positions = summary["positions"]
+                dividends = summary["dividends"]
+                usd_jpy   = summary["usd_jpy"]
+
+                def _to_display(value_native, is_jp: bool) -> float:
+                    """ネイティブ通貨の値を表示通貨に変換"""
+                    if value_native is None:
+                        return 0.0
+                    if use_jpy:
+                        return float(value_native) if is_jp else float(value_native) * usd_jpy
+                    else:
+                        return float(value_native) / usd_jpy if is_jp else float(value_native)
+
+                import plotly.graph_objects as go
+
+                # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;margin-bottom:18px">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '📊 保有株式 損益サマリー</div>',
+                    unsafe_allow_html=True,
+                )
+
+                total_cost = sum(
+                    _to_display(p["cost"], p["is_jp"]) for p in positions.values()
+                )
+                total_mkt = sum(
+                    _to_display(p["market_value"], p["is_jp"])
+                    for p in positions.values() if p["market_value"] is not None
+                )
+                total_gain  = total_mkt - total_cost
+                total_gp    = total_gain / total_cost * 100 if total_cost > 0 else 0
+                gain_color  = "#22c55e" if total_gain >= 0 else "#ef4444"
+                gain_sign   = "+" if total_gain >= 0 else ""
+
+                c_left, c_right = st.columns([3, 1])
+                with c_left:
+                    # 水平バーチャート（元本 vs 評価額）
+                    fig_gl = go.Figure()
+                    fig_gl.add_trace(go.Bar(
+                        y=["コスト", "評価額"],
+                        x=[total_cost, total_mkt],
                         orientation="h",
-                        marker_color=sector_colors[:len(sec_labels)],
-                        text=[f"{v / sum(sec_values) * 100:.1f}%" for v in sec_values],
+                        marker_color=["#475569", "#3b82f6"],
+                        text=[f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"],
                         textposition="outside",
-                        textfont=dict(color="#94a3b8", size=11),
-                        hovertemplate="%{y}<br>%{x:,.0f}<extra></extra>",
+                        textfont=dict(color="#e2e8f0", size=12),
+                        hovertemplate="%{y}: %{x:,.0f}<extra></extra>",
                     ))
-                    fig_sec.update_layout(
+                    fig_gl.update_layout(
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(color="#e2e8f0"),
                         xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
                                    tickformat=",.0f"),
-                        yaxis=dict(tickfont=dict(color="#e2e8f0"), autorange="reversed"),
-                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        yaxis=dict(tickfont=dict(color="#e2e8f0")),
                         margin=dict(l=10, r=60, t=5, b=5),
-                        height=max(160, len(sec_labels) * 36),
+                        height=100,
                         showlegend=False,
                     )
-                    st.plotly_chart(fig_sec, use_container_width=True)
-                else:
-                    st.info("データなし")
+                    st.plotly_chart(fig_gl, use_container_width=True)
+
+                with c_right:
+                    st.markdown(
+                        f'<div style="text-align:center;padding-top:10px">'
+                        f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
+                        f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
+                        f'{gain_sign}{cur_label} {total_gain:,.0f}</div>'
+                        f'<div style="font-size:14px;color:{gain_color}">'
+                        f'{gain_sign}{total_gp:.2f}%</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            # ── 個別銘柄テーブル ─────────────────────────────────
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("##### 保有銘柄一覧")
-
-            rows_tbl = []
-            for ticker, p in positions.items():
-                mkt_disp  = _to_display(p["market_value"], p["is_jp"])
-                gain_disp = _to_display(p["gain"], p["is_jp"])
-                gp = p["gain_pct"] or 0.0
-                pos_sign  = "+" if gain_disp >= 0 else ""
-                gain_str = f'{pos_sign}{cur_label} {abs(gain_disp):,.0f} ({gp:+.2f}%)' if p["gain"] is not None else "—"
-                flag = "🇯🇵" if p["is_jp"] else "🇺🇸"
-                rows_tbl.append({
-                    "": flag,
-                    "ティッカー": ticker,
-                    "銘柄名": p["name"],
-                    "セクター": p["sector"],
-                    f"評価額 ({cur_label})": f"{mkt_disp:,.0f}" if p["market_value"] else "—",
-                    "含み損益": gain_str,
-                })
-            if rows_tbl:
-                st.dataframe(
-                    rows_tbl,
-                    use_container_width=True,
-                    hide_index=True,
+                # ── カード2: 配当金 ────────────────────────────────────
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;margin-bottom:18px">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '💴 配当金（過去6ヶ月）</div>',
+                    unsafe_allow_html=True,
                 )
 
-            st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
+                # 月別配当を集計
+                months_6 = []
+                now = datetime.now()
+                for i in range(5, -1, -1):
+                    m = (now.month - i - 1) % 12 + 1
+                    y = now.year - ((now.month - i - 1) // 12 + (1 if (now.month - i - 1) < 0 else 0))
+                    months_6.append(f"{y:04d}-{m:02d}")
+                months_6 = sorted(set(months_6))[-6:]
 
-    # ── マイポートフォリオ（ログイン必要）─────────────────────────────────────
-    st.markdown('<a id="my-portfolio"></a>', unsafe_allow_html=True)
-    st.markdown(
-        '<div style="background:linear-gradient(135deg,#0a0f1e,#0d1b2a,#0f172a);'
-        'border:1px solid #334155;border-radius:12px;padding:14px 20px;margin:20px 0 12px;">'
-        '<div style="font-size:18px;font-weight:800;color:#f59e0b">📂 マイポートフォリオ</div>'
-        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
-        '実保有ポジションの管理・損益追跡（ログイン必要）</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+                # ティッカー別に月次配当を集計（スタック棒グラフ用）
+                ticker_month_div: dict[str, dict[str, float]] = {}
+                detail_rows = []  # 明細テーブル用
+                has_any_div = False
 
-    _auth_token = st.query_params.get("token", "")
-    _auth_user  = _auth_check_session(_auth_token) if _auth_token else ""
+                _ticker_colors = [
+                    "#f59e0b", "#60a5fa", "#34d399", "#f87171",
+                    "#a78bfa", "#fb923c", "#38bdf8", "#4ade80",
+                ]
+                for _ci, (_tk, _dd) in enumerate(dividends.items()):
+                    _is_jp = _dd["is_jp"]
+                    _name  = _dd.get("name", _tk)
+                    _label = f"{_tk}（{_name}）" if _name != _tk else _tk
+                    ticker_month_div[_label] = {m: 0.0 for m in months_6}
+                    for month_key, amount in _dd["divs_by_month"].items():
+                        if month_key in months_6:
+                            ticker_month_div[_label][month_key] += _to_display(amount, _is_jp)
+                            has_any_div = True
+                    # 明細行
+                    for ev in _dd.get("divs_detail", []):
+                        _disp = _to_display(ev["total"], _is_jp)
+                        _ps   = _to_display(ev["per_share"], _is_jp)
+                        detail_rows.append({
+                            "銘柄":     _label,
+                            "権利落日": ev["date"],
+                            "1株配当":  f"{_ps:,.4f} {cur_label}",
+                            "保有株数": int(ev["qty"]),
+                            "受取配当": f"{_disp:,.2f} {cur_label}",
+                        })
 
-    if not _auth_user:
-        # ログインフォーム
-        _lc, _ = st.columns([1, 2])
-        with _lc:
-            st.markdown(
-                '<div style="background:#1e293b;border:1px solid #334155;'
-                'border-radius:10px;padding:20px 24px;">'
-                '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">🔐 ログイン</div>',
-                unsafe_allow_html=True,
-            )
-            _login_user = st.text_input("ユーザー名", key="mp_login_username")
-            _login_pass = st.text_input("パスワード", type="password", key="mp_login_password")
-            if st.button("ログイン", type="primary", key="mp_login_btn"):
-                if _auth_validate(_login_user, _login_pass):
-                    _new_token = _auth_create_session(_login_user)
-                    st.query_params["token"] = _new_token
-                    st.success(f"✅ ログイン成功 — このURLをブックマークで{_SESSION_DAYS}日間維持")
-                    st.rerun()
+                if has_any_div:
+                    import plotly.graph_objects as go
+                    fig_div = go.Figure()
+                    for _ci, (_label, _mvals) in enumerate(ticker_month_div.items()):
+                        _color = _ticker_colors[_ci % len(_ticker_colors)]
+                        fig_div.add_trace(go.Bar(
+                            name=_label,
+                            x=list(_mvals.keys()),
+                            y=list(_mvals.values()),
+                            marker_color=_color,
+                            hovertemplate=f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>",
+                        ))
+                    fig_div.update_layout(
+                        barmode="stack",
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                   tickprefix=f"{cur_label} "),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        legend=dict(font=dict(color="#e2e8f0", size=11),
+                                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                        margin=dict(l=10, r=10, t=40, b=10),
+                        height=220,
+                    )
+                    st.plotly_chart(fig_div, use_container_width=True)
+
+                    # 明細テーブル
+                    if detail_rows:
+                        detail_rows_sorted = sorted(detail_rows, key=lambda r: r["権利落日"], reverse=True)
+                        total_div = sum(
+                            float(r["受取配当"].split()[0].replace(",", ""))
+                            for r in detail_rows_sorted
+                        )
+                        for dr in detail_rows_sorted:
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:space-between;'
+                                f'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
+                                f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
+                                f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
+                                f'<span style="color:#64748b">{dr["1株配当"]}</span>'
+                                f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
+                                f'<span style="color:#f59e0b;font-weight:700">{dr["受取配当"]}</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                        st.markdown(
+                            f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
+                            f'過去6ヶ月合計: <b style="color:#f59e0b">{cur_label} {total_div:,.2f}</b></div>',
+                            unsafe_allow_html=True,
+                        )
                 else:
-                    st.error("ユーザー名またはパスワードが違います")
-            st.markdown("</div>", unsafe_allow_html=True)
-        st.caption(f"ログイン後のURLをブックマーク → {_SESSION_DAYS}日間セッション維持（ブラウザ・端末をまたいで有効）")
-    else:
-        # ログイン済み
-        _users_map  = _auth_get_users()
-        _disp_name  = _users_map.get(_auth_user, {}).get("display_name", _auth_user)
-        _col_u, _col_lo = st.columns([5, 1])
-        with _col_u:
-            st.markdown(
-                f'<div style="color:#4ade80;font-size:13px;padding:4px 0">'
-                f'✅ <b>{_disp_name}</b> としてログイン中</div>',
-                unsafe_allow_html=True,
-            )
-        with _col_lo:
-            if st.button("ログアウト", key="mp_logout_btn"):
-                _keep = {k: v for k, v in st.query_params.items() if k != "token"}
-                st.query_params.clear()
-                for _k, _v in _keep.items():
-                    st.query_params[_k] = _v
-                _auth_check_session.clear()
-                st.rerun()
+                    st.info("配当履歴がありません（過去6ヶ月）。")
 
-        st.info("📂 ポートフォリオデータの管理機能は近日実装予定です。")
+                st.markdown("</div>", unsafe_allow_html=True)
 
+                # ── カード3 & 4 を横並び ─────────────────────────────
+                col3, col4 = st.columns(2)
+
+                # ── カード3: アセットアロケーション ─────────────────
+                with col3:
+                    st.markdown(
+                        '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                        'padding:18px 20px;height:100%">'
+                        '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                        '🌏 アセットアロケーション</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    jp_val = sum(
+                        _to_display(p["market_value"], True)
+                        for p in positions.values() if p["is_jp"] and p["market_value"] is not None
+                    )
+                    us_val = sum(
+                        _to_display(p["market_value"], False)
+                        for p in positions.values() if not p["is_jp"] and p["market_value"] is not None
+                    )
+                    total_alloc = jp_val + us_val
+
+                    if total_alloc > 0:
+                        jp_pct = jp_val / total_alloc * 100
+                        us_pct = us_val / total_alloc * 100
+                        fig_alloc = go.Figure(go.Pie(
+                            labels=["🇯🇵 日本株", "🇺🇸 米国株"],
+                            values=[jp_val, us_val],
+                            marker_colors=["#f97316", "#3b82f6"],
+                            textinfo="label+percent",
+                            textfont=dict(color="#e2e8f0", size=12),
+                            hole=0.5,
+                            hovertemplate="%{label}<br>%{value:,.0f} (%{percent})<extra></extra>",
+                        ))
+                        fig_alloc.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="#e2e8f0"),
+                            legend=dict(font=dict(color="#e2e8f0"), bgcolor="rgba(0,0,0,0)"),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=220,
+                        )
+                        st.plotly_chart(fig_alloc, use_container_width=True)
+                        st.markdown(
+                            f'<div style="display:flex;gap:16px;justify-content:center;font-size:12px">'
+                            f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% ({cur_label} {jp_val:,.0f})</span>'
+                            f'<span style="color:#3b82f6">🇺🇸 {us_pct:.1f}% ({cur_label} {us_val:,.0f})</span>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.info("データなし")
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── カード4: セクターアロケーション ─────────────────
+                with col4:
+                    st.markdown(
+                        '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                        'padding:18px 20px;height:100%">'
+                        '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                        '🏭 セクター別配分</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    sector_vals: dict[str, float] = {}
+                    for p in positions.values():
+                        if p["market_value"] is None:
+                            continue
+                        sec = p["sector"]
+                        val = _to_display(p["market_value"], p["is_jp"])
+                        sector_vals[sec] = sector_vals.get(sec, 0.0) + val
+
+                    if sector_vals:
+                        sorted_sectors = sorted(sector_vals.items(), key=lambda x: x[1], reverse=True)
+                        sec_labels = [s[0] for s in sorted_sectors]
+                        sec_values = [s[1] for s in sorted_sectors]
+
+                        sector_colors = [
+                            "#3b82f6", "#8b5cf6", "#06b6d4", "#22c55e",
+                            "#f59e0b", "#f97316", "#ef4444", "#ec4899",
+                            "#64748b", "#14b8a6", "#a855f7",
+                        ]
+
+                        fig_sec = go.Figure(go.Bar(
+                            x=sec_values,
+                            y=sec_labels,
+                            orientation="h",
+                            marker_color=sector_colors[:len(sec_labels)],
+                            text=[f"{v / sum(sec_values) * 100:.1f}%" for v in sec_values],
+                            textposition="outside",
+                            textfont=dict(color="#94a3b8", size=11),
+                            hovertemplate="%{y}<br>%{x:,.0f}<extra></extra>",
+                        ))
+                        fig_sec.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="#e2e8f0"),
+                            xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
+                                       tickformat=",.0f"),
+                            yaxis=dict(tickfont=dict(color="#e2e8f0"), autorange="reversed"),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                            margin=dict(l=10, r=60, t=5, b=5),
+                            height=max(160, len(sec_labels) * 36),
+                            showlegend=False,
+                        )
+                        st.plotly_chart(fig_sec, use_container_width=True)
+                    else:
+                        st.info("データなし")
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── 個別銘柄テーブル ─────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("##### 保有銘柄一覧")
+
+                rows_tbl = []
+                for ticker, p in positions.items():
+                    mkt_disp  = _to_display(p["market_value"], p["is_jp"])
+                    gain_disp = _to_display(p["gain"], p["is_jp"])
+                    gp = p["gain_pct"] or 0.0
+                    pos_sign  = "+" if gain_disp >= 0 else ""
+                    gain_str = f'{pos_sign}{cur_label} {abs(gain_disp):,.0f} ({gp:+.2f}%)' if p["gain"] is not None else "—"
+                    flag = "🇯🇵" if p["is_jp"] else "🇺🇸"
+                    rows_tbl.append({
+                        "": flag,
+                        "ティッカー": ticker,
+                        "銘柄名": p["name"],
+                        "セクター": p["sector"],
+                        f"評価額 ({cur_label})": f"{mkt_disp:,.0f}" if p["market_value"] else "—",
+                        "含み損益": gain_str,
+                    })
+                if rows_tbl:
+                    st.dataframe(
+                        rows_tbl,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
 
 # =====================================================
 # 🔐 管理者用チェンジログ（パスワード保護）
