@@ -20680,6 +20680,8 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         _r3 = _d.get("ret_3m") or 0
         _r6 = _d.get("ret_6m") or 0
         _r1 = _d.get("ret_1y") or 0
+        if _r1 < -20:  # 1y -20%以下は除外（下落トレンド銘柄）
+            continue
         _sc = _r3 * _weights[0] + _r6 * _weights[1] + _r1 * _weights[2]
         _scored.append((_tk, _sc, _r3, _r6, _r1, _px))
     _scored.sort(key=lambda x: x[1], reverse=True)
