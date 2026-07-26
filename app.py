@@ -20707,7 +20707,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
   - 日本個別株: 100株単元のため株価×100が配分金額以内でないと購入不可
     → 予算{budget_str}では株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
   - 上記モメンタムデータの⛔リスト銘柄は絶対に選定禁止（予算超過確認済）
-  - 予算{budget_str}なら「米国株＋日本ETF」中心が現実的
+  - {"予算"+budget_str+"なら日本個別株も積極検討可（多くの銘柄が単元購入可能）。例: トヨタ(7203.T)・ソニー(6758.T)・NTT(9432.T)など¥"+f"{int(budget*0.25/100):,}"+"以下の銘柄は全て対象" if budget >= 3_000_000 else "予算"+budget_str+"なら「米国株＋日本ETF」中心が現実的。日本個別株は単元コストが高く選択肢が限られる"}
 ・各銘柄に以下フィールドを必ず設ける（全て必須）:
   rationale: 20字以内の短い投資テーマ
   merits: メリット2〜3点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
@@ -22269,6 +22269,37 @@ def render_claude_trading_project():
                                             f'💡 <b>結論:</b> {_conc}</div>',
                                             unsafe_allow_html=True,
                                         )
+
+                        # 余剰資金をETFで自動充填（ロット丸め後の残金を吸収）
+                        _fill_target = int(_ip_bv * (100 - _r_cash_pct) / 100)
+                        _fill_gap    = _fill_target - _ip_total_actual
+                        _FILL_ETFS = [
+                            ("2244.T", "iFreeETF NASDAQ100", "🇯🇵"),
+                            ("2558.T", "MAXIS S&P500(H無)", "🇯🇵"),
+                            ("1321.T", "野村日経225ETF",     "🇯🇵"),
+                        ]
+                        if _fill_gap >= 3000:
+                            for _fe_tk, _fe_nm, _fe_fl in _FILL_ETFS:
+                                _fe_pd = _disp_cperf.get(_fe_tk) or {}
+                                _fe_px = _fe_pd.get("price")
+                                if not (_fe_px and _fe_px > 0):
+                                    continue
+                                _fe_units = int(_fill_gap / _fe_px)
+                                if _fe_units <= 0:
+                                    continue
+                                _fe_cost = int(_fe_units * _fe_px)
+                                _ip_total_actual += _fe_cost
+                                st.markdown(
+                                    f'<div style="background:#f0fdf4;border:1px dashed #86efac;'
+                                    f'border-radius:6px;padding:6px 10px;margin:4px 0;'
+                                    f'font-size:11px;color:#166534">'
+                                    f'🔧 <b>余剰充填枠（自動）</b>　{_fe_fl} {_fe_tk} {_fe_nm}　'
+                                    f'{_fe_units:,}口　¥{_fe_px:,.0f}/口　≒¥{_fe_cost:,}'
+                                    f'<span style="color:#4ade80;margin-left:8px">残余剰: ¥{_fill_gap - _fe_cost:,}</span>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+                                break
 
                         # 合計・余剰資金フッター
                         _ip_cash = max(0, _ip_bv - _ip_total_actual)
