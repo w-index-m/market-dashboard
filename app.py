@@ -22373,7 +22373,7 @@ def render_claude_trading_project():
                     unsafe_allow_html=True,
                 )
 
-                if True:  # 旧タブ統合 — unified キーで1ポートフォリオ表示
+                for _ in [None]:  # 旧タブ統合 — unified キーで1ポートフォリオ表示（continue早期脱出のため1回ループ）
                     _tab_obj = st  # st に直接描画
                     if True:
                         _ip_r = _ip_disp.get("unified", _ip_disp.get("etf", _ip_disp.get("individual", {})))
