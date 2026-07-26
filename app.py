@@ -20401,7 +20401,7 @@ def _fetch_candidate_performance(today_str: str) -> dict:
         import yfinance as _yf
         _raw = _yf.download(
             _TRADING_CANDIDATES,
-            period="14mo",
+            period="4y",
             interval="1d",
             auto_adjust=True,
             progress=False,
@@ -20425,8 +20425,8 @@ def _fetch_candidate_performance(today_str: str) -> dict:
                     _p = float(_s.iloc[_idx])
                     return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
                 _result[_tk] = {
-                    "ret_1y": _r(252), "ret_6m": _r(126),
-                    "ret_3m": _r(63),  "ret_1m": _r(21),
+                    "ret_3y": _r(756), "ret_1y": _r(252),
+                    "ret_6m": _r(126), "ret_3m": _r(63), "ret_1m": _r(21),
                 }
             except Exception:
                 continue
@@ -21945,25 +21945,62 @@ def render_claude_trading_project():
                         _cmt  = _ip_met.get("comment", "")
                         _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
                         _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
+
+                        # 実績リターン（候補銘柄データから加重平均）
+                        _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
+                        _disp_cperf = _fetch_candidate_performance(_today_disp)
+                        _w1y_num = _w3y_num = _w_den = 0.0
+                        for _pit in _ip_pf:
+                            _pa = float(_pit.get("allocation", 0))
+                            if _pa <= 0:
+                                continue
+                            _pd = _disp_cperf.get(_pit.get("ticker", "")) or {}
+                            if _pd.get("ret_1y") is not None:
+                                _w1y_num += _pa * _pd["ret_1y"]
+                                _w_den   += _pa
+                            if _pd.get("ret_3y") is not None:
+                                _w3y_num += _pa * _pd["ret_3y"]
+                        _actual_1y = round(_w1y_num / _w_den, 1) if _w_den > 0 else None
+                        _actual_3y = round(_w3y_num / _w_den, 1) if _w_den > 0 else None
+
+                        def _ret_color(v):
+                            return "#4ade80" if (v or 0) > 0 else "#ef4444"
+                        def _ret_fmt(v, label):
+                            if v is None:
+                                return ""
+                            _c = _ret_color(v)
+                            return (
+                                f'<div style="text-align:center;border-left:1px solid #334155;padding-left:12px">'
+                                f'<div style="font-size:11px;color:#64748b">{label}</div>'
+                                f'<div style="font-size:20px;font-weight:800;color:{_c}">{v:+.1f}%</div>'
+                                f'<div style="font-size:9px;color:#475569">実績(加重平均)</div></div>'
+                            )
+
                         st.markdown(
                             f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
                             f'padding:12px 16px;margin-bottom:10px">'
                             f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
                             f'{_ip_rlbl} ｜ 予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
-                            f'<div style="display:flex;gap:16px;flex-wrap:wrap">'
+                            f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div></div>'
+                            f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div>'
+                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">ボラティリティ</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div></div>'
+                            f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div>'
+                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">シャープレシオ</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div></div>'
+                            f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div>'
+                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">最大DD推定</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div></div>'
-                            f'</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div>'
+                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
+                            + _ret_fmt(_actual_1y, "過去1年実績")
+                            + _ret_fmt(_actual_3y, "過去3年実績")
+                            + f'</div>'
                             + (f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;border-top:1px solid #1e293b;'
                                f'padding-top:6px">💬 {_cmt}</div>' if _cmt else '')
                             + f'</div>',
