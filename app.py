@@ -20374,6 +20374,135 @@ def _save_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: s
         return False
 
 
+# ─────────────────────────────────────────────
+# マルチエージェント分析 (Agent A / B)
+# ─────────────────────────────────────────────
+
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _analyze_macro_agent(
+    date_str: str,
+    fg_score: float, fg_label: str,
+    crash_score: int, crash_label: str,
+    vix_val: float, naaim_exp: float,
+    leading_str: str, improving_str: str,
+    nk_pred: str, us_pred: str,
+) -> dict:
+    """Agent A: マクロ市場環境を分析してスタンスを返す。6hキャッシュ。"""
+    try:
+        _prompt = f"""市場データを分析し投資スタンスをJSONのみで回答（日本語・余分なテキスト不要）。
+
+Fear&Greed: {fg_score:.0f} ({fg_label})
+VIX: {vix_val:.1f}  NAAIM: {naaim_exp:.0f}%
+クラッシュリスク: {crash_score}/10 ({crash_label})
+日経225予測: {nk_pred}  米国市場予測: {us_pred}
+RRG先行セクター: {leading_str}
+RRG改善セクター: {improving_str}
+
+{{"stance": "強気/中立強気/中立/中立弱気/弱気",
+  "sector_bias": ["注目セクター1", "注目セクター2"],
+  "key_risks": ["リスク1", "リスク2"],
+  "market_comment": "市場環境を30字以内で"
+}}"""
+        _text, _mdl = _call_ai_for_trading(_prompt, max_output_tokens=250, temperature=0.2)
+        import json as _j, re as _re2
+        _m = _re2.search(r'\{[\s\S]*\}', _text)
+        if _m:
+            _r = _j.loads(_m.group())
+            _r["_model"] = _mdl
+            return _r
+    except Exception as _e:
+        logger.warning(f"[agent_a] マクロ分析失敗: {_e}")
+    return {"stance": "中立", "sector_bias": [], "key_risks": [], "market_comment": "", "_model": "none"}
+
+
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def _analyze_stock_agent(
+    ticker: str, date_str: str,
+    ret_3m: float, ret_6m: float, ret_1y: float,
+    price: float, macro_stance: str,
+) -> dict:
+    """Agent B: 個別銘柄を分析してスコア・根拠を返す。12hキャッシュ(ticker+date)。"""
+    _flag = "🇯🇵" if ticker.endswith(".T") else "🇺🇸"
+    _cur  = "円" if ticker.endswith(".T") else "USD"
+    try:
+        _prompt = f"""銘柄 {_flag}{ticker} を投資観点で分析しJSONのみで回答（日本語）。
+
+株価: {price:,.0f}{_cur}
+パフォーマンス: 3m{ret_3m:+.1f}%  6m{ret_6m:+.1f}%  1y{ret_1y:+.1f}%
+市場スタンス: {macro_stance}
+
+{{"score": 0〜10,
+  "merits": [{{"point": "8字以内", "detail": "30字以内"}}],
+  "demerits": [{{"point": "8字以内", "detail": "30字以内"}}],
+  "thesis": "投資テーマ20字以内",
+  "conclusion": "買い/様子見/除外"
+}}
+merits/demerits は各1〜2点のみ。JSONのみ回答。"""
+        _text, _mdl = _call_ai_for_trading(_prompt, max_output_tokens=220, temperature=0.2)
+        import json as _j, re as _re2
+        _m = _re2.search(r'\{[\s\S]*\}', _text)
+        if _m:
+            _r = _j.loads(_m.group())
+            _r["ticker"] = ticker
+            _r["_model"] = _mdl
+            return _r
+    except Exception as _e:
+        logger.warning(f"[agent_b] {ticker} 分析失敗: {_e}")
+    return {"ticker": ticker, "score": 5.0, "merits": [], "demerits": [],
+            "thesis": "", "conclusion": "様子見", "_model": "none"}
+
+
+def _run_stock_agents_parallel(
+    ticker_args: list,   # [(ticker, ret_3m, ret_6m, ret_1y, price), ...]
+    date_str: str,
+    macro_stance: str,
+    max_workers: int = 3,
+) -> dict:
+    """Agent B を最大 max_workers 並列で実行。キャッシュ済みは即時返却。"""
+    import concurrent.futures as _cf2
+    _results = {}
+
+    def _one(args):
+        _tk, _r3, _r6, _r1, _px = args
+        return _tk, _analyze_stock_agent(_tk, date_str, _r3, _r6, _r1, _px, macro_stance)
+
+    with _cf2.ThreadPoolExecutor(max_workers=max_workers) as _ex:
+        _futs = {_ex.submit(_one, a): a[0] for a in ticker_args}
+        for _fut in _cf2.as_completed(_futs):
+            _tk = _futs[_fut]
+            try:
+                _tk, _res = _fut.result(timeout=40)
+                _results[_tk] = _res
+            except Exception as _e:
+                logger.warning(f"[agent_b] {_tk} 並列実行失敗: {_e}")
+                _results[_tk] = {"ticker": _tk, "score": 5.0, "merits": [], "demerits": [],
+                                  "thesis": "", "conclusion": "様子見", "_model": "none"}
+    return _results
+
+
+def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: int = 15) -> list:
+    """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
+    _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
+    _usdjpy = 150.0
+    _max_per = budget * 0.35
+    _scored = []
+    for _tk, _d in cand_perf.items():
+        _px = _d.get("price", 0) or 0
+        if _px <= 0:
+            continue
+        _min = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+                else _px if _tk.endswith(".T") else _px * _usdjpy)
+        if _min > _max_per:
+            continue
+        _r3 = _d.get("ret_3m") or 0
+        _r6 = _d.get("ret_6m") or 0
+        _r1 = _d.get("ret_1y") or 0
+        _sc = _r3 * _weights[0] + _r6 * _weights[1] + _r1 * _weights[2]
+        _scored.append((_tk, _sc, _r3, _r6, _r1, _px))
+    _scored.sort(key=lambda x: x[1], reverse=True)
+    return [(_tk, _r3, _r6, _r1, _px) for _tk, _sc, _r3, _r6, _r1, _px in _scored[:n]]
+
+
 # 候補銘柄ウォッチリスト（モメンタム事前スクリーニング用）
 _TRADING_CANDIDATES = [
     # US AI/Cloud/Tech
@@ -20533,8 +20662,11 @@ def _generate_investment_portfolio_rec(
     model_pref: str = "auto",
     trading_mode: str = "growth",  # "growth" | "momentum" | "autonomous"
     candidate_perf: dict | None = None,  # _fetch_candidate_performance() の戻り値
+    agent_a: dict | None = None,  # _analyze_macro_agent() の結果
+    agent_b: dict | None = None,  # {ticker: _analyze_stock_agent() の結果}
 ) -> dict:
     """予算・モデル・リスクプロファイル・トレーディングモードに応じた新規投資推奨ポートフォリオをAIが生成。
+    agent_a/agent_b が渡された場合は事前分析結果を活用した短縮プロンプトを使用。
     Returns: {"portfolio": [...], "metrics": {...}, "model": str, "error": str|None}
     """
     fg_sc    = market_ctx.get("fg_score", 50) or 50
@@ -20648,7 +20780,87 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
     else:
         etf_note = "\n個別株のみ選定。ETF・投資信託は不可。日本株(.T)・米国株の両方を検討。"
 
-    prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です。
+    _n_stocks = "5〜7" if budget <= 1_000_000 else "8〜12"
+    _budget_note = (
+        f"予算{budget_str}なら日本個別株も積極検討可（例: トヨタ・ソニー・NTT等、株価¥{int(budget*0.25/100):,}以下）"
+        if budget >= 3_000_000 else
+        f"予算{budget_str}は米国株＋日本ETF中心が現実的"
+    )
+    _json_example = (
+        f'{{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},'
+        f'"rationale": "AI半導体独占",'
+        f'"merits": [{{"point": "ROIC卓越", "detail": "ROIC 45%・WACC 10%→スプレッド35%"}}],'
+        f'"demerits": [{{"point": "高PERリスク", "detail": "PER 40倍超。成長鈍化で大幅下落リスク"}}],'
+        f'"conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。"}}'
+    )
+
+    # ── Agent A+B が揃っている場合は短縮プロンプト（Agent C モード）─────────
+    if agent_a and agent_b:
+        # Agent B の結果をスコア順にソートして文字列化
+        _ab_sorted = sorted(agent_b.values(), key=lambda x: float(x.get("score", 0)), reverse=True)
+        _ab_lines = []
+        for _ab in _ab_sorted[:15]:
+            _tk = _ab.get("ticker", "")
+            _sc = _ab.get("score", 5)
+            _th = _ab.get("thesis", "")
+            _co = _ab.get("conclusion", "様子見")
+            _ms = " / ".join(m.get("point", "") for m in _ab.get("merits", []))
+            _ds = " / ".join(d.get("point", "") for d in _ab.get("demerits", []))
+            # 予算チェック付き最低配分注記
+            _cperf_d = (candidate_perf or {}).get(_tk, {})
+            _px = _cperf_d.get("price", 0) or 0
+            _min_note = ""
+            if _px > 0 and budget > 0:
+                _mc = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+                       else _px if _tk.endswith(".T") else _px * 150)
+                _mp = int(_mc / budget * 100) + 1
+                if _mp >= 3:
+                    _min_note = f" ※最低{_mp}%"
+            _ab_lines.append(
+                f"  {_tk:8s} score:{_sc:.1f} {_co} | {_th} | ✅{_ms} | ⚠️{_ds}{_min_note}"
+            )
+        _ab_str = "\n".join(_ab_lines) if _ab_lines else "（データなし）"
+        _aa_stance  = agent_a.get("stance", "中立")
+        _aa_sectors = "・".join(agent_a.get("sector_bias", []))
+        _aa_risks   = "・".join(agent_a.get("key_risks", []))
+        _aa_comment = agent_a.get("market_comment", "")
+
+        prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
+事前分析済みの結果を使ってポートフォリオのみを構築してください。
+
+【投資条件】
+予算: {budget_str} ／ モデル: {model_desc} ／ リスク: {risk_desc}
+モード: {_mode_label} ／ 保有（除外）: {holdings_str}
+{etf_note}
+
+【Agent A: マクロ分析結果（キャッシュ済）】
+市場スタンス: {_aa_stance}
+注目セクター: {_aa_sectors or "不明"}
+リスク要因: {_aa_risks or "なし"}
+コメント: {_aa_comment}
+クラッシュリスク: {_crash_score}/10  VIX: {_vix_val:.1f}  NAAIM: {_naaim_exp:.0f}%
+
+【Agent B: 銘柄別分析結果（キャッシュ済・スコア順）】
+{_ab_str}
+
+【配分ルール（必須）】
+・銘柄数: {_n_stocks}銘柄（{_budget_note}）
+・合計配分: {_invest_pct}% （残り{_cash_reserve}%はキャッシュ）
+・{_cash_note}
+・Agent Bの conclusion「買い」銘柄を優先。「除外」は選定しない
+・予算超過銘柄（最低%記載あり）はその割合以上の配分必須
+・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}
+・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
+・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
+
+以下のJSONのみで回答（前後テキスト不要）:
+{{"portfolio": [{_json_example}],
+  "metrics": {{"expected_return": 18.0, "risk_volatility": 22.0, "sharpe_ratio": 0.75, "max_drawdown_estimate": -28.0, "comment": "50字以内"}}
+}}"""
+
+    # ── 従来型フルプロンプト（Agent A+B なし / フォールバック）────────────
+    else:
+        prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です。
 以下の条件で最適な投資ポートフォリオを提案してください。
 
 【投資条件】
@@ -20678,66 +20890,36 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 
 {_scoring_guide}
 
-【必須スクリーニング条件（これを満たさない銘柄は選定しない）】
-・3年連続増収増益: 過去3期連続で売上高・営業利益がともに前年比プラスであること
-  ※ モメンタムモードでは、直近2四半期連続増収増益かつEPS加速があれば可（3年不要）
-  ※ 長期育成モードでは、1期でも減収または減益の企業は原則除外（一時的特別損失は例外可）
-・直近決算で増収増益継続が確認できること（最新の決算発表ベース）
+【必須スクリーニング条件】
+・3年連続増収増益（モメンタムモードは直近2四半期でも可）
+・直近決算で増収増益継続が確認できること
 
-【モメンタム制限ルール（必ず遵守）】
+【モメンタム制限ルール】
 ・過去1年リターンが-25%以下の銘柄はポートフォリオ全体で最大1銘柄まで
-  → 強い下落トレンドは継続しやすい。「安い」だけの理由で複数入れることは禁止
-・モメンタムモード（⚡）では過去12ヶ月・3ヶ月いずれも上昇していると推定できる銘柄のみ選定可
-・長期育成モード（🌱）でも1y -40%以下の銘柄は理由がよほど明確でない限り除外
-
-・セクター分散も意識しつつ、上記スコアが総合的に高い銘柄を選定すること
+・モメンタムモード（⚡）では12ヶ月・3ヶ月いずれも上昇推定銘柄のみ選定可
+・長期育成モード（🌱）でも1y -40%以下は原則除外
+・セクター分散も意識すること
 
 【キャッシュ留保指示（必ず守ること）】
 {_cash_note}
 ・クラッシュリスクスコア: {_crash_score}/10（{_crash_label}）　VIX: {_vix_val:.1f}　NAAIM: {_naaim_exp:.0f}%
 
 【提案ルール】
-・銘柄数: {"5〜7" if budget <= 1_000_000 else "8〜12"}銘柄{"(ETF混合)" if model_type == "etf" else ""}（予算{budget_str}に合わせた分散数）
+・銘柄数: {_n_stocks}銘柄{"(ETF混合)" if model_type == "etf" else ""}（{_budget_note}）
 ・日本株ティッカーは末尾に.T（例: 7203.T）
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
-・【重要】予算{budget_str}で実際に購入できる銘柄のみ選定すること:
-  - 米国株: 1株から購入可。株価×150円が配分金額以内であればOK
-  - 日本ETF（1321.T/2244.T/2558.T等）: 1口から購入可。米国株と同様に柔軟
-  - 日本個別株: 100株単元のため株価×100が配分金額以内でないと購入不可
-    → 予算{budget_str}では株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
-  - 上記モメンタムデータの⛔リスト銘柄は絶対に選定禁止（予算超過確認済）
-  - {"予算"+budget_str+"なら日本個別株も積極検討可（多くの銘柄が単元購入可能）。例: トヨタ(7203.T)・ソニー(6758.T)・NTT(9432.T)など¥"+f"{int(budget*0.25/100):,}"+"以下の銘柄は全て対象" if budget >= 3_000_000 else "予算"+budget_str+"なら「米国株＋日本ETF」中心が現実的。日本個別株は単元コストが高く選択肢が限られる"}
-・各銘柄に以下フィールドを必ず設ける（全て必須）:
-  rationale: 20字以内の短い投資テーマ
-  merits: メリット2〜3点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
-  demerits: デメリット1〜2点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
-  conclusion: 現在の投資モード（{_mode_label}）での結論を60字以内で（「なぜ選ぶか or 除外すべきか」）
-・meritsには以下の財務指標が優れている場合は積極的に記載すること:
-  - ROIC-WACCスプレッド（ROICがWACCを5%以上上回る場合は「資本効率卓越」として記載）
-  - ROE（15%超: 高収益、20%超: 卓越。改善トレンドも評価）
-  - DOE・配当方針（日本株で株主資本配当率や増配継続・自社株買いが優れる場合）
-  - これら指標が特に優れている場合は具体的な数値とともに記載すること
-・直近1年マイナスの銘柄はmeritsに「なぜ今下落中でも買うか」の観点を必ず含めること
-・demeritsは実際のリスクを正直に記載（過小評価禁止）
-・既存保有銘柄はJSONに一切含めないこと。新規投資先のみを回答する
-
-【リスク指標の推計方法】
-期待年間リターン: セクター・過去実績・市場環境から推定（%）
-リスク(ボラティリティ): 年率標準偏差の推定（%）
-シャープレシオ: (期待リターン - 1.5%) / ボラティリティ
-最大ドローダウン推定: 過去の市場危機時の想定下落率（%、マイナス値）
+・【重要】予算{budget_str}で実際に購入できる銘柄のみ選定:
+  米国株 1株・日本ETF 1口・日本個別株 100株単元
+  → 株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
+  → ⛔リスト銘柄は絶対に選定禁止
+・各銘柄に rationale(20字)・merits(2〜3点)・demerits(1〜2点)・conclusion(60字)を必ず設ける
+・meritsにROIC-WACC・ROE・DOEが優れる場合は数値とともに記載
+・直近1年マイナス銘柄はmeritsに「なぜ今買うか」を必ず含めること
+・既存保有銘柄はJSONに含めないこと
 
 以下のJSONのみで回答（前後のテキスト不要）:
-{{
-  "portfolio": [
-    {{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},
-      "rationale": "AI半導体独占",
-      "merits": [{{"point": "ROIC卓越", "detail": "ROIC 45%・WACC 10%→スプレッド35%。圧倒的資本効率"}}, {{"point": "AI需要急増", "detail": "データセンターGPU需要が四半期ごとに過去最高更新"}}],
-      "demerits": [{{"point": "高PERリスク", "detail": "PER 40倍超。成長鈍化で大幅下落リスク"}}],
-      "conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。20%は上限の認識で。"
-    }}
-  ],
+{{"portfolio": [{_json_example}],
   "metrics": {{"expected_return": 18.0, "risk_volatility": 22.0, "sharpe_ratio": 0.75, "max_drawdown_estimate": -28.0, "comment": "ポートフォリオの特徴と注意点を50字以内で"}}
 }}"""
 
@@ -21860,19 +22042,58 @@ def render_claude_trading_project():
                         f'<div style="background:#0f172a;border:1px solid #334155;'
                         f'border-radius:8px;padding:12px 16px;margin-bottom:8px">'
                         f'<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">'
-                        f'🤖 <b style="color:#e2e8f0">{label}モデル</b> を生成中…'
+                        f'🤖 <b style="color:#e2e8f0">Agent C ({label}モデル)</b> 組み立て中…'
                         f'&nbsp;&nbsp;<span style="color:#60a5fa">({done}/{n_steps}完了)</span>'
                         f'&nbsp;&nbsp;⏱ 残り約 <b style="color:#fbbf24">{_remain}秒</b></div>'
                         f'<div style="background:#1e293b;border-radius:4px;height:8px">'
                         f'<div style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);'
                         f'width:{_total_pct}%;height:8px;border-radius:4px"></div></div>'
                         f'<div style="font-size:10px;color:#475569;margin-top:5px">'
-                        f'経過: {int(elapsed)}秒　Gemini → Groq → OpenRouter の順で試行</div>'
+                        f'経過: {int(elapsed)}秒　A+B分析済み → Gemini → Groq → OpenRouter の順で試行</div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
 
                 import threading as _ipth
+
+                # ── Agent A: マクロ分析（6hキャッシュ）──────────────────────
+                _ip_prog_area.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                    'padding:10px 16px;margin-bottom:8px;font-size:12px;color:#94a3b8">'
+                    '🧠 <b style="color:#e2e8f0">Agent A</b>: マクロ市場環境を分析中…'
+                    '</div>', unsafe_allow_html=True
+                )
+                _ip_a_ctx = _ip_mktctx or {}
+                _ip_agent_a = _analyze_macro_agent(
+                    _ip_today,
+                    float(_ip_a_ctx.get("fg_score", 50) or 50),
+                    str(_ip_a_ctx.get("fg_label", "")),
+                    int(_ip_a_ctx.get("crash_risk_score", 0)),
+                    str(_ip_a_ctx.get("crash_risk_label", "🟢 低リスク")),
+                    float(_ip_a_ctx.get("vix_val", 0)),
+                    float(_ip_a_ctx.get("naaim_exp", 0)),
+                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明",
+                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明",
+                    str(_ip_a_ctx.get("nikkei_pred_label", "")),
+                    str(_ip_a_ctx.get("us_pred_label", "")),
+                )
+
+                # ── Agent B: 上位候補銘柄を並列分析（12hキャッシュ）──────────
+                _ip_top_args = _get_top_candidate_args(_ip_cand_perf, _ip_trade_mode, _ip_budget_val, n=15)
+                _ip_prog_area.markdown(
+                    f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                    f'padding:10px 16px;margin-bottom:8px;font-size:12px;color:#94a3b8">'
+                    f'🔬 <b style="color:#e2e8f0">Agent B</b>: {len(_ip_top_args)}銘柄を並列分析中…'
+                    f'（キャッシュ済みは即時）</div>', unsafe_allow_html=True
+                )
+                _ip_agent_b = _run_stock_agents_parallel(
+                    _ip_top_args, _ip_today,
+                    _ip_agent_a.get("stance", "中立"),
+                    max_workers=3,
+                )
+                _ip_b_count  = len(_ip_agent_b)
+                _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
+                logger.info(f"[trading] Agent B完了: {_ip_b_count}銘柄 via {_ip_b_model}")
 
                 for _ip_mt in ["etf", "individual"]:
                     _cached = None
@@ -21886,13 +22107,16 @@ def render_claude_trading_project():
                     _ip_step_t0 = time.time()
                     _ip_result_box = [None]
 
-                    def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt, cp=_ip_cand_perf):
+                    def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt, cp=_ip_cand_perf,
+                                       ag_a=_ip_agent_a, ag_b=_ip_agent_b):
                         try:
                             box[0] = _generate_investment_portfolio_rec(
                                 _ip_budget_val, mt, _ip_risk_key,
                                 _ip_mktctx, _ip_holdings, _ip_model_pref,
                                 trading_mode=_ip_trade_mode,
                                 candidate_perf=cp,
+                                agent_a=ag_a,
+                                agent_b=ag_b,
                             )
                         except Exception as _wex:
                             logger.error(f"[trading] portfolio worker crash ({mt}): {_wex}", exc_info=True)
