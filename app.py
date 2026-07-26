@@ -20513,6 +20513,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
   ※ 1期でも減収または減益の企業は原則除外（ただし一時的な特別損失等で実態成長中の場合は例外可・根拠を明記）
 ・直近決算で増収増益継続が確認できること（最新の決算発表ベース）
 
+【モメンタム制限ルール（必ず遵守）】
+・過去1年リターンが-25%以下の銘柄はポートフォリオ全体で最大1銘柄まで
+  → それ以上の「大幅下落銘柄」を複数入れることは禁止。強い下落トレンドは継続しやすい
+・モメンタムモード（⚡）では過去1年リターンがプラス、かつ直近3ヶ月もプラスの銘柄のみ選定可
+・長期育成モード（🌱）でも1y -40%以下の銘柄は理由がよほど明確でない限り除外
+
 ・セクター分散も意識しつつ、上記スコアが総合的に高い銘柄を選定すること
 
 【キャッシュ留保指示（必ず守ること）】
@@ -21952,11 +21958,19 @@ def render_claude_trading_project():
                             else:
                                 _stats_html = ""
 
+                            # 下落警告バッジ
+                            if _ret1y is not None and _ret1y <= -30:
+                                _mom_badge = '<span style="background:#7f1d1d;color:#fca5a5;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚠️ 強下落継続</span>'
+                            elif _ret1y is not None and _ret1y <= -15:
+                                _mom_badge = '<span style="background:#78350f;color:#fde68a;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚡ 下落注意</span>'
+                            else:
+                                _mom_badge = ""
+
                             _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
                                              unsafe_allow_html=True)
                             _row[1].markdown(
-                                f'<div style="font-size:12px;font-weight:700;color:#0f172a">{_tk}</div>'
+                                f'<div style="font-size:12px;font-weight:700;color:#0f172a">{_tk}{_mom_badge}</div>'
                                 f'<div style="font-size:10px;color:#334155">{_nm}</div>',
                                 unsafe_allow_html=True,
                             )
