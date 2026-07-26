@@ -20596,24 +20596,40 @@ def _analyze_stock_agent(
     ticker: str, date_str: str,
     ret_3m: float, ret_6m: float, ret_1y: float,
     price: float, macro_stance: str,
+    pe_current: float = 0.0,
 ) -> dict:
-    """Agent B: 個別銘柄を分析してスコア・根拠を返す。12hキャッシュ(ticker+date)。"""
+    """Agent B: 個別銘柄を分析してスコア・根拠を返す。12hキャッシュ(ticker+date+pe)。"""
     _flag = "🇯🇵" if ticker.endswith(".T") else "🇺🇸"
     _cur  = "円" if ticker.endswith(".T") else "USD"
+    _pe_line = ""
+    if pe_current and pe_current > 0:
+        # PER水準の判定（業種によらない大まかな基準）
+        _pe_judge = (
+            "📉 歴史的割安圏（10年下限付近）" if pe_current < 12 else
+            "🟢 割安（平均以下）"              if pe_current < 18 else
+            "🟡 適正（フェアバリュー付近）"    if pe_current < 25 else
+            "🟠 やや割高"                     if pe_current < 35 else
+            "🔴 割高警戒圏"
+        )
+        _pe_line = f"PER(trailing): {pe_current:.1f}x  [{_pe_judge}]"
+        if ret_1y < -15 and pe_current < 20:
+            _pe_line += "  ← 下落中だがPER圧縮が進行、底値圏サインの可能性"
     try:
         _prompt = f"""銘柄 {_flag}{ticker} を投資観点で分析しJSONのみで回答（日本語）。
 
 株価: {price:,.0f}{_cur}
 パフォーマンス: 3m{ret_3m:+.1f}%  6m{ret_6m:+.1f}%  1y{ret_1y:+.1f}%
+{_pe_line}
 市場スタンス: {macro_stance}
 
 {{"score": 0〜10,
   "merits": [{{"point": "8字以内", "detail": "30字以内"}}],
   "demerits": [{{"point": "8字以内", "detail": "30字以内"}}],
   "thesis": "投資テーマ20字以内",
-  "conclusion": "買い/様子見/除外"
+  "conclusion": "買い/様子見/除外",
+  "pe_signal": "割安/適正/割高/データなし"
 }}
-merits/demerits は各1〜2点のみ。JSONのみ回答。"""
+merits/demerits は各1〜2点のみ。PERが低く株価が下落中なら「バリュエーション底値圏」をmeritsに含めること。JSONのみ回答。"""
         _text, _mdl = _call_ai_for_trading(_prompt, max_output_tokens=220, temperature=0.2)
         import json as _j, re as _re2
         _m = _re2.search(r'\{[\s\S]*\}', _text)
@@ -20621,15 +20637,18 @@ merits/demerits は各1〜2点のみ。JSONのみ回答。"""
             _r = _j.loads(_m.group())
             _r["ticker"] = ticker
             _r["_model"] = _mdl
+            _r.setdefault("pe_signal", "データなし")
+            if pe_current and pe_current > 0:
+                _r["pe_current"] = pe_current
             return _r
     except Exception as _e:
         logger.warning(f"[agent_b] {ticker} 分析失敗: {_e}")
     return {"ticker": ticker, "score": 5.0, "merits": [], "demerits": [],
-            "thesis": "", "conclusion": "様子見", "_model": "none"}
+            "thesis": "", "conclusion": "様子見", "pe_signal": "データなし", "_model": "none"}
 
 
 def _run_stock_agents_parallel(
-    ticker_args: list,   # [(ticker, ret_3m, ret_6m, ret_1y, price), ...]
+    ticker_args: list,   # [(ticker, ret_3m, ret_6m, ret_1y, price, pe), ...]
     date_str: str,
     macro_stance: str,
     max_workers: int = 3,
@@ -20639,8 +20658,8 @@ def _run_stock_agents_parallel(
     _results = {}
 
     def _one(args):
-        _tk, _r3, _r6, _r1, _px = args
-        return _tk, _analyze_stock_agent(_tk, date_str, _r3, _r6, _r1, _px, macro_stance)
+        _tk, _r3, _r6, _r1, _px, _pe = args
+        return _tk, _analyze_stock_agent(_tk, date_str, _r3, _r6, _r1, _px, macro_stance, _pe)
 
     with _cf2.ThreadPoolExecutor(max_workers=max_workers) as _ex:
         _futs = {_ex.submit(_one, a): a[0] for a in ticker_args}
@@ -20657,7 +20676,7 @@ def _run_stock_agents_parallel(
 
 
 def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: int = 15) -> list:
-    """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
+    """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price, pe) のリストで返す。"""
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
     _usdjpy = 150.0
     _max_per = budget * 0.35
@@ -20673,10 +20692,11 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         _r3 = _d.get("ret_3m") or 0
         _r6 = _d.get("ret_6m") or 0
         _r1 = _d.get("ret_1y") or 0
+        _pe = _d.get("pe") or 0.0
         _sc = _r3 * _weights[0] + _r6 * _weights[1] + _r1 * _weights[2]
-        _scored.append((_tk, _sc, _r3, _r6, _r1, _px))
+        _scored.append((_tk, _sc, _r3, _r6, _r1, _px, _pe))
     _scored.sort(key=lambda x: x[1], reverse=True)
-    return [(_tk, _r3, _r6, _r1, _px) for _tk, _sc, _r3, _r6, _r1, _px in _scored[:n]]
+    return [(_tk, _r3, _r6, _r1, _px, _pe) for _tk, _sc, _r3, _r6, _r1, _px, _pe in _scored[:n]]
 
 
 # 候補銘柄ウォッチリスト（モメンタム事前スクリーニング用）
@@ -20712,9 +20732,36 @@ _JP_ETF_TICKERS = {
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def _fetch_candidate_pe(today_str: str) -> dict:
+    """候補銘柄のPER（trailing）を並列取得。日次+12hキャッシュ。
+    Returns: {ticker: {"pe": float, "pe_fwd": float|None}}
+    """
+    import concurrent.futures as _cfe
+    import yfinance as _yfe
+
+    def _get_one(tk):
+        try:
+            _fi = _yfe.Ticker(tk).fast_info
+            _pe = getattr(_fi, "pe_ratio", None)
+            if _pe and 0 < float(_pe) < 2000:
+                return tk, {"pe": round(float(_pe), 1)}
+        except Exception:
+            pass
+        return tk, {}
+
+    _res = {}
+    with _cfe.ThreadPoolExecutor(max_workers=6) as _ex:
+        for _tk, _d in _ex.map(_get_one, _TRADING_CANDIDATES):
+            if _d:
+                _res[_tk] = _d
+    logger.info(f"[trading] candidate_pe: {len(_res)}銘柄のPER取得完了")
+    return _res
+
+
 def _fetch_candidate_performance(today_str: str) -> dict:
     """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + 12h TTL）。
-    Returns: {ticker: {ret_1y, ret_6m, ret_3m, ret_1m}} — 全て %表記float
+    Returns: {ticker: {price, ret_1y, ret_6m, ret_3m, ret_1m, pe}} — peはトレーリングPER
     """
     try:
         import yfinance as _yf
@@ -20750,6 +20797,11 @@ def _fetch_candidate_performance(today_str: str) -> dict:
                 }
             except Exception:
                 continue
+        # PERを別キャッシュからマージ
+        _pe_map = _fetch_candidate_pe(today_str)
+        for _tk, _d in _pe_map.items():
+            if _tk in _result:
+                _result[_tk]["pe"] = _d.get("pe")
         logger.info(f"[trading] candidate_performance: {len(_result)}銘柄取得完了")
         return _result
     except Exception as e:
