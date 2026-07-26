@@ -7921,6 +7921,82 @@ def compute_bear_market_risk() -> Dict[str, Any]:
 
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def fetch_sp500_pe_trend() -> dict:
+    """S&P500 PER推移をmultpl.comから取得。Tech PERはXLKをyfinanceから補完。"""
+    result = {"sp500": None, "tech": None, "error": None}
+    try:
+        from bs4 import BeautifulSoup as _BS4
+        from io import StringIO as _SIO2
+        _r = requests.get(
+            "https://www.multpl.com/s-p-500-pe-ratio/table/by-month",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            timeout=15,
+        )
+        if _r.status_code != 200:
+            result["error"] = f"HTTP {_r.status_code}"
+            return result
+        _soup = _BS4(_r.text, "lxml")
+        _tbl  = _soup.find("table", {"id": "datatable"}) or _soup.find("table")
+        _rows = []
+        if _tbl:
+            for _tr in _tbl.find_all("tr"):
+                _cells = _tr.find_all("td")
+                if len(_cells) >= 2:
+                    try:
+                        _dt  = pd.to_datetime(_cells[0].get_text(strip=True))
+                        _val = float(_cells[1].get_text(strip=True).replace(",", ""))
+                        _rows.append((_dt, _val))
+                    except (ValueError, Exception):
+                        pass
+        if not _rows:
+            _tables = pd.read_html(_SIO2(_r.text))
+            if _tables:
+                _df0 = _tables[0].iloc[:, :2]
+                _df0.columns = ["date", "pe"]
+                _df0["date"] = pd.to_datetime(_df0["date"], errors="coerce")
+                _df0["pe"]   = pd.to_numeric(_df0["pe"].astype(str).str.replace(",", ""), errors="coerce")
+                _df0 = _df0.dropna()
+                _rows = list(zip(_df0["date"], _df0["pe"]))
+        if not _rows:
+            result["error"] = "データ取得失敗"
+            return result
+        _df = pd.DataFrame(_rows, columns=["date", "pe"]).sort_values("date")
+        _df = _df[_df["pe"] > 0]
+        _now = pd.Timestamp.now()
+        _df5y  = _df[_df["date"] >= _now - pd.DateOffset(years=5)]
+        _df10y = _df[_df["date"] >= _now - pd.DateOffset(years=10)]
+        result["sp500"] = {
+            "df":       _df5y[["date", "pe"]].reset_index(drop=True),
+            "current":  float(_df["pe"].iloc[-1]),
+            "avg_5y":   round(float(_df5y["pe"].mean()), 1),
+            "avg_10y":  round(float(_df10y["pe"].mean()), 1),
+            "min_10y":  round(float(_df10y["pe"].min()), 1),
+            "max_10y":  round(float(_df10y["pe"].max()), 1),
+        }
+    except Exception as _e:
+        result["error"] = str(_e)[:120]
+
+    # Tech sector PER: XLK から yfinance
+    try:
+        import yfinance as _yf2
+        _xlk = _yf2.Ticker("XLK")
+        _xlk_info = _xlk.info
+        _tech_pe  = _xlk_info.get("trailingPE") or _xlk_info.get("forwardPE")
+        if _tech_pe:
+            # 過去5年の時系列: 株価 / (EPS推定) — yfinanceのhistoryで近似
+            _hist = _xlk.history(period="5y", interval="1mo", auto_adjust=True)
+            result["tech"] = {
+                "current": round(float(_tech_pe), 1),
+                "ticker":  "XLK",
+                "name":    "Technology (XLK)",
+            }
+    except Exception:
+        pass
+
+    return result
+
+
 def fetch_macro_indicators() -> Dict[str, Any]:
     """CAPE / OECD CLI / インフレ指標を取得
     - CAPE    : multpl.com スクレイピング
@@ -8342,6 +8418,106 @@ def render_macro_indicators():
             "2. My Account → API Keys でキーを発行\n"
             "3. Streamlit Cloud Secrets に追加: `FRED_API_KEY = \"your_key_here\"`"
         )
+
+    # ── S&P500 PER推移チャート ─────────────────────────────────
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#7dd3fc;margin:18px 0 8px">'
+        '📊 S&P500 フォワードPER推移（バリュエーション水準）</div>',
+        unsafe_allow_html=True,
+    )
+    _pe_data = fetch_sp500_pe_trend()
+    _pe_sp   = _pe_data.get("sp500")
+    _pe_tech = _pe_data.get("tech")
+
+    if _pe_sp and _pe_sp.get("df") is not None and len(_pe_sp["df"]) > 0:
+        import plotly.graph_objects as _go_pe
+
+        _cur   = _pe_sp["current"]
+        _a5    = _pe_sp["avg_5y"]
+        _a10   = _pe_sp["avg_10y"]
+        _mn10  = _pe_sp["min_10y"]
+        _mx10  = _pe_sp["max_10y"]
+        _df_pe = _pe_sp["df"]
+
+        # 現在値の色: 10y平均より高ければ警戒、平均以下なら割安
+        _cur_c = "#ef4444" if _cur > _a10 * 1.15 else "#fbbf24" if _cur > _a10 else "#4ade80"
+        _floor_gap = round(_cur - _mn10, 1)
+        _avg_gap   = round(_cur - _a10, 1)
+
+        # サマリーカード
+        _pe_cols = st.columns(4)
+        for _col, (_lbl, _val, _c) in zip(_pe_cols, [
+            ("現在PER",  f"{_cur:.1f}x",  _cur_c),
+            ("5年平均",  f"{_a5:.1f}x",   "#94a3b8"),
+            ("10年平均", f"{_a10:.1f}x",  "#94a3b8"),
+            ("10年下限", f"{_mn10:.1f}x", "#60a5fa"),
+        ]):
+            _col.markdown(
+                f'<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;'
+                f'padding:10px 12px;text-align:center">'
+                f'<div style="font-size:10px;color:#64748b">{_lbl}</div>'
+                f'<div style="font-size:20px;font-weight:800;color:{_c}">{_val}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # 下限との距離を表示
+        _floor_note_c = "#4ade80" if _floor_gap < 3 else "#fbbf24" if _floor_gap < 6 else "#ef4444"
+        _floor_status = "⚠️ 割高圏" if _avg_gap > 0 else "🟢 平均以下（割安圏）"
+        st.markdown(
+            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+            f'padding:8px 14px;margin:8px 0;font-size:11px;color:#94a3b8;display:flex;gap:24px;flex-wrap:wrap">'
+            f'<span>10年平均との乖離: <b style="color:{_floor_note_c}">{_avg_gap:+.1f}x</b></span>'
+            f'<span>10年下限までの距離: <b style="color:#60a5fa">{_floor_gap:.1f}x</b></span>'
+            f'<span>判定: <b style="color:{_floor_note_c}">{_floor_status}</b></span>'
+            + (f'<span>Tech(XLK): <b style="color:#e2e8f0">{_pe_tech["current"]:.1f}x</b></span>'
+               if _pe_tech else '')
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Plotly チャート
+        _fig_pe = _go_pe.Figure()
+        _fig_pe.add_trace(_go_pe.Scatter(
+            x=_df_pe["date"], y=_df_pe["pe"],
+            mode="lines", name="S&P500 PER",
+            line=dict(color="#38bdf8", width=2),
+            fill="tozeroy", fillcolor="rgba(56,189,248,0.08)",
+        ))
+        for _yval, _lbl, _clr, _dash in [
+            (_a5,   f"5年平均 {_a5}x",   "#a78bfa", "dash"),
+            (_a10,  f"10年平均 {_a10}x",  "#fbbf24", "dot"),
+            (_mn10, f"10年下限 {_mn10}x", "#4ade80", "dashdot"),
+        ]:
+            _fig_pe.add_hline(
+                y=_yval, line_dash=_dash, line_color=_clr, line_width=1.5,
+                annotation_text=_lbl,
+                annotation_position="right",
+                annotation_font=dict(color=_clr, size=10),
+            )
+        _fig_pe.update_layout(
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            height=280, margin=dict(l=10, r=80, t=10, b=20),
+            font=dict(color="#e2e8f0"),
+            xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", showgrid=True),
+            yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                       title=dict(text="PER (倍)", font=dict(color="#94a3b8"))),
+            legend=dict(font=dict(color="#e2e8f0"), bgcolor="rgba(0,0,0,0)"),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(_fig_pe, use_container_width=True)
+
+        with st.expander("💡 PER水準の読み方", expanded=False):
+            st.markdown(
+                "**PER（株価収益率）= 株価 ÷ 1株当たり利益**\n\n"
+                "| 水準 | 判断 |\n|---|---|\n"
+                f"| 10年下限（{_mn10}x）付近 | 歴史的割安ゾーン。株価下落の底値圏サイン |\n"
+                f"| 10年平均（{_a10}x）前後 | フェアバリュー |\n"
+                f"| 10年高値（{_mx10}x）付近 | 割高警戒ゾーン。急落リスク上昇 |\n\n"
+                "※ トレーリングPER（実績EPS）を使用。フォワードPER（予想EPS）は有料データが必要なため近似値として参照。"
+            )
+    elif _pe_data.get("error"):
+        st.caption(f"⚠️ PERデータ取得失敗: {_pe_data['error']}")
 
 
 def render_bear_market_checker():
