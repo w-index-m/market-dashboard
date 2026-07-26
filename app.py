@@ -20481,8 +20481,15 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     _lines.append(f"▲ 上昇ランキング（予算内・{'3m重視' if trading_mode == 'momentum' else '1y重視'}スコア順）:")
     for i, (_tk, _sc, _d) in enumerate(_top, 1):
         _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
+        _price = _d.get("price", 0) or 0
+        _min_note = ""
+        if _price > 0 and budget > 0:
+            _min_cost = _price * 100 if _tk.endswith(".T") else _price * usdjpy
+            _min_pct = int(_min_cost / budget * 100) + 1  # 切り上げ+バッファ1%
+            if _min_pct >= 3:
+                _min_note = f"  ※最低{_min_pct}%以上の配分必須"
         _lines.append(
-            f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  6m:{_r6:+6.1f}%  1y:{_r1y:+7.1f}%"
+            f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  6m:{_r6:+6.1f}%  1y:{_r1y:+7.1f}%{_min_note}"
         )
     if _bottom:
         _lines.append("▼ 下落銘柄（1y -15%以下・原則除外）:")
@@ -20736,6 +20743,24 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             parsed["cash_reserve_pct"] = _cash_reserve
             parsed["crash_risk_score"] = _crash_score
             parsed["crash_risk_label"] = _crash_label
+            # 配分が購入最低額を下回る銘柄を自動補正（US株1株・JP株1単元）
+            _cperf = candidate_perf or {}
+            _usdjpy_est = 150.0
+            for _itm in parsed.get("portfolio", []):
+                _tk2 = _itm.get("ticker", "")
+                _al2 = float(_itm.get("allocation", 0))
+                if _al2 <= 0:
+                    continue
+                _pd2 = _cperf.get(_tk2)
+                if not _pd2:
+                    continue
+                _pr2 = _pd2.get("price", 0) or 0
+                if _pr2 <= 0:
+                    continue
+                _min_cost2 = _pr2 * 100 if _tk2.endswith(".T") else _pr2 * _usdjpy_est
+                _min_pct2 = _min_cost2 / budget * 100 + 1  # +1%バッファ
+                if _al2 < _min_pct2:
+                    _itm["allocation"] = round(_min_pct2, 1)
             # allocation合計を _invest_pct% に正規化（キャッシュ留保を反映）
             _pf_list = [_i for _i in parsed.get("portfolio", []) if float(_i.get("allocation", 0)) > 0]
             _alloc_sum = sum(float(_i.get("allocation", 0)) for _i in _pf_list)
