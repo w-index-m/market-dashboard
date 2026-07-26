@@ -17938,10 +17938,16 @@ def _get_stock_display_name(ticker: str) -> str:
     except Exception:
         return ticker
 
-def _load_trades() -> tuple[pd.DataFrame, str | None]:
+def _trades_tab(username: str = "") -> str:
+    """ユーザー名からタブ名を返す。admin または未指定なら既存の claude_trades を使用。"""
+    u = username or st.session_state.get("_trading_user", "admin")
+    return "claude_trades" if u in ("admin", "") else f"claude_trades_{u}"
+
+
+def _load_trades(username: str = "") -> tuple[pd.DataFrame, str | None]:
     """取引記録をGoogle Sheetsから読み込む。(DataFrame, error_msg) を返す。"""
     try:
-        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
+        ws = _trading_ws(_trades_tab(username), _TRADES_HEADERS)
         if not ws:
             return pd.DataFrame(), "Google Sheets接続失敗（3回リトライ後も接続できませんでした）"
         rows = ws.get_all_records()
@@ -17959,10 +17965,11 @@ def _load_trades() -> tuple[pd.DataFrame, str | None]:
 
 def _save_trade(date: str, ticker: str, name: str, action: str,
                 quantity: float, price: float, fee: float,
-                memo: str, ai_target: float, ai_stoploss: float):
+                memo: str, ai_target: float, ai_stoploss: float,
+                username: str = ""):
     """取引記録をGoogle Sheetsに追加"""
     try:
-        ws = _trading_ws("claude_trades", [
+        ws = _trading_ws(_trades_tab(username), [
             "date", "ticker", "name", "action", "quantity", "price",
             "fee", "memo", "ai_target", "ai_stoploss"
         ])
@@ -22524,13 +22531,12 @@ def render_claude_trading_project():
                             )
 
                         # リスク指標カード
-                        _er   = _ip_met.get("expected_return", 0)
-                        _rv   = _ip_met.get("risk_volatility", 0)
-                        _sr   = _ip_met.get("sharpe_ratio", 0)
-                        _mdd  = _ip_met.get("max_drawdown_estimate", 0)
+                        _er   = float(_ip_met.get("expected_return", 0) or 0)
+                        _rv   = float(_ip_met.get("risk_volatility", 0) or 0)
+                        _sr   = float(_ip_met.get("sharpe_ratio", 0) or 0)
+                        _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
                         _cmt  = _ip_met.get("comment", "")
-                        _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
-                        _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
+                        _met_label = "AI推定"
 
                         # 実績リターン（候補銘柄データから加重平均）
                         _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
@@ -22548,6 +22554,34 @@ def render_claude_trading_project():
                                 _w3y_num += _pa * _pd["ret_3y"]
                         _actual_1y = round(_w1y_num / _w_den, 1) if _w_den > 0 else None
                         _actual_3y = round(_w3y_num / _w_den, 1) if _w_den > 0 else None
+
+                        # AIメトリクスが0/未設定のとき実績データから計算
+                        if (_er == 0 or _rv == 0) and _disp_cperf:
+                            _wvol = _wdd = _wden2 = 0.0
+                            for _pit2 in _ip_pf:
+                                _pa2 = float(_pit2.get("allocation", 0))
+                                if _pa2 <= 0:
+                                    continue
+                                _pd2 = _disp_cperf.get(_pit2.get("ticker", "")) or {}
+                                if _pd2.get("volatility"):
+                                    _wvol  += _pa2 * _pd2["volatility"]
+                                    _wden2 += _pa2
+                                if _pd2.get("max_dd"):
+                                    _wdd   += _pa2 * abs(_pd2["max_dd"])
+                            _calc_vol = round(_wvol / _wden2, 1) if _wden2 > 0 else 0
+                            _calc_mdd = round(-_wdd / _wden2, 1) if _wden2 > 0 else 0
+                            if _er == 0 and _actual_1y is not None:
+                                _er = _actual_1y
+                            if _rv == 0 and _calc_vol > 0:
+                                _rv = _calc_vol
+                            if _sr == 0 and _rv > 0 and _er != 0:
+                                _sr = round((_er - 1.5) / _rv, 2)
+                            if _mdd == 0 and _calc_mdd != 0:
+                                _mdd = _calc_mdd
+                            _met_label = "実績から計算"
+
+                        _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
+                        _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
 
                         def _ret_color(v):
                             return "#4ade80" if (v or 0) > 0 else "#ef4444"
@@ -22571,19 +22605,19 @@ def render_claude_trading_project():
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
                             f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
+                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">ボラティリティ</div>'
                             f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
+                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">シャープレシオ</div>'
                             f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div>'
-                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
+                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">最大DD推定</div>'
                             f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">AI推定</div></div>'
+                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
                             + _ret_fmt(_actual_1y, "過去1年実績")
                             + _ret_fmt(_actual_3y, "過去3年実績")
                             + f'</div>'
@@ -23247,6 +23281,8 @@ def render_claude_trading_project():
     with tab_trade:
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -23308,7 +23344,8 @@ def render_claude_trading_project():
                         ok, err = _save_trade(
                             str(t_date), trade_ticker, trade_name,
                             action, int(t_qty), float(t_price), float(t_fee),
-                            t_memo, float(t_target), float(t_stop)
+                            t_memo, float(t_target), float(t_stop),
+                            username=_usr,
                         )
                         if ok:
                             st.session_state["_trade_ticker"] = ""
@@ -23326,6 +23363,8 @@ def render_claude_trading_project():
     with tab_pnl:
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -23507,6 +23546,8 @@ def render_claude_trading_project():
     with tab_hist:
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -23784,6 +23825,8 @@ def render_claude_trading_project():
     with tab_summary:
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
