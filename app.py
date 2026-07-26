@@ -21286,6 +21286,107 @@ Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体�
         return {"text": "", "model": "", "error": str(e)}
 
 
+# ── 認証ユーティリティ ─────────────────────────────────────────────
+import hashlib as _hl
+import uuid as _uuid
+from datetime import timedelta as _tdelta
+
+_SESSION_DAYS = 3
+
+
+def _auth_hash(pw: str) -> str:
+    return _hl.sha256(pw.encode()).hexdigest()
+
+
+def _auth_get_sheets_sp():
+    """認証用 Google Sheets spreadsheet を返す（キャッシュなし、呼び出し元でキャッシュ制御）。"""
+    import gspread as _gs
+    from google.oauth2.service_account import Credentials as _Creds
+    import json as _j
+    _sa = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
+    if isinstance(_sa, str):
+        _sa = _j.loads(_sa)
+    elif not isinstance(_sa, dict):
+        _sa = dict(_sa)
+    _creds = _Creds.from_service_account_info(
+        _sa,
+        scopes=["https://spreadsheets.google.com/feeds",
+                "https://www.googleapis.com/auth/drive"],
+    )
+    return _gs.authorize(_creds).open_by_key(st.secrets.get("GOOGLE_SHEETS_ID", ""))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _auth_get_users(_dummy: str = "") -> dict:
+    """usersタブから {username: {password_hash, display_name}} を取得。初回はタブ自動作成。"""
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("users")
+        except _gs.exceptions.WorksheetNotFound:
+            _ws = _sp.add_worksheet("users", rows=100, cols=3)
+            _ws.append_row(["username", "password_hash", "display_name"])
+            _ws.append_row(["admin",     _auth_hash("admin123"),   "Admin"])
+            _ws.append_row(["mshibuta1", _auth_hash("mshibuta1"),  "M.Shibuta"])
+        return {
+            r["username"]: {
+                "password_hash": r.get("password_hash", ""),
+                "display_name":  r.get("display_name", r["username"]),
+            }
+            for r in _ws.get_all_records() if r.get("username")
+        }
+    except Exception as _e:
+        logger.warning(f"[auth] users取得失敗: {_e}")
+        return {}
+
+
+def _auth_validate(username: str, password: str) -> bool:
+    _u = _auth_get_users().get(username)
+    return bool(_u and _u.get("password_hash") == _auth_hash(password))
+
+
+def _auth_create_session(username: str) -> str:
+    """UUIDトークンを生成してsessionsタブに記録し、トークン文字列を返す。"""
+    _token = _uuid.uuid4().hex
+    _expires = (datetime.now(JST) + _tdelta(days=_SESSION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("sessions")
+        except _gs.exceptions.WorksheetNotFound:
+            _ws = _sp.add_worksheet("sessions", rows=1000, cols=3)
+            _ws.append_row(["token", "username", "expires_at"])
+        _ws.append_row([_token, username, _expires])
+    except Exception as _e:
+        logger.warning(f"[auth] セッション保存失敗: {_e}")
+    return _token
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _auth_check_session(token: str) -> str:
+    """トークンを検証。有効ならusername、無効なら空文字を返す。60秒キャッシュ。"""
+    if not token or len(token) < 10:
+        return ""
+    try:
+        _sp = _auth_get_sheets_sp()
+        _ws = _sp.worksheet("sessions")
+        _now = datetime.now(JST)
+        for _row in _ws.get_all_records():
+            if _row.get("token") == token:
+                try:
+                    _exp = datetime.strptime(_row["expires_at"], "%Y-%m-%d %H:%M:%S")
+                    if _now < _exp.replace(tzinfo=JST):
+                        return _row.get("username", "")
+                except Exception:
+                    pass
+                return ""
+    except Exception as _e:
+        logger.warning(f"[auth] セッション確認失敗: {_e}")
+    return ""
+
+
 def render_claude_trading_project():
     """🤖 Claude 個別株トレーディングプロジェクト"""
     st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
@@ -23954,6 +24055,65 @@ def render_claude_trading_project():
                 )
 
             st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
+
+    # ── マイポートフォリオ（ログイン必要）─────────────────────────────────────
+    st.markdown('<a id="my-portfolio"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#0a0f1e,#0d1b2a,#0f172a);'
+        'border:1px solid #334155;border-radius:12px;padding:14px 20px;margin:20px 0 12px;">'
+        '<div style="font-size:18px;font-weight:800;color:#f59e0b">📂 マイポートフォリオ</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
+        '実保有ポジションの管理・損益追跡（ログイン必要）</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    _auth_token = st.query_params.get("token", "")
+    _auth_user  = _auth_check_session(_auth_token) if _auth_token else ""
+
+    if not _auth_user:
+        # ログインフォーム
+        _lc, _ = st.columns([1, 2])
+        with _lc:
+            st.markdown(
+                '<div style="background:#1e293b;border:1px solid #334155;'
+                'border-radius:10px;padding:20px 24px;">'
+                '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">🔐 ログイン</div>',
+                unsafe_allow_html=True,
+            )
+            _login_user = st.text_input("ユーザー名", key="mp_login_username")
+            _login_pass = st.text_input("パスワード", type="password", key="mp_login_password")
+            if st.button("ログイン", type="primary", key="mp_login_btn"):
+                if _auth_validate(_login_user, _login_pass):
+                    _new_token = _auth_create_session(_login_user)
+                    st.query_params["token"] = _new_token
+                    st.success(f"✅ ログイン成功 — このURLをブックマークで{_SESSION_DAYS}日間維持")
+                    st.rerun()
+                else:
+                    st.error("ユーザー名またはパスワードが違います")
+            st.markdown("</div>", unsafe_allow_html=True)
+        st.caption(f"ログイン後のURLをブックマーク → {_SESSION_DAYS}日間セッション維持（ブラウザ・端末をまたいで有効）")
+    else:
+        # ログイン済み
+        _users_map  = _auth_get_users()
+        _disp_name  = _users_map.get(_auth_user, {}).get("display_name", _auth_user)
+        _col_u, _col_lo = st.columns([5, 1])
+        with _col_u:
+            st.markdown(
+                f'<div style="color:#4ade80;font-size:13px;padding:4px 0">'
+                f'✅ <b>{_disp_name}</b> としてログイン中</div>',
+                unsafe_allow_html=True,
+            )
+        with _col_lo:
+            if st.button("ログアウト", key="mp_logout_btn"):
+                _keep = {k: v for k, v in st.query_params.items() if k != "token"}
+                st.query_params.clear()
+                for _k, _v in _keep.items():
+                    st.query_params[_k] = _v
+                _auth_check_session.clear()
+                st.rerun()
+
+        st.info("📂 ポートフォリオデータの管理機能は近日実装予定です。")
 
 
 # =====================================================
