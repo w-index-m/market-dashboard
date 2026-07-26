@@ -684,9 +684,9 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
     if not GROQ_API_KEY:
         return "⚠️ GROQ_API_KEY が設定されていません", ""
     GROQ_MODELS = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it",
+        "llama-3.1-8b-instant",    # TPM 6000 — 速くて制限緩い
+        "gemma2-9b-it",            # TPM 15000 — 最も緩い
+        "llama-3.3-70b-versatile", # TPM 1500  — 高品質だが制限厳しい（最後）
     ]
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -20526,8 +20526,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・投資金額 = 予算 × 比率
 ・各銘柄に以下フィールドを必ず設ける（全て必須）:
   rationale: 20字以内の短い投資テーマ
-  merits: メリット2〜4点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
-  demerits: デメリット2〜3点。各要素: {{"point": "観点（12字以内）", "detail": "内容（40字以内）"}}
+  merits: メリット2〜3点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
+  demerits: デメリット1〜2点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
   conclusion: 現在の投資モード（{_mode_label}）での結論を60字以内で（「なぜ選ぶか or 除外すべきか」）
 ・meritsには以下の財務指標が優れている場合は積極的に記載すること:
   - ROIC-WACCスプレッド（ROICがWACCを5%以上上回る場合は「資本効率卓越」として記載）
@@ -20547,38 +20547,14 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 以下のJSONのみで回答（前後のテキスト不要）:
 {{
   "portfolio": [
-    {{"ticker": "MSFT", "name": "Microsoft", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},
-      "rationale": "AI/クラウド成長継続",
-      "merits": [
-        {{"point": "割安水準", "detail": "-24%の下落でPERが改善。2023年高値比で明らかに割安"}},
-        {{"point": "AI収益化最右翼", "detail": "Azure OpenAI・Copilot課金が本格化。次期決算から増益加速見込み"}}
-      ],
-      "demerits": [
-        {{"point": "モメンタム崩壊", "detail": "3m/6m/1y全てマイナス。下落トレンド継続リスクあり"}},
-        {{"point": "ETF二重取り", "detail": "QQQ+VGTで既に保有中。個別11%は過剰集中になりやすい"}}
-      ],
-      "conclusion": "長期育成モードなら条件付き買い。AI収益が2025〜26年に加速すれば大化け可能性あり。比率5〜10%が適正。"
-    }},
-    {{"ticker": "7203.T", "name": "トヨタ自動車", "flag": "🇯🇵", "allocation": 15, "amount": {int(budget*0.15)},
-      "rationale": "円安恩恵・EV展開",
-      "merits": [
-        {{"point": "円安恩恵", "detail": "円安継続で輸出採算改善。業績上振れ余地大"}},
-        {{"point": "配当利回り", "detail": "3%台の安定配当。HEV世界シェアNo.1維持"}}
-      ],
-      "demerits": [
-        {{"point": "EV化リスク", "detail": "EV普及加速でHEV優位性が中期的に低下する可能性"}},
-        {{"point": "円急騰リスク", "detail": "日銀利上げ加速なら円高転換で業績直撃"}}
-      ],
-      "conclusion": "円安継続シナリオなら配当込みで安定。EV・為替リスクを許容できる場合に組み入れ推奨。"
+    {{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},
+      "rationale": "AI半導体独占",
+      "merits": [{{"point": "ROIC卓越", "detail": "ROIC 45%・WACC 10%→スプレッド35%。圧倒的資本効率"}}, {{"point": "AI需要急増", "detail": "データセンターGPU需要が四半期ごとに過去最高更新"}}],
+      "demerits": [{{"point": "高PERリスク", "detail": "PER 40倍超。成長鈍化で大幅下落リスク"}}],
+      "conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。20%は上限の認識で。"
     }}
   ],
-  "metrics": {{
-    "expected_return": 18.0,
-    "risk_volatility": 22.0,
-    "sharpe_ratio": 0.75,
-    "max_drawdown_estimate": -28.0,
-    "comment": "ポートフォリオの特徴と注意点を50字以内で"
-  }}
+  "metrics": {{"expected_return": 18.0, "risk_volatility": 22.0, "sharpe_ratio": 0.75, "max_drawdown_estimate": -28.0, "comment": "ポートフォリオの特徴と注意点を50字以内で"}}
 }}"""
 
     import json as _json_ip, re as _re  # ローカルスコープで明示的にインポート
@@ -20586,7 +20562,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
     _model_used = ""
     try:
         text, _model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=2000, temperature=0.3
         )
         # JSONブロックを抽出（前後のテキストを除去）
         m = _re.search(r'\{[\s\S]*\}', text)
