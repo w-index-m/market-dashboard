@@ -22680,18 +22680,31 @@ def render_claude_trading_project():
                             # 株数・必要金額を株価ベースで計算
                             if _price and _price > 0:
                                 if _is_jp:
-                                    _lot_cost = _price * 100
-                                    _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
-                                    if _lots == 0:
-                                        # 1単元が配分予算を超える場合は予算外表示
-                                        _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
-                                        _price_str   = f"¥{_price:,.0f}/株"
-                                        _actual_cost = 0
+                                    _is_jp_etf = _tk in _JP_ETF_TICKERS
+                                    if _is_jp_etf:
+                                        # ETFは1口単位
+                                        _units    = int(_amt / _price)
+                                        if _units == 0:
+                                            _shares_str  = f"⚠️ 予算外（1口¥{_price:,.0f}）"
+                                            _price_str   = f"¥{_price:,.0f}/口"
+                                            _actual_cost = 0
+                                        else:
+                                            _actual_cost = int(_units * _price)
+                                            _shares_str  = f"{_units:,}口"
+                                            _price_str   = f"¥{_price:,.0f}/口"
                                     else:
-                                        _shares      = _lots * 100
-                                        _actual_cost = int(_lots * _lot_cost)
-                                        _shares_str  = f"{_shares:,}株 ({_lots}単元)"
-                                        _price_str   = f"¥{_price:,.0f}/株"
+                                        _lot_cost = _price * 100
+                                        _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
+                                        if _lots == 0:
+                                            # 1単元が配分予算を超える場合は予算外表示
+                                            _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
+                                            _price_str   = f"¥{_price:,.0f}/株"
+                                            _actual_cost = 0
+                                        else:
+                                            _shares      = _lots * 100
+                                            _actual_cost = int(_lots * _lot_cost)
+                                            _shares_str  = f"{_shares:,}株 ({_lots}単元)"
+                                            _price_str   = f"¥{_price:,.0f}/株"
                                 else:
                                     _price_jpy = _price * _usdjpy
                                     _shares    = int(_amt / _price_jpy)  # max(1)なし
