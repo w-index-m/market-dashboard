@@ -20386,10 +20386,24 @@ _TRADING_CANDIDATES = [
     "LLY", "NVO", "ABBV", "UNH", "AMGN",
     # US Energy/Industrial
     "XOM", "NEE", "GE", "CAT", "DE",
-    # Japan key
+    # Japan ETF（1口から購入可）
+    "1321.T",   # 野村 日経225 ETF
+    "2244.T",   # NASDAQ100 JPY ETF
+    "2558.T",   # S&P500 JPY ETF
+    "1476.T",   # iシェアーズ Jリート
+    "1570.T",   # 日経レバレッジ ETF
+    "2513.T",   # iシェアーズ 先進国株
+    # Japan 個別株（高単元コストに注意）
     "7203.T", "9984.T", "6861.T", "8035.T", "6758.T", "4063.T",
     "6902.T", "7974.T", "9433.T", "8306.T", "4502.T", "6367.T",
 ]
+
+# 日本ETF（1口から購入可能 → 100株単元ルール適用外）
+_JP_ETF_TICKERS = {
+    "1321.T", "1329.T", "1330.T", "1346.T",
+    "2244.T", "2558.T", "2513.T", "2516.T",
+    "1476.T", "1570.T", "1571.T", "1572.T",
+}
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
@@ -20457,12 +20471,17 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         _price = _d.get("price", 0) or 0
         # 購入可否チェック
         if _price > 0:
-            if _tk.endswith(".T"):
-                _min_cost = _price * 100  # 100株単元
+            if _tk.endswith(".T") and _tk not in _JP_ETF_TICKERS:
+                _min_cost = _price * 100  # 日本個別株: 100株単元
+                _lot_label = "1単元(100株)"
+            elif _tk.endswith(".T"):
+                _min_cost = _price * 1    # 日本ETF: 1口から
+                _lot_label = "1口"
             else:
-                _min_cost = _price * usdjpy  # 1株 × 為替
+                _min_cost = _price * usdjpy  # 米国株: 1株から
+                _lot_label = "1株"
             if _min_cost > _max_per_stock:
-                _unaffordable.append(f"{_tk}(最低購入額¥{_min_cost:,.0f})")
+                _unaffordable.append(f"{_tk}({_lot_label}≒¥{_min_cost:,.0f})")
                 continue  # スコアリングからも除外
         _r3 = _d.get("ret_3m") or 0
         _r6 = _d.get("ret_6m") or 0
@@ -20484,8 +20503,13 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         _price = _d.get("price", 0) or 0
         _min_note = ""
         if _price > 0 and budget > 0:
-            _min_cost = _price * 100 if _tk.endswith(".T") else _price * usdjpy
-            _min_pct = int(_min_cost / budget * 100) + 1  # 切り上げ+バッファ1%
+            if _tk.endswith(".T") and _tk not in _JP_ETF_TICKERS:
+                _min_cost = _price * 100  # 個別株100株単元
+            elif _tk.endswith(".T"):
+                _min_cost = _price        # 日本ETF 1口
+            else:
+                _min_cost = _price * usdjpy  # 米国株1株
+            _min_pct = int(_min_cost / budget * 100) + 1
             if _min_pct >= 3:
                 _min_note = f"  ※最低{_min_pct}%以上の配分必須"
         _lines.append(
@@ -20678,10 +20702,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
 ・【重要】予算{budget_str}で実際に購入できる銘柄のみ選定すること:
-  - 日本株: 株価×100株（1単元コスト）が配分金額以内であること
-    例）予算{budget_str}で10%配分=¥{int(budget*0.10):,} → 1単元¥{int(budget*0.10):,}以下の銘柄のみ
-  - 米国株: 株価×150円（1株コスト）が配分金額以内であること
+  - 米国株: 1株から購入可。株価×150円が配分金額以内であればOK
+  - 日本ETF（1321.T/2244.T/2558.T等）: 1口から購入可。米国株と同様に柔軟
+  - 日本個別株: 100株単元のため株価×100が配分金額以内でないと購入不可
+    → 予算{budget_str}では株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
   - 上記モメンタムデータの⛔リスト銘柄は絶対に選定禁止（予算超過確認済）
+  - 予算{budget_str}なら「米国株＋日本ETF」中心が現実的
 ・各銘柄に以下フィールドを必ず設ける（全て必須）:
   rationale: 20字以内の短い投資テーマ
   merits: メリット2〜3点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
@@ -20757,7 +20783,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
                 _pr2 = _pd2.get("price", 0) or 0
                 if _pr2 <= 0:
                     continue
-                _min_cost2 = _pr2 * 100 if _tk2.endswith(".T") else _pr2 * _usdjpy_est
+                if _tk2.endswith(".T") and _tk2 not in _JP_ETF_TICKERS:
+                    _min_cost2 = _pr2 * 100   # 個別株100株単元
+                elif _tk2.endswith(".T"):
+                    _min_cost2 = _pr2          # 日本ETF 1口
+                else:
+                    _min_cost2 = _pr2 * _usdjpy_est  # 米国株1株
                 _min_pct2 = _min_cost2 / budget * 100 + 1  # +1%バッファ
                 if _al2 < _min_pct2:
                     _itm["allocation"] = round(_min_pct2, 1)
