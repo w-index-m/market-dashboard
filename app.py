@@ -20374,6 +20374,105 @@ def _save_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: s
         return False
 
 
+# 候補銘柄ウォッチリスト（モメンタム事前スクリーニング用）
+_TRADING_CANDIDATES = [
+    # US AI/Cloud/Tech
+    "NVDA", "META", "GOOGL", "AMZN", "AAPL", "MSFT", "TSLA", "AVGO",
+    "AMD", "QCOM", "ORCL", "CRM", "ADBE", "NOW", "PANW", "PLTR",
+    "AXON", "CRWD", "DDOG", "ANET", "ZS", "UBER", "SHOP", "ARM",
+    # US Finance/Consumer
+    "BRK-B", "JPM", "GS", "V", "MA", "COST", "WMT", "HD",
+    # US Healthcare
+    "LLY", "NVO", "ABBV", "UNH", "AMGN",
+    # US Energy/Industrial
+    "XOM", "NEE", "GE", "CAT", "DE",
+    # Japan key
+    "7203.T", "9984.T", "6861.T", "8035.T", "6758.T", "4063.T",
+    "6902.T", "7974.T", "9433.T", "8306.T", "4502.T", "6367.T",
+]
+
+
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def _fetch_candidate_performance(today_str: str) -> dict:
+    """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + 12h TTL）。
+    Returns: {ticker: {ret_1y, ret_6m, ret_3m, ret_1m}} — 全て %表記float
+    """
+    try:
+        import yfinance as _yf
+        _raw = _yf.download(
+            _TRADING_CANDIDATES,
+            period="14mo",
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            timeout=45,
+        )
+        if _raw.empty:
+            return {}
+        # multi-ticker download → Close列を取得
+        _cl = _raw["Close"] if "Close" in _raw.columns else _raw
+        if not hasattr(_cl, "columns"):
+            return {}
+        _result = {}
+        for _tk in _cl.columns:
+            try:
+                _s = _cl[_tk].dropna()
+                if len(_s) < 50:
+                    continue
+                _cur = float(_s.iloc[-1])
+                def _r(days, _s=_s, _cur=_cur):
+                    _idx = max(0, len(_s) - days - 1)
+                    _p = float(_s.iloc[_idx])
+                    return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
+                _result[_tk] = {
+                    "ret_1y": _r(252), "ret_6m": _r(126),
+                    "ret_3m": _r(63),  "ret_1m": _r(21),
+                }
+            except Exception:
+                continue
+        logger.info(f"[trading] candidate_performance: {len(_result)}銘柄取得完了")
+        return _result
+    except Exception as e:
+        logger.warning(f"[trading] candidate_performance fetch失敗: {e}")
+        return {}
+
+
+def _build_momentum_table(cand_perf: dict, trading_mode: str) -> str:
+    """候補銘柄のパフォーマンスデータをプロンプト用テキストに変換。"""
+    if not cand_perf:
+        return ""
+    # モードに応じたスコアリング重み
+    if trading_mode == "momentum":
+        weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
+    else:
+        weights = (0.2, 0.3, 0.5)  # growth/autonomous: 1y重視
+    _scored = []
+    for _tk, _d in cand_perf.items():
+        _r3 = _d.get("ret_3m") or 0
+        _r6 = _d.get("ret_6m") or 0
+        _r1y = _d.get("ret_1y") or 0
+        _sc = _r3 * weights[0] + _r6 * weights[1] + _r1y * weights[2]
+        _scored.append((_tk, _sc, _d))
+    _scored.sort(key=lambda x: x[1], reverse=True)
+    _top = _scored[:18]
+    _bottom = [x for x in _scored if (x[2].get("ret_1y") or 0) < -15][:8]
+
+    _lines = ["【実株価モメンタムデータ（当日取得・キャッシュ済）】"]
+    _lines.append(f"▲ 上昇ランキング（{'3m重視' if trading_mode == 'momentum' else '1y重視'}スコア順）:")
+    for i, (_tk, _sc, _d) in enumerate(_top, 1):
+        _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
+        _lines.append(
+            f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  6m:{_r6:+6.1f}%  1y:{_r1y:+7.1f}%"
+        )
+    if _bottom:
+        _lines.append("▼ 下落銘柄（1y -15%以下・原則除外）:")
+        for _tk, _sc, _d in _bottom:
+            _r3 = _d.get("ret_3m"); _r1y = _d.get("ret_1y")
+            _lines.append(f"  ✗ {_tk:8s} 3m:{_r3:+6.1f}%  1y:{_r1y:+7.1f}%")
+    _lines.append("→ 上記実データを最優先で参考にすること。上位ランク銘柄から選定すること。")
+    return "\n".join(_lines)
+
+
 def _generate_investment_portfolio_rec(
     budget: int,
     model_type: str,       # "etf" | "individual"
@@ -20382,6 +20481,7 @@ def _generate_investment_portfolio_rec(
     existing_holdings: list | None = None,
     model_pref: str = "auto",
     trading_mode: str = "growth",  # "growth" | "momentum" | "autonomous"
+    candidate_perf: dict | None = None,  # _fetch_candidate_performance() の戻り値
 ) -> dict:
     """予算・モデル・リスクプロファイル・トレーディングモードに応じた新規投資推奨ポートフォリオをAIが生成。
     Returns: {"portfolio": [...], "metrics": {...}, "model": str, "error": str|None}
@@ -20481,6 +20581,9 @@ def _generate_investment_portfolio_rec(
   あなたの判断で最もリターンが期待できる組み合わせを選んでよい""",
     }.get(trading_mode, "")
 
+    # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
+    _momentum_table_str = _build_momentum_table(candidate_perf or {}, trading_mode)
+
     holdings_str = "なし（新規投資）"
     if existing_holdings:
         holdings_str = " / ".join(existing_holdings[:8])
@@ -20515,10 +20618,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・RRGリーディングセクター: {leading_str}
 ・RRGインプルービングセクター: {improving_str}
 
+{_momentum_table_str}
+
 【銘柄選定範囲と評価軸（モード別優先順位）】
-・米国株: NASDAQ100・S&P500構成銘柄から選定
+・米国株: NASDAQ100・S&P500構成銘柄から選定（上記モメンタムデータにない銘柄も検討可）
 ・日本株: 日経225構成銘柄から選定
-・あなたの学習データで把握している「直近1〜2年の株価トレンド」を必ず考慮して選ぶこと
+・上記【実株価モメンタムデータ】がある場合は必ずそれを最優先で参照すること
 
 {_scoring_guide}
 
@@ -21647,6 +21752,8 @@ def render_claude_trading_project():
                 _ip_holdings    = list(open_pos.keys()) if open_pos else []
                 _ip_mktctx      = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
                 _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
+                # 候補銘柄の実株価モメンタムデータを当日キャッシュで取得
+                _ip_cand_perf   = _fetch_candidate_performance(_ip_today)
                 # キャッシュキーにモードを含めて、モード違いのキャッシュが混在しないようにする
                 _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}"
 
@@ -21698,12 +21805,13 @@ def render_claude_trading_project():
                     _ip_step_t0 = time.time()
                     _ip_result_box = [None]
 
-                    def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt):
+                    def _ip_gen_worker(box=_ip_result_box, mt=_ip_mt, cp=_ip_cand_perf):
                         try:
                             box[0] = _generate_investment_portfolio_rec(
                                 _ip_budget_val, mt, _ip_risk_key,
                                 _ip_mktctx, _ip_holdings, _ip_model_pref,
                                 trading_mode=_ip_trade_mode,
+                                candidate_perf=cp,
                             )
                         except Exception as _wex:
                             logger.error(f"[trading] portfolio worker crash ({mt}): {_wex}", exc_info=True)
