@@ -22271,7 +22271,8 @@ def render_claude_trading_project():
                                         )
 
                         # 余剰資金をETFで自動充填（ロット丸め後の残金を吸収）
-                        _fill_target = int(_ip_bv * (100 - _r_cash_pct) / 100)
+                        _fill_cash_pct = _ip_r.get("cash_reserve_pct", 0)
+                        _fill_target = int(_ip_bv * (100 - _fill_cash_pct) / 100)
                         _fill_gap    = _fill_target - _ip_total_actual
                         _FILL_ETFS = [
                             ("2244.T", "iFreeETF NASDAQ100", "🇯🇵"),
