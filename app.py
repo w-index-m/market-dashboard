@@ -20425,6 +20425,7 @@ def _fetch_candidate_performance(today_str: str) -> dict:
                     _p = float(_s.iloc[_idx])
                     return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
                 _result[_tk] = {
+                    "price":  _cur,
                     "ret_3y": _r(756), "ret_1y": _r(252),
                     "ret_6m": _r(126), "ret_3m": _r(63), "ret_1m": _r(21),
                 }
@@ -20437,8 +20438,10 @@ def _fetch_candidate_performance(today_str: str) -> dict:
         return {}
 
 
-def _build_momentum_table(cand_perf: dict, trading_mode: str) -> str:
-    """候補銘柄のパフォーマンスデータをプロンプト用テキストに変換。"""
+def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_000_000, usdjpy: float = 150.0) -> str:
+    """候補銘柄のパフォーマンスデータをプロンプト用テキストに変換。
+    budget を渡すと予算内で購入不可能な銘柄を「除外リスト」としてプロンプトに注入する。
+    """
     if not cand_perf:
         return ""
     # モードに応じたスコアリング重み
@@ -20446,8 +20449,21 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str) -> str:
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
     else:
         weights = (0.2, 0.3, 0.5)  # growth/autonomous: 1y重視
+    # 予算内で購入不可能な銘柄を特定
+    _max_per_stock = budget * 0.3  # 1銘柄最大30%配分
+    _unaffordable = []
     _scored = []
     for _tk, _d in cand_perf.items():
+        _price = _d.get("price", 0) or 0
+        # 購入可否チェック
+        if _price > 0:
+            if _tk.endswith(".T"):
+                _min_cost = _price * 100  # 100株単元
+            else:
+                _min_cost = _price * usdjpy  # 1株 × 為替
+            if _min_cost > _max_per_stock:
+                _unaffordable.append(f"{_tk}(最低購入額¥{_min_cost:,.0f})")
+                continue  # スコアリングからも除外
         _r3 = _d.get("ret_3m") or 0
         _r6 = _d.get("ret_6m") or 0
         _r1y = _d.get("ret_1y") or 0
@@ -20457,8 +20473,12 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str) -> str:
     _top = _scored[:18]
     _bottom = [x for x in _scored if (x[2].get("ret_1y") or 0) < -15][:8]
 
-    _lines = ["【実株価モメンタムデータ（当日取得・キャッシュ済）】"]
-    _lines.append(f"▲ 上昇ランキング（{'3m重視' if trading_mode == 'momentum' else '1y重視'}スコア順）:")
+    _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）】"]
+    if _unaffordable:
+        _lines.append(f"⛔ 予算¥{budget:,}では購入不可能（絶対に選定禁止）:")
+        for _u in _unaffordable:
+            _lines.append(f"  × {_u}")
+    _lines.append(f"▲ 上昇ランキング（予算内・{'3m重視' if trading_mode == 'momentum' else '1y重視'}スコア順）:")
     for i, (_tk, _sc, _d) in enumerate(_top, 1):
         _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
         _lines.append(
@@ -20469,7 +20489,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str) -> str:
         for _tk, _sc, _d in _bottom:
             _r3 = _d.get("ret_3m"); _r1y = _d.get("ret_1y")
             _lines.append(f"  ✗ {_tk:8s} 3m:{_r3:+6.1f}%  1y:{_r1y:+7.1f}%")
-    _lines.append("→ 上記実データを最優先で参考にすること。上位ランク銘柄から選定すること。")
+    _lines.append("→ ⛔リストの銘柄は予算超過のため絶対に選定禁止。▲リストの上位から選ぶこと。")
     return "\n".join(_lines)
 
 
@@ -20582,7 +20602,7 @@ def _generate_investment_portfolio_rec(
     }.get(trading_mode, "")
 
     # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
-    _momentum_table_str = _build_momentum_table(candidate_perf or {}, trading_mode)
+    _momentum_table_str = _build_momentum_table(candidate_perf or {}, trading_mode, budget=budget)
 
     holdings_str = "なし（新規投資）"
     if existing_holdings:
@@ -20650,6 +20670,11 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・日本株ティッカーは末尾に.T（例: 7203.T）
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
+・【重要】予算{budget_str}で実際に購入できる銘柄のみ選定すること:
+  - 日本株: 株価×100株（1単元コスト）が配分金額以内であること
+    例）予算{budget_str}で10%配分=¥{int(budget*0.10):,} → 1単元¥{int(budget*0.10):,}以下の銘柄のみ
+  - 米国株: 株価×150円（1株コスト）が配分金額以内であること
+  - 上記モメンタムデータの⛔リスト銘柄は絶対に選定禁止（予算超過確認済）
 ・各銘柄に以下フィールドを必ず設ける（全て必須）:
   rationale: 20字以内の短い投資テーマ
   merits: メリット2〜3点。各要素: {{"point": "観点（10字以内）", "detail": "内容（35字以内）"}}
