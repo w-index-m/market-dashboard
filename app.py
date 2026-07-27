@@ -18574,6 +18574,7 @@ def _generate_replacement_rec(
         "growth":     "ファンダメンタルズ重視・長期育成（PER/EPS成長率・配当安定性）",
         "momentum":   "テクニカル重視・上昇トレンド継続中の銘柄（RSI/ブレイクアウト）",
         "autonomous": "AIが最適スタイルを自律判断（成長・モメンタム・決算プレイ等）",
+        "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -20665,6 +20666,8 @@ def _run_stock_agents_parallel(
 
 def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: int = 15) -> list:
     """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
+    if trading_mode == "ai_mix":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
     _usdjpy = 150.0
     _max_per = budget * 0.35
@@ -20694,6 +20697,9 @@ _TRADING_CANDIDATES = [
     "NVDA", "META", "GOOGL", "AMZN", "AAPL", "MSFT", "TSLA", "AVGO",
     "AMD", "QCOM", "ORCL", "CRM", "ADBE", "NOW", "PANW", "PLTR",
     "AXON", "CRWD", "DDOG", "ANET", "ZS", "UBER", "SHOP", "ARM",
+    "TSM", "ASML", "SNOW",  # AI テーマバスケット追加
+    # US ETF（AIミックスモード用）
+    "QQQ",
     # US Finance/Consumer
     "BRK-B", "JPM", "GS", "V", "MA", "COST", "WMT", "HD",
     # US Healthcare
@@ -20723,6 +20729,24 @@ _JP_ETF_TICKERS = {
     "1321.T", "1329.T", "1330.T", "1346.T",
     "2244.T", "2558.T", "2513.T", "2516.T",
     "1476.T",
+}
+
+# Claude オリジナル AI テーマバスケット（AIミックスモード専用候補銘柄）
+_CLAUDE_AI_BASKET = {
+    # AIインフラ層（GPU・半導体・ハードウェア）
+    "NVDA", "AMD", "AVGO", "ARM", "TSM", "ASML",
+    # AIモデル・プラットフォーム層
+    "MSFT", "GOOGL", "META", "AMZN",
+    # AIソフトウェア・エージェント・クラウド層
+    "PLTR", "NOW", "CRM", "DDOG", "SNOW",
+    # 日本AI関連株
+    "9984.T",   # ソフトバンクG（ARM株主・AI投資）
+    "8035.T",   # 東京エレクトロン（半導体製造装置）
+    "6758.T",   # ソニー（AIセンサー・エンタメAI）
+    "6861.T",   # キーエンス（産業AI・FA）
+    # AI ETF
+    "QQQ",      # NASDAQ100（AI企業集中）
+    "2244.T",   # NASDAQ100 JPY ETF
 }
 
 
@@ -20778,11 +20802,13 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     """
     if not cand_perf:
         return ""
+    if trading_mode == "ai_mix":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     # モードに応じたスコアリング重み
     if trading_mode == "momentum":
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
     else:
-        weights = (0.2, 0.3, 0.5)  # growth/autonomous: 1y重視
+        weights = (0.2, 0.3, 0.5)  # growth/autonomous/ai_mix: 1y重視
     # 予算内で購入不可能な銘柄を特定
     _max_per_stock = budget * 0.3  # 1銘柄最大30%配分
     _unaffordable = []
@@ -20812,12 +20838,14 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     _top = _scored[:18]
     _bottom = [x for x in _scored if (x[2].get("ret_1y") or 0) < -15][:8]
 
-    _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）】"]
+    _ai_mix_note = "【Claude AIミックスバスケット限定】" if trading_mode == "ai_mix" else ""
+    _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）{_ai_mix_note}】"]
     if _unaffordable:
         _lines.append(f"⛔ 予算¥{budget:,}では購入不可能（絶対に選定禁止）:")
         for _u in _unaffordable:
             _lines.append(f"  × {_u}")
-    _lines.append(f"▲ 上昇ランキング（予算内・{'3m重視' if trading_mode == 'momentum' else '1y重視'}スコア順）:")
+    _rank_label = "3m重視" if trading_mode == "momentum" else "AI露出度+1y重視" if trading_mode == "ai_mix" else "1y重視"
+    _lines.append(f"▲ 上昇ランキング（予算内・{_rank_label}スコア順）:")
     for i, (_tk, _sc, _d) in enumerate(_top, 1):
         _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
         _price = _d.get("price", 0) or 0
@@ -20922,6 +20950,12 @@ def _generate_investment_portfolio_rec(
             "市場環境に応じて最適に組み合わせ。保有期間・損切ラインもAIが柔軟に判断。"
             "独自の視点で通常は注目されにくい銘柄も積極的に提案してよい。",
         ),
+        "ai_mix": (
+            "✨ Claude AIミックス",
+            "AI産業の3層（インフラ・プラットフォーム・ソフトウェア）に集中投資。"
+            "NVDA・MSFT・PLTR等のAI純粋銘柄を中心に構成し、高PERも許容する。"
+            "損切-15〜20%・目標=AI普及加速による業績成長の織り込み水準。",
+        ),
     }
     _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
@@ -20953,6 +20987,19 @@ def _generate_investment_portfolio_rec(
   - バリュー株（割安・高配当）: 市場が調整局面なら比率を上げる
   - グロース株（高成長・高PER）: F&G高値圏では比率を抑える
   あなたの判断で最もリターンが期待できる組み合わせを選んでよい""",
+
+        "ai_mix": """\
+評価軸の優先順位（✨ Claude AIミックス — AI特化テーマバスケット）:
+  ① AI事業への露出度【最重要・40%ウェイト】
+     インフラ層(NVDA/AMD/TSM/ASML)・プラットフォーム層(MSFT/GOOGL/META)・
+     ソフトウェア/エージェント層(PLTR/NOW/DDOG/SNOW)の3層から必ずバランスよく選定
+  ② AI事業の成長率【30%ウェイト】
+     AI関連売上高の前年比成長率・粗利率の高さ・ARRの伸び（SaaS系）
+  ③ 株価モメンタム【20%ウェイト】
+     AI関連決算・製品発表後の株価トレンドの強さ
+  ④ PEG比率【10%ウェイト】
+     高PERも許容するが、成長率対比の水準を確認すること
+  ※ 日本株はソフトバンクG(9984.T)・東京エレクトロン(8035.T)・キーエンス(6861.T)等を積極的に組み入れる""",
     }.get(trading_mode, "")
 
     # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
@@ -21018,6 +21065,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         _aa_risks   = "・".join(agent_a.get("key_risks", []))
         _aa_comment = agent_a.get("market_comment", "")
 
+        _ai_mix_constraint = (
+            "\n・【AIミックス専用】銘柄はAgent Bリストのティッカーのみから選定。"
+            "インフラ層(NVDA/AMD/TSM等)・プラットフォーム層(MSFT/GOOGL/META等)・"
+            "ソフトウェア層(PLTR/NOW/DDOG等)の3層から必ずバランスよく配分すること"
+            if trading_mode == "ai_mix" else ""
+        )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
 事前分析済みの結果を使ってポートフォリオのみを構築してください。
 
@@ -21046,7 +21099,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
-・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）
+・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_ai_mix_constraint}
 
 以下のJSONのみで回答（前後テキスト不要）:
 {{"portfolio": [{_json_example}],
@@ -21086,7 +21139,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 {_scoring_guide}
 
 【必須スクリーニング条件】
-・3年連続増収増益（モメンタムモードは直近2四半期でも可）
+・3年連続増収増益（モメンタムモード・AIミックスモードは直近2四半期でも可）
 ・直近決算で増収増益継続が確認できること
 
 【モメンタム制限ルール】
@@ -21094,6 +21147,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・モメンタムモード（⚡）では12ヶ月・3ヶ月いずれも上昇推定銘柄のみ選定可
 ・長期育成モード（🌱）でも1y -40%以下は原則除外
 ・セクター分散も意識すること
+{"・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix" else ""}
 
 【キャッシュ留保指示（必ず守ること）】
 {_cash_note}
@@ -21446,9 +21500,18 @@ def render_claude_trading_project():
             "color":  "#a78bfa", "sub_color": "#c4b5fd",
             "border": "#8b5cf6", "bg": "#1e0040",
         },
+        {
+            "key":    "ai_mix",
+            "emoji":  "✨",
+            "label":  "Claude AIミックス",
+            "sub":    "AI特化 · インフラ/モデル/アプリ3層 · 高成長集中",
+            "detail": "NVDA・MSFT・PLTR等AI純粋銘柄に集中 · 高PER許容 · 損切 -15〜20%",
+            "color":  "#38bdf8", "sub_color": "#7dd3fc",
+            "border": "#0284c7", "bg": "#0c1a2e",
+        },
     ]
 
-    mode_cols = st.columns(3)
+    mode_cols = st.columns(4)
     for _md, _col in zip(_MODE_DEFS, mode_cols):
         _is_sel = _cur_mode == _md["key"]
         _border = _md["border"] if _is_sel else "#334155"
