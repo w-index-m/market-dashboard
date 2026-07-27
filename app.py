@@ -18575,7 +18575,8 @@ def _generate_replacement_rec(
         "momentum":   "テクニカル重視・上昇トレンド継続中の銘柄（RSI/ブレイクアウト）",
         "autonomous": "AIが最適スタイルを自律判断（成長・モメンタム・決算プレイ等）",
         "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
-        "optical_mix": "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
+        "optical_mix":     "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
+        "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り2%以上の銘柄のみ選定）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -20671,6 +20672,8 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     elif trading_mode == "optical_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
+    elif trading_mode == "dividend_stable":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_DIVIDEND_BASKET}
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
     _usdjpy = 150.0
     _max_per = budget * 0.35
@@ -20688,6 +20691,11 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         _r1 = _d.get("ret_1y") or 0
         if _r1 < -20:  # 1y -20%以下は除外（下落トレンド銘柄）
             continue
+        # 配当安定モード: 過去3年の最大ドローダウンが -35% 超の銘柄は除外
+        if trading_mode == "dividend_stable":
+            _dd3y = _d.get("max_dd_3y") or 0
+            if _dd3y < -35:
+                continue
         _sc = _r3 * _weights[0] + _r6 * _weights[1] + _r1 * _weights[2]
         _scored.append((_tk, _sc, _r3, _r6, _r1, _px))
     _scored.sort(key=lambda x: x[1], reverse=True)
@@ -20705,6 +20713,9 @@ _TRADING_CANDIDATES = [
     "QQQ",
     # 光通信・フォトニクス（光銘柄ミックスモード用）
     "CIEN", "COHR", "LITE", "VIAV", "AAOI", "GLW", "APH", "VRT", "INFN",
+    # 配当安定株・米国（配当安定モード用）
+    "JNJ", "PG", "KO", "PEP", "MCD", "O", "VZ", "CVX", "ABT", "PM",
+    "VYM", "SCHD", "HDV",  # 高配当ETF
     # US Finance/Consumer
     "BRK-B", "JPM", "GS", "V", "MA", "COST", "WMT", "HD",
     # US Healthcare
@@ -20721,6 +20732,12 @@ _TRADING_CANDIDATES = [
     # Japan 光通信関連（光銘柄ミックスモード用）
     "5803.T",   # フジクラ（光ファイバー）
     "5801.T",   # 古河電工（光ファイバー）
+    # Japan 配当安定株（配当安定モード用）
+    "8058.T",   # 三菱商事（高配当・連続増配）
+    "8031.T",   # 三井物産（高配当・安定）
+    "8002.T",   # 丸紅（高配当商社）
+    "8411.T",   # みずほFG（高配当金融）
+    "9437.T",   # NTT（通信・安定配当）
     # Japan 個別株（高単元コストに注意）
     "7203.T", "9984.T", "6861.T", "8035.T", "6758.T", "4063.T",
     "6902.T", "7974.T", "9433.T", "8306.T", "4502.T", "6367.T",
@@ -20775,6 +20792,39 @@ _CLAUDE_OPTICAL_BASKET = {
     "5801.T",   # 古河電工（光ファイバー・電線）
 }
 
+# Claude 配当安定バスケット（配当安定モード専用候補銘柄）
+_CLAUDE_DIVIDEND_BASKET = {
+    # 米国 生活必需品・ディフェンシブ（連続増配）
+    "JNJ",      # Johnson & Johnson（ヘルスケア・60年超増配）
+    "PG",       # Procter & Gamble（生活用品・67年超増配）
+    "KO",       # Coca-Cola（飲料・62年超増配）
+    "PEP",      # PepsiCo（飲料・食品・51年超増配）
+    "MCD",      # McDonald's（外食・47年超増配）
+    "ABT",      # Abbott Laboratories（医療機器・安定増配）
+    # 米国 エネルギー・通信（高配当）
+    "XOM",      # ExxonMobil（エネルギー・高配当）
+    "CVX",      # Chevron（エネルギー・37年超増配）
+    "VZ",       # Verizon（通信・高配当安定）
+    "PM",       # Philip Morris（タバコ・高配当）
+    # 米国 REIT・不動産（毎月配当）
+    "O",        # Realty Income（毎月配当REIT・30年超増配）
+    # 高配当ETF
+    "VYM",      # Vanguard High Dividend Yield ETF
+    "SCHD",     # Schwab US Dividend Equity ETF（増配重視）
+    "HDV",      # iShares Core High Dividend ETF
+    # 日本 高配当・連続増配株
+    "8058.T",   # 三菱商事（商社・高配当・連続増配）
+    "8031.T",   # 三井物産（商社・高配当安定）
+    "8002.T",   # 丸紅（商社・高配当）
+    "8306.T",   # 三菱UFJ（メガバンク・高配当）
+    "8411.T",   # みずほFG（メガバンク・高配当）
+    "9433.T",   # KDDI（通信・連続増配25年）
+    "9437.T",   # NTT（通信・安定配当）
+    "2914.T",   # JT（日本たばこ・超高配当）
+    "7203.T",   # トヨタ（自動車・増配傾向）
+    "4502.T",   # 武田薬品（医薬品・高配当）
+}
+
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
 def _fetch_candidate_performance(today_str: str) -> dict:
@@ -20808,10 +20858,16 @@ def _fetch_candidate_performance(today_str: str) -> dict:
                     _idx = max(0, len(_s) - days - 1)
                     _p = float(_s.iloc[_idx])
                     return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
+                # 過去3年の最大ドローダウン計算
+                _s3y = _s.iloc[-756:] if len(_s) >= 756 else _s
+                _roll_max = _s3y.cummax()
+                _dd_ser = (_s3y - _roll_max) / _roll_max
+                _max_dd_3y = round(float(_dd_ser.min()) * 100, 1)
                 _result[_tk] = {
-                    "price":  _cur,
-                    "ret_3y": _r(756), "ret_1y": _r(252),
-                    "ret_6m": _r(126), "ret_3m": _r(63), "ret_1m": _r(21),
+                    "price":     _cur,
+                    "ret_3y":    _r(756), "ret_1y": _r(252),
+                    "ret_6m":    _r(126), "ret_3m": _r(63), "ret_1m": _r(21),
+                    "max_dd_3y": _max_dd_3y,  # 負の%値（例: -25.3）
                 }
             except Exception:
                 continue
@@ -20832,6 +20888,8 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     elif trading_mode == "optical_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
+    elif trading_mode == "dividend_stable":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_DIVIDEND_BASKET}
     # モードに応じたスコアリング重み
     if trading_mode == "momentum":
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
@@ -20869,6 +20927,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     _basket_note = (
         "【Claude AIミックスバスケット限定】" if trading_mode == "ai_mix"
         else "【Claude 光銘柄バスケット限定】" if trading_mode == "optical_mix"
+        else "【Claude 配当安定バスケット限定・3年MDD>-35%のみ】" if trading_mode == "dividend_stable"
         else ""
     )
     _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）{_basket_note}】"]
@@ -20880,6 +20939,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         "3m重視" if trading_mode == "momentum"
         else "AI露出度+1y重視" if trading_mode == "ai_mix"
         else "光通信需要+1y重視" if trading_mode == "optical_mix"
+        else "3y安定性+配当重視" if trading_mode == "dividend_stable"
         else "1y重視"
     )
     _lines.append(f"▲ 上昇ランキング（予算内・{_rank_label}スコア順）:")
@@ -20897,9 +20957,15 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
             _min_pct = int(_min_cost / budget * 100) + 1
             if _min_pct >= 3:
                 _min_note = f"  ※最低{_min_pct}%以上の配分必須"
-        _lines.append(
-            f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  6m:{_r6:+6.1f}%  1y:{_r1y:+7.1f}%{_min_note}"
-        )
+        if trading_mode == "dividend_stable":
+            _dd3y = _d.get("max_dd_3y") or 0
+            _lines.append(
+                f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  1y:{_r1y:+7.1f}%  3yMDD:{_dd3y:+6.1f}%{_min_note}"
+            )
+        else:
+            _lines.append(
+                f"  {i:2d}. {_tk:8s} 3m:{_r3:+6.1f}%  6m:{_r6:+6.1f}%  1y:{_r1y:+7.1f}%{_min_note}"
+            )
     if _bottom:
         _lines.append("▼ 下落銘柄（1y -15%以下・原則除外）:")
         for _tk, _sc, _d in _bottom:
@@ -20999,6 +21065,12 @@ def _generate_investment_portfolio_rec(
             "光ファイバー・光トランシーバ・光ネットワーク機器の需要爆発を捉える。"
             "CIEN・COHR・GLW・フジクラ等が対象。損切-15〜20%・目標=AI投資サイクル高継続。",
         ),
+        "dividend_stable": (
+            "🏦 配当安定モード",
+            "株価安定性と配当収入を最優先。過去3年間の最大ドローダウンが-35%以内の銘柄のみ対象。"
+            "連続増配・高配当利回り・財務健全性を評価軸とし、急落リスクを極力排除する。"
+            "PG・KO・KDDI・三菱商事等のディフェンシブ株・高配当ETFが中心。損切-10〜15%。",
+        ),
     }
     _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
@@ -21043,6 +21115,21 @@ def _generate_investment_portfolio_rec(
   ④ PEG比率【10%ウェイト】
      高PERも許容するが、成長率対比の水準を確認すること
   ※ 日本株はソフトバンクG(9984.T)・東京エレクトロン(8035.T)・キーエンス(6861.T)等を積極的に組み入れる""",
+
+        "dividend_stable": """\
+評価軸の優先順位（🏦 配当安定モード — 株価安定・高配当・急落なし）:
+  ① 株価安定性【最重要・35%ウェイト】
+     過去3年の最大ドローダウン(3yMDD)が-25%以内なら優秀、-35%以内なら許容
+     データに3yMDD列があれば必ず参照し、数値を根拠に記載すること
+  ② 配当利回り・増配実績【30%ウェイト】
+     配当利回り2%以上を最低条件。連続増配10年以上ならさらに優遇
+     日本株：配当利回り3%以上を目安
+  ③ 財務健全性【20%ウェイト】
+     自己資本比率・フリーキャッシュフロー・配当性向（70%以下が目安）
+  ④ 株価トレンド【15%ウェイト】
+     緩やかな右肩上がりを確認。急騰・急落銘柄は不可
+  ※ 高配当ETF(VYM/SCHD/HDV)は分散効果があり積極的に組み入れてよい
+  ※ 日本株：KDDI(9433.T)・三菱商事(8058.T)・JT(2914.T)等を優先的に検討""",
 
         "optical_mix": """\
 評価軸の優先順位（💡 Claude 光銘柄ミックス — 光通信・フォトニクステーマバスケット）:
@@ -21131,6 +21218,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "光トランシーバ(CIEN/COHR/LITE等)・光ファイバー(GLW/5803.T等)・"
             "光NW装置(VIAV/INFN等)・インフラ(VRT/APH等)から幅広く配分すること"
             if trading_mode == "optical_mix"
+            else "\n・【配当安定モード専用】銘柄はAgent Bリストのティッカーのみから選定。"
+            "3yMDDが-25%以内の銘柄を最優先。配当利回り・連続増配年数をmeritsに必ず記載すること。"
+            "損切ラインは-10〜15%（通常より短め）に設定すること"
+            if trading_mode == "dividend_stable"
             else ""
         )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
@@ -21212,6 +21303,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 {
 "・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix"
 else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
+else "・【配当安定モード専用】3yMDD -35%以内の銘柄のみ選定可。配当利回り2%以上を必須条件とする。損切ライン-10〜15%で統一" if trading_mode == "dividend_stable"
 else ""}
 
 【キャッシュ留保指示（必ず守ること）】
@@ -21583,12 +21675,21 @@ def render_claude_trading_project():
             "color":  "#fb923c", "sub_color": "#fdba74",
             "border": "#ea580c", "bg": "#1a0c00",
         },
+        {
+            "key":    "dividend_stable",
+            "emoji":  "🏦",
+            "label":  "配当安定モード",
+            "sub":    "高配当 · 株価安定 · 過去3年急落なし(-35%以内)",
+            "detail": "PG・KO・KDDI・三菱商事等 · 連続増配/高配当ETF中心 · 損切-10〜15%",
+            "color":  "#34d399", "sub_color": "#6ee7b7",
+            "border": "#059669", "bg": "#022c22",
+        },
     ]
 
-    # 3+2 の2行レイアウトでモードボタンを表示
+    # 3+3 の2行レイアウトでモードボタンを表示
     _mode_row1 = _MODE_DEFS[:3]
     _mode_row2 = _MODE_DEFS[3:]
-    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
+    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(3))]
     for _row_defs, _row_cols in _mode_pairs:
         for _md, _col in zip(_row_defs, _row_cols):
             _is_sel = _cur_mode == _md["key"]
