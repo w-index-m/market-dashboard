@@ -18575,6 +18575,7 @@ def _generate_replacement_rec(
         "momentum":   "テクニカル重視・上昇トレンド継続中の銘柄（RSI/ブレイクアウト）",
         "autonomous": "AIが最適スタイルを自律判断（成長・モメンタム・決算プレイ等）",
         "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
+        "optical_mix": "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -20668,6 +20669,8 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
     """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
     if trading_mode == "ai_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
+    elif trading_mode == "optical_mix":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
     _usdjpy = 150.0
     _max_per = budget * 0.35
@@ -20700,6 +20703,8 @@ _TRADING_CANDIDATES = [
     "TSM", "ASML", "SNOW",  # AI テーマバスケット追加
     # US ETF（AIミックスモード用）
     "QQQ",
+    # 光通信・フォトニクス（光銘柄ミックスモード用）
+    "CIEN", "COHR", "LITE", "VIAV", "AAOI", "GLW", "APH", "VRT", "INFN",
     # US Finance/Consumer
     "BRK-B", "JPM", "GS", "V", "MA", "COST", "WMT", "HD",
     # US Healthcare
@@ -20713,6 +20718,9 @@ _TRADING_CANDIDATES = [
     "1476.T",   # iシェアーズ Jリート
     "2513.T",   # iシェアーズ 先進国株
     # ※ 1570.T(日経レバ)/1571.T(日経インバース)等のレバ・インバース系は除外
+    # Japan 光通信関連（光銘柄ミックスモード用）
+    "5803.T",   # フジクラ（光ファイバー）
+    "5801.T",   # 古河電工（光ファイバー）
     # Japan 個別株（高単元コストに注意）
     "7203.T", "9984.T", "6861.T", "8035.T", "6758.T", "4063.T",
     "6902.T", "7974.T", "9433.T", "8306.T", "4502.T", "6367.T",
@@ -20747,6 +20755,24 @@ _CLAUDE_AI_BASKET = {
     # AI ETF
     "QQQ",      # NASDAQ100（AI企業集中）
     "2244.T",   # NASDAQ100 JPY ETF
+}
+
+# Claude 光銘柄テーマバスケット（光銘柄ミックスモード専用候補銘柄）
+_CLAUDE_OPTICAL_BASKET = {
+    # 光トランシーバ・部品メーカー
+    "CIEN",     # Ciena（光ネットワーク装置）
+    "COHR",     # Coherent（光部品・レーザー）
+    "LITE",     # Lumentum（光部品・3Dセンシング）
+    "VIAV",     # Viavi Solutions（光試験測定）
+    "AAOI",     # Applied Optoelectronics（トランシーバ）
+    "INFN",     # Infinera（光ネットワーク装置）
+    # 光ファイバー・インフラ
+    "GLW",      # Corning（光ファイバー世界最大手）
+    "APH",      # Amphenol（光コネクタ・高速伝送）
+    "VRT",      # Vertiv（AIデータセンター電源・冷却）
+    # 日本 光通信関連
+    "5803.T",   # フジクラ（光ファイバー・AI需要急拡大）
+    "5801.T",   # 古河電工（光ファイバー・電線）
 }
 
 
@@ -20804,6 +20830,8 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         return ""
     if trading_mode == "ai_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
+    elif trading_mode == "optical_mix":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
     # モードに応じたスコアリング重み
     if trading_mode == "momentum":
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
@@ -20838,13 +20866,22 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     _top = _scored[:18]
     _bottom = [x for x in _scored if (x[2].get("ret_1y") or 0) < -15][:8]
 
-    _ai_mix_note = "【Claude AIミックスバスケット限定】" if trading_mode == "ai_mix" else ""
-    _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）{_ai_mix_note}】"]
+    _basket_note = (
+        "【Claude AIミックスバスケット限定】" if trading_mode == "ai_mix"
+        else "【Claude 光銘柄バスケット限定】" if trading_mode == "optical_mix"
+        else ""
+    )
+    _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）{_basket_note}】"]
     if _unaffordable:
         _lines.append(f"⛔ 予算¥{budget:,}では購入不可能（絶対に選定禁止）:")
         for _u in _unaffordable:
             _lines.append(f"  × {_u}")
-    _rank_label = "3m重視" if trading_mode == "momentum" else "AI露出度+1y重視" if trading_mode == "ai_mix" else "1y重視"
+    _rank_label = (
+        "3m重視" if trading_mode == "momentum"
+        else "AI露出度+1y重視" if trading_mode == "ai_mix"
+        else "光通信需要+1y重視" if trading_mode == "optical_mix"
+        else "1y重視"
+    )
     _lines.append(f"▲ 上昇ランキング（予算内・{_rank_label}スコア順）:")
     for i, (_tk, _sc, _d) in enumerate(_top, 1):
         _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
@@ -20956,6 +20993,12 @@ def _generate_investment_portfolio_rec(
             "NVDA・MSFT・PLTR等のAI純粋銘柄を中心に構成し、高PERも許容する。"
             "損切-15〜20%・目標=AI普及加速による業績成長の織り込み水準。",
         ),
+        "optical_mix": (
+            "💡 Claude 光銘柄ミックス",
+            "光通信・フォトニクス関連銘柄に集中投資。AIデータセンター拡張に伴う"
+            "光ファイバー・光トランシーバ・光ネットワーク機器の需要爆発を捉える。"
+            "CIEN・COHR・GLW・フジクラ等が対象。損切-15〜20%・目標=AI投資サイクル高継続。",
+        ),
     }
     _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
@@ -21000,6 +21043,20 @@ def _generate_investment_portfolio_rec(
   ④ PEG比率【10%ウェイト】
      高PERも許容するが、成長率対比の水準を確認すること
   ※ 日本株はソフトバンクG(9984.T)・東京エレクトロン(8035.T)・キーエンス(6861.T)等を積極的に組み入れる""",
+
+        "optical_mix": """\
+評価軸の優先順位（💡 Claude 光銘柄ミックス — 光通信・フォトニクステーマバスケット）:
+  ① 光通信需要への露出度【最重要・40%ウェイト】
+     AIデータセンター向け光トランシーバ(CIEN/COHR/LITE/AAOI)・
+     光ファイバー(GLW/5803.T/5801.T)・光NW装置(VIAV/INFN)・
+     データセンターインフラ(VRT/APH)から幅広く選定
+  ② 光通信事業の売上成長率【30%ウェイト】
+     データセンター向け売上比率・受注残・顧客パイプライン
+  ③ 株価モメンタム【20%ウェイト】
+     AI設備投資サイクルによる株価上昇トレンドの継続性
+  ④ バリュエーション【10%ウェイト】
+     光通信セクターは一般に中・小型株が多い。過去の業績変動リスクを注記すること
+  ※ 日本株はフジクラ(5803.T)・古河電工(5801.T)を積極的に組み入れる""",
     }.get(trading_mode, "")
 
     # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
@@ -21065,11 +21122,16 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         _aa_risks   = "・".join(agent_a.get("key_risks", []))
         _aa_comment = agent_a.get("market_comment", "")
 
-        _ai_mix_constraint = (
+        _theme_constraint = (
             "\n・【AIミックス専用】銘柄はAgent Bリストのティッカーのみから選定。"
             "インフラ層(NVDA/AMD/TSM等)・プラットフォーム層(MSFT/GOOGL/META等)・"
             "ソフトウェア層(PLTR/NOW/DDOG等)の3層から必ずバランスよく配分すること"
-            if trading_mode == "ai_mix" else ""
+            if trading_mode == "ai_mix"
+            else "\n・【光銘柄ミックス専用】銘柄はAgent Bリストのティッカーのみから選定。"
+            "光トランシーバ(CIEN/COHR/LITE等)・光ファイバー(GLW/5803.T等)・"
+            "光NW装置(VIAV/INFN等)・インフラ(VRT/APH等)から幅広く配分すること"
+            if trading_mode == "optical_mix"
+            else ""
         )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
 事前分析済みの結果を使ってポートフォリオのみを構築してください。
@@ -21099,7 +21161,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
-・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_ai_mix_constraint}
+・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_theme_constraint}
 
 以下のJSONのみで回答（前後テキスト不要）:
 {{"portfolio": [{_json_example}],
@@ -21147,7 +21209,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・モメンタムモード（⚡）では12ヶ月・3ヶ月いずれも上昇推定銘柄のみ選定可
 ・長期育成モード（🌱）でも1y -40%以下は原則除外
 ・セクター分散も意識すること
-{"・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix" else ""}
+{
+"・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix"
+else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
+else ""}
 
 【キャッシュ留保指示（必ず守ること）】
 {_cash_note}
@@ -21509,34 +21574,47 @@ def render_claude_trading_project():
             "color":  "#38bdf8", "sub_color": "#7dd3fc",
             "border": "#0284c7", "bg": "#0c1a2e",
         },
+        {
+            "key":    "optical_mix",
+            "emoji":  "💡",
+            "label":  "Claude 光銘柄ミックス",
+            "sub":    "光通信特化 · データセンター光需要 · AI設備投資の恩恵",
+            "detail": "CIEN・COHR・GLW・フジクラ等 · 光トランシーバ/ファイバー/NW機器",
+            "color":  "#fb923c", "sub_color": "#fdba74",
+            "border": "#ea580c", "bg": "#1a0c00",
+        },
     ]
 
-    mode_cols = st.columns(4)
-    for _md, _col in zip(_MODE_DEFS, mode_cols):
-        _is_sel = _cur_mode == _md["key"]
-        _border = _md["border"] if _is_sel else "#334155"
-        _bg     = _md["bg"]     if _is_sel else "#0f172a"
-        _check  = (f'<div style="margin-top:6px;font-size:11px;color:{_md["color"]};font-weight:600">✓ 選択中</div>'
-                   if _is_sel else "")
-        _col.markdown(
-            f'<div style="background:{_bg};border:2px solid {_border};border-radius:10px;'
-            f'padding:12px 14px">'
-            f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
-            f'{_md["emoji"]} {_md["label"]}</div>'
-            f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
-            f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
-            f'{_check}</div>',
-            unsafe_allow_html=True,
-        )
-        if _col.button(
-            f'{_md["emoji"]} {"選択中" if _is_sel else "切替"}',
-            key=f'btn_mode_{_md["key"]}',
-            type="primary" if _is_sel else "secondary",
-            use_container_width=True,
-        ):
-            st.session_state["trading_mode"] = _md["key"]
-            st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
-            st.rerun()
+    # 3+2 の2行レイアウトでモードボタンを表示
+    _mode_row1 = _MODE_DEFS[:3]
+    _mode_row2 = _MODE_DEFS[3:]
+    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
+    for _row_defs, _row_cols in _mode_pairs:
+        for _md, _col in zip(_row_defs, _row_cols):
+            _is_sel = _cur_mode == _md["key"]
+            _border = _md["border"] if _is_sel else "#334155"
+            _bg     = _md["bg"]     if _is_sel else "#0f172a"
+            _check  = (f'<div style="margin-top:6px;font-size:11px;color:{_md["color"]};font-weight:600">✓ 選択中</div>'
+                       if _is_sel else "")
+            _col.markdown(
+                f'<div style="background:{_bg};border:2px solid {_border};border-radius:10px;'
+                f'padding:12px 14px">'
+                f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
+                f'{_md["emoji"]} {_md["label"]}</div>'
+                f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
+                f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
+                f'{_check}</div>',
+                unsafe_allow_html=True,
+            )
+            if _col.button(
+                f'{_md["emoji"]} {"選択中" if _is_sel else "切替"}',
+                key=f'btn_mode_{_md["key"]}',
+                type="primary" if _is_sel else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state["trading_mode"] = _md["key"]
+                st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
+                st.rerun()
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
