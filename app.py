@@ -985,6 +985,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#momentum",        "🚀 Momentum"),
             ("?page=trading",    "💹 Trading"),
             ("#optical-semi",    "📡 Optical vs Semi"),
+            ("#ticker-chart",    "📈 Ticker Chart"),
             ("#earnings-forecast", "📊 Index Forecast"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
             ("#sector",          "🔄 Sectors"),
@@ -1001,6 +1002,7 @@ def _build_nav_html(lang: str = "ja") -> str:
             ("#momentum",        "🚀 モメンタム"),
             ("?page=trading",    "💹 売買"),
             ("#optical-semi",    "📡 光通信vs半導体"),
+            ("#ticker-chart",    "📈 銘柄チャート"),
             ("#earnings-forecast", "📊 指数予測"),
             ("#fear-greed",      "😱 Fear&amp;Greed"),
             ("#sector",          "🔄 セクター"),
@@ -16674,6 +16676,148 @@ def render_stock_screener():
             st.info("「🤖 AI評価を生成」を押すと総合評価が表示されます")
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFrame:
+    """指定ティッカーの過去N年分の日次終値を取得。"""
+    import yfinance as _yf
+    try:
+        _df = _yf.download(
+            ticker, period=f"{years}y", interval="1d",
+            auto_adjust=True, progress=False, timeout=30,
+        )
+        if _df.empty:
+            return pd.DataFrame()
+        _cl = _df["Close"] if "Close" in _df.columns else _df
+        if hasattr(_cl, "columns"):
+            _cl = _cl.iloc[:, 0]
+        _out = _cl.dropna().to_frame(name="close")
+        _out.index = pd.to_datetime(_out.index)
+        return _out
+    except Exception:
+        return pd.DataFrame()
+
+
+def render_ticker_chart_compare():
+    """任意銘柄の株価チャート表示 + 年別（1月起点）トレンド比較"""
+    st.markdown('<a id="ticker-chart"></a>', unsafe_allow_html=True)
+    st.header("📈 銘柄チャート & 年別トレンド比較")
+    st.caption("任意の銘柄ティッカーを指定して株価推移を表示し、年初来の上昇トレンドが例年と似ているか比較できます。")
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        _tk_input = st.text_input(
+            "ティッカーを入力（例: 7203.T / NVDA / AAPL）",
+            value=st.session_state.get("_ycmp_ticker", "NVDA"),
+            key="ycmp_ticker_input",
+        ).strip().upper()
+    with c2:
+        _period_label = st.selectbox("上段チャートの表示期間", ["3年", "5年"], key="ycmp_period")
+    _years_n = 3 if _period_label == "3年" else 5
+
+    if not _tk_input:
+        st.info("ティッカーを入力してください。")
+        return
+
+    with st.spinner(f"{_tk_input} のデータ取得中..."):
+        _hist = _fetch_ticker_history_multi_year(_tk_input, years=max(_years_n, 5))
+
+    if _hist.empty:
+        st.warning(f"⚠️ {_tk_input} のデータを取得できませんでした。ティッカーを確認してください。")
+        return
+
+    st.session_state["_ycmp_ticker"] = _tk_input
+
+    import plotly.graph_objects as go
+
+    # ── 上段: 通常の価格推移チャート ──────────────────────────
+    _cutoff = _hist.index.max() - pd.DateOffset(years=_years_n)
+    _cut = _hist[_hist.index >= _cutoff]
+    _fig1 = go.Figure()
+    _fig1.add_trace(go.Scatter(
+        x=_cut.index, y=_cut["close"], mode="lines",
+        line=dict(color="#60a5fa", width=1.6),
+        name=_tk_input,
+        hovertemplate="%{x|%Y-%m-%d}: %{y:,.2f}<extra></extra>",
+    ))
+    _fig1.update_layout(
+        title=dict(text=f"{_tk_input} 株価推移（過去{_years_n}年）", font=dict(size=14, color="#e2e8f0")),
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+        font=dict(color="#e2e8f0"),
+        height=340, margin=dict(l=40, r=20, t=44, b=36),
+        yaxis=dict(title=dict(text="価格", font=dict(color="#e2e8f0")),
+                   tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        showlegend=False,
+    )
+    st.plotly_chart(_fig1, use_container_width=True)
+
+    # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:14px 0 4px">'
+        '📅 年初来トレンド比較（1月起点・累積騰落率）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("各年の年初終値を0%とした累積騰落率。上昇トレンドの形が例年と似ているかを比較できます。")
+
+    _cur_year = _hist.index.max().year
+    _target_years = [_cur_year - 2, _cur_year - 1, _cur_year]
+    _year_colors = {
+        _target_years[0]: "#64748b",  # 2年前: グレー
+        _target_years[1]: "#fbbf24",  # 前年: アンバー
+        _target_years[2]: "#4ade80",  # 今年: グリーン（強調）
+    }
+
+    _fig2 = go.Figure()
+    _has_any = False
+    for _yr in _target_years:
+        _yser = _hist[_hist.index.year == _yr]["close"]
+        if _yser.empty:
+            continue
+        _base = float(_yser.iloc[0])
+        if _base <= 0:
+            continue
+        _pct = (_yser / _base - 1) * 100
+        # x軸を「月/日」に正規化して重ね合わせ（2000年はうるう年なので2/29もそのまま利用可）
+        _x = [pd.Timestamp(2000, _d.month, _d.day) for _d in _pct.index]
+        _fig2.add_trace(go.Scatter(
+            x=_x, y=_pct.values, mode="lines",
+            line=dict(color=_year_colors.get(_yr, "#94a3b8"), width=2.4 if _yr == _cur_year else 1.6),
+            name=f"{_yr}年",
+            hovertemplate=f"{_yr}年 " + "%{x|%m/%d}: %{y:+.1f}%<extra></extra>",
+        ))
+        _has_any = True
+
+    if not _has_any:
+        st.info("年別比較に十分なデータがありません。")
+        return
+
+    _fig2.update_layout(
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+        font=dict(color="#e2e8f0"),
+        height=380, margin=dict(l=40, r=20, t=20, b=36),
+        yaxis=dict(title=dict(text="年初来騰落率(%)", font=dict(color="#e2e8f0")),
+                   tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b",
+                   zeroline=True, zerolinecolor="#475569"),
+        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d"),
+        legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.1, x=0),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+    )
+    st.plotly_chart(_fig2, use_container_width=True)
+
+    # 直近時点での年別サマリー
+    _sum_cols = st.columns(len(_target_years))
+    for _col, _yr in zip(_sum_cols, _target_years):
+        _yser = _hist[_hist.index.year == _yr]["close"]
+        if _yser.empty:
+            _col.metric(f"{_yr}年", "—")
+            continue
+        _base = float(_yser.iloc[0])
+        _last = float(_yser.iloc[-1])
+        _chg = (_last / _base - 1) * 100 if _base > 0 else 0
+        _last_date = _yser.index[-1].strftime("%m/%d")
+        _col.metric(f"{_yr}年（〜{_last_date}）", f"{_chg:+.1f}%")
+
 
 def render_av_economic_dashboard():
     """Alpha Vantage経済指標をダッシュボード表示（マクロ分析に組み込み）"""
@@ -25456,6 +25600,10 @@ OPENROUTER_API_KEY = "sk-or-..."
 
     # 銘柄需給・バリュエーション評価
     render_stock_screener()
+    st.divider()
+
+    # 銘柄チャート & 年別トレンド比較
+    render_ticker_chart_compare()
     st.divider()
 
     # RSSニュース（調査報道・経済メディア）
