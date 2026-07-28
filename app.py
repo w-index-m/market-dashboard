@@ -16725,8 +16725,9 @@ def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFram
         return pd.DataFrame()
 
 
-def render_ticker_chart_compare():
+def render_ticker_chart_compare(key_prefix: str = "main"):
     """任意銘柄の株価チャート表示 + 年別（1月起点）トレンド比較"""
+    _sk = lambda name: f"{key_prefix}_{name}"  # ウィジェットキー衝突防止（同一ページ内で複数回呼ぶ場合）
     st.markdown('<a id="ticker-chart"></a>', unsafe_allow_html=True)
     st.header("📈 銘柄チャート & 年別トレンド比較")
     st.caption("任意の銘柄ティッカーを指定して株価推移を表示し、年初来の上昇トレンドが例年と似ているか比較できます。")
@@ -16735,11 +16736,11 @@ def render_ticker_chart_compare():
     with c1:
         _raw_query = st.text_input(
             "銘柄名・証券コード・ティッカーを入力（例: トヨタ / 7203 / NVDA / Apple）",
-            value=st.session_state.get("_ycmp_query", "NVDA"),
-            key="ycmp_ticker_input",
+            value=st.session_state.get(_sk("_ycmp_query"), "NVDA"),
+            key=_sk("ycmp_ticker_input"),
         ).strip()
     with c2:
-        _period_label = st.selectbox("上段チャートの表示期間", ["3年", "5年"], key="ycmp_period")
+        _period_label = st.selectbox("上段チャートの表示期間", ["3年", "5年"], key=_sk("ycmp_period"))
     _years_n = 3 if _period_label == "3年" else 5
 
     if not _raw_query:
@@ -16762,7 +16763,7 @@ def render_ticker_chart_compare():
         st.warning(f"⚠️ {_tk_input} のデータを取得できませんでした。ティッカーを確認してください。")
         return
 
-    st.session_state["_ycmp_query"] = _raw_query
+    st.session_state[_sk("_ycmp_query")] = _raw_query
 
     import plotly.graph_objects as go
 
@@ -16787,7 +16788,7 @@ def render_ticker_chart_compare():
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
         showlegend=False,
     )
-    st.plotly_chart(_fig1, use_container_width=True)
+    st.plotly_chart(_fig1, use_container_width=True, key=_sk("ycmp_fig_price"))
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
@@ -16840,7 +16841,7 @@ def render_ticker_chart_compare():
         legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.1, x=0),
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
     )
-    st.plotly_chart(_fig2, use_container_width=True)
+    st.plotly_chart(_fig2, use_container_width=True, key=_sk("ycmp_fig_yearcmp"))
 
     # 直近時点での年別サマリー
     _sum_cols = st.columns(len(_target_years))
@@ -24630,9 +24631,13 @@ def render_claude_trading_project():
 
                 st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
 
-    # ── タブ⑥: チャート比較 ─────────────────────────────────────
+    # ── タブ⑥: チャート比較（ページ最下部にも常時表示）─────────────
     with tab_chart:
         render_ticker_chart_compare()
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+    st.markdown("---")
+    render_ticker_chart_compare(key_prefix="bottom")
 
 # =====================================================
 # 🔐 管理者用チェンジログ（パスワード保護）
