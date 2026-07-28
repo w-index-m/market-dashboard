@@ -16994,10 +16994,10 @@ def _ai_chart_analysis(
             f"{_news_str}\n"
         )
         _news_point = "6. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
-        _final_point_num, _n_points, _max_chars = 7, 7, 400
+        _final_point_num, _n_points, _max_chars = 7, 7, 500
     else:
         _news_block, _news_point = "\n", ""
-        _final_point_num, _n_points, _max_chars = 6, 6, 350
+        _final_point_num, _n_points, _max_chars = 6, 6, 450
 
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
 【分析基準日】{as_of}（このデータは全て{as_of}時点のもの）
@@ -17018,9 +17018,12 @@ def _ai_chart_analysis(
 {season_text}
 {_news_block}
 以下{_n_points}点を日本語・合計{_max_chars}字程度で簡潔に分析してください:
-1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠
+1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠。
+   クロスが発生している場合は「なぜそのクロスが株価に影響しやすいか」を一言添えること
+   （例: ゴールデンクロス＝短期の買い勢いが長期トレンドを上回り始めたサインで新規買いを誘発しやすい／
+   デッドクロス＝短期の売り圧力が優勢に転じたサインで損切り・追随売りを誘発しやすい、等）
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
-3. サポート/レジスタンス（次に意識される価格帯とその根拠）
+3. サポート/レジスタンス（次に意識される価格帯とその根拠。なぜその価格帯が意識されやすいか＝過去に何度も反発/抵抗された水準であることに触れる）
 4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
 5. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
 {_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
@@ -17030,7 +17033,7 @@ def _ai_chart_analysis(
 ※ 数値・見出しは上記データにあるものだけを使い、創作しないこと。
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
 
-    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.4)
+    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=900, temperature=0.4)
 
 
 def _summarize_year_chart_state(y_close: pd.Series, y_up: pd.Series, y_lo: pd.Series,
