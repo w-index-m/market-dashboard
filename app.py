@@ -16894,6 +16894,12 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.1, x=0),
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
     )
+    # 凡例と重ならないよう、チャート内タイトルではなくチャート直上にStreamlit要素として表示
+    st.markdown(
+        f'<div style="font-size:17px;font-weight:800;color:#60a5fa;margin:2px 0 6px">'
+        f'{_tk_input} 年別トレンド比較</div>',
+        unsafe_allow_html=True,
+    )
     st.plotly_chart(
         _fig2, use_container_width=True, key=_sk("ycmp_fig_yearcmp"),
         config={"displayModeBar": False, "scrollZoom": False},
