@@ -16847,8 +16847,8 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
 
     _cur_year = _hist.index.max().year
     _target_years = list(range(_cur_year - _years_n + 1, _cur_year + 1))
-    # 古い年ほどグレーで潰れて見づらいとの指摘のため、判別しやすい暖色系パレットに変更
-    _older_palette = ["#f87171", "#f472b6", "#c084fc", "#38bdf8", "#fb923c"]  # 赤・ピンク・紫・水色・橙
+    # 古い年ほどグレーで潰れて見づらいとの指摘のため、判別しやすい多色パレットに変更
+    _older_palette = ["#f87171", "#f472b6", "#60a5fa", "#c084fc", "#fb923c"]  # 赤・ピンク・青・紫・橙
 
     def _year_color(_i: int, _n: int) -> str:
         if _i == _n - 1:
