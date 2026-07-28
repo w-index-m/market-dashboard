@@ -16749,7 +16749,7 @@ def _resolve_ticker_query(query: str) -> tuple[str, str]:
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFrame:
-    """指定ティッカーの過去N年分の日次終値を取得。"""
+    """指定ティッカーの過去N年分の日次終値・出来高を取得。"""
     import yfinance as _yf
     try:
         _df = _yf.download(
@@ -16762,10 +16762,24 @@ def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFram
         if hasattr(_cl, "columns"):
             _cl = _cl.iloc[:, 0]
         _out = _cl.dropna().to_frame(name="close")
+        if "Volume" in _df.columns:
+            _vol = _df["Volume"]
+            if hasattr(_vol, "columns"):
+                _vol = _vol.iloc[:, 0]
+            _out["volume"] = _vol.reindex(_out.index)
         _out.index = pd.to_datetime(_out.index)
         return _out
     except Exception:
         return pd.DataFrame()
+
+
+def _compute_bollinger_bands(s: pd.Series, window: int = 20, num_std: float = 2.0) -> tuple:
+    """ボリンジャーバンド（中心線=SMA・上下バンド）を計算する。"""
+    _mid = s.rolling(window).mean()
+    _std = s.rolling(window).std()
+    _upper = _mid + num_std * _std
+    _lower = _mid - num_std * _std
+    return _mid, _upper, _lower
 
 
 def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
@@ -16808,6 +16822,23 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     _rets = s.pct_change().dropna()
     _recent = _rets.iloc[-60:] if len(_rets) >= 60 else _rets
     out["vol_ann"] = float(_recent.std() * (252 ** 0.5) * 100) if len(_recent) > 5 else None
+
+    # ボリンジャーバンド（20日・±2σ）と %B（バンド内の現在位置）
+    if len(s) >= 20:
+        _bb_mid, _bb_up, _bb_lo = _compute_bollinger_bands(s, window=20, num_std=2.0)
+        _u, _l, _m = _bb_up.iloc[-1], _bb_lo.iloc[-1], _bb_mid.iloc[-1]
+        out["bb_upper"], out["bb_lower"], out["bb_mid"] = float(_u), float(_l), float(_m)
+        out["bb_pctb"] = (cur - _l) / (_u - _l) * 100 if (_u - _l) > 0 else None
+    else:
+        out["bb_upper"] = out["bb_lower"] = out["bb_mid"] = out["bb_pctb"] = None
+
+    # 出来高（直近値と20日平均比）
+    if "volume" in hist.columns:
+        _v = hist["volume"].dropna()
+        if len(_v) > 0:
+            out["vol_last"] = float(_v.iloc[-1])
+            _v20 = _v.iloc[-20:].mean() if len(_v) >= 20 else _v.mean()
+            out["vol_ratio_20d"] = float(_v.iloc[-1] / _v20) if _v20 > 0 else None
     return out
 
 
@@ -16826,11 +16857,26 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: st
             _ma_lines.append(f"{_label}: {_v:,.2f}（乖離 {_dev:+.1f}%）")
     _ma_str = " / ".join(_ma_lines) if _ma_lines else "データ不足（上場間もない等）"
 
+    _bb_u, _bb_l, _bb_m = tech.get("bb_upper"), tech.get("bb_lower"), tech.get("bb_mid")
+    if _bb_u is not None:
+        _bb_str = (f"中心線(SMA20) {_bb_m:,.2f} ／ 上限 {_bb_u:,.2f} ／ 下限 {_bb_l:,.2f} "
+                   f"／ %B（バンド内位置） {_f(tech.get('bb_pctb'))}%")
+    else:
+        _bb_str = "データ不足"
+
+    _vol_str = "データなし"
+    if tech.get("vol_last") is not None:
+        _vol_ratio = tech.get("vol_ratio_20d")
+        _vol_str = f"直近出来高 {tech['vol_last']:,.0f}" + (
+            f"（20日平均比 {_vol_ratio:.2f}倍）" if _vol_ratio is not None else "")
+
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
 
 【現在値】{tech.get('price'):,.2f}
 【移動平均線】{_ma_str}
 【RSI(14)】{_f(tech.get('rsi14'))}
+【ボリンジャーバンド(20,2σ)】{_bb_str}
+【出来高】{_vol_str}
 【52週レンジ】高値 {_f(tech.get('hi52'), 2)} / 安値 {_f(tech.get('lo52'), 2)} / レンジ内位置 {_f(tech.get('pos52'))}%
 【リターン】1ヶ月 {_f(tech.get('ret_1m'))}% ／ 3ヶ月 {_f(tech.get('ret_3m'))}% ／ 6ヶ月 {_f(tech.get('ret_6m'))}% ／ 1年 {_f(tech.get('ret_1y'))}%
 【年率ボラティリティ（直近60営業日）】{_f(tech.get('vol_ann'))}%
@@ -16838,11 +16884,12 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: st
 【年別の季節性パターン（年初からの累積騰落率）】
 {season_text}
 
-以下4点を日本語・合計250字程度で簡潔に分析してください:
+以下5点を日本語・合計300字程度で簡潔に分析してください:
 1. トレンド判定（上昇/下降/レンジ）とMA・RSIからの根拠
-2. 現在位置（52週レンジ内のどこにいるか、過熱/売られ過ぎの有無）
-3. 季節性（例年の同時期と比べて今年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
-4. 総合コメント（次に注目すべき価格帯やイベント）
+2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
+3. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
+4. 季節性（例年の同時期と比べて今年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
+5. 総合コメント（次に注目すべき価格帯やイベント）
 
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
 
@@ -16891,28 +16938,76 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     st.session_state[_sk("_ycmp_query")] = _raw_query
 
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
-    # ── 上段: 通常の価格推移チャート ──────────────────────────
+    # ── 上段: 価格推移チャート（ボリンジャーバンド＋出来高）──────────
+    _show_bb = st.checkbox("ボリンジャーバンド(20,2σ)を表示", value=True, key=_sk("ycmp_show_bb"))
+
     _cutoff = _hist.index.max() - pd.DateOffset(years=_years_n)
     _cut = _hist[_hist.index >= _cutoff]
-    _fig1 = go.Figure()
+    _has_volume = "volume" in _cut.columns and _cut["volume"].notna().any()
+
+    _fig1 = make_subplots(
+        rows=2 if _has_volume else 1, cols=1, shared_xaxes=True,
+        row_heights=[0.72, 0.28] if _has_volume else [1.0],
+        vertical_spacing=0.04,
+    )
+
+    if _show_bb and len(_cut) >= 20:
+        _bb_mid, _bb_up, _bb_lo = _compute_bollinger_bands(_cut["close"], window=20, num_std=2.0)
+        _fig1.add_trace(go.Scatter(
+            x=_cut.index, y=_bb_up, mode="lines",
+            line=dict(color="#475569", width=1), name="BB上限",
+            hovertemplate="上限 %{y:,.2f}<extra></extra>",
+        ), row=1, col=1)
+        _fig1.add_trace(go.Scatter(
+            x=_cut.index, y=_bb_lo, mode="lines",
+            line=dict(color="#475569", width=1), name="BB下限",
+            fill="tonexty", fillcolor="rgba(96,165,250,0.08)",
+            hovertemplate="下限 %{y:,.2f}<extra></extra>",
+        ), row=1, col=1)
+        _fig1.add_trace(go.Scatter(
+            x=_cut.index, y=_bb_mid, mode="lines",
+            line=dict(color="#94a3b8", width=1, dash="dot"), name="SMA20",
+            hovertemplate="SMA20 %{y:,.2f}<extra></extra>",
+        ), row=1, col=1)
+
     _fig1.add_trace(go.Scatter(
         x=_cut.index, y=_cut["close"], mode="lines",
-        line=dict(color="#60a5fa", width=1.6),
-        name=_tk_input,
+        line=dict(color="#60a5fa", width=1.8), name=_tk_input,
         hovertemplate="%{x|%Y-%m-%d}: %{y:,.2f}<extra></extra>",
-    ))
+    ), row=1, col=1)
+
+    if _has_volume:
+        _vol_colors = [
+            "#4ade80" if _c >= _o else "#f87171"
+            for _c, _o in zip(_cut["close"], _cut["close"].shift(1).fillna(_cut["close"].iloc[0]))
+        ]
+        _fig1.add_trace(go.Bar(
+            x=_cut.index, y=_cut["volume"], marker=dict(color=_vol_colors, line=dict(width=0)),
+            name="出来高", hovertemplate="出来高 %{y:,.0f}<extra></extra>",
+        ), row=2, col=1)
+
     _fig1.update_layout(
         title=dict(text=f"{_tk_input} 株価推移（過去{_years_n}年）", font=dict(size=14, color="#e2e8f0")),
         paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
         font=dict(color="#e2e8f0"),
-        height=340, margin=dict(l=40, r=20, t=44, b=36),
-        yaxis=dict(title=dict(text="価格", font=dict(color="#e2e8f0")),
-                   tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
-        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
+        height=460 if _has_volume else 340, margin=dict(l=40, r=20, t=44, b=36),
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
         showlegend=False,
     )
+    _fig1.update_yaxes(
+        title=dict(text="価格", font=dict(color="#e2e8f0")),
+        tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True, row=1, col=1,
+    )
+    _fig1.update_xaxes(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True, row=1, col=1)
+    if _has_volume:
+        _fig1.update_yaxes(
+            title=dict(text="出来高", font=dict(color="#e2e8f0")),
+            tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True, row=2, col=1,
+        )
+        _fig1.update_xaxes(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True, row=2, col=1)
+
     st.plotly_chart(
         _fig1, use_container_width=True, key=_sk("ycmp_fig_price"),
         config={"displayModeBar": False, "scrollZoom": False},
