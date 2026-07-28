@@ -16896,6 +16896,69 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: st
     return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.4)
 
 
+def _summarize_year_chart_state(y_close: pd.Series, y_up: pd.Series, y_lo: pd.Series,
+                                 y_mid: pd.Series, y_ma50: pd.Series) -> dict:
+    """年別チャートAIコメント用の軽量サマリー（バンドウォーク判定・バンド幅推移など）を作る。"""
+    out = {}
+    if y_close.empty:
+        return out
+    _start, _end = float(y_close.iloc[0]), float(y_close.iloc[-1])
+    out["chg_pct"] = (_end / _start - 1) * 100 if _start > 0 else None
+
+    _u, _l = y_up.iloc[-1], y_lo.iloc[-1]
+    out["pctb"] = (_end - _l) / (_u - _l) * 100 if pd.notna(_u) and pd.notna(_l) and (_u - _l) > 0 else None
+
+    _ma50_last = y_ma50.iloc[-1]
+    out["vs_ma50"] = (_end / _ma50_last - 1) * 100 if pd.notna(_ma50_last) and _ma50_last > 0 else None
+
+    # 直近10営業日のバンドウォーク判定
+    _n = min(10, len(y_close))
+    _rc, _ru, _rl = y_close.iloc[-_n:], y_up.iloc[-_n:], y_lo.iloc[-_n:]
+    _near_upper = sum(1 for c, u in zip(_rc, _ru) if pd.notna(u) and c >= u * 0.98)
+    _near_lower = sum(1 for c, l in zip(_rc, _rl) if pd.notna(l) and c <= l * 1.02)
+    if _near_upper >= _n * 0.5:
+        out["band_state"] = "上限バンドウォーク中"
+    elif _near_lower >= _n * 0.5:
+        out["band_state"] = "下限バンドウォーク中"
+    else:
+        out["band_state"] = "バンド中央付近"
+
+    # バンド幅（ボラティリティ）の前半→後半の推移
+    def _avg_width(u, l, m):
+        _w = (u - l) / m.replace(0, pd.NA) * 100
+        return float(_w.dropna().mean()) if _w.notna().any() else None
+
+    _mid_idx = len(y_close) // 2
+    _w1 = _avg_width(y_up.iloc[:_mid_idx], y_lo.iloc[:_mid_idx], y_mid.iloc[:_mid_idx]) if _mid_idx > 5 else None
+    _w2 = _avg_width(y_up.iloc[_mid_idx:], y_lo.iloc[_mid_idx:], y_mid.iloc[_mid_idx:]) if len(y_close) - _mid_idx > 5 else None
+    out["width_trend"] = None
+    if _w1 is not None and _w2 is not None and _w1 > 0:
+        out["width_trend"] = "拡大" if _w2 > _w1 * 1.15 else ("縮小" if _w2 < _w1 * 0.85 else "横ばい")
+
+    return out
+
+
+def _ai_year_comment(ticker: str, year: int, summary: dict, model_pref: str = "auto") -> tuple:
+    """年ごとの短いAIコメントを生成する。Returns: (comment_text, model_label)"""
+    if not summary:
+        return "データ不足のためコメントできません。", "none"
+
+    def _f(v, digits=1):
+        return f"{v:.{digits}f}" if v is not None else "N/A"
+
+    prompt = f"""{ticker}の{year}年のチャートについて、以下データのみから2文以内・80字程度で簡潔にコメントしてください。
+
+年間騰落率: {_f(summary.get('chg_pct'))}%
+バンド内位置(%B): {_f(summary.get('pctb'))}%
+状態: {summary.get('band_state', '不明')}
+ボラティリティ(バンド幅)の推移: {summary.get('width_trend') or '不明'}
+50日線からの乖離: {_f(summary.get('vs_ma50'))}%
+
+投資助言ではなく、チャートの特徴を端的に説明するだけにしてください。前置き不要、コメント本文のみ返すこと。"""
+
+    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=150, temperature=0.4)
+
+
 def render_ticker_chart_compare(key_prefix: str = "main"):
     """任意銘柄の株価チャート表示 + 年別（1月起点）トレンド比較"""
     _sk = lambda name: f"{key_prefix}_{name}"  # ウィジェットキー衝突防止（同一ページ内で複数回呼ぶ場合）
@@ -17113,13 +17176,31 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     _full_bb_mid, _full_bb_up, _full_bb_lo = _compute_bollinger_bands(_full_close, window=20, num_std=2.0)
     _full_ma50 = _full_close.rolling(50).mean()
 
-    for _yr in reversed(_target_years):  # 新しい年を上に
+    _year_series = {}
+    for _yr in _target_years:
         _y_mask = _hist.index.year == _yr
         if not _y_mask.any():
             continue
-        _y_close = _full_close[_y_mask]
-        _y_up, _y_lo, _y_mid = _full_bb_up[_y_mask], _full_bb_lo[_y_mask], _full_bb_mid[_y_mask]
-        _y_ma50 = _full_ma50[_y_mask]
+        _year_series[_yr] = (
+            _full_close[_y_mask], _full_bb_up[_y_mask], _full_bb_lo[_y_mask],
+            _full_bb_mid[_y_mask], _full_ma50[_y_mask],
+        )
+
+    if st.button("🤖 年別コメントを生成", key=_sk("ycmp_year_comment_btn")):
+        with st.spinner(f"{len(_year_series)}年分のコメントを生成中..."):
+            def _gen_one(_yr):
+                _yc, _yu, _yl, _ym, _yma = _year_series[_yr]
+                _summary = _summarize_year_chart_state(_yc, _yu, _yl, _ym, _yma)
+                return _yr, _ai_year_comment(_tk_input, _yr, _summary, model_pref="auto")
+
+            with ThreadPoolExecutor(max_workers=min(5, len(_year_series))) as _ex:
+                for _yr, _result in _ex.map(_gen_one, list(_year_series.keys())):
+                    st.session_state[_sk(f"ycmp_year_comment_{_yr}")] = _result
+
+    for _yr in reversed(_target_years):  # 新しい年を上に
+        if _yr not in _year_series:
+            continue
+        _y_close, _y_up, _y_lo, _y_mid, _y_ma50 = _year_series[_yr]
 
         _figy = go.Figure()
         _figy.add_trace(go.Scatter(
@@ -17162,6 +17243,16 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             _figy, use_container_width=True, key=_sk(f"ycmp_fig_year_{_yr}"),
             config={"displayModeBar": False, "scrollZoom": False},
         )
+        _yr_comment = st.session_state.get(_sk(f"ycmp_year_comment_{_yr}"))
+        if _yr_comment:
+            _yc_text, _yc_model = _yr_comment
+            st.markdown(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-left:3px solid '
+                f'{_year_colors.get(_yr, "#60a5fa")};border-radius:6px;padding:8px 14px;'
+                f'font-size:12.5px;line-height:1.7;color:#cbd5e1;margin:-4px 0 12px">'
+                f'🤖 {_yc_text}</div>',
+                unsafe_allow_html=True,
+            )
 
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
