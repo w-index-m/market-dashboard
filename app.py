@@ -16889,8 +16889,11 @@ def _ai_chart_analysis(
     # 直近ニュース（あれば追加項目として分析させる。過去年の分析には使わない）
     if news_lines:
         _news_str = "\n".join(f"・{n}" for n in news_lines[:5])
-        _news_block = f"\n【直近ニュース見出し】\n{_news_str}\n"
-        _news_point = "5. 直近ニュースが値動き・出来高と関係していそうか\n"
+        _news_block = (
+            f"\n【直近ニュース見出し（{ticker}関連として取得済み。ここに無い銘柄・数値は言及しないこと）】\n"
+            f"{_news_str}\n"
+        )
+        _news_point = "5. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
         _final_point_num, _n_points, _max_chars = 6, 6, 350
     else:
         _news_block, _news_point = "\n", ""
@@ -16919,6 +16922,8 @@ def _ai_chart_analysis(
 {_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
 
 ※ 年に言及する際は「今年」「昨年」等の曖昧な表現を使わず、必ず西暦（{as_of[:4]}年、等）で明記すること。
+※ 分析対象は{ticker}のみ。上記データに登場しない他の銘柄名・ティッカーには一切言及しないこと。
+※ 数値・見出しは上記データにあるものだけを使い、創作しないこと。
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
 
     return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.4)
