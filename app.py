@@ -16844,6 +16844,50 @@ def _find_support_resistance(s: pd.Series, window: int = 10, num_levels: int = 3
     }
 
 
+def _find_drawdown_episodes(s: pd.Series, threshold_pct: float = -20.0, max_episodes: int = 5) -> list:
+    """価格系列からピーク→ボトム→（あれば）回復の主要な急落局面を検出する。
+    threshold_pct 以上（例: -20%以上）の下落のみを対象とし、直近の局面から新しい順で返す。
+    Returns: [{"peak_date","trough_date","decline_pct","recovery_date"(or None),
+               "days_to_trough","days_to_recover"(or None)}, ...]
+    """
+    if len(s) < 10:
+        return []
+    episodes = []
+    peak_val, peak_idx = float(s.iloc[0]), s.index[0]
+    trough_val, trough_idx = float(s.iloc[0]), s.index[0]
+    in_dd = False
+
+    def _finalize(recovery_idx):
+        _dd_pct = (trough_val / peak_val - 1) * 100
+        if _dd_pct <= threshold_pct:
+            episodes.append({
+                "peak_date": peak_idx, "trough_date": trough_idx,
+                "decline_pct": _dd_pct, "recovery_date": recovery_idx,
+                "days_to_trough": len(s[(s.index > peak_idx) & (s.index <= trough_idx)]),
+                "days_to_recover": (
+                    len(s[(s.index > trough_idx) & (s.index <= recovery_idx)]) if recovery_idx is not None else None
+                ),
+            })
+
+    for i in range(1, len(s)):
+        _val, _idx = float(s.iloc[i]), s.index[i]
+        if _val > peak_val:
+            if in_dd:
+                _finalize(_idx)
+                in_dd = False
+            peak_val, peak_idx = _val, _idx
+            trough_val, trough_idx = _val, _idx
+        else:
+            if _val < trough_val:
+                trough_val, trough_idx = _val, _idx
+                in_dd = True
+
+    if in_dd:
+        _finalize(None)  # 末尾時点でまだ未回復
+
+    return episodes[-max_episodes:][::-1]  # 新しい順
+
+
 def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     """価格系列からAI分析用のテクニカル指標を計算する。"""
     s = hist["close"]
@@ -16917,6 +16961,9 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
 
     # サポート/レジスタンス（直近1年の価格クラスタリング）
     out["support_resistance"] = _find_support_resistance(s, window=10, num_levels=3)
+
+    # 過去の急落局面（-20%以上）と回復までの日数
+    out["drawdown_episodes"] = _find_drawdown_episodes(s, threshold_pct=-20.0, max_episodes=5)
     return out
 
 
@@ -16980,6 +17027,24 @@ def _ai_chart_analysis(
         f"サポート候補: {', '.join(f'{s3:,.2f}' for s3 in _sup_list) if _sup_list else 'なし'}"
     )
 
+    _dd_eps = tech.get("drawdown_episodes") or []
+    if _dd_eps:
+        _dd_lines = []
+        for _ep in _dd_eps:
+            _pk = _ep["peak_date"].strftime("%Y-%m")
+            if _ep["recovery_date"] is not None:
+                _dd_lines.append(
+                    f"・{_pk}頃ピーク→{_ep['decline_pct']:+.1f}%下落（{_ep['days_to_trough']}営業日）"
+                    f"→ 回復まで{_ep['days_to_recover']}営業日"
+                )
+            else:
+                _dd_lines.append(
+                    f"・{_pk}頃ピーク→{_ep['decline_pct']:+.1f}%下落（{_ep['days_to_trough']}営業日）→ 未回復（{as_of}時点）"
+                )
+        _dd_str = "\n".join(_dd_lines)
+    else:
+        _dd_str = "-20%以上の急落局面はデータ期間内になし"
+
     _vol_str = "データなし"
     if tech.get("vol_last") is not None:
         _vol_ratio = tech.get("vol_ratio_20d")
@@ -16993,11 +17058,11 @@ def _ai_chart_analysis(
             f"\n【直近ニュース見出し（{ticker}関連として取得済み。ここに無い銘柄・数値は言及しないこと）】\n"
             f"{_news_str}\n"
         )
-        _news_point = "6. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
-        _final_point_num, _n_points, _max_chars = 7, 7, 500
+        _news_point = "7. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
+        _final_point_num, _n_points, _max_chars = 8, 8, 550
     else:
         _news_block, _news_point = "\n", ""
-        _final_point_num, _n_points, _max_chars = 6, 6, 450
+        _final_point_num, _n_points, _max_chars = 7, 7, 500
 
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
 【分析基準日】{as_of}（このデータは全て{as_of}時点のもの）
@@ -17016,6 +17081,9 @@ def _ai_chart_analysis(
 
 【年別の季節性パターン（年初からの累積騰落率）】
 {season_text}
+
+【過去の急落局面（-20%以上）と回復までの日数】
+{_dd_str}
 {_news_block}
 以下{_n_points}点を日本語・合計{_max_chars}字程度で簡潔に分析してください:
 1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠。
@@ -17025,7 +17093,8 @@ def _ai_chart_analysis(
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
 3. サポート/レジスタンス（次に意識される価格帯とその根拠。なぜその価格帯が意識されやすいか＝過去に何度も反発/抵抗された水準であることに触れる）
 4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
-5. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
+5. 急落耐性（過去の急落局面の下落幅・回復日数を踏まえ、同程度の急落が今起きた場合にどの程度で凌げそうか）
+6. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
 {_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
 
 ※ 年に言及する際は「今年」「昨年」等の曖昧な表現を使わず、必ず西暦（{as_of[:4]}年、等）で明記すること。
