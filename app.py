@@ -16768,6 +16768,87 @@ def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFram
         return pd.DataFrame()
 
 
+def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
+    """価格系列からAI分析用のテクニカル指標を計算する。"""
+    s = hist["close"]
+    cur = float(s.iloc[-1])
+    out = {"price": cur}
+
+    def _ma(n):
+        return float(s.iloc[-n:].mean()) if len(s) >= n else None
+
+    out["ma25"], out["ma50"], out["ma75"], out["ma200"] = _ma(25), _ma(50), _ma(75), _ma(200)
+
+    # RSI(14)
+    _delta = s.diff()
+    _gain = _delta.clip(lower=0).rolling(14).mean()
+    _loss = (-_delta.clip(upper=0)).rolling(14).mean()
+    _rs = _gain / _loss.replace(0, pd.NA)
+    _rsi = 100 - (100 / (1 + _rs))
+    _rsi_last = _rsi.iloc[-1]
+    out["rsi14"] = float(_rsi_last) if pd.notna(_rsi_last) else None
+
+    # 52週レンジ
+    _s52 = s.iloc[-252:] if len(s) >= 252 else s
+    _hi52, _lo52 = float(_s52.max()), float(_s52.min())
+    out["hi52"], out["lo52"] = _hi52, _lo52
+    out["pos52"] = (cur - _lo52) / (_hi52 - _lo52) * 100 if _hi52 > _lo52 else None
+
+    # リターン
+    def _ret(days):
+        if len(s) > days:
+            _base = float(s.iloc[-days - 1])
+            return (cur / _base - 1) * 100 if _base > 0 else None
+        return None
+
+    out["ret_1m"], out["ret_3m"] = _ret(21), _ret(63)
+    out["ret_6m"], out["ret_1y"] = _ret(126), _ret(252)
+
+    # 年率ボラティリティ（直近60営業日）
+    _rets = s.pct_change().dropna()
+    _recent = _rets.iloc[-60:] if len(_rets) >= 60 else _rets
+    out["vol_ann"] = float(_recent.std() * (252 ** 0.5) * 100) if len(_recent) > 5 else None
+    return out
+
+
+def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: str = "auto") -> tuple:
+    """テクニカル指標＋季節性パターンをAIに渡してチャート分析コメントを生成する。
+    Returns: (analysis_text, model_label)
+    """
+    def _f(v, digits=1):
+        return f"{v:.{digits}f}" if v is not None else "N/A"
+
+    _ma_lines = []
+    for _label, _key in [("MA25", "ma25"), ("MA50", "ma50"), ("MA75", "ma75"), ("MA200", "ma200")]:
+        _v = tech.get(_key)
+        if _v is not None and tech.get("price"):
+            _dev = (tech["price"] / _v - 1) * 100
+            _ma_lines.append(f"{_label}: {_v:,.2f}（乖離 {_dev:+.1f}%）")
+    _ma_str = " / ".join(_ma_lines) if _ma_lines else "データ不足（上場間もない等）"
+
+    prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
+
+【現在値】{tech.get('price'):,.2f}
+【移動平均線】{_ma_str}
+【RSI(14)】{_f(tech.get('rsi14'))}
+【52週レンジ】高値 {_f(tech.get('hi52'), 2)} / 安値 {_f(tech.get('lo52'), 2)} / レンジ内位置 {_f(tech.get('pos52'))}%
+【リターン】1ヶ月 {_f(tech.get('ret_1m'))}% ／ 3ヶ月 {_f(tech.get('ret_3m'))}% ／ 6ヶ月 {_f(tech.get('ret_6m'))}% ／ 1年 {_f(tech.get('ret_1y'))}%
+【年率ボラティリティ（直近60営業日）】{_f(tech.get('vol_ann'))}%
+
+【年別の季節性パターン（年初からの累積騰落率）】
+{season_text}
+
+以下4点を日本語・合計250字程度で簡潔に分析してください:
+1. トレンド判定（上昇/下降/レンジ）とMA・RSIからの根拠
+2. 現在位置（52週レンジ内のどこにいるか、過熱/売られ過ぎの有無）
+3. 季節性（例年の同時期と比べて今年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
+4. 総合コメント（次に注目すべき価格帯やイベント）
+
+※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
+
+    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.4)
+
+
 def render_ticker_chart_compare(key_prefix: str = "main"):
     """任意銘柄の株価チャート表示 + 年別（1月起点）トレンド比較"""
     _sk = lambda name: f"{key_prefix}_{name}"  # ウィジェットキー衝突防止（同一ページ内で複数回呼ぶ場合）
@@ -16922,6 +17003,69 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             "年初来騰落率": f"{_chg:+.1f}%",
         })
     st.dataframe(_sum_rows, use_container_width=True, hide_index=True)
+
+    # ── AIチャート分析 ─────────────────────────────────────────
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        '🤖 AIチャート分析</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("移動平均・RSI・52週レンジ・季節性パターンを総合し、AIがチャートを読み解きます。")
+
+    _ai_model_opts = {
+        "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+        "🟡 Gemini": "gemini",
+        "⚡ Groq（高速）": "groq",
+        "🌐 OpenRouter": "openrouter",
+    }
+    _ai_model_label = st.selectbox(
+        "使用するAIモデル", list(_ai_model_opts.keys()), key=_sk("ycmp_ai_model"),
+    )
+    _ai_model_pref = _ai_model_opts[_ai_model_label]
+
+    if st.button("🤖 AIにチャート分析させる", key=_sk("ycmp_ai_btn"), type="primary"):
+        # 同時期比較用の季節性サマリーを構築（過去年は「今と同じ時期」時点と最終結果、今年は進行中の値）
+        _cur_last = _hist.index.max()
+        _cur_mmdd = (_cur_last.month, _cur_last.day)
+        _season_lines = []
+        for _yr in reversed(_target_years):
+            _yser = _hist[_hist.index.year == _yr]["close"]
+            if _yser.empty:
+                continue
+            _base = float(_yser.iloc[0])
+            if _base <= 0:
+                continue
+            if _yr == _cur_year:
+                _now_pct = (float(_yser.iloc[-1]) / _base - 1) * 100
+                _season_lines.append(
+                    f"{_yr}年（進行中・{_yser.index[0].strftime('%m/%d')}〜{_yser.index[-1].strftime('%m/%d')}）: {_now_pct:+.1f}%"
+                )
+            else:
+                _same_period = _yser[[(d.month, d.day) <= _cur_mmdd for d in _yser.index]]
+                _sp_pct = ((float(_same_period.iloc[-1]) / _base - 1) * 100) if not _same_period.empty else None
+                _full_pct = (float(_yser.iloc[-1]) / _base - 1) * 100
+                _sp_str = f"{_sp_pct:+.1f}%" if _sp_pct is not None else "N/A"
+                _season_lines.append(f"{_yr}年: 同時期時点 {_sp_str} → 最終 {_full_pct:+.1f}%")
+        _season_text = "\n".join(_season_lines) if _season_lines else "データなし"
+
+        with st.spinner(f"🤖 {_tk_input} のチャートを分析中..."):
+            _tech = _compute_chart_technicals(_hist)
+            _analysis_text, _analysis_model = _ai_chart_analysis(
+                _tk_input, _tech, _season_text, model_pref=_ai_model_pref,
+            )
+        st.session_state[_sk("ycmp_ai_result")] = (_analysis_text, _analysis_model)
+
+    _ai_result = st.session_state.get(_sk("ycmp_ai_result"))
+    if _ai_result:
+        _res_text, _res_model = _ai_result
+        st.markdown(
+            f'<div style="background:#0f172a;border:1px solid #334155;border-left:4px solid #60a5fa;'
+            f'border-radius:8px;padding:16px 20px;font-size:13px;line-height:1.9;color:#e2e8f0;margin-top:8px">'
+            f'{_res_text.replace(chr(10), "<br>")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(f"🤖 {_res_model} | ⚠️ 情報提供目的のみ・投資助言ではありません")
 
 
 def render_av_economic_dashboard():
