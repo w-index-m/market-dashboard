@@ -16924,6 +16924,69 @@ def _find_drawdown_episodes(s: pd.Series, threshold_pct: float = -20.0, max_epis
     return episodes[-max_episodes:][::-1]  # 新しい順
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_analyst_rating_changes(ticker: str, date_key: str) -> pd.DataFrame:
+    """アナリストのレーティング変更履歴を取得（yfinance）。date_keyは当日キャッシュ用。"""
+    try:
+        import yfinance as _yf
+        _df = _yf.Ticker(ticker).upgrades_downgrades
+        if _df is None or _df.empty:
+            return pd.DataFrame()
+        _df = _df.reset_index()
+        return _df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _analyze_downgrades_in_uptrend(hist: pd.DataFrame, ratings_df: pd.DataFrame, max_items: int = 10) -> list:
+    """格下げ（downgrade）発生時点が上昇トレンド中だったかと、その後の株価推移を検証する。
+    「上げトレンドの下げレーティングは買い」という経験則を、この銘柄の実データで検証するための集計。
+    """
+    if ratings_df is None or ratings_df.empty:
+        return []
+    _s = hist["close"]
+    _ma50 = _s.rolling(50).mean()
+
+    _date_col = "GradeDate" if "GradeDate" in ratings_df.columns else ratings_df.columns[0]
+    _action_col = "Action" if "Action" in ratings_df.columns else None
+    if _action_col is None:
+        return []
+
+    _results = []
+    for _, _row in ratings_df.iterrows():
+        _action = str(_row.get(_action_col, "")).lower()
+        if "down" not in _action:
+            continue
+        try:
+            _dt = pd.Timestamp(_row[_date_col])
+        except Exception:
+            continue
+        _candidates = _s.index[_s.index >= _dt]
+        if len(_candidates) == 0:
+            continue
+        _event_idx = _candidates[0]
+        _pos = _s.index.get_loc(_event_idx)
+        _price_at = float(_s.iloc[_pos])
+        _ma50_at = _ma50.iloc[_pos] if _pos < len(_ma50) else None
+        _is_uptrend = bool(pd.notna(_ma50_at) and _ma50_at > 0 and _price_at > _ma50_at)
+
+        _fwd5 = (float(_s.iloc[_pos + 5]) / _price_at - 1) * 100 if _pos + 5 < len(_s) else None
+        _fwd20 = (float(_s.iloc[_pos + 20]) / _price_at - 1) * 100 if _pos + 20 < len(_s) else None
+
+        _results.append({
+            "date": _event_idx.strftime("%Y-%m-%d"),
+            "firm": str(_row.get("Firm", "-")),
+            "from_grade": str(_row.get("FromGrade", "-")),
+            "to_grade": str(_row.get("ToGrade", "-")),
+            "is_uptrend": _is_uptrend,
+            "fwd_5d": _fwd5,
+            "fwd_20d": _fwd20,
+        })
+
+    _results.sort(key=lambda r: r["date"], reverse=True)
+    return _results[:max_items]
+
+
 def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     """価格系列からAI分析用のテクニカル指標を計算する。"""
     s = hist["close"]
@@ -17538,6 +17601,54 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             ],
             use_container_width=True, hide_index=True,
         )
+
+    # ── アナリスト格下げレーティング検証（「上げトレンドの下げレーティングは買い」説）──
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        f'📉 {_tk_input} アナリスト格下げ履歴 & 上げトレンド検証</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "「上昇トレンド中の格下げレーティングはむしろ買い」という経験則を、この銘柄の実データで検証します"
+        "（格下げ時点でMA50より上＝上昇トレンド中とみなす）。"
+    )
+    _ratings_df = _fetch_analyst_rating_changes(_tk_input, _hist.index.max().strftime("%Y-%m-%d"))
+    if _ratings_df.empty:
+        st.info(f"{_tk_input} のアナリストレーティング変更履歴が取得できませんでした（データ提供元の対応銘柄外の可能性）。")
+    else:
+        _dg_results = _analyze_downgrades_in_uptrend(_hist, _ratings_df, max_items=15)
+        if not _dg_results:
+            st.info("直近の格下げレーティングは見つかりませんでした。")
+        else:
+            _uptrend_dgs = [r for r in _dg_results if r["is_uptrend"]]
+            _up_fwd20 = [r["fwd_20d"] for r in _uptrend_dgs if r["fwd_20d"] is not None]
+            if _up_fwd20:
+                _avg_fwd20 = sum(_up_fwd20) / len(_up_fwd20)
+                _win_rate = sum(1 for v in _up_fwd20 if v > 0) / len(_up_fwd20) * 100
+                st.markdown(
+                    f'<div style="background:#0f172a;border:1px solid #334155;border-left:4px solid #4ade80;'
+                    f'border-radius:8px;padding:12px 16px;font-size:13px;color:#e2e8f0;margin-bottom:8px">'
+                    f'📊 上昇トレンド中の格下げ {len(_uptrend_dgs)}件中、20営業日後プラスだったのは '
+                    f'<b style="color:#4ade80">{_win_rate:.0f}%</b>　'
+                    f'平均リターン: <b style="color:{"#4ade80" if _avg_fwd20 >= 0 else "#f87171"}">{_avg_fwd20:+.1f}%</b>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            st.dataframe(
+                [
+                    {
+                        "日付": r["date"], "証券会社": r["firm"],
+                        "レーティング": f"{r['from_grade']} → {r['to_grade']}",
+                        "上昇トレンド中?": "🟢 Yes" if r["is_uptrend"] else "⚪ No",
+                        "5営業日後": f"{r['fwd_5d']:+.1f}%" if r["fwd_5d"] is not None else "—",
+                        "20営業日後": f"{r['fwd_20d']:+.1f}%" if r["fwd_20d"] is not None else "—",
+                    }
+                    for r in _dg_results
+                ],
+                use_container_width=True, hide_index=True,
+            )
+            st.caption("⚠️ サンプル数が少ないため統計的な信頼性は限定的です。情報提供目的のみ・投資助言ではありません。")
 
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
