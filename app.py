@@ -16955,9 +16955,40 @@ def _fetch_finnhub_rating_changes_raw(ticker: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _fetch_fmp_rating_changes_raw(ticker: str) -> pd.DataFrame:
+    """FMPのアナリストレーティング変更履歴（/api/v4/upgrades-downgrades）を取得。"""
+    if not FMP_API_KEY:
+        return pd.DataFrame()
+    try:
+        url = "https://financialmodelingprep.com/api/v4/upgrades-downgrades"
+        r = requests.get(url, params={"symbol": ticker, "apikey": FMP_API_KEY}, timeout=10)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data = r.json()
+        if not isinstance(data, list) or not data:
+            return pd.DataFrame()
+        rows = []
+        for item in data:
+            _date = item.get("publishedDate") or item.get("date")
+            if not _date:
+                continue
+            rows.append({
+                "GradeDate": pd.to_datetime(_date, errors="coerce"),
+                "Firm": item.get("gradingCompany", "-") or "-",
+                "FromGrade": item.get("previousGrade", "-") or "-",
+                "ToGrade": item.get("newGrade", "-") or "-",
+                "Action": item.get("action", "") or "",
+            })
+        _df = pd.DataFrame(rows)
+        return _df.dropna(subset=["GradeDate"]) if not _df.empty else _df
+    except Exception as e:
+        logger.warning(f"[fmp] upgrades-downgrades取得失敗 {ticker}: {e}")
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_analyst_rating_changes(ticker: str, date_key: str) -> pd.DataFrame:
-    """アナリストのレーティング変更履歴を取得（yfinance + Finnhubをマージ）。date_keyは当日キャッシュ用。"""
+    """アナリストのレーティング変更履歴を取得（yfinance + Finnhub + FMPをマージ）。date_keyは当日キャッシュ用。"""
     _frames = []
     try:
         import yfinance as _yf
@@ -16970,6 +17001,10 @@ def _fetch_analyst_rating_changes(ticker: str, date_key: str) -> pd.DataFrame:
     _fh_df = _fetch_finnhub_rating_changes_raw(ticker)
     if not _fh_df.empty:
         _frames.append(_fh_df)
+
+    _fmp_df = _fetch_fmp_rating_changes_raw(ticker)
+    if not _fmp_df.empty:
+        _frames.append(_fmp_df)
 
     if not _frames:
         return pd.DataFrame()
