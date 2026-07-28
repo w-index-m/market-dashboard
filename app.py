@@ -16842,8 +16842,9 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     return out
 
 
-def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: str = "auto") -> tuple:
+def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, as_of: str, model_pref: str = "auto") -> tuple:
     """テクニカル指標＋季節性パターンをAIに渡してチャート分析コメントを生成する。
+    as_of: 分析基準日（YYYY-MM-DD）。プロンプトに明示し、年の取り違えを防ぐ。
     Returns: (analysis_text, model_label)
     """
     def _f(v, digits=1):
@@ -16871,6 +16872,7 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: st
             f"（20日平均比 {_vol_ratio:.2f}倍）" if _vol_ratio is not None else "")
 
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
+【分析基準日】{as_of}（このデータは全て{as_of}時点のもの）
 
 【現在値】{tech.get('price'):,.2f}
 【移動平均線】{_ma_str}
@@ -16891,6 +16893,7 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, model_pref: st
 4. 季節性（例年の同時期と比べて今年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
 5. 総合コメント（次に注目すべき価格帯やイベント）
 
+※ 年に言及する際は「今年」「昨年」等の曖昧な表現を使わず、必ず西暦（{as_of[:4]}年、等）で明記すること。
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
 
     return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=700, temperature=0.4)
@@ -16946,15 +16949,17 @@ def _ai_year_comment(ticker: str, year: int, summary: dict, model_pref: str = "a
     def _f(v, digits=1):
         return f"{v:.{digits}f}" if v is not None else "N/A"
 
-    prompt = f"""{ticker}の{year}年のチャートについて、以下データのみから2文以内・80字程度で簡潔にコメントしてください。
+    prompt = f"""{ticker}の{year}年（1月〜{year}年時点）のチャートについて、以下データのみから2文以内・80字程度で簡潔にコメントしてください。
+他の年の話は一切せず、{year}年の値動きのみを説明すること。
 
-年間騰落率: {_f(summary.get('chg_pct'))}%
-バンド内位置(%B): {_f(summary.get('pctb'))}%
-状態: {summary.get('band_state', '不明')}
-ボラティリティ(バンド幅)の推移: {summary.get('width_trend') or '不明'}
-50日線からの乖離: {_f(summary.get('vs_ma50'))}%
+{year}年間の騰落率: {_f(summary.get('chg_pct'))}%
+{year}年末時点のバンド内位置(%B): {_f(summary.get('pctb'))}%
+{year}年終盤の状態: {summary.get('band_state', '不明')}
+{year}年前半→後半のボラティリティ(バンド幅)推移: {summary.get('width_trend') or '不明'}
+{year}年末の50日線からの乖離: {_f(summary.get('vs_ma50'))}%
 
-投資助言ではなく、チャートの特徴を端的に説明するだけにしてください。前置き不要、コメント本文のみ返すこと。"""
+投資助言ではなく、チャートの特徴を端的に説明するだけにしてください。
+必ず「{year}年は」で書き出すこと。前置き不要、コメント本文のみ返すこと。"""
 
     return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=150, temperature=0.4)
 
@@ -17299,12 +17304,12 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 _season_lines.append(f"{_yr}年: 同時期時点 {_sp_str} → 最終 {_full_pct:+.1f}%")
         _season_text = "\n".join(_season_lines) if _season_lines else "データなし"
 
+        _as_of = _hist.index.max().strftime("%Y-%m-%d")
         with st.spinner(f"🤖 {_tk_input} のチャートを分析中..."):
             _tech = _compute_chart_technicals(_hist)
             _analysis_text, _analysis_model = _ai_chart_analysis(
-                _tk_input, _tech, _season_text, model_pref=_ai_model_pref,
+                _tk_input, _tech, _season_text, _as_of, model_pref=_ai_model_pref,
             )
-        _as_of = _hist.index.max().strftime("%Y-%m-%d")
         st.session_state[_sk(f"ycmp_ai_result_{_tk_input}")] = (_analysis_text, _analysis_model, _as_of, _tk_input)
 
     _ai_result = st.session_state.get(_sk(f"ycmp_ai_result_{_tk_input}"))
