@@ -17099,6 +17099,70 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         })
     st.dataframe(_sum_rows, use_container_width=True, hide_index=True)
 
+    # ── 年別チャート（株価＋移動平均＋ボリンジャーバンド、1年ずつ）────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:22px;font-weight:800;color:#60a5fa;margin:4px 0 8px">'
+        f'📆 {_tk_input} 年別チャート（株価・移動平均・ボリンジャーバンド）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("各年ごとに株価・SMA20/50・ボリンジャーバンド(20,2σ)を表示。年内の値動きのクセを見比べられます。")
+
+    # 指標は年をまたいだ全期間データで計算してから各年に切り出す（年始のNaN欠損を防ぐ）
+    _full_close = _hist["close"]
+    _full_bb_mid, _full_bb_up, _full_bb_lo = _compute_bollinger_bands(_full_close, window=20, num_std=2.0)
+    _full_ma50 = _full_close.rolling(50).mean()
+
+    for _yr in reversed(_target_years):  # 新しい年を上に
+        _y_mask = _hist.index.year == _yr
+        if not _y_mask.any():
+            continue
+        _y_close = _full_close[_y_mask]
+        _y_up, _y_lo, _y_mid = _full_bb_up[_y_mask], _full_bb_lo[_y_mask], _full_bb_mid[_y_mask]
+        _y_ma50 = _full_ma50[_y_mask]
+
+        _figy = go.Figure()
+        _figy.add_trace(go.Scatter(
+            x=_y_close.index, y=_y_up, mode="lines",
+            line=dict(color="#475569", width=1), name="BB上限",
+            hovertemplate="上限 %{y:,.2f}<extra></extra>",
+        ))
+        _figy.add_trace(go.Scatter(
+            x=_y_close.index, y=_y_lo, mode="lines",
+            line=dict(color="#475569", width=1), name="BB下限",
+            fill="tonexty", fillcolor="rgba(96,165,250,0.08)",
+            hovertemplate="下限 %{y:,.2f}<extra></extra>",
+        ))
+        _figy.add_trace(go.Scatter(
+            x=_y_close.index, y=_y_mid, mode="lines",
+            line=dict(color="#94a3b8", width=1, dash="dot"), name="SMA20",
+            hovertemplate="SMA20 %{y:,.2f}<extra></extra>",
+        ))
+        _figy.add_trace(go.Scatter(
+            x=_y_close.index, y=_y_ma50, mode="lines",
+            line=dict(color="#fbbf24", width=1.2, dash="dash"), name="SMA50",
+            hovertemplate="SMA50 %{y:,.2f}<extra></extra>",
+        ))
+        _figy.add_trace(go.Scatter(
+            x=_y_close.index, y=_y_close, mode="lines",
+            line=dict(color=_year_colors.get(_yr, "#60a5fa"), width=2), name=f"{_yr}年 株価",
+            hovertemplate="%{x|%m/%d}: %{y:,.2f}<extra></extra>",
+        ))
+        _figy.update_layout(
+            title=dict(text=f"{_yr}年", font=dict(size=13, color="#94a3b8")),
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            font=dict(color="#e2e8f0"),
+            height=300, margin=dict(l=40, r=20, t=36, b=32),
+            yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
+            xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d", fixedrange=True),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+            showlegend=False,
+        )
+        st.plotly_chart(
+            _figy, use_container_width=True, key=_sk(f"ycmp_fig_year_{_yr}"),
+            config={"displayModeBar": False, "scrollZoom": False},
+        )
+
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
     st.markdown(
