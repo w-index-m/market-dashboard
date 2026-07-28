@@ -16773,6 +16773,42 @@ def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFram
         return pd.DataFrame()
 
 
+# 過去の主要な市場全体の急落局面（参考値・代表指数ベース、概算）
+# AIの創作を防ぐため、具体的な数値はここで固定して渡す
+_MAJOR_CRASH_REFERENCE = [
+    {
+        "name": "ITバブル崩壊", "period": "2000年3月〜2002年10月",
+        "decline": "NASDAQ -78% / S&P500 -49%",
+        "to_bottom": "約2年7ヶ月で底打ち",
+        "to_recover": "S&P500は約7年後(2007年)、NASDAQは15年後(2015年)に高値更新",
+    },
+    {
+        "name": "世界金融危機（リーマンショック）", "period": "2007年10月〜2009年3月",
+        "decline": "S&P500 -57%",
+        "to_bottom": "約1年5ヶ月で底打ち",
+        "to_recover": "約4年後(2013年)に高値更新",
+    },
+    {
+        "name": "東日本大震災ショック（3/11）", "period": "2011年3月",
+        "decline": "日経平均 -16%程度（3営業日、10,254→8,227）",
+        "to_bottom": "発生後3営業日で底打ち",
+        "to_recover": "約1ヶ月で震災前水準まで急回復（短期急落・急回復型）",
+    },
+    {
+        "name": "コロナショック", "period": "2020年2月19日〜3月23日",
+        "decline": "S&P500 -34%",
+        "to_bottom": "わずか33日間で史上最速の弱気相場入り",
+        "to_recover": "約5ヶ月後(2020年8月)に高値更新",
+    },
+    {
+        "name": "トランプ関税ショック（相互関税/\"解放の日\"）", "period": "2025年4月",
+        "decline": "S&P500 -12%程度（数営業日で急落）",
+        "to_bottom": "発表後1週間程度で底打ち",
+        "to_recover": "数週間〜数ヶ月で回復基調に転換",
+    },
+]
+
+
 def _compute_bollinger_bands(s: pd.Series, window: int = 20, num_std: float = 2.0) -> tuple:
     """ボリンジャーバンド（中心線=SMA・上下バンド）を計算する。"""
     _mid = s.rolling(window).mean()
@@ -17045,6 +17081,11 @@ def _ai_chart_analysis(
     else:
         _dd_str = "-20%以上の急落局面はデータ期間内になし"
 
+    _crash_ref_str = "\n".join(
+        f"・{c['name']}（{c['period']}）: {c['decline']} ／ {c['to_bottom']} ／ {c['to_recover']}"
+        for c in _MAJOR_CRASH_REFERENCE
+    )
+
     _vol_str = "データなし"
     if tech.get("vol_last") is not None:
         _vol_ratio = tech.get("vol_ratio_20d")
@@ -17082,8 +17123,11 @@ def _ai_chart_analysis(
 【年別の季節性パターン（年初からの累積騰落率）】
 {season_text}
 
-【過去の急落局面（-20%以上）と回復までの日数】
+【過去の急落局面（{ticker}自身の-20%以上の下落）と回復までの日数】
 {_dd_str}
+
+【参考: 市場全体の歴史的な主要急落（{ticker}固有ではなく一般的な参考情報）】
+{_crash_ref_str}
 {_news_block}
 以下{_n_points}点を日本語・合計{_max_chars}字程度で簡潔に分析してください:
 1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠。
@@ -17093,7 +17137,8 @@ def _ai_chart_analysis(
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
 3. サポート/レジスタンス（次に意識される価格帯とその根拠。なぜその価格帯が意識されやすいか＝過去に何度も反発/抵抗された水準であることに触れる）
 4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
-5. 急落耐性（過去の急落局面の下落幅・回復日数を踏まえ、同程度の急落が今起きた場合にどの程度で凌げそうか）
+5. 急落耐性（{ticker}自身の過去の急落局面の下落幅・回復日数を踏まえ、同程度の急落が今起きた場合にどの程度で凌げそうか。
+   参考情報の歴史的急落と比べて{ticker}の値動きの荒さがどの水準かにも触れてよい）
 6. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
 {_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
 
@@ -17481,6 +17526,18 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 f'🤖 {_yc_text}</div>',
                 unsafe_allow_html=True,
             )
+
+    # ── 過去の主要な市場急落（参考・AI呼び出し不要で常時閲覧可）─────
+    with st.expander("📚 過去の主要な市場急落を振り返る（マインドセット用の参考資料）"):
+        st.caption("急落局面で慌てないための参考情報。数値は代表的な指数ベースの概算です。")
+        st.dataframe(
+            [
+                {"急落名": c["name"], "時期": c["period"], "下落幅": c["decline"],
+                 "底打ちまで": c["to_bottom"], "回復まで": c["to_recover"]}
+                for c in _MAJOR_CRASH_REFERENCE
+            ],
+            use_container_width=True, hide_index=True,
+        )
 
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
