@@ -21632,6 +21632,19 @@ def _fetch_portfolio_prices(tickers: tuple) -> dict:
             _roll_max = _cl1y.cummax()
             _dd  = ((_cl1y - _roll_max) / _roll_max * 100).min()
             _max_dd = float(_dd) if not _math.isnan(_dd) else 0.0
+
+            # 配当利回り（過去12ヶ月の実配当合計 ÷ 現在値。日米どちらも同じロジック）
+            _div_yield = None
+            try:
+                _divs = _yf3.Ticker(_t).dividends
+                if _divs is not None and not _divs.empty:
+                    _cutoff = pd.Timestamp.now(tz=_divs.index.tz) - pd.Timedelta(days=365)
+                    _ttm_sum = float(_divs[_divs.index >= _cutoff].sum())
+                    if _ttm_sum > 0 and _price > 0:
+                        _div_yield = round(_ttm_sum / _price * 100, 2)
+            except Exception:
+                pass
+
             out[_t] = {
                 "price":      _price,
                 "ret_1y":     _ret1y,
@@ -21640,6 +21653,7 @@ def _fetch_portfolio_prices(tickers: tuple) -> dict:
                 "volatility": round(_vol, 1),
                 "sharpe":     round(_sr, 2),
                 "max_dd":     round(_max_dd, 1),
+                "div_yield":  _div_yield,
             }
         except Exception:
             out[_t] = None
@@ -24014,7 +24028,8 @@ def render_claude_trading_project():
                             '<b>3m/6m/1y</b>: 過去3ヶ月・6ヶ月・1年の株価リターン（騰落率）　'
                             '<b>ボラ</b>: 年率ボラティリティ（値動きの荒さ、低いほど安定）　'
                             '<b>SR</b>: シャープレシオ（リスク1%あたりのリターン、1.0以上が優秀）　'
-                            '<b>DD</b>: 最大ドローダウン（直近1年の最大下落幅、マイナスが大きいほどリスク高）'
+                            '<b>DD</b>: 最大ドローダウン（直近1年の最大下落幅、マイナスが大きいほどリスク高）　'
+                            '<b>配当利回り</b>: 過去12ヶ月の実配当合計÷現在値（日米共通）'
                             '</div>',
                             unsafe_allow_html=True,
                         )
@@ -24094,11 +24109,18 @@ def render_claude_trading_project():
                             _pvol   = _tdat.get("volatility") if isinstance(_tdat, dict) else None
                             _psr    = _tdat.get("sharpe")   if isinstance(_tdat, dict) else None
                             _pmdd   = _tdat.get("max_dd")   if isinstance(_tdat, dict) else None
+                            _pdiv   = _tdat.get("div_yield") if isinstance(_tdat, dict) else None
 
                             def _rc(v):
                                 return "#16a34a" if (v or 0) >= 0 else "#dc2626"
                             def _rv(v):
                                 return f"{v:+.1f}%" if v is not None else "—"
+
+                            _div_html = (
+                                f'&nbsp;&nbsp;<span style="color:#475569">配当利回り:</span>'
+                                f'<span style="color:#0891b2;font-weight:700"> {_pdiv:.2f}%</span>'
+                                if _pdiv is not None else ""
+                            )
 
                             if any(v is not None for v in [_ret1y, _ret6m, _ret3m]):
                                 _sr_c2 = "#16a34a" if (_psr or 0) >= 1.0 else "#ca8a04" if (_psr or 0) >= 0.5 else "#dc2626"
@@ -24118,6 +24140,7 @@ def render_claude_trading_project():
                                     f'<span style="color:{_sr_c2}">SR:{_psr:.2f}</span>'
                                     f'&nbsp;'
                                     f'<span style="color:#b45309">DD:{_pmdd:.1f}%</span>'
+                                    f'{_div_html}'
                                     f'</div>'
                                 )
                             else:
