@@ -16887,7 +16887,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
         font=dict(color="#e2e8f0"),
         height=380, margin=dict(l=40, r=20, t=20, b=36),
-        yaxis=dict(title=dict(text=f"{_tk_input} 年初来騰落率(%)", font=dict(color="#e2e8f0")),
+        yaxis=dict(title=dict(text="年初来騰落率(%)", font=dict(color="#e2e8f0")),
                    tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b",
                    zeroline=True, zerolinecolor="#475569", fixedrange=True),
         xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d", fixedrange=True),
@@ -16896,8 +16896,8 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     )
     # 凡例と重ならないよう、チャート内タイトルではなくチャート直上にStreamlit要素として表示
     st.markdown(
-        f'<div style="font-size:17px;font-weight:800;color:#60a5fa;margin:2px 0 6px">'
-        f'{_tk_input} 年別トレンド比較</div>',
+        f'<div style="font-size:22px;font-weight:800;color:#60a5fa;margin:4px 0 8px">'
+        f'📊 {_tk_input} 年別トレンド比較</div>',
         unsafe_allow_html=True,
     )
     st.plotly_chart(
