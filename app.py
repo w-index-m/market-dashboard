@@ -21738,6 +21738,49 @@ RRG改善セクター: {improving_str}
     return {"stance": "中立", "sector_bias": [], "key_risks": [], "market_comment": "", "_model": "none"}
 
 
+_AGENT_B_FABRICATED_METRIC_RE = re.compile(r'(ROIC|ROE|ROA|PER|PBR|PSR|DOE|EPS成長率?)\s*[:：]?\s*\d+(\.\d+)?\s*%?', re.IGNORECASE)
+
+
+def _verify_stock_agent_result(result: dict, ret_3m: float, ret_6m: float, ret_1y: float) -> dict:
+    """Agent Bの出力を、実際に渡した数値データと整合しているか軽量検証する（LLM追加呼び出しなし）。
+    Agent Cに渡す前に毎回実行し、_verified / _verify_flags を付与する。
+    """
+    _flags = []
+    _score = float(result.get("score", 5) or 5)
+    _conclusion = str(result.get("conclusion", ""))
+    _merits = result.get("merits", []) or []
+    _demerits = result.get("demerits", []) or []
+
+    # 1) スコアと結論の整合性
+    if _score >= 7 and "除外" in _conclusion:
+        _flags.append("スコアが高いのに結論が「除外」")
+    if _score <= 3 and "買い" in _conclusion:
+        _flags.append("スコアが低いのに結論が「買い」")
+
+    # 2) トレンド方向とmerits/thesisの整合性（実際のリターン方向と逆のことを言っていないか）
+    _avg_ret = (ret_3m + ret_6m + ret_1y) / 3
+    _text_all = str(result.get("thesis", "")) + " " + " ".join(
+        f"{m.get('point','')}{m.get('detail','')}" for m in _merits
+    )
+    _uptrend_kw = ["上昇トレンド", "上昇継続", "力強い上昇", "急騰", "好調"]
+    _downtrend_kw = ["下落トレンド", "下落継続", "軟調", "急落"]
+    if _avg_ret < -15 and any(_kw in _text_all for _kw in _uptrend_kw):
+        _flags.append(f"merits/thesisが上昇基調を主張しているが実際の平均リターンは{_avg_ret:+.1f}%")
+    if _avg_ret > 15 and any(_kw in _text_all for _kw in _downtrend_kw):
+        _flags.append(f"demerits/thesisが下落基調を主張しているが実際の平均リターンは{_avg_ret:+.1f}%")
+
+    # 3) 未提供のはずの財務指標（ROIC/ROE/PER等）を具体的数値付きで捏造していないか
+    #    Agent Bのプロンプトには価格・リターンしか渡していないため、財務指標の実数値は入力に存在しない
+    for _m in _merits + _demerits:
+        _combined = f"{_m.get('point','')} {_m.get('detail','')}"
+        if _AGENT_B_FABRICATED_METRIC_RE.search(_combined):
+            _flags.append(f"未提供の財務指標を具体的数値付きで言及: 「{_combined[:30]}」")
+
+    result["_verify_flags"] = _flags
+    result["_verified"] = len(_flags) == 0
+    return result
+
+
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
 def _analyze_stock_agent(
     ticker: str, date_str: str,
@@ -21787,7 +21830,10 @@ def _run_stock_agents_parallel(
 
     def _one(args):
         _tk, _r3, _r6, _r1, _px = args
-        return _tk, _analyze_stock_agent(_tk, date_str, _r3, _r6, _r1, _px, macro_stance)
+        _res = _analyze_stock_agent(_tk, date_str, _r3, _r6, _r1, _px, macro_stance)
+        # キャッシュ済み結果でも毎回検証し直す（検証ロジック自体はキャッシュしない）
+        _res = _verify_stock_agent_result(dict(_res), _r3, _r6, _r1)
+        return _tk, _res
 
     with _cf2.ThreadPoolExecutor(max_workers=max_workers) as _ex:
         _futs = {_ex.submit(_one, a): a[0] for a in ticker_args}
@@ -21796,10 +21842,13 @@ def _run_stock_agents_parallel(
             try:
                 _tk, _res = _fut.result(timeout=40)
                 _results[_tk] = _res
+                if not _res.get("_verified", True):
+                    logger.warning(f"[agent_b_verify] {_tk} 検証NG: {_res.get('_verify_flags')}")
             except Exception as _e:
                 logger.warning(f"[agent_b] {_tk} 並列実行失敗: {_e}")
                 _results[_tk] = {"ticker": _tk, "score": 5.0, "merits": [], "demerits": [],
-                                  "thesis": "", "conclusion": "様子見", "_model": "none"}
+                                  "thesis": "", "conclusion": "様子見", "_model": "none",
+                                  "_verified": True, "_verify_flags": []}
     return _results
 
 
@@ -22319,6 +22368,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         # Agent B の結果をスコア順にソートして文字列化
         _ab_sorted = sorted(agent_b.values(), key=lambda x: float(x.get("score", 0)), reverse=True)
         _ab_lines = []
+        _ab_flagged_tickers = []
         for _ab in _ab_sorted[:15]:
             _tk = _ab.get("ticker", "")
             _sc = _ab.get("score", 5)
@@ -22336,10 +22386,20 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
                 _mp = int(_mc / budget * 100) + 1
                 if _mp >= 3:
                     _min_note = f" ※最低{_mp}%"
+            # 検証NGの銘柄は選定禁止マークを付ける（Agent Bの根拠が実データと矛盾/捏造の疑いあり）
+            _verify_note = ""
+            if not _ab.get("_verified", True):
+                _verify_note = " 🚫検証NG(選定禁止)"
+                _ab_flagged_tickers.append(_tk)
             _ab_lines.append(
-                f"  {_tk:8s} score:{_sc:.1f} {_co} | {_th} | ✅{_ms} | ⚠️{_ds}{_min_note}"
+                f"  {_tk:8s} score:{_sc:.1f} {_co} | {_th} | ✅{_ms} | ⚠️{_ds}{_min_note}{_verify_note}"
             )
         _ab_str = "\n".join(_ab_lines) if _ab_lines else "（データなし）"
+        _ab_flag_constraint = (
+            f"\n・🚫検証NGと記載された銘柄（{', '.join(_ab_flagged_tickers)}）は事前チェックでAgent Bの分析根拠が"
+            f"実データと矛盾していたため、絶対に選定しないこと"
+            if _ab_flagged_tickers else ""
+        )
         _aa_stance  = agent_a.get("stance", "中立")
         _aa_sectors = "・".join(agent_a.get("sector_bias", []))
         _aa_risks   = "・".join(agent_a.get("key_risks", []))
@@ -22384,7 +22444,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・{_cash_note}
 ・Agent Bの conclusion「買い」銘柄を優先。「除外」は選定しない
 ・予算超過銘柄（最低%記載あり）はその割合以上の配分必須
-・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}
+・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}{_ab_flag_constraint}
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
@@ -23769,7 +23829,13 @@ def render_claude_trading_project():
                 )
                 _ip_b_count  = len(_ip_agent_b)
                 _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
+                _ip_b_flagged = [v.get("ticker", "") for v in _ip_agent_b.values() if not v.get("_verified", True)]
                 logger.info(f"[trading] Agent B完了: {_ip_b_count}銘柄 via {_ip_b_model}")
+                if _ip_b_flagged:
+                    logger.info(f"[trading] 検証NGで選定除外: {_ip_b_flagged}")
+                    st.session_state["_ip_last_flagged"] = _ip_b_flagged
+                else:
+                    st.session_state["_ip_last_flagged"] = []
 
                 # ── Agent C: ポートフォリオ組み立て（1回のみ）────────────
                 _cached_unified = None
@@ -23829,6 +23895,14 @@ def render_claude_trading_project():
                 _ip_bv  = st.session_state.get("_ip_budget_val", 1_000_000)
                 _ip_rk  = st.session_state.get("_ip_risk_key", "balanced")
                 _ip_rlbl = "🔥 リスク先行型" if _ip_rk == "aggressive" else "⚖️ リスクリターン考慮型"
+
+                # ── Agent B検証結果（実データと矛盾する分析根拠を除外できているか）──
+                _ip_flagged = st.session_state.get("_ip_last_flagged", [])
+                if _ip_flagged:
+                    st.caption(
+                        f"🔍 検証エージェント: {len(_ip_flagged)}銘柄の分析根拠が実データと矛盾していたため選定から除外 "
+                        f"（{', '.join(_ip_flagged)}）"
+                    )
 
                 # ── クラッシュリスクメーター ──
                 _crs_ctx   = st.session_state.get("_alloc_mktctx") or {}
