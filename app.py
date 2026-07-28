@@ -16840,7 +16840,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
         f'<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:14px 0 4px">'
-        f'📅 年初来トレンド比較（1月〜12月を{_years_n}年分重ね描き・季節性チェック用）</div>',
+        f'📅 {_tk_input} 年初来トレンド比較（1月〜12月を{_years_n}年分重ね描き・季節性チェック用）</div>',
         unsafe_allow_html=True,
     )
     st.caption("各年の年初終値を0%とした累積騰落率を月/日で重ね合わせ。毎年同じ時期に似た値動きが出ていないか（季節性）を確認できます。")
@@ -16887,7 +16887,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
         font=dict(color="#e2e8f0"),
         height=380, margin=dict(l=40, r=20, t=20, b=36),
-        yaxis=dict(title=dict(text="年初来騰落率(%)", font=dict(color="#e2e8f0")),
+        yaxis=dict(title=dict(text=f"{_tk_input} 年初来騰落率(%)", font=dict(color="#e2e8f0")),
                    tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b",
                    zeroline=True, zerolinecolor="#475569", fixedrange=True),
         xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d", fixedrange=True),
