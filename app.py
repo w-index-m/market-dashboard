@@ -17195,7 +17195,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
 
             with ThreadPoolExecutor(max_workers=min(5, len(_year_series))) as _ex:
                 for _yr, _result in _ex.map(_gen_one, list(_year_series.keys())):
-                    st.session_state[_sk(f"ycmp_year_comment_{_yr}")] = _result
+                    st.session_state[_sk(f"ycmp_year_comment_{_tk_input}_{_yr}")] = _result
 
     for _yr in reversed(_target_years):  # 新しい年を上に
         if _yr not in _year_series:
@@ -17243,7 +17243,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             _figy, use_container_width=True, key=_sk(f"ycmp_fig_year_{_yr}"),
             config={"displayModeBar": False, "scrollZoom": False},
         )
-        _yr_comment = st.session_state.get(_sk(f"ycmp_year_comment_{_yr}"))
+        _yr_comment = st.session_state.get(_sk(f"ycmp_year_comment_{_tk_input}_{_yr}"))
         if _yr_comment:
             _yc_text, _yc_model = _yr_comment
             st.markdown(
@@ -17304,14 +17304,17 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             _analysis_text, _analysis_model = _ai_chart_analysis(
                 _tk_input, _tech, _season_text, model_pref=_ai_model_pref,
             )
-        st.session_state[_sk("ycmp_ai_result")] = (_analysis_text, _analysis_model)
+        _as_of = _hist.index.max().strftime("%Y-%m-%d")
+        st.session_state[_sk(f"ycmp_ai_result_{_tk_input}")] = (_analysis_text, _analysis_model, _as_of, _tk_input)
 
-    _ai_result = st.session_state.get(_sk("ycmp_ai_result"))
+    _ai_result = st.session_state.get(_sk(f"ycmp_ai_result_{_tk_input}"))
     if _ai_result:
-        _res_text, _res_model = _ai_result
+        _res_text, _res_model, _res_as_of, _res_ticker = _ai_result
         st.markdown(
             f'<div style="background:#0f172a;border:1px solid #334155;border-left:4px solid #60a5fa;'
             f'border-radius:8px;padding:16px 20px;font-size:13px;line-height:1.9;color:#e2e8f0;margin-top:8px">'
+            f'<div style="font-size:12px;color:#60a5fa;font-weight:700;margin-bottom:8px">'
+            f'📅 {_res_ticker} ／ {_res_as_of} 時点のデータで分析</div>'
             f'{_res_text.replace(chr(10), "<br>")}</div>',
             unsafe_allow_html=True,
         )
