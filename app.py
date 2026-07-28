@@ -16924,18 +16924,62 @@ def _find_drawdown_episodes(s: pd.Series, threshold_pct: float = -20.0, max_epis
     return episodes[-max_episodes:][::-1]  # 新しい順
 
 
+def _fetch_finnhub_rating_changes_raw(ticker: str) -> pd.DataFrame:
+    """Finnhubのアナリストレーティング変更履歴（/stock/upgrade-downgrade）を取得。"""
+    api_key = get_env_var("FINNHUB_API_KEY", "")
+    if not api_key:
+        return pd.DataFrame()
+    try:
+        url = f"https://finnhub.io/api/v1/stock/upgrade-downgrade?symbol={ticker}&token={api_key}"
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data = r.json()
+        if not isinstance(data, list) or not data:
+            return pd.DataFrame()
+        rows = []
+        for item in data:
+            _ts = item.get("gradeTime")
+            if not _ts:
+                continue
+            rows.append({
+                "GradeDate": pd.to_datetime(_ts, unit="s"),
+                "Firm": item.get("company", "-") or "-",
+                "FromGrade": item.get("fromGrade", "-") or "-",
+                "ToGrade": item.get("toGrade", "-") or "-",
+                "Action": item.get("action", "") or "",
+            })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        logger.warning(f"[finnhub] upgrade-downgrade取得失敗 {ticker}: {e}")
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_analyst_rating_changes(ticker: str, date_key: str) -> pd.DataFrame:
-    """アナリストのレーティング変更履歴を取得（yfinance）。date_keyは当日キャッシュ用。"""
+    """アナリストのレーティング変更履歴を取得（yfinance + Finnhubをマージ）。date_keyは当日キャッシュ用。"""
+    _frames = []
     try:
         import yfinance as _yf
-        _df = _yf.Ticker(ticker).upgrades_downgrades
-        if _df is None or _df.empty:
-            return pd.DataFrame()
-        _df = _df.reset_index()
-        return _df
+        _yf_df = _yf.Ticker(ticker).upgrades_downgrades
+        if _yf_df is not None and not _yf_df.empty:
+            _frames.append(_yf_df.reset_index())
     except Exception:
+        pass
+
+    _fh_df = _fetch_finnhub_rating_changes_raw(ticker)
+    if not _fh_df.empty:
+        _frames.append(_fh_df)
+
+    if not _frames:
         return pd.DataFrame()
+
+    _combined = pd.concat(_frames, ignore_index=True, sort=False)
+    # 同一日・同一証券会社のイベントは重複除去（両ソースに同じ事象がある場合）
+    if "GradeDate" in _combined.columns and "Firm" in _combined.columns:
+        _combined["_dedup_key"] = pd.to_datetime(_combined["GradeDate"]).dt.strftime("%Y-%m-%d") + "|" + _combined["Firm"].astype(str)
+        _combined = _combined.drop_duplicates(subset=["_dedup_key"], keep="first").drop(columns=["_dedup_key"])
+    return _combined
 
 
 def _analyze_downgrades_in_uptrend(hist: pd.DataFrame, ratings_df: pd.DataFrame, max_items: int = 10) -> list:
