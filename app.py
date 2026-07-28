@@ -16842,9 +16842,24 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     return out
 
 
-def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, as_of: str, model_pref: str = "auto") -> tuple:
-    """テクニカル指標＋季節性パターンをAIに渡してチャート分析コメントを生成する。
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
+def _fetch_recent_ticker_news(ticker: str, date_key: str, days_back: int = 14) -> list:
+    """指定銘柄の直近ニュース見出しを取得（Finnhub→Yahoo Financeフォールバック）。
+    date_key は当日キャッシュ用（呼び出し側で today 文字列を渡す）。
+    """
+    try:
+        return fetch_finnhub_company_news({ticker: ticker}, days_back=days_back)
+    except Exception:
+        return []
+
+
+def _ai_chart_analysis(
+    ticker: str, tech: dict, season_text: str, as_of: str,
+    news_lines: list | None = None, model_pref: str = "auto",
+) -> tuple:
+    """テクニカル指標＋季節性パターン＋直近ニュースをAIに渡してチャート分析コメントを生成する。
     as_of: 分析基準日（YYYY-MM-DD）。プロンプトに明示し、年の取り違えを防ぐ。
+    news_lines: 直近ニュース見出しのリスト（あれば出来高急増等の裏付けとして利用）
     Returns: (analysis_text, model_label)
     """
     def _f(v, digits=1):
@@ -16871,6 +16886,16 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, as_of: str, mo
         _vol_str = f"直近出来高 {tech['vol_last']:,.0f}" + (
             f"（20日平均比 {_vol_ratio:.2f}倍）" if _vol_ratio is not None else "")
 
+    # 直近ニュース（あれば追加項目として分析させる。過去年の分析には使わない）
+    if news_lines:
+        _news_str = "\n".join(f"・{n}" for n in news_lines[:5])
+        _news_block = f"\n【直近ニュース見出し】\n{_news_str}\n"
+        _news_point = "5. 直近ニュースが値動き・出来高と関係していそうか\n"
+        _final_point_num, _n_points, _max_chars = 6, 6, 350
+    else:
+        _news_block, _news_point = "\n", ""
+        _final_point_num, _n_points, _max_chars = 5, 5, 300
+
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
 【分析基準日】{as_of}（このデータは全て{as_of}時点のもの）
 
@@ -16885,13 +16910,13 @@ def _ai_chart_analysis(ticker: str, tech: dict, season_text: str, as_of: str, mo
 
 【年別の季節性パターン（年初からの累積騰落率）】
 {season_text}
-
-以下5点を日本語・合計300字程度で簡潔に分析してください:
+{_news_block}
+以下{_n_points}点を日本語・合計{_max_chars}字程度で簡潔に分析してください:
 1. トレンド判定（上昇/下降/レンジ）とMA・RSIからの根拠
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
 3. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
-4. 季節性（例年の同時期と比べて今年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
-5. 総合コメント（次に注目すべき価格帯やイベント）
+4. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
+{_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
 
 ※ 年に言及する際は「今年」「昨年」等の曖昧な表現を使わず、必ず西暦（{as_of[:4]}年、等）で明記すること。
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
@@ -17307,8 +17332,10 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         _as_of = _hist.index.max().strftime("%Y-%m-%d")
         with st.spinner(f"🤖 {_tk_input} のチャートを分析中..."):
             _tech = _compute_chart_technicals(_hist)
+            # 直近ニュースは「今」の分析にのみ使用（過去年の年別コメントには使わない）
+            _news_lines = _fetch_recent_ticker_news(_tk_input, _as_of, days_back=14)
             _analysis_text, _analysis_model = _ai_chart_analysis(
-                _tk_input, _tech, _season_text, _as_of, model_pref=_ai_model_pref,
+                _tk_input, _tech, _season_text, _as_of, news_lines=_news_lines, model_pref=_ai_model_pref,
             )
         st.session_state[_sk(f"ycmp_ai_result_{_tk_input}")] = (_analysis_text, _analysis_model, _as_of, _tk_input)
 
