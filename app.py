@@ -16782,6 +16782,68 @@ def _compute_bollinger_bands(s: pd.Series, window: int = 20, num_std: float = 2.
     return _mid, _upper, _lower
 
 
+def _compute_macd(s: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple:
+    """MACD（線・シグナル・ヒストグラム）を計算する。"""
+    _ema_fast = s.ewm(span=fast, adjust=False).mean()
+    _ema_slow = s.ewm(span=slow, adjust=False).mean()
+    _macd = _ema_fast - _ema_slow
+    _signal = _macd.ewm(span=signal, adjust=False).mean()
+    _hist = _macd - _signal
+    return _macd, _signal, _hist
+
+
+def _detect_ma_cross(s: pd.Series, short_win: int, long_win: int, lookback: int = 10) -> dict:
+    """短期MAと長期MAのゴールデンクロス/デッドクロスを直近lookback営業日以内から検出する。
+    Returns: {"type": "golden"|"dead"|None, "days_ago": int|None}
+    """
+    if len(s) < long_win + lookback + 1:
+        return {"type": None, "days_ago": None}
+    _diff = (s.rolling(short_win).mean() - s.rolling(long_win).mean()).dropna()
+    if len(_diff) < lookback + 1:
+        return {"type": None, "days_ago": None}
+    _vals = _diff.iloc[-(lookback + 1):].tolist()
+    for i in range(len(_vals) - 1, 0, -1):
+        _prev, _cur = _vals[i - 1], _vals[i]
+        if _prev == 0 or _cur == 0:
+            continue
+        if (_prev < 0) != (_cur < 0):
+            return {"type": "golden" if _cur > 0 else "dead", "days_ago": len(_vals) - 1 - i}
+    return {"type": None, "days_ago": None}
+
+
+def _find_support_resistance(s: pd.Series, window: int = 10, num_levels: int = 3) -> dict:
+    """直近の価格スイング高値・安値をクラスタリングしてサポート/レジスタンス候補を抽出する。"""
+    _s = s.iloc[-252:] if len(s) > 252 else s  # 直近1年程度に限定
+    if len(_s) < window * 2 + 1:
+        return {"support": [], "resistance": []}
+    _vals = _s.values
+    _highs, _lows = [], []
+    for i in range(window, len(_vals) - window):
+        _seg = _vals[i - window:i + window + 1]
+        if _vals[i] == _seg.max():
+            _highs.append(float(_vals[i]))
+        if _vals[i] == _seg.min():
+            _lows.append(float(_vals[i]))
+
+    def _cluster(prices):
+        prices = sorted(prices)
+        clusters = []
+        for p in prices:
+            if clusters and clusters[-1][-1] > 0 and abs(p - clusters[-1][-1]) / clusters[-1][-1] < 0.02:
+                clusters[-1].append(p)
+            else:
+                clusters.append([p])
+        return [(sum(c) / len(c), len(c)) for c in clusters]
+
+    _cur = float(_s.iloc[-1])
+    _res = sorted([c for c in _cluster(_highs) if c[0] > _cur], key=lambda x: (-x[1], x[0]))[:num_levels]
+    _sup = sorted([c for c in _cluster(_lows) if c[0] < _cur], key=lambda x: (-x[1], -x[0]))[:num_levels]
+    return {
+        "resistance": sorted([r[0] for r in _res]),
+        "support": sorted([s2[0] for s2 in _sup], reverse=True),
+    }
+
+
 def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     """価格系列からAI分析用のテクニカル指標を計算する。"""
     s = hist["close"]
@@ -16839,6 +16901,22 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
             out["vol_last"] = float(_v.iloc[-1])
             _v20 = _v.iloc[-20:].mean() if len(_v) >= 20 else _v.mean()
             out["vol_ratio_20d"] = float(_v.iloc[-1] / _v20) if _v20 > 0 else None
+
+    # ゴールデンクロス/デッドクロス（短期25/50・classic 50/200）
+    out["cross_25_50"] = _detect_ma_cross(s, 25, 50, lookback=10)
+    out["cross_50_200"] = _detect_ma_cross(s, 50, 200, lookback=10)
+
+    # MACD
+    _macd, _macd_sig, _macd_hist = _compute_macd(s)
+    _m_last, _ms_last, _mh_last = _macd.iloc[-1], _macd_sig.iloc[-1], _macd_hist.iloc[-1]
+    if pd.notna(_m_last):
+        out["macd"], out["macd_signal"], out["macd_hist"] = float(_m_last), float(_ms_last), float(_mh_last)
+        out["macd_state"] = "ゴールデン（上）" if _m_last > _ms_last else "デッド（下）"
+    else:
+        out["macd"] = out["macd_signal"] = out["macd_hist"] = out["macd_state"] = None
+
+    # サポート/レジスタンス（直近1年の価格クラスタリング）
+    out["support_resistance"] = _find_support_resistance(s, window=10, num_levels=3)
     return out
 
 
@@ -16880,6 +16958,28 @@ def _ai_chart_analysis(
     else:
         _bb_str = "データ不足"
 
+    def _cross_str(_c):
+        if not _c or not _c.get("type"):
+            return "直近10日以内のクロスなし"
+        _label = "ゴールデンクロス" if _c["type"] == "golden" else "デッドクロス"
+        return f"{_label}（{_c['days_ago']}営業日前）"
+
+    _cross_str_25_50 = _cross_str(tech.get("cross_25_50"))
+    _cross_str_50_200 = _cross_str(tech.get("cross_50_200"))
+
+    if tech.get("macd") is not None:
+        _macd_str = (f"MACD {tech['macd']:+.2f} ／ シグナル {tech['macd_signal']:+.2f} ／ "
+                     f"ヒストグラム {tech['macd_hist']:+.2f} ／ 状態: {tech['macd_state']}")
+    else:
+        _macd_str = "データ不足"
+
+    _sr = tech.get("support_resistance") or {}
+    _res_list, _sup_list = _sr.get("resistance") or [], _sr.get("support") or []
+    _sr_str = (
+        f"レジスタンス候補: {', '.join(f'{r:,.2f}' for r in _res_list) if _res_list else 'なし'} ／ "
+        f"サポート候補: {', '.join(f'{s3:,.2f}' for s3 in _sup_list) if _sup_list else 'なし'}"
+    )
+
     _vol_str = "データなし"
     if tech.get("vol_last") is not None:
         _vol_ratio = tech.get("vol_ratio_20d")
@@ -16893,11 +16993,11 @@ def _ai_chart_analysis(
             f"\n【直近ニュース見出し（{ticker}関連として取得済み。ここに無い銘柄・数値は言及しないこと）】\n"
             f"{_news_str}\n"
         )
-        _news_point = "5. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
-        _final_point_num, _n_points, _max_chars = 6, 6, 350
+        _news_point = "6. 直近ニュースが値動き・出来高と関係していそうか（上記見出しの範囲内でのみ言及）\n"
+        _final_point_num, _n_points, _max_chars = 7, 7, 400
     else:
         _news_block, _news_point = "\n", ""
-        _final_point_num, _n_points, _max_chars = 5, 5, 300
+        _final_point_num, _n_points, _max_chars = 6, 6, 350
 
     prompt = f"""あなたはテクニカル分析の専門家です。以下のデータのみに基づき、{ticker}のチャートを分析してください。
 【分析基準日】{as_of}（このデータは全て{as_of}時点のもの）
@@ -16906,6 +17006,9 @@ def _ai_chart_analysis(
 【移動平均線】{_ma_str}
 【RSI(14)】{_f(tech.get('rsi14'))}
 【ボリンジャーバンド(20,2σ)】{_bb_str}
+【MACD】{_macd_str}
+【MA25/50クロス】{_cross_str_25_50}　【MA50/200クロス（大局的な金/デッドクロス）】{_cross_str_50_200}
+【サポート・レジスタンス（直近1年の価格クラスタリングより）】{_sr_str}
 【出来高】{_vol_str}
 【52週レンジ】高値 {_f(tech.get('hi52'), 2)} / 安値 {_f(tech.get('lo52'), 2)} / レンジ内位置 {_f(tech.get('pos52'))}%
 【リターン】1ヶ月 {_f(tech.get('ret_1m'))}% ／ 3ヶ月 {_f(tech.get('ret_3m'))}% ／ 6ヶ月 {_f(tech.get('ret_6m'))}% ／ 1年 {_f(tech.get('ret_1y'))}%
@@ -16915,10 +17018,11 @@ def _ai_chart_analysis(
 {season_text}
 {_news_block}
 以下{_n_points}点を日本語・合計{_max_chars}字程度で簡潔に分析してください:
-1. トレンド判定（上昇/下降/レンジ）とMA・RSIからの根拠
+1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
-3. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
-4. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
+3. サポート/レジスタンス（次に意識される価格帯とその根拠）
+4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
+5. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
 {_news_point}{_final_point_num}. 総合コメント（次に注目すべき価格帯やイベント）
 
 ※ 年に言及する際は「今年」「昨年」等の曖昧な表現を使わず、必ず西暦（{as_of[:4]}年、等）で明記すること。
@@ -17039,7 +17143,9 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     from plotly.subplots import make_subplots
 
     # ── 上段: 価格推移チャート（ボリンジャーバンド＋出来高）──────────
-    _show_bb = st.checkbox("ボリンジャーバンド(20,2σ)を表示", value=True, key=_sk("ycmp_show_bb"))
+    _bb_c1, _bb_c2 = st.columns(2)
+    _show_bb = _bb_c1.checkbox("ボリンジャーバンド(20,2σ)を表示", value=True, key=_sk("ycmp_show_bb"))
+    _show_sr = _bb_c2.checkbox("サポート/レジスタンスを表示", value=True, key=_sk("ycmp_show_sr"))
 
     _cutoff = _hist.index.max() - pd.DateOffset(years=_years_n)
     _cut = _hist[_hist.index >= _cutoff]
@@ -17075,6 +17181,21 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         line=dict(color="#60a5fa", width=1.8), name=_tk_input,
         hovertemplate="%{x|%Y-%m-%d}: %{y:,.2f}<extra></extra>",
     ), row=1, col=1)
+
+    if _show_sr and len(_cut) >= 30:
+        _sr_levels = _find_support_resistance(_cut["close"], window=10, num_levels=3)
+        for _r in _sr_levels.get("resistance", []):
+            _fig1.add_trace(go.Scatter(
+                x=[_cut.index[0], _cut.index[-1]], y=[_r, _r], mode="lines",
+                line=dict(color="#f87171", width=1, dash="dash"), name=f"レジスタンス {_r:,.2f}",
+                hovertemplate=f"レジスタンス {_r:,.2f}<extra></extra>",
+            ), row=1, col=1)
+        for _s4 in _sr_levels.get("support", []):
+            _fig1.add_trace(go.Scatter(
+                x=[_cut.index[0], _cut.index[-1]], y=[_s4, _s4], mode="lines",
+                line=dict(color="#4ade80", width=1, dash="dash"), name=f"サポート {_s4:,.2f}",
+                hovertemplate=f"サポート {_s4:,.2f}<extra></extra>",
+            ), row=1, col=1)
 
     if _has_volume:
         _vol_colors = [
