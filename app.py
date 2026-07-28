@@ -16676,12 +16676,46 @@ def render_stock_screener():
             st.info("「🤖 AI評価を生成」を押すと総合評価が表示されます")
 
 
+# 日本語銘柄名 → ティッカー のローカル対応表（Yahoo Finance検索APIが日本語社名に
+# 弱いため、本アプリで頻出する銘柄を先にここで解決する。キーは全て小文字・正規化済み）
+_JP_NAME_TICKER_MAP = {
+    "トヨタ": "7203.T", "トヨタ自動車": "7203.T",
+    "ソフトバンク": "9984.T", "ソフトバンクグループ": "9984.T", "ソフトバンクg": "9984.T",
+    "キーエンス": "6861.T",
+    "東京エレクトロン": "8035.T",
+    "ソニー": "6758.T", "ソニーグループ": "6758.T",
+    "デンソー": "6902.T",
+    "任天堂": "7974.T",
+    "kddi": "9433.T",
+    "三菱ufj": "8306.T", "三菱ufjフィナンシャル・グループ": "8306.T", "三菱ufj銀行": "8306.T",
+    "武田薬品": "4502.T", "武田薬品工業": "4502.T",
+    "ダイキン": "6367.T", "ダイキン工業": "6367.T",
+    "富士通": "6702.T",
+    "日立": "6501.T", "日立製作所": "6501.T",
+    "三菱電機": "6503.T",
+    "日本電産": "6594.T", "ニデック": "6594.T",
+    "第一三共": "4568.T",
+    "jt": "2914.T", "日本たばこ": "2914.T", "日本たばこ産業": "2914.T",
+    "フジクラ": "5803.T",
+    "古河電工": "5801.T", "古河電気工業": "5801.T",
+    "三菱商事": "8058.T",
+    "三井物産": "8031.T",
+    "丸紅": "8002.T",
+    "みずほ": "8411.T", "みずほfg": "8411.T", "みずほフィナンシャルグループ": "8411.T",
+    "ntt": "9437.T", "日本電信電話": "9437.T",
+    "住友電工": "5901.T", "住友電気工業": "5901.T",
+    "アドバンテスト": "6857.T",
+    "東京応化工業": "4063.T", "東京応化": "4063.T",
+}
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _resolve_ticker_query(query: str) -> tuple[str, str]:
     """入力文字列（ティッカー・証券コード・銘柄名）から (ticker, display_name) を解決する。
     - 4桁数字のみ → 日本株証券コードとみなし .T を付与
     - 英数字/.-のみ → そのままティッカーとして扱う（高速パス）
-    - それ以外（銘柄名・日本語等）→ Yahoo Finance検索APIで解決
+    - _JP_NAME_TICKER_MAP に完全一致・部分一致する日本語社名 → ローカル解決
+    - それ以外（英語社名等）→ Yahoo Finance検索APIで解決
     """
     import re as _re
     q = query.strip()
@@ -16691,6 +16725,15 @@ def _resolve_ticker_query(query: str) -> tuple[str, str]:
         return f"{q}.T", q
     if _re.fullmatch(r"[A-Za-z0-9.\-]+", q):
         return q.upper(), q.upper()
+
+    _qn = q.lower()
+    if _qn in _JP_NAME_TICKER_MAP:
+        _sym = _JP_NAME_TICKER_MAP[_qn]
+        return _sym, q
+    for _name, _sym in _JP_NAME_TICKER_MAP.items():
+        if _name in _qn or _qn in _name:
+            return _sym, q
+
     try:
         import yfinance as _yf
         _res = _yf.Search(q, max_results=5)
