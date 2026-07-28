@@ -16677,6 +16677,34 @@ def render_stock_screener():
 
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _resolve_ticker_query(query: str) -> tuple[str, str]:
+    """入力文字列（ティッカー・証券コード・銘柄名）から (ticker, display_name) を解決する。
+    - 4桁数字のみ → 日本株証券コードとみなし .T を付与
+    - 英数字/.-のみ → そのままティッカーとして扱う（高速パス）
+    - それ以外（銘柄名・日本語等）→ Yahoo Finance検索APIで解決
+    """
+    import re as _re
+    q = query.strip()
+    if not q:
+        return "", ""
+    if q.isdigit() and len(q) == 4:
+        return f"{q}.T", q
+    if _re.fullmatch(r"[A-Za-z0-9.\-]+", q):
+        return q.upper(), q.upper()
+    try:
+        import yfinance as _yf
+        _res = _yf.Search(q, max_results=5)
+        for _qt in _res.quotes or []:
+            _sym = _qt.get("symbol", "")
+            if _sym:
+                _name = _qt.get("shortname") or _qt.get("longname") or _sym
+                return _sym, _name
+    except Exception:
+        pass
+    return q.upper(), q.upper()
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_ticker_history_multi_year(ticker: str, years: int = 5) -> pd.DataFrame:
     """指定ティッカーの過去N年分の日次終値を取得。"""
     import yfinance as _yf
@@ -16705,18 +16733,27 @@ def render_ticker_chart_compare():
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        _tk_input = st.text_input(
-            "ティッカーを入力（例: 7203.T / NVDA / AAPL）",
-            value=st.session_state.get("_ycmp_ticker", "NVDA"),
+        _raw_query = st.text_input(
+            "銘柄名・証券コード・ティッカーを入力（例: トヨタ / 7203 / NVDA / Apple）",
+            value=st.session_state.get("_ycmp_query", "NVDA"),
             key="ycmp_ticker_input",
-        ).strip().upper()
+        ).strip()
     with c2:
         _period_label = st.selectbox("上段チャートの表示期間", ["3年", "5年"], key="ycmp_period")
     _years_n = 3 if _period_label == "3年" else 5
 
-    if not _tk_input:
-        st.info("ティッカーを入力してください。")
+    if not _raw_query:
+        st.info("銘柄名・証券コード・ティッカーのいずれかを入力してください。")
         return
+
+    with st.spinner(f"「{_raw_query}」を検索中..."):
+        _tk_input, _tk_name = _resolve_ticker_query(_raw_query)
+
+    if not _tk_input:
+        st.warning(f"⚠️ 「{_raw_query}」に一致する銘柄が見つかりませんでした。")
+        return
+    if _tk_name and _tk_name != _tk_input:
+        st.caption(f"🔎 「{_raw_query}」 → **{_tk_input}**（{_tk_name}）")
 
     with st.spinner(f"{_tk_input} のデータ取得中..."):
         _hist = _fetch_ticker_history_multi_year(_tk_input, years=max(_years_n, 5))
@@ -16725,7 +16762,7 @@ def render_ticker_chart_compare():
         st.warning(f"⚠️ {_tk_input} のデータを取得できませんでした。ティッカーを確認してください。")
         return
 
-    st.session_state["_ycmp_ticker"] = _tk_input
+    st.session_state["_ycmp_query"] = _raw_query
 
     import plotly.graph_objects as go
 
