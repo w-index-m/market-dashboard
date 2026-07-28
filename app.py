@@ -16783,12 +16783,15 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         font=dict(color="#e2e8f0"),
         height=340, margin=dict(l=40, r=20, t=44, b=36),
         yaxis=dict(title=dict(text="価格", font=dict(color="#e2e8f0")),
-                   tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                   tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
+        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
         showlegend=False,
     )
-    st.plotly_chart(_fig1, use_container_width=True, key=_sk("ycmp_fig_price"))
+    st.plotly_chart(
+        _fig1, use_container_width=True, key=_sk("ycmp_fig_price"),
+        config={"displayModeBar": False, "scrollZoom": False},
+    )
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
@@ -16836,12 +16839,15 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         height=380, margin=dict(l=40, r=20, t=20, b=36),
         yaxis=dict(title=dict(text="年初来騰落率(%)", font=dict(color="#e2e8f0")),
                    tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b",
-                   zeroline=True, zerolinecolor="#475569"),
-        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d"),
+                   zeroline=True, zerolinecolor="#475569", fixedrange=True),
+        xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", tickformat="%m/%d", fixedrange=True),
         legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.1, x=0),
         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
     )
-    st.plotly_chart(_fig2, use_container_width=True, key=_sk("ycmp_fig_yearcmp"))
+    st.plotly_chart(
+        _fig2, use_container_width=True, key=_sk("ycmp_fig_yearcmp"),
+        config={"displayModeBar": False, "scrollZoom": False},
+    )
 
     # 直近時点での年別サマリー
     _sum_cols = st.columns(len(_target_years))
