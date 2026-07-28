@@ -16847,14 +16847,15 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
 
     _cur_year = _hist.index.max().year
     _target_years = list(range(_cur_year - _years_n + 1, _cur_year + 1))
-    _gray_shades = ["#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"]
+    # 古い年ほどグレーで潰れて見づらいとの指摘のため、判別しやすい暖色系パレットに変更
+    _older_palette = ["#f87171", "#f472b6", "#c084fc", "#38bdf8", "#fb923c"]  # 赤・ピンク・紫・水色・橙
 
     def _year_color(_i: int, _n: int) -> str:
         if _i == _n - 1:
             return "#4ade80"  # 今年: グリーン（強調）
         if _i == _n - 2:
             return "#fbbf24"  # 前年: アンバー
-        return _gray_shades[min(_i, len(_gray_shades) - 1)]  # それ以前: グレー段階
+        return _older_palette[min(_i, len(_older_palette) - 1)]  # それ以前: 暖色系で判別
 
     _year_colors = {_yr: _year_color(_i, len(_target_years)) for _i, _yr in enumerate(_target_years)}
 
