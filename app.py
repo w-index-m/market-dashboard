@@ -16757,7 +16757,8 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         st.caption(f"🔎 「{_raw_query}」 → **{_tk_input}**（{_tk_name}）")
 
     with st.spinner(f"{_tk_input} のデータ取得中..."):
-        _hist = _fetch_ticker_history_multi_year(_tk_input, years=max(_years_n, 5))
+        # 季節性比較の最古年の1月を確実に含めるため+1年分バッファを取得
+        _hist = _fetch_ticker_history_multi_year(_tk_input, years=_years_n + 1)
 
     if _hist.empty:
         st.warning(f"⚠️ {_tk_input} のデータを取得できませんでした。ティッカーを確認してください。")
@@ -16795,19 +16796,24 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
-        '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:14px 0 4px">'
-        '📅 年初来トレンド比較（1月起点・累積騰落率）</div>',
+        f'<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:14px 0 4px">'
+        f'📅 年初来トレンド比較（1月〜12月を{_years_n}年分重ね描き・季節性チェック用）</div>',
         unsafe_allow_html=True,
     )
-    st.caption("各年の年初終値を0%とした累積騰落率。上昇トレンドの形が例年と似ているかを比較できます。")
+    st.caption("各年の年初終値を0%とした累積騰落率を月/日で重ね合わせ。毎年同じ時期に似た値動きが出ていないか（季節性）を確認できます。")
 
     _cur_year = _hist.index.max().year
-    _target_years = [_cur_year - 2, _cur_year - 1, _cur_year]
-    _year_colors = {
-        _target_years[0]: "#64748b",  # 2年前: グレー
-        _target_years[1]: "#fbbf24",  # 前年: アンバー
-        _target_years[2]: "#4ade80",  # 今年: グリーン（強調）
-    }
+    _target_years = list(range(_cur_year - _years_n + 1, _cur_year + 1))
+    _gray_shades = ["#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"]
+
+    def _year_color(_i: int, _n: int) -> str:
+        if _i == _n - 1:
+            return "#4ade80"  # 今年: グリーン（強調）
+        if _i == _n - 2:
+            return "#fbbf24"  # 前年: アンバー
+        return _gray_shades[min(_i, len(_gray_shades) - 1)]  # それ以前: グレー段階
+
+    _year_colors = {_yr: _year_color(_i, len(_target_years)) for _i, _yr in enumerate(_target_years)}
 
     _fig2 = go.Figure()
     _has_any = False
@@ -16849,18 +16855,23 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         config={"displayModeBar": False, "scrollZoom": False},
     )
 
-    # 直近時点での年別サマリー
-    _sum_cols = st.columns(len(_target_years))
-    for _col, _yr in zip(_sum_cols, _target_years):
+    # 直近時点での年別サマリー（年数が増えてもモバイルで見やすいよう表形式）
+    _sum_rows = []
+    for _yr in reversed(_target_years):  # 新しい年を上に
         _yser = _hist[_hist.index.year == _yr]["close"]
         if _yser.empty:
-            _col.metric(f"{_yr}年", "—")
+            _sum_rows.append({"年": f"{_yr}年", "期間": "—", "年初来騰落率": "—"})
             continue
         _base = float(_yser.iloc[0])
         _last = float(_yser.iloc[-1])
         _chg = (_last / _base - 1) * 100 if _base > 0 else 0
+        _first_date = _yser.index[0].strftime("%m/%d")
         _last_date = _yser.index[-1].strftime("%m/%d")
-        _col.metric(f"{_yr}年（〜{_last_date}）", f"{_chg:+.1f}%")
+        _sum_rows.append({
+            "年": f"{_yr}年", "期間": f"{_first_date}〜{_last_date}",
+            "年初来騰落率": f"{_chg:+.1f}%",
+        })
+    st.dataframe(_sum_rows, use_container_width=True, hide_index=True)
 
 
 def render_av_economic_dashboard():
