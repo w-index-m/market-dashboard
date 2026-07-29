@@ -17257,7 +17257,8 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
 @st.cache_data(ttl=TTL_RSS, show_spinner=False)
 def _fetch_recent_ticker_news(ticker: str, date_key: str, days_back: int = 14) -> list:
     """指定銘柄の直近ニュース見出しを取得（Finnhub→Yahoo Financeフォールバック）。
-    日本株(.T)の場合はTDnet適時開示も合わせて取得しマージする（Finnhub/Yahooは日本株のカバレッジが薄いため）。
+    日本株(.T)はTDnet適時開示、米国株はSEC EDGARの8-Kも合わせて取得しマージする
+    （Finnhub/Yahooは日本株のカバレッジが薄く、米国株も8-K相当の一次情報は別途必要なため）。
     date_key は当日キャッシュ用（呼び出し側で today 文字列を渡す）。
     """
     try:
@@ -17265,14 +17266,19 @@ def _fetch_recent_ticker_news(ticker: str, date_key: str, days_back: int = 14) -
     except Exception:
         _news = []
     if ticker.endswith(".T"):
-        _news = _fetch_recent_tdnet_for_ticker(ticker, date_key) + _news
+        _disc = _fetch_recent_tdnet_items_for_ticker(ticker, date_key)
+        _news = [f"[TDnet適時開示] {it['title']}" + (f"（{it['date']}）" if it["date"] else "") for it in _disc] + _news
+    else:
+        _disc = _fetch_recent_edgar_filings(ticker, date_key)
+        _news = [f"[SEC EDGAR 8-K] {it['title']}" + (f"（{it['date']}）" if it["date"] else "") for it in _disc] + _news
     return _news
 
 
 @st.cache_data(ttl=TTL_RSS, show_spinner=False)
-def _fetch_recent_tdnet_for_ticker(ticker: str, date_key: str, max_items: int = 5) -> list:
-    """指定した日本株ティッカーの証券コードに一致する直近のTDnet適時開示見出しを取得。
+def _fetch_recent_tdnet_items_for_ticker(ticker: str, date_key: str, max_items: int = 5) -> list:
+    """指定した日本株ティッカーの証券コードに一致する直近のTDnet適時開示を構造化データで取得。
     正規のTDnet配信（東証適時開示システムのRSS）を利用。date_keyは当日キャッシュ用。
+    Returns: [{"title","date","url","source":"TDnet"}, ...]
     """
     if not ticker.endswith(".T"):
         return []
@@ -17282,15 +17288,122 @@ def _fetch_recent_tdnet_for_ticker(ticker: str, date_key: str, max_items: int = 
         _results = []
         for _entry in _feed.entries:
             _title = _entry.get("title", "")
-            if re.search(rf"\b{_code}\b", _title):
-                _pub = _entry.get("published", "")
-                _results.append(f"[TDnet適時開示] {_title}" + (f"（{_pub}）" if _pub else ""))
+            if not re.search(rf"\b{_code}\b", _title):
+                continue
+            _link = _entry.get("link", "")
+            _pdf_url = _link if ".pdf" in _link.lower() else ""
+            if not _pdf_url:
+                _desc = _entry.get("description", "") or _entry.get("summary", "")
+                _soup = BeautifulSoup(_desc, "html.parser")
+                for _a in _soup.find_all("a", href=True):
+                    if ".pdf" in _a["href"].lower():
+                        _pdf_url = _a["href"]
+                        break
+            _results.append({
+                "title": _title, "date": _entry.get("published", ""),
+                "url": _pdf_url, "source": "TDnet",
+            })
             if len(_results) >= max_items:
                 break
         return _results
     except Exception as e:
         logger.warning(f"[tdnet] {ticker} 取得失敗: {e}")
         return []
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_sec_ticker_cik_map() -> dict:
+    """SEC EDGARのティッカー→CIK対応表を取得（日次キャッシュ）。"""
+    try:
+        _r = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": UA}, timeout=15,
+        )
+        _r.raise_for_status()
+        _data = _r.json()
+        return {v["ticker"].upper(): str(v["cik_str"]).zfill(10) for v in _data.values()}
+    except Exception as e:
+        logger.warning(f"[edgar] ticker-CIK対応表取得失敗: {e}")
+        return {}
+
+
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
+def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5) -> list:
+    """米国株の直近SEC EDGAR 8-K（重要事象の適時開示）を構造化データで取得。
+    正規のSEC公式API（data.sec.gov）を利用。date_keyは当日キャッシュ用。
+    Returns: [{"title","date","url","source":"EDGAR"}, ...]
+    """
+    if ticker.endswith(".T"):
+        return []
+    _cik = _fetch_sec_ticker_cik_map().get(ticker.upper())
+    if not _cik:
+        return []
+    try:
+        _r = requests.get(
+            f"https://data.sec.gov/submissions/CIK{_cik}.json",
+            headers={"User-Agent": UA}, timeout=15,
+        )
+        _r.raise_for_status()
+        _recent = _r.json().get("filings", {}).get("recent", {})
+        _forms  = _recent.get("form", [])
+        _dates  = _recent.get("filingDate", [])
+        _accs   = _recent.get("accessionNumber", [])
+        _docs   = _recent.get("primaryDocument", [])
+        _results = []
+        for _form, _date, _acc, _doc in zip(_forms, _dates, _accs, _docs):
+            if _form != "8-K":
+                continue
+            _acc_nodash = _acc.replace("-", "")
+            _url = f"https://www.sec.gov/Archives/edgar/data/{int(_cik)}/{_acc_nodash}/{_doc}"
+            _results.append({
+                "title": f"{ticker} 8-K（重要事象の適時開示）", "date": _date,
+                "url": _url, "source": "EDGAR",
+            })
+            if len(_results) >= max_items:
+                break
+        return _results
+    except Exception as e:
+        logger.warning(f"[edgar] {ticker} filings取得失敗: {e}")
+        return []
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _extract_text_from_disclosure_url(url: str) -> str:
+    """開示資料URLから本文テキストを抽出する（PDF・HTML両対応）。"""
+    if not url:
+        return ""
+    try:
+        if url.lower().endswith(".pdf"):
+            return extract_text_from_pdf(download_pdf_bytes(url))
+        _r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
+        _r.raise_for_status()
+        _soup = BeautifulSoup(_r.content, "html.parser")
+        return _soup.get_text("\n", strip=True)
+    except Exception as e:
+        logger.warning(f"[disclosure] 本文取得失敗 {url}: {e}")
+        return ""
+
+
+def _ai_summarize_disclosure(doc_text: str, title: str, ticker: str) -> tuple:
+    """開示資料（TDnet PDF・EDGAR 8-K等）の要点をAIで要約する。
+    Returns: (summary_text, model_label)
+    """
+    _trimmed = (doc_text or "")[:MAX_PDF_TEXT_CHARS]
+    if not _trimmed:
+        return "本文を取得できませんでした（PDF/HTML解析に失敗、またはアクセス不可）。", "none"
+    _prompt = f"""あなたは上場企業の開示資料の読み取り担当です。
+以下の資料テキストから要点を抽出し、次のフォーマットで日本語・150字程度にまとめてください。
+
+【出力フォーマット】
+- 概要: （何が発表されたか）
+- 主要数値: （あれば売上/利益等の変化。なければ「特になし」）
+- 株価への影響: （ポジティブ/ニュートラル/ネガティブを一言で）
+
+【銘柄】{ticker}
+【資料タイトル】{title}
+【本文】
+{_trimmed}"""
+    return _call_ai_for_trading(_prompt, model_pref="auto", max_output_tokens=400, temperature=0.3)
 
 
 def _ai_chart_analysis(
@@ -17923,6 +18036,57 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 f'（薄商い）</div></div>'
             )
         st.markdown("".join(_thin_cards_html), unsafe_allow_html=True)
+
+    # ── 開示資料 AI要約（日本株=TDnet／米国株=SEC EDGAR 8-K）──────────
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    _disc_source_label = "TDnet適時開示" if _tk_input.endswith(".T") else "SEC EDGAR 8-K"
+    st.markdown(
+        f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        f'📄 {_tk_input} 開示資料 AI要約（{_disc_source_label}）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"{_disc_source_label}（公式の一次情報）から直近の開示を取得し、要点をAIが要約します。"
+    )
+    if _tk_input.endswith(".T"):
+        _disc_items = _fetch_recent_tdnet_items_for_ticker(_tk_input, _as_of_disc := _hist.index.max().strftime("%Y-%m-%d"))
+    else:
+        _disc_items = _fetch_recent_edgar_filings(_tk_input, _as_of_disc := _hist.index.max().strftime("%Y-%m-%d"))
+
+    if not _disc_items:
+        st.info(f"{_tk_input} の直近開示が見つかりませんでした。")
+    else:
+        if st.button("🤖 開示資料を要約", key=_sk("ycmp_disc_summarize_btn")):
+            with st.spinner(f"{min(3, len(_disc_items))}件の開示資料を取得・要約中…"):
+                for _it in _disc_items[:3]:
+                    _key = _sk(f"ycmp_disc_sum_{_tk_input}_{_it['date']}_{_it['title'][:20]}")
+                    if _key in st.session_state:
+                        continue
+                    _text = _extract_text_from_disclosure_url(_it["url"])
+                    _summary, _model = _ai_summarize_disclosure(_text, _it["title"], _tk_input)
+                    st.session_state[_key] = (_summary, _model)
+
+        _disc_cards_html = []
+        for _it in _disc_items:
+            _key = _sk(f"ycmp_disc_sum_{_tk_input}_{_it['date']}_{_it['title'][:20]}")
+            _sum_result = st.session_state.get(_key)
+            _sum_html = ""
+            if _sum_result:
+                _sum_text, _sum_model = _sum_result
+                _sum_html = (
+                    f'<div style="margin-top:8px;padding-top:8px;border-top:1px solid #1e293b;'
+                    f'color:#cbd5e1;line-height:1.7">🤖 {_sum_text.replace(chr(10), "<br>")}'
+                    f'<div style="color:#475569;font-size:10px;margin-top:4px">via {_sum_model}</div></div>'
+                )
+            _disc_cards_html.append(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                f'padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
+                f'<div style="font-weight:700">{_it["title"]}</div>'
+                f'<div style="color:#64748b;margin-top:2px">{_it["date"]}</div>'
+                f'{_sum_html}</div>'
+            )
+        st.markdown("".join(_disc_cards_html), unsafe_allow_html=True)
+        st.caption("⚠️ AI要約は原文を簡略化したものです。重要な判断は必ず原文（開示資料）をご確認ください。")
 
     # ── ゴールデンクロス×出来高 バックテスト ───────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
