@@ -16099,6 +16099,29 @@ def _bar_html(label: str, value: float, max_val: float,
     )
 
 
+def _bar_html_dark(label: str, value: float, max_val: float,
+                    color: str, sub_label: str = "") -> str:
+    """横棒グラフHTML（kabuステーション風・ダークテーマ版。銘柄チャートツール用）"""
+    _pct = min((value / max_val * 100) if max_val > 0 else 0, 100)
+    _val_str = f"{value/1000:,.1f}千株" if value >= 1000 else f"{value:,.0f}株"
+    _sub_html = (
+        f'<div style="font-size:10px;color:#64748b;">{sub_label}</div>'
+        if sub_label else ""
+    )
+    return (
+        f'<div style="margin-bottom:6px;">'
+        f'<div style="display:flex;justify-content:space-between;'
+        f'font-size:12px;color:#94a3b8;margin-bottom:2px;">'
+        f'<span>{label}</span>'
+        f'<span style="font-weight:700;color:#e2e8f0">{_val_str}</span></div>'
+        f'<div style="background:#1e293b;border-radius:3px;height:14px;">'
+        f'<div style="background:{color};height:100%;border-radius:3px;'
+        f'width:{_pct:.1f}%;"></div></div>'
+        f'{_sub_html}'
+        f'</div>'
+    )
+
+
 # 監視銘柄リスト
 WATCHLIST_STOCKS = {
     "COHR":   {"name": "Coherent",               "sector": "光通信", "flag": "🇺🇸"},
@@ -17821,6 +17844,96 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         st.success(f"📐 RSI強気ダイバージェンス検出: {_div_ui['detail']}（下落の勢い低下＝反発の可能性。ダマシの可能性もあるため他指標と併せて判断してください）")
     elif _div_ui.get("type") == "bearish":
         st.warning(f"📐 RSI弱気ダイバージェンス検出: {_div_ui['detail']}（上昇の勢い低下＝反落の可能性。ダマシの可能性もあるため他指標と併せて判断してください）")
+
+    # ── 需給分析（日本株のみ・J-Quants、kabuステーション風）─────────
+    if _tk_input.endswith(".T"):
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+            f'📊 {_tk_input} 需給分析（信用残・売買動向）</div>',
+            unsafe_allow_html=True,
+        )
+        with st.spinner("信用残データを取得中…"):
+            _mg_data = fetch_margin_data_jquants(_tk_input)
+        if not _mg_data.get("ok"):
+            st.info(f"需給データを取得できませんでした（{_mg_data.get('reason', '取得失敗')}）。J-Quants APIキーの設定が必要な場合があります。")
+        else:
+            _mg = _mg_data.get("margin", {})
+            _tr = _mg_data.get("trade", {})
+            _supply_cards = []
+
+            if _tr:
+                _spot_buy   = _tr.get("spot_buy", 0)
+                _spot_sell  = _tr.get("spot_sell", 0)
+                _short_sell = _tr.get("short_sell", 0)
+                _spot_net   = _spot_buy - _spot_sell
+                _net_label  = "買越し" if _spot_net > 0 else "売越し"
+                _net_color  = "#f87171" if _spot_net > 0 else "#60a5fa"
+                _max_spot   = max(_spot_buy, _spot_sell + _short_sell, 1)
+                _date_str   = _tr.get("date", "")
+                _supply_cards.append(
+                    f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                    f'padding:14px 18px;margin-bottom:10px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:14px;font-weight:700;color:#e2e8f0">現物　'
+                    f'<span style="font-size:11px;color:#64748b">{_date_str}</span></span>'
+                    f'<span style="background:{_net_color};color:#0f172a;font-size:13px;font-weight:700;'
+                    f'padding:4px 14px;border-radius:20px">{abs(_spot_net)/1000:,.0f}千株 {_net_label}</span>'
+                    f'</div><div style="margin-top:10px">'
+                    + _bar_html_dark("現物買", _spot_buy, _max_spot, "#f87171")
+                    + _bar_html_dark("現物売", _spot_sell, _max_spot, "#93c5fd",
+                                     sub_label=f"空売り {_short_sell/1000:,.1f}千株含む")
+                    + '</div></div>'
+                )
+
+            if _mg:
+                _long_bal   = _mg.get("long_balance", 0)
+                _long_new   = _mg.get("long_new", 0)
+                _long_repay = _mg.get("long_repay", 0)
+                _long_diff  = _mg.get("long_diff", 0)
+                _ldiff_label = "買残増" if _long_diff >= 0 else "買残減"
+                _ldiff_color = "#f87171" if _long_diff >= 0 else "#60a5fa"
+                _max_long   = max(_long_new, _long_repay, 1)
+                _supply_cards.append(
+                    f'<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;'
+                    f'padding:14px 18px;margin-bottom:10px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:14px;font-weight:700;color:#f87171">信用買残（週次）</span>'
+                    f'<span style="background:{_ldiff_color};color:#0f172a;font-size:13px;font-weight:700;'
+                    f'padding:4px 14px;border-radius:20px">{abs(_long_diff)/1000:,.0f}千株 {_ldiff_label}</span>'
+                    f'</div><div style="font-size:22px;font-weight:800;color:#f87171;margin:6px 0">'
+                    f'{_long_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
+                    + _bar_html_dark("新規買", _long_new, _max_long, "#f87171")
+                    + _bar_html_dark("返済売", _long_repay, _max_long, "#93c5fd")
+                    + '</div></div>'
+                )
+
+                _short_bal   = _mg.get("short_balance", 0)
+                _short_new   = _mg.get("short_new", 0)
+                _short_repay = _mg.get("short_repay", 0)
+                _short_diff  = _mg.get("short_diff", 0)
+                _sdiff_label = "売残増" if _short_diff >= 0 else "売残減"
+                _sdiff_color = "#60a5fa" if _short_diff >= 0 else "#4ade80"
+                _max_short   = max(_short_new, _short_repay, 1)
+                _supply_cards.append(
+                    f'<div style="background:#031a0f;border:1px solid #14532d;border-radius:10px;'
+                    f'padding:14px 18px;margin-bottom:10px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:14px;font-weight:700;color:#4ade80">信用売残（週次）</span>'
+                    f'<span style="background:{_sdiff_color};color:#0f172a;font-size:13px;font-weight:700;'
+                    f'padding:4px 14px;border-radius:20px">{abs(_short_diff)/1000:,.0f}千株 {_sdiff_label}</span>'
+                    f'</div><div style="font-size:22px;font-weight:800;color:#4ade80;margin:6px 0">'
+                    f'{_short_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
+                    + _bar_html_dark("新規売", _short_new, _max_short, "#60a5fa")
+                    + _bar_html_dark("返済買", _short_repay, _max_short, "#6ee7b7")
+                    + '</div></div>'
+                )
+
+            if _supply_cards:
+                st.markdown("".join(_supply_cards), unsafe_allow_html=True)
+                st.caption("データ提供: J-Quants（週次信用残・日次売買動向の推計値）")
+            else:
+                st.info("需給データが見つかりませんでした。")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
