@@ -23887,7 +23887,8 @@ def render_claude_trading_project():
                             time.time() - _ip_t0,
                             time.time() - _ip_step_t0,
                         )
-                        time.sleep(1)
+                        # 更新頻度を落としてプレースホルダー再描画によるDOM競合エラーを軽減
+                        time.sleep(2)
 
                     _ip_th.join()
                     _r = _ip_result_box[0] or {"error": "生成失敗", "portfolio": None, "model": ""}
