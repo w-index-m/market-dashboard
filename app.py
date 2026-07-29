@@ -22855,7 +22855,7 @@ def render_claude_trading_project():
             "emoji":  "⚡",
             "label":  "モメンタムモード",
             "sub":    "テクニカル重視 · 保有期間 1〜4週間 · 直近で強く上がっている銘柄を追う",
-            "detail": "RSI/出来高急増/MA上抜け/ブレイクアウトで選定 · 損切 -5〜8% · 目標=直近レジスタンス突破後の次の節目<br>※ リスク先行型と組み合わせると「ゴリゴリ上昇中の銘柄のみ」に絞れる",
+            "detail": "RSI/出来高急増/MA上抜け/ブレイクアウトで選定 · 損切 -5〜8% · 目標=直近レジスタンス突破後の次の節目",
             "color":  "#fbbf24", "sub_color": "#fcd34d",
             "border": "#f59e0b", "bg": "#1c1400",
         },
@@ -23726,27 +23726,22 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
-            # コントロール行
-            _ip_c1, _ip_c2, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.4, 1.2, 1.2, 1.2])
+            # コントロール行（リスクプロファイル選択は廃止 — 長期育成/モメンタム/AI自律/AIミックス/
+            # 光銘柄ミックス/配当安定の6モードで既にリスク志向が分かれているため常に「balanced」評価で統一）
+            _ip_c1, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.2, 1.2, 1.2])
             _ip_budget = _ip_c1.radio(
                 "投資予算", ["100万円", "500万円"],
                 key="ip_budget", horizontal=True,
             )
-            _ip_risk = _ip_c2.radio(
-                "リスクプロファイル", ["リスク先行型", "リスクリターン考慮型"],
-                key="ip_risk", horizontal=False,
-            )
             _ip_etf_ok = _ip_c5.checkbox("ETF可（日本ETF含む）", value=True, key="ip_etf_ok")
 
-            # 予算・リスクが変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
+            # 予算が変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
             _ip_cur_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
-            _ip_cur_risk_key   = "aggressive" if "先行" in _ip_risk else "balanced"
             if (st.session_state.get("_ip_budget_val") is not None and
-                    (st.session_state.get("_ip_budget_val") != _ip_cur_budget_val or
-                     st.session_state.get("_ip_risk_key")   != _ip_cur_risk_key)):
+                    st.session_state.get("_ip_budget_val") != _ip_cur_budget_val):
                 st.session_state.pop("_ip_results", None)
                 st.session_state["_ip_budget_val"] = _ip_cur_budget_val
-                st.session_state["_ip_risk_key"]   = _ip_cur_risk_key
+            st.session_state["_ip_risk_key"] = "balanced"
             _ip_model_opts = {
                 "🔄 自動": "auto", "🟡 Gemini": "gemini",
                 "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
@@ -23761,7 +23756,7 @@ def render_claude_trading_project():
 
             if st.button("💼 推奨ポートフォリオを生成", type="primary", key="btn_invest_portfolio"):
                 _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
-                _ip_risk_key    = "aggressive" if "先行" in _ip_risk else "balanced"
+                _ip_risk_key    = "balanced"
                 _ip_model_pref  = _ip_model_opts[_ip_model_sel]
                 _ip_today       = datetime.now(JST).strftime("%Y-%m-%d")
                 _ip_holdings    = list(open_pos.keys()) if open_pos else []
@@ -23909,8 +23904,6 @@ def render_claude_trading_project():
             _ip_disp = st.session_state.get("_ip_results", {})
             if _ip_disp:
                 _ip_bv  = st.session_state.get("_ip_budget_val", 1_000_000)
-                _ip_rk  = st.session_state.get("_ip_risk_key", "balanced")
-                _ip_rlbl = "🔥 リスク先行型" if _ip_rk == "aggressive" else "⚖️ リスクリターン考慮型"
 
                 # ── Agent B検証結果（実データと矛盾する分析根拠を除外できているか）──
                 _ip_flagged = st.session_state.get("_ip_last_flagged", [])
@@ -24076,7 +24069,7 @@ def render_claude_trading_project():
                             f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
                             f'padding:12px 16px;margin-bottom:10px">'
                             f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
-                            f'{_ip_rlbl} ｜ 予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
+                            f'予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
                             f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">'
                             f'<div style="text-align:center">'
                             f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
