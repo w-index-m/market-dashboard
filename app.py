@@ -16002,14 +16002,19 @@ def fetch_margin_data_jquants(code: str) -> Dict:
         if not jquants_key:
             return {"ok": False, "reason": "JQUANTS_API_KEY未設定"}
 
-        # ① リフレッシュトークン取得
+        # ① リフレッシュトークン(JQUANTS_API_KEYに保存済み)からidTokenを取得
+        #    旧実装はauth_userを空の認証情報で呼び出した結果を使わず、生のキーを
+        #    そのままBearerトークンとして使っていたため認証が通っていなかった
         r1 = requests.post(
-            "https://api.jquants.com/v1/token/auth_user",
-            json={"mailaddress": "", "password": ""},  # APIキー直接利用
+            f"https://api.jquants.com/v1/token/auth_refresh?refreshtoken={jquants_key}",
             timeout=10,
         )
-        # J-QuantsはAPIキーをそのまま使う方式
-        headers = {"Authorization": f"Bearer {jquants_key}"}
+        if r1.status_code != 200:
+            return {"ok": False, "reason": f"認証失敗(auth_refresh): HTTP {r1.status_code} {r1.text[:150]}"}
+        id_token = r1.json().get("idToken", "")
+        if not id_token:
+            return {"ok": False, "reason": "idToken取得失敗（レスポンスにidTokenが含まれない）"}
+        headers = {"Authorization": f"Bearer {id_token}"}
 
         # ② 信用残データ取得（週次）
         import datetime as dt
@@ -16024,7 +16029,8 @@ def fetch_margin_data_jquants(code: str) -> Dict:
             timeout=10,
         )
 
-        # ③ 売買内訳データ（日次）
+        # ③ 売買内訳データ（投資部門別売買状況。市場区分単位の集計データのため
+        #    個別銘柄codeでは一致しないことが多い点に留意——ベストエフォートで試行）
         r_trade = requests.get(
             f"https://api.jquants.com/v1/markets/trades_spec",
             params={"code": code_clean, "from": from_date, "to": to_date},
@@ -16034,6 +16040,8 @@ def fetch_margin_data_jquants(code: str) -> Dict:
 
         result = {"ok": True, "margin": {}, "trade": {}}
 
+        if r_margin.status_code != 200:
+            logger.debug(f"[jquants_margin] weekly_margin_interest失敗 {code}: HTTP {r_margin.status_code} {r_margin.text[:150]}")
         if r_margin.status_code == 200:
             data = r_margin.json().get("weekly_margin_interest", [])
             if data:
@@ -16058,6 +16066,8 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                         result["margin"]["short_balance"] - prev.get("ShortMarginTradeVolume", 0)
                     )
 
+        if r_trade.status_code != 200:
+            logger.debug(f"[jquants_margin] trades_spec失敗 {code}: HTTP {r_trade.status_code} {r_trade.text[:150]}")
         if r_trade.status_code == 200:
             data = r_trade.json().get("trades_spec", [])
             if data:
@@ -16069,6 +16079,8 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                     "short_sell":    latest.get("ProprietaryShortSelling", 0), # 空売り
                 }
 
+        if not result["margin"] and not result["trade"]:
+            result["reason"] = "APIは成功したが対象期間・銘柄のデータが0件でした"
         return result
 
     except Exception as e:
@@ -17933,7 +17945,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 st.markdown("".join(_supply_cards), unsafe_allow_html=True)
                 st.caption("データ提供: J-Quants（週次信用残・日次売買動向の推計値）")
             else:
-                st.info("需給データが見つかりませんでした。")
+                st.info(f"需給データが見つかりませんでした（{_mg_data.get('reason', '原因不明')}）。")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
