@@ -17030,6 +17030,51 @@ def _detect_thin_volume_moves(hist: pd.DataFrame, recent_n: int = 15, move_mult:
     return _flagged[::-1]  # 新しい順
 
 
+def _detect_rsi_divergence(s: pd.Series, rsi: pd.Series, window: int = 5, lookback: int = 60) -> dict:
+    """価格とRSIのダイバージェンス（強気/弱気）を直近lookback営業日から検出する。
+    強気: 価格が安値を更新しているのにRSIは安値を切り上げている（下落の勢い低下＝反転候補）
+    弱気: 価格が高値を更新しているのにRSIは高値を切り下げている（上昇の勢い低下＝反転候補）
+    Returns: {"type": "bullish"|"bearish"|None, "detail": str|None}
+    """
+    _n = min(lookback, len(s))
+    _rc = s.iloc[-_n:]
+    _rr = rsi.iloc[-_n:]
+    if len(_rc) < window * 2 + 1:
+        return {"type": None, "detail": None}
+
+    _vals = _rc.values
+    _lows, _highs = [], []
+    for i in range(window, len(_vals) - window):
+        _seg = _vals[i - window:i + window + 1]
+        _r = _rr.iloc[i]
+        if pd.isna(_r):
+            continue
+        if _vals[i] == _seg.min():
+            _lows.append((_vals[i], float(_r)))
+        if _vals[i] == _seg.max():
+            _highs.append((_vals[i], float(_r)))
+
+    if len(_lows) >= 2:
+        _prev_p, _prev_r = _lows[-2]
+        _last_p, _last_r = _lows[-1]
+        if _last_p < _prev_p and _last_r > _prev_r:
+            return {
+                "type": "bullish",
+                "detail": f"価格 {_prev_p:,.2f}→{_last_p:,.2f}（安値更新）に対し RSI {_prev_r:.1f}→{_last_r:.1f}（切り上げ）",
+            }
+
+    if len(_highs) >= 2:
+        _prev_p, _prev_r = _highs[-2]
+        _last_p, _last_r = _highs[-1]
+        if _last_p > _prev_p and _last_r < _prev_r:
+            return {
+                "type": "bearish",
+                "detail": f"価格 {_prev_p:,.2f}→{_last_p:,.2f}（高値更新）に対し RSI {_prev_r:.1f}→{_last_r:.1f}（切り下げ）",
+            }
+
+    return {"type": None, "detail": None}
+
+
 def _fetch_finnhub_rating_changes_raw(ticker: str) -> pd.DataFrame:
     """Finnhubのアナリストレーティング変更履歴（/stock/upgrade-downgrade）を取得。"""
     api_key = get_env_var("FINNHUB_API_KEY", "")
@@ -17191,6 +17236,7 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
     _rsi = 100 - (100 / (1 + _rs))
     _rsi_last = _rsi.iloc[-1]
     out["rsi14"] = float(_rsi_last) if pd.notna(_rsi_last) else None
+    out["rsi_divergence"] = _detect_rsi_divergence(s, _rsi)
 
     # 52週レンジ
     _s52 = s.iloc[-252:] if len(s) >= 252 else s
@@ -17443,6 +17489,14 @@ def _ai_chart_analysis(
     _cross_str_25_50 = _cross_str(tech.get("cross_25_50"))
     _cross_str_50_200 = _cross_str(tech.get("cross_50_200"))
 
+    _rsi_div = tech.get("rsi_divergence") or {}
+    if _rsi_div.get("type") == "bullish":
+        _rsi_div_str = f"強気ダイバージェンス検出（{_rsi_div['detail']}）"
+    elif _rsi_div.get("type") == "bearish":
+        _rsi_div_str = f"弱気ダイバージェンス検出（{_rsi_div['detail']}）"
+    else:
+        _rsi_div_str = "ダイバージェンスなし"
+
     if tech.get("macd") is not None:
         _macd_str = (f"MACD {tech['macd']:+.2f} ／ シグナル {tech['macd_signal']:+.2f} ／ "
                      f"ヒストグラム {tech['macd_hist']:+.2f} ／ 状態: {tech['macd_state']}")
@@ -17512,7 +17566,7 @@ def _ai_chart_analysis(
 
 【現在値】{tech.get('price'):,.2f}
 【移動平均線】{_ma_str}
-【RSI(14)】{_f(tech.get('rsi14'))}
+【RSI(14)】{_f(tech.get('rsi14'))}　【RSIダイバージェンス（直近60営業日）】{_rsi_div_str}
 【ボリンジャーバンド(20,2σ)】{_bb_str}
 【MACD】{_macd_str}
 【MA25/50クロス】{_cross_str_25_50}　【MA50/200クロス（大局的な金/デッドクロス）】{_cross_str_50_200}
@@ -17537,7 +17591,9 @@ def _ai_chart_analysis(
 1. トレンド判定（上昇/下降/レンジ）とMA・RSI・MACD・クロス状況からの根拠。
    クロスが発生している場合は「なぜそのクロスが株価に影響しやすいか」を一言添えること
    （例: ゴールデンクロス＝短期の買い勢いが長期トレンドを上回り始めたサインで新規買いを誘発しやすい／
-   デッドクロス＝短期の売り圧力が優勢に転じたサインで損切り・追随売りを誘発しやすい、等）
+   デッドクロス＝短期の売り圧力が優勢に転じたサインで損切り・追随売りを誘発しやすい、等）。
+   RSIダイバージェンスが検出されている場合は、トレンド転換（反発/反落）の可能性を示唆する
+   シグナルとして触れること（ただしダマシの可能性もあるため断定は避け、他の根拠との重なりで判断すること）
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
 3. サポート/レジスタンス（次に意識される価格帯とその根拠。なぜその価格帯が意識されやすいか＝過去に何度も反発/抵抗された水準であることに触れる）
 4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）。
@@ -17754,6 +17810,17 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         _fig1, use_container_width=True, key=_sk("ycmp_fig_price"),
         config={"displayModeBar": False, "scrollZoom": False},
     )
+
+    # ── RSIダイバージェンス状態（AI呼び出し不要で常時表示）────────────
+    _rsi_delta_ui = _hist["close"].diff()
+    _rsi_gain_ui = _rsi_delta_ui.clip(lower=0).rolling(14).mean()
+    _rsi_loss_ui = (-_rsi_delta_ui.clip(upper=0)).rolling(14).mean()
+    _rsi_series_ui = 100 - (100 / (1 + _rsi_gain_ui / _rsi_loss_ui.replace(0, pd.NA)))
+    _div_ui = _detect_rsi_divergence(_hist["close"], _rsi_series_ui)
+    if _div_ui.get("type") == "bullish":
+        st.success(f"📐 RSI強気ダイバージェンス検出: {_div_ui['detail']}（下落の勢い低下＝反発の可能性。ダマシの可能性もあるため他指標と併せて判断してください）")
+    elif _div_ui.get("type") == "bearish":
+        st.warning(f"📐 RSI弱気ダイバージェンス検出: {_div_ui['detail']}（上昇の勢い低下＝反落の可能性。ダマシの可能性もあるため他指標と併せて判断してください）")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
