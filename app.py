@@ -17275,40 +17275,41 @@ def _fetch_recent_ticker_news(ticker: str, date_key: str, days_back: int = 14) -
 
 
 @st.cache_data(ttl=TTL_RSS, show_spinner=False)
-def _fetch_recent_tdnet_items_for_ticker(ticker: str, date_key: str, max_items: int = 5) -> list:
+def _fetch_recent_tdnet_items_for_ticker(ticker: str, date_key: str, max_items: int = 5,
+                                          lookback_days: int = 90) -> list:
     """指定した日本株ティッカーの証券コードに一致する直近のTDnet適時開示を構造化データで取得。
-    正規のTDnet配信（東証適時開示システムのRSS）を利用。date_keyは当日キャッシュ用。
-    Returns: [{"title","date","url","source":"TDnet"}, ...]
+    "recent.rss" は直近数日分しか保持していないため、fetch_tdnet_items_for_date()で
+    過去lookback_days日分を1日ずつ日付指定取得してフィルタする（同関数はRSSで取れない
+    古い日付は東証TDnet公式サイトのHTMLに自動フォールバックするため、真に過去に遡れる）。
+    date_keyは当日キャッシュ用。
+    Returns: [{"title","date","url","source":"TDnet"}, ...]（新しい順）
     """
     if not ticker.endswith(".T"):
         return []
     _code = ticker.replace(".T", "")
-    try:
-        _feed = feedparser.parse("https://webapi.yanoshin.jp/webapi/tdnet/list/recent.rss")
-        _results = []
-        for _entry in _feed.entries:
-            _title = _entry.get("title", "")
-            if not re.search(rf"\b{_code}\b", _title):
+    _results = []
+    _today = datetime.now(JST).date()
+    for _i in range(lookback_days):
+        _d = _today - timedelta(days=_i)
+        _yyyymmdd = _d.strftime("%Y%m%d")
+        try:
+            _items = fetch_tdnet_items_for_date(_yyyymmdd)
+        except Exception as e:
+            logger.warning(f"[tdnet] {ticker} {_yyyymmdd}取得失敗: {e}")
+            continue
+        for _it in _items:
+            if _it.get("code") != _code:
                 continue
-            _link = _entry.get("link", "")
-            _pdf_url = _link if ".pdf" in _link.lower() else ""
-            if not _pdf_url:
-                _desc = _entry.get("description", "") or _entry.get("summary", "")
-                _soup = BeautifulSoup(_desc, "html.parser")
-                for _a in _soup.find_all("a", href=True):
-                    if ".pdf" in _a["href"].lower():
-                        _pdf_url = _a["href"]
-                        break
+            _time_str = _it.get("time") or ""
             _results.append({
-                "title": _title, "date": _entry.get("published", ""),
-                "url": _pdf_url, "source": "TDnet",
+                "title": _it.get("title", ""),
+                "date": f"{_d.strftime('%Y-%m-%d')} {_time_str}".strip(),
+                "url": _it.get("pdf_url", ""),
+                "source": "TDnet",
             })
-            if len(_results) >= max_items:
-                break
-        return _results
-    except Exception as e:
-        logger.warning(f"[tdnet] {ticker} 取得失敗: {e}")
-        return []
+        if len(_results) >= max_items:
+            break
+    return _results[:max_items]
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -18048,10 +18049,12 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     st.caption(
         f"{_disc_source_label}（公式の一次情報）から直近の開示を取得し、要点をAIが要約します。"
     )
+    _as_of_disc = _hist.index.max().strftime("%Y-%m-%d")
     if _tk_input.endswith(".T"):
-        _disc_items = _fetch_recent_tdnet_items_for_ticker(_tk_input, _as_of_disc := _hist.index.max().strftime("%Y-%m-%d"))
+        with st.spinner("TDnetを過去90日分さかのぼって検索中…（初回は少し時間がかかります）"):
+            _disc_items = _fetch_recent_tdnet_items_for_ticker(_tk_input, _as_of_disc)
     else:
-        _disc_items = _fetch_recent_edgar_filings(_tk_input, _as_of_disc := _hist.index.max().strftime("%Y-%m-%d"))
+        _disc_items = _fetch_recent_edgar_filings(_tk_input, _as_of_disc)
 
     if not _disc_items:
         st.info(f"{_tk_input} の直近開示が見つかりませんでした。")
