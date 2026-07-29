@@ -17672,19 +17672,19 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     # ── 過去の主要な市場急落（参考・AI呼び出し不要で常時閲覧可）─────
     with st.expander("📚 過去の主要な市場急落を振り返る（マインドセット用の参考資料）"):
         st.caption("急落局面で慌てないための参考情報。数値は代表的な指数ベースの概算です。")
-        for c in _MAJOR_CRASH_REFERENCE:
-            st.markdown(
-                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
-                f'padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
-                f'<div style="font-weight:700;color:#f87171;margin-bottom:4px">{c["name"]}</div>'
-                f'<div style="color:#94a3b8;margin-bottom:4px">🗓 {c["period"]}</div>'
-                f'<div style="line-height:1.8">'
-                f'<span style="color:#64748b">下落幅:</span> {c["decline"]}<br>'
-                f'<span style="color:#64748b">底打ちまで:</span> {c["to_bottom"]}<br>'
-                f'<span style="color:#64748b">回復まで:</span> {c["to_recover"]}'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
+        _crash_cards_html = "".join(
+            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+            f'padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
+            f'<div style="font-weight:700;color:#f87171;margin-bottom:4px">{c["name"]}</div>'
+            f'<div style="color:#94a3b8;margin-bottom:4px">🗓 {c["period"]}</div>'
+            f'<div style="line-height:1.8">'
+            f'<span style="color:#64748b">下落幅:</span> {c["decline"]}<br>'
+            f'<span style="color:#64748b">底打ちまで:</span> {c["to_bottom"]}<br>'
+            f'<span style="color:#64748b">回復まで:</span> {c["to_recover"]}'
+            f'</div></div>'
+            for c in _MAJOR_CRASH_REFERENCE
+        )
+        st.markdown(_crash_cards_html, unsafe_allow_html=True)
 
     # ── アナリスト格下げレーティング検証（「上げトレンドの下げレーティングは買い」説）──
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -17719,6 +17719,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+            _dg_cards_html = []
             for r in _dg_results:
                 _trend_badge = (
                     '<span style="color:#4ade80">🟢 上昇トレンド中</span>' if r["is_uptrend"]
@@ -17728,7 +17729,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 _f20 = f"{r['fwd_20d']:+.1f}%" if r["fwd_20d"] is not None else "—"
                 _f5_c = "#4ade80" if (r["fwd_5d"] or 0) >= 0 else "#f87171"
                 _f20_c = "#4ade80" if (r["fwd_20d"] or 0) >= 0 else "#f87171"
-                st.markdown(
+                _dg_cards_html.append(
                     f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
                     f'padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
                     f'<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
@@ -17738,9 +17739,9 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'<div style="color:#64748b">'
                     f'5営業日後: <span style="color:{_f5_c};font-weight:700">{_f5}</span>　'
                     f'20営業日後: <span style="color:{_f20_c};font-weight:700">{_f20}</span>'
-                    f'</div></div>',
-                    unsafe_allow_html=True,
+                    f'</div></div>'
                 )
+            st.markdown("".join(_dg_cards_html), unsafe_allow_html=True)
             st.caption("⚠️ サンプル数が少ないため統計的な信頼性は限定的です。情報提供目的のみ・投資助言ではありません。")
 
     # ── AIチャート分析 ─────────────────────────────────────────
