@@ -16847,6 +16847,72 @@ def _detect_ma_cross(s: pd.Series, short_win: int, long_win: int, lookback: int 
     return {"type": None, "days_ago": None}
 
 
+def _find_all_ma_crosses(s: pd.Series, short_win: int, long_win: int) -> list:
+    """価格系列全体からゴールデンクロス/デッドクロスの全発生日を検出する（バックテスト用）。
+    Returns: [{"date": Timestamp, "type": "golden"|"dead"}, ...]（古い順）
+    """
+    if len(s) < long_win + 2:
+        return []
+    _diff = (s.rolling(short_win).mean() - s.rolling(long_win).mean()).dropna()
+    _vals = _diff.tolist()
+    _idx = _diff.index
+    _events = []
+    for i in range(1, len(_vals)):
+        _prev, _cur = _vals[i - 1], _vals[i]
+        if _prev == 0 or _cur == 0:
+            continue
+        if (_prev < 0) != (_cur < 0):
+            _events.append({"date": _idx[i], "type": "golden" if _cur > 0 else "dead"})
+    return _events
+
+
+def _backtest_golden_cross_with_volume(hist: pd.DataFrame, short_win: int = 25, long_win: int = 50,
+                                        vol_confirm_ratio: float = 1.2, horizons: tuple = (5, 20, 60)) -> dict:
+    """過去の全ゴールデンクロス発生時点を、出来高増加を伴っていたか否かで2群に分け、
+    その後のフォワードリターンに差が出るかを実データで検証する。
+    Returns: {"summary": {horizon: {"confirmed": {...}, "unconfirmed": {...}}}, "events": {...}}
+    """
+    if "volume" not in hist.columns or hist["volume"].dropna().empty:
+        return {}
+    _s = hist["close"]
+    _vol = hist["volume"]
+    _vol_avg20 = _vol.rolling(20).mean()
+
+    _golden = [e for e in _find_all_ma_crosses(_s, short_win, long_win) if e["type"] == "golden"]
+    if not _golden:
+        return {}
+
+    _groups = {"confirmed": [], "unconfirmed": []}
+    for _e in _golden:
+        _dt = _e["date"]
+        if _dt not in _s.index:
+            continue
+        _pos = _s.index.get_loc(_dt)
+        _v20 = _vol_avg20.iloc[_pos] if _pos < len(_vol_avg20) else None
+        if pd.isna(_v20) or not _v20 or _v20 <= 0:
+            continue
+        _vr = float(_vol.iloc[_pos] / _v20)
+        _group = "confirmed" if _vr >= vol_confirm_ratio else "unconfirmed"
+        _price0 = float(_s.iloc[_pos])
+        _fwd = {}
+        for _h in horizons:
+            if _pos + _h < len(_s):
+                _fwd[_h] = (float(_s.iloc[_pos + _h]) / _price0 - 1) * 100
+        _groups[_group].append({"date": _dt.strftime("%Y-%m-%d"), "vol_ratio": round(_vr, 2), "fwd": _fwd})
+
+    def _summarize(items, h):
+        _vals = [it["fwd"][h] for it in items if h in it["fwd"]]
+        if not _vals:
+            return None
+        _win = sum(1 for v in _vals if v > 0) / len(_vals) * 100
+        return {"n": len(_vals), "win_rate": round(_win, 1), "avg_return": round(sum(_vals) / len(_vals), 1)}
+
+    _summary = {_h: {"confirmed": _summarize(_groups["confirmed"], _h),
+                      "unconfirmed": _summarize(_groups["unconfirmed"], _h)} for _h in horizons}
+    return {"summary": _summary, "events": _groups,
+            "n_confirmed": len(_groups["confirmed"]), "n_unconfirmed": len(_groups["unconfirmed"])}
+
+
 def _find_support_resistance(s: pd.Series, window: int = 10, num_levels: int = 3) -> dict:
     """直近の価格スイング高値・安値をクラスタリングしてサポート/レジスタンス候補を抽出する。"""
     _s = s.iloc[-252:] if len(s) > 252 else s  # 直近1年程度に限定
@@ -17829,6 +17895,54 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 f'（薄商い）</div></div>'
             )
         st.markdown("".join(_thin_cards_html), unsafe_allow_html=True)
+
+    # ── ゴールデンクロス×出来高 バックテスト ───────────────────────
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        f'🔀 {_tk_input} ゴールデンクロス×出来高 バックテスト（MA25/50）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "「ゴールデンクロス＋出来高増加」の方が「出来高を伴わないゴールデンクロス」より株価が上がりやすいか、"
+        "取得できている全期間のゴールデンクロス発生時点を対象に実データで検証します（出来高増加＝20日平均比1.2倍以上）。"
+    )
+    _gc_bt = _backtest_golden_cross_with_volume(_hist, short_win=25, long_win=50, vol_confirm_ratio=1.2)
+    if not _gc_bt:
+        st.info("ゴールデンクロスの発生が検出できませんでした（データ期間が短い、または出来高データなし）。")
+    else:
+        st.caption(
+            f"検出件数: 出来高増加を伴ったクロス {_gc_bt['n_confirmed']}件 ／ "
+            f"伴わなかったクロス {_gc_bt['n_unconfirmed']}件"
+        )
+        _horizon_labels = {5: "5営業日後", 20: "20営業日後", 60: "60営業日後"}
+        _bt_cards = []
+        for _h, _hl in _horizon_labels.items():
+            _c = _gc_bt["summary"].get(_h, {}).get("confirmed")
+            _u = _gc_bt["summary"].get(_h, {}).get("unconfirmed")
+
+            def _stat_html(_st_d, _label, _color):
+                if not _st_d:
+                    return f'<div style="flex:1"><div style="color:#64748b;font-size:11px">{_label}</div>データ不足</div>'
+                _wc = "#4ade80" if _st_d["avg_return"] >= 0 else "#f87171"
+                return (
+                    f'<div style="flex:1">'
+                    f'<div style="color:{_color};font-size:11px;font-weight:700">{_label}（n={_st_d["n"]}）</div>'
+                    f'<div>勝率 <b>{_st_d["win_rate"]:.0f}%</b>　平均 <b style="color:{_wc}">{_st_d["avg_return"]:+.1f}%</b></div>'
+                    f'</div>'
+                )
+
+            _bt_cards.append(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                f'padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
+                f'<div style="font-weight:700;margin-bottom:6px">{_hl}</div>'
+                f'<div style="display:flex;gap:12px">'
+                f'{_stat_html(_c, "出来高増加あり", "#4ade80")}'
+                f'{_stat_html(_u, "出来高増加なし", "#94a3b8")}'
+                f'</div></div>'
+            )
+        st.markdown("".join(_bt_cards), unsafe_allow_html=True)
+        st.caption("⚠️ 件数が少ない銘柄では統計的信頼性が低くなります。情報提供目的のみ・投資助言ではありません。")
 
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
