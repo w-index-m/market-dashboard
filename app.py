@@ -16924,6 +16924,46 @@ def _find_drawdown_episodes(s: pd.Series, threshold_pct: float = -20.0, max_epis
     return episodes[-max_episodes:][::-1]  # 新しい順
 
 
+def _detect_thin_volume_moves(hist: pd.DataFrame, recent_n: int = 15, move_mult: float = 1.5,
+                               vol_ratio_max: float = 0.8) -> list:
+    """値動きの大きさに対して出来高が伴っていない「スカスカ」な日を検出する。
+    直近recent_n営業日のうち、当日の騰落率が過去60日の典型的な値動き(中央値)のmove_mult倍以上あり、
+    かつ出来高が20日平均のvol_ratio_max倍未満だった日をフラグする。
+    Returns: [{"date","chg_pct","vol_ratio","close"}, ...]（新しい順）
+    """
+    if "volume" not in hist.columns or hist["volume"].dropna().empty:
+        return []
+    _close = hist["close"]
+    _vol   = hist["volume"]
+    _rets  = _close.pct_change()
+    if len(_rets.dropna()) < 20:
+        return []
+
+    _typical_move = _rets.iloc[-60:].abs().median()
+    if not _typical_move or _typical_move <= 0:
+        return []
+    _vol_avg20 = _vol.rolling(20).mean()
+
+    _flagged = []
+    _n = min(recent_n, len(_close) - 1)
+    for i in range(len(_close) - _n, len(_close)):
+        if i < 20:
+            continue
+        _ret = _rets.iloc[i]
+        _v20 = _vol_avg20.iloc[i]
+        if pd.isna(_ret) or pd.isna(_v20) or _v20 <= 0:
+            continue
+        _vr = _vol.iloc[i] / _v20
+        if abs(_ret) >= _typical_move * move_mult and _vr < vol_ratio_max:
+            _flagged.append({
+                "date": _close.index[i].strftime("%Y-%m-%d"),
+                "chg_pct": round(_ret * 100, 1),
+                "vol_ratio": round(float(_vr), 2),
+                "close": float(_close.iloc[i]),
+            })
+    return _flagged[::-1]  # 新しい順
+
+
 def _fetch_finnhub_rating_changes_raw(ticker: str) -> pd.DataFrame:
     """Finnhubのアナリストレーティング変更履歴（/stock/upgrade-downgrade）を取得。"""
     api_key = get_env_var("FINNHUB_API_KEY", "")
@@ -17142,6 +17182,9 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
 
     # 過去の急落局面（-20%以上）と回復までの日数
     out["drawdown_episodes"] = _find_drawdown_episodes(s, threshold_pct=-20.0, max_episodes=5)
+
+    # 値動きに対して出来高が伴っていない「スカスカ」な日（直近15営業日）
+    out["thin_volume_moves"] = _detect_thin_volume_moves(hist, recent_n=15)
     return out
 
 
@@ -17234,6 +17277,15 @@ def _ai_chart_analysis(
         _vol_str = f"直近出来高 {tech['vol_last']:,.0f}" + (
             f"（20日平均比 {_vol_ratio:.2f}倍）" if _vol_ratio is not None else "")
 
+    _thin_moves = tech.get("thin_volume_moves") or []
+    if _thin_moves:
+        _thin_str = "\n".join(
+            f"・{m['date']}: {m['chg_pct']:+.1f}%の値動きに対し出来高は20日平均の{m['vol_ratio']:.2f}倍のみ（薄商い）"
+            for m in _thin_moves
+        )
+    else:
+        _thin_str = "直近15営業日に値動きに対して出来高が薄い日は検出されず"
+
     # 直近ニュース（あれば追加項目として分析させる。過去年の分析には使わない）
     if news_lines:
         _news_str = "\n".join(f"・{n}" for n in news_lines[:5])
@@ -17258,6 +17310,8 @@ def _ai_chart_analysis(
 【MA25/50クロス】{_cross_str_25_50}　【MA50/200クロス（大局的な金/デッドクロス）】{_cross_str_50_200}
 【サポート・レジスタンス（直近1年の価格クラスタリングより）】{_sr_str}
 【出来高】{_vol_str}
+【薄商い警戒（値動きの大きさに対し出来高が伴っていない日・直近15営業日）】
+{_thin_str}
 【52週レンジ】高値 {_f(tech.get('hi52'), 2)} / 安値 {_f(tech.get('lo52'), 2)} / レンジ内位置 {_f(tech.get('pos52'))}%
 【リターン】1ヶ月 {_f(tech.get('ret_1m'))}% ／ 3ヶ月 {_f(tech.get('ret_3m'))}% ／ 6ヶ月 {_f(tech.get('ret_6m'))}% ／ 1年 {_f(tech.get('ret_1y'))}%
 【年率ボラティリティ（直近60営業日）】{_f(tech.get('vol_ann'))}%
@@ -17278,7 +17332,9 @@ def _ai_chart_analysis(
    デッドクロス＝短期の売り圧力が優勢に転じたサインで損切り・追随売りを誘発しやすい、等）
 2. ボリンジャーバンドの状態（バンドウォーク中か、スクイーズ/エクスパンションか、%Bの示す過熱感）
 3. サポート/レジスタンス（次に意識される価格帯とその根拠。なぜその価格帯が意識されやすいか＝過去に何度も反発/抵抗された水準であることに触れる）
-4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）
+4. 出来高が値動きを裏付けているか（出来高を伴った動きか、閑散か）。
+   薄商い警戒に該当日があれば、その日の値動きは「スカスカ抜け」＝薄い商いで価格だけ動いた可能性が高く、
+   反対売買が入ると急に反転しやすい・ダマシになりやすいことに触れること
 5. 急落耐性（{ticker}自身の過去の急落局面の下落幅・回復日数を踏まえ、同程度の急落が今起きた場合にどの程度で凌げそうか。
    参考情報の歴史的急落と比べて{ticker}の値動きの荒さがどの水準かにも触れてよい）
 6. 季節性（例年の同時期と比べて{as_of[:4]}年は強いか弱いか、過去パターンが年末にかけて続く傾向があるか）
@@ -17743,6 +17799,36 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 )
             st.markdown("".join(_dg_cards_html), unsafe_allow_html=True)
             st.caption("⚠️ サンプル数が少ないため統計的な信頼性は限定的です。情報提供目的のみ・投資助言ではありません。")
+
+    # ── 薄商い警戒（値動きに対して出来高が伴っていない日）────────────
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        f'📉 {_tk_input} 薄商い警戒（値動きに出来高が伴っていない日）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "直近15営業日のうち、値動きの大きさに対して出来高が20日平均の80%未満だった日を検出。"
+        "薄商いでの値動きは反対売買が入ると反転しやすく、ダマシになりやすい傾向があります。"
+    )
+    _thin_ui = _detect_thin_volume_moves(_hist, recent_n=15) if "volume" in _hist.columns else []
+    if not _thin_ui:
+        st.info("直近15営業日に該当する薄商いの値動きは検出されませんでした。")
+    else:
+        _thin_cards_html = []
+        for _tm in _thin_ui:
+            _tm_c = "#4ade80" if _tm["chg_pct"] >= 0 else "#f87171"
+            _thin_cards_html.append(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-left:3px solid #fbbf24;'
+                f'border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#e2e8f0">'
+                f'<div style="display:flex;justify-content:space-between">'
+                f'<span style="font-weight:700">{_tm["date"]}</span>'
+                f'<span style="color:{_tm_c};font-weight:700">{_tm["chg_pct"]:+.1f}%</span></div>'
+                f'<div style="color:#64748b;margin-top:2px">'
+                f'終値 {_tm["close"]:,.2f}　出来高は20日平均比 <span style="color:#fbbf24">{_tm["vol_ratio"]:.2f}倍</span>'
+                f'（薄商い）</div></div>'
+            )
+        st.markdown("".join(_thin_cards_html), unsafe_allow_html=True)
 
     # ── AIチャート分析 ─────────────────────────────────────────
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
