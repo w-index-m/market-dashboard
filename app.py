@@ -17257,11 +17257,39 @@ def _compute_chart_technicals(hist: pd.DataFrame) -> dict:
 @st.cache_data(ttl=TTL_RSS, show_spinner=False)
 def _fetch_recent_ticker_news(ticker: str, date_key: str, days_back: int = 14) -> list:
     """指定銘柄の直近ニュース見出しを取得（Finnhub→Yahoo Financeフォールバック）。
+    日本株(.T)の場合はTDnet適時開示も合わせて取得しマージする（Finnhub/Yahooは日本株のカバレッジが薄いため）。
     date_key は当日キャッシュ用（呼び出し側で today 文字列を渡す）。
     """
     try:
-        return fetch_finnhub_company_news({ticker: ticker}, days_back=days_back)
+        _news = fetch_finnhub_company_news({ticker: ticker}, days_back=days_back)
     except Exception:
+        _news = []
+    if ticker.endswith(".T"):
+        _news = _fetch_recent_tdnet_for_ticker(ticker, date_key) + _news
+    return _news
+
+
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
+def _fetch_recent_tdnet_for_ticker(ticker: str, date_key: str, max_items: int = 5) -> list:
+    """指定した日本株ティッカーの証券コードに一致する直近のTDnet適時開示見出しを取得。
+    正規のTDnet配信（東証適時開示システムのRSS）を利用。date_keyは当日キャッシュ用。
+    """
+    if not ticker.endswith(".T"):
+        return []
+    _code = ticker.replace(".T", "")
+    try:
+        _feed = feedparser.parse("https://webapi.yanoshin.jp/webapi/tdnet/list/recent.rss")
+        _results = []
+        for _entry in _feed.entries:
+            _title = _entry.get("title", "")
+            if re.search(rf"\b{_code}\b", _title):
+                _pub = _entry.get("published", "")
+                _results.append(f"[TDnet適時開示] {_title}" + (f"（{_pub}）" if _pub else ""))
+            if len(_results) >= max_items:
+                break
+        return _results
+    except Exception as e:
+        logger.warning(f"[tdnet] {ticker} 取得失敗: {e}")
         return []
 
 
