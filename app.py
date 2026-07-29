@@ -23769,74 +23769,33 @@ def render_claude_trading_project():
                 _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}_{_ip_model_type}"
 
                 _ip_results = {}
-                _ip_prog_area = st.empty()
-                _ip_done  = 0
-                _ip_t0    = time.time()
-                _IP_EST   = 40  # Agent C 1回あたり推定秒数
-                _ip_n_steps = 1 if (_ip_force or not _load_invest_rec_cache(
-                    _ip_today, _ip_budget_val, "unified", _ip_cache_risk)) else 0
-
-                def _ip_render_progress(label, done, n_steps, elapsed, inner_elapsed):
-                    """進捗バーHTMLを更新する"""
-                    # 全体進捗
-                    _base_pct  = int(done / n_steps * 100) if n_steps > 0 else 0
-                    # 現在のステップ内進捗（最大95%まで）
-                    _inner_pct = min(95, int(inner_elapsed / _IP_EST * 100))
-                    _total_pct = min(99, _base_pct + int((100 / n_steps) * _inner_pct / 100)) if n_steps > 0 else _inner_pct
-                    _remain    = max(0, int((_ip_n_steps - _ip_done - 1) * _IP_EST + max(0, _IP_EST - inner_elapsed)))
-                    _ip_prog_area.markdown(
-                        f'<div style="background:#0f172a;border:1px solid #334155;'
-                        f'border-radius:8px;padding:12px 16px;margin-bottom:8px">'
-                        f'<div style="font-size:12px;color:#94a3b8;margin-bottom:6px">'
-                        f'🤖 <b style="color:#e2e8f0">Agent C ({label}モデル)</b> 組み立て中…'
-                        f'&nbsp;&nbsp;<span style="color:#60a5fa">({done}/{n_steps}完了)</span>'
-                        f'&nbsp;&nbsp;⏱ 残り約 <b style="color:#fbbf24">{_remain}秒</b></div>'
-                        f'<div style="background:#1e293b;border-radius:4px;height:8px">'
-                        f'<div style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);'
-                        f'width:{_total_pct}%;height:8px;border-radius:4px"></div></div>'
-                        f'<div style="font-size:10px;color:#475569;margin-top:5px">'
-                        f'経過: {int(elapsed)}秒　A+B分析済み → Gemini → Groq → OpenRouter の順で試行</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                import threading as _ipth
-
                 # ── Agent A: マクロ分析（6hキャッシュ）──────────────────────
-                _ip_prog_area.markdown(
-                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
-                    'padding:10px 16px;margin-bottom:8px;font-size:12px;color:#94a3b8">'
-                    '🧠 <b style="color:#e2e8f0">Agent A</b>: マクロ市場環境を分析中…'
-                    '</div>', unsafe_allow_html=True
-                )
-                _ip_a_ctx = _ip_mktctx or {}
-                _ip_agent_a = _analyze_macro_agent(
-                    _ip_today,
-                    float(_ip_a_ctx.get("fg_score", 50) or 50),
-                    str(_ip_a_ctx.get("fg_label", "")),
-                    int(_ip_a_ctx.get("crash_risk_score", 0)),
-                    str(_ip_a_ctx.get("crash_risk_label", "🟢 低リスク")),
-                    float(_ip_a_ctx.get("vix_val", 0)),
-                    float(_ip_a_ctx.get("naaim_exp", 0)),
-                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明",
-                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明",
-                    str(_ip_a_ctx.get("nikkei_pred_label", "")),
-                    str(_ip_a_ctx.get("us_pred_label", "")),
-                )
+                # 進捗はst.spinnerで表示（プレースホルダーのポーリング更新はDOM競合エラーの
+                # 原因になるため使わない。バックグラウンドスレッドも不要になるので撤去）
+                with st.spinner("🧠 Agent A: マクロ市場環境を分析中…"):
+                    _ip_a_ctx = _ip_mktctx or {}
+                    _ip_agent_a = _analyze_macro_agent(
+                        _ip_today,
+                        float(_ip_a_ctx.get("fg_score", 50) or 50),
+                        str(_ip_a_ctx.get("fg_label", "")),
+                        int(_ip_a_ctx.get("crash_risk_score", 0)),
+                        str(_ip_a_ctx.get("crash_risk_label", "🟢 低リスク")),
+                        float(_ip_a_ctx.get("vix_val", 0)),
+                        float(_ip_a_ctx.get("naaim_exp", 0)),
+                        " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明",
+                        " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明",
+                        str(_ip_a_ctx.get("nikkei_pred_label", "")),
+                        str(_ip_a_ctx.get("us_pred_label", "")),
+                    )
 
                 # ── Agent B: 上位候補銘柄を並列分析（12hキャッシュ）──────────
                 _ip_top_args = _get_top_candidate_args(_ip_cand_perf, _ip_trade_mode, _ip_budget_val, n=15)
-                _ip_prog_area.markdown(
-                    f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
-                    f'padding:10px 16px;margin-bottom:8px;font-size:12px;color:#94a3b8">'
-                    f'🔬 <b style="color:#e2e8f0">Agent B</b>: {len(_ip_top_args)}銘柄を並列分析中…'
-                    f'（キャッシュ済みは即時）</div>', unsafe_allow_html=True
-                )
-                _ip_agent_b = _run_stock_agents_parallel(
-                    _ip_top_args, _ip_today,
-                    _ip_agent_a.get("stance", "中立"),
-                    max_workers=3,
-                )
+                with st.spinner(f"🔬 Agent B: {len(_ip_top_args)}銘柄を並列分析中…（キャッシュ済みは即時）"):
+                    _ip_agent_b = _run_stock_agents_parallel(
+                        _ip_top_args, _ip_today,
+                        _ip_agent_a.get("stance", "中立"),
+                        max_workers=3,
+                    )
                 _ip_b_count  = len(_ip_agent_b)
                 _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
                 _ip_b_flagged = [v.get("ticker", "") for v in _ip_agent_b.values() if not v.get("_verified", True)]
@@ -23854,47 +23813,23 @@ def render_claude_trading_project():
                 if _cached_unified:
                     _ip_results["unified"] = _cached_unified
                 else:
-                    _ip_step_t0 = time.time()
-                    _ip_result_box = [None]
-
-                    def _ip_gen_worker(box=_ip_result_box, cp=_ip_cand_perf,
-                                       ag_a=_ip_agent_a, ag_b=_ip_agent_b,
-                                       mt=_ip_model_type):
+                    with st.spinner("🤖 Agent C: ポートフォリオを組み立て中…（Gemini→Groq→OpenRouterの順で試行）"):
                         try:
-                            box[0] = _generate_investment_portfolio_rec(
-                                _ip_budget_val, mt, _ip_risk_key,
+                            _r = _generate_investment_portfolio_rec(
+                                _ip_budget_val, _ip_model_type, _ip_risk_key,
                                 _ip_mktctx, _ip_holdings, _ip_model_pref,
                                 trading_mode=_ip_trade_mode,
-                                candidate_perf=cp,
-                                agent_a=ag_a,
-                                agent_b=ag_b,
+                                candidate_perf=_ip_cand_perf,
+                                agent_a=_ip_agent_a,
+                                agent_b=_ip_agent_b,
                             )
                         except Exception as _wex:
-                            logger.error(f"[trading] portfolio worker crash: {_wex}", exc_info=True)
-                            box[0] = {"portfolio": [], "metrics": {}, "model": "", "error": f"内部エラー: {str(_wex)[:200]}"}
-
-                    _ip_th = _ipth.Thread(target=_ip_gen_worker, daemon=True)
-                    _ip_th.start()
-
-                    while _ip_th.is_alive():
-                        _ip_render_progress(
-                            "統合", _ip_done, max(_ip_n_steps, 1),
-                            time.time() - _ip_t0,
-                            time.time() - _ip_step_t0,
-                        )
-                        # 更新頻度を落としてプレースホルダー再描画によるDOM競合エラーを軽減
-                        time.sleep(2)
-
-                    _ip_th.join()
-                    _r = _ip_result_box[0] or {"error": "生成失敗", "portfolio": None, "model": ""}
-                    _ip_done += 1
+                            logger.error(f"[trading] portfolio生成失敗: {_wex}", exc_info=True)
+                            _r = {"error": f"内部エラー: {str(_wex)[:200]}", "portfolio": None, "model": ""}
                     if not _r.get("error") and _r.get("portfolio"):
                         _save_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk,
                                                _r, _r.get("model", ""))
                     _ip_results["unified"] = _r
-
-                # 完了 → 進捗バーを消す
-                _ip_prog_area.empty()
 
                 st.session_state["_ip_results"]     = _ip_results
                 st.session_state["_ip_budget_val"]  = _ip_budget_val
