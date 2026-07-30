@@ -7650,6 +7650,54 @@ _SP500_STOCKS = {
 }
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_factor_monthly_returns(ticker: str, date_key: str, years: int = 15) -> pd.Series:
+    """モメンタム/ハイベータ・ファクターETFの月次リターン履歴を取得する。
+    自前でモメンタム銘柄バスケットを組むとルック・アヘッド・バイアス（後知恵で当時の
+    「高モメンタム銘柄」を選んでしまう）が入るため、実在の投資可能なファクターETFの
+    価格履歴をそのまま使う。date_keyは当日キャッシュ用。
+    Returns: 月末終値ベースの月次リターン(%)のSeries（新しい順ではなく時系列順）
+    """
+    try:
+        import yfinance as _yf
+        _df = _yf.download(ticker, period=f"{years}y", interval="1d",
+                            auto_adjust=True, progress=False, timeout=30)
+        if _df.empty:
+            return pd.Series(dtype=float)
+        _cl = _df["Close"] if "Close" in _df.columns else _df
+        if hasattr(_cl, "columns"):
+            _cl = _cl.iloc[:, 0]
+        _cl = _cl.dropna()
+        _monthly = _cl.resample("ME").last()
+        return (_monthly.pct_change().dropna() * 100)
+    except Exception as e:
+        logger.warning(f"[factor] {ticker} 月次リターン取得失敗: {e}")
+        return pd.Series(dtype=float)
+
+
+def _analyze_factor_crash_risk(monthly_ret: pd.Series) -> dict:
+    """直近月のリターンが過去の月次分布の中でどの位置にあるかを分析する。"""
+    if monthly_ret.empty or len(monthly_ret) < 13:
+        return {}
+    _current = float(monthly_ret.iloc[-1])
+    _hist = monthly_ret.iloc[:-1]  # 直近月を除いた過去分布と比較
+    _mean, _std = float(_hist.mean()), float(_hist.std())
+    _z = (_current - _mean) / _std if _std > 0 else 0.0
+    _percentile = float((_hist < _current).mean() * 100)
+    _rank_worst = int((_hist <= _current).sum()) + 1  # 1 = 過去含め最悪
+    return {
+        "current_month":    monthly_ret.index[-1].strftime("%Y-%m"),
+        "current_ret":      round(_current, 2),
+        "z_score":          round(_z, 2),
+        "percentile":       round(_percentile, 1),
+        "rank_worst":       _rank_worst,
+        "total_months":     len(_hist) + 1,
+        "is_worst_ever":    bool(_current <= _hist.min()),
+        "worst_ever_val":   round(float(_hist.min()), 2),
+        "worst_ever_month": _hist.idxmin().strftime("%Y-%m"),
+    }
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
     """日経225 / ナスダック100 / S&P500 構成銘柄のモメンタムスコアを計算"""
@@ -9765,6 +9813,77 @@ def render_momentum_ranking():
         with st.spinner("S&P500データを取得中..."):
             df_sp = _fetch_momentum_ranking("sp500")
         _render_cards(df_sp)
+
+    # ── モメンタムファクター 月次崩れチェック（MTUM） ─────────────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '📉 モメンタムファクター 月次崩れチェック（MTUM）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "個別銘柄ではなく「モメンタム・ファクターそのもの」の月次リターンを見るセクションです。"
+        "iShares MSCI USA Momentum Factor ETF（MTUM）の月次リターンが、過去と比べて歴史的な"
+        "極値（クラッシュ級の悪化）になっていないかを確認します。自前でモメンタム銘柄バスケットを"
+        "組むとルック・アヘッド・バイアスが入るため、実在の投資可能なファクターETFをそのまま使っています。"
+    )
+    _today_factor = datetime.now(JST).strftime("%Y-%m-%d")
+    _mtum_monthly = _fetch_factor_monthly_returns("MTUM", _today_factor, years=15)
+    if _mtum_monthly.empty:
+        st.info("MTUMの月次リターンデータを取得できませんでした。")
+    else:
+        _crash_info = _analyze_factor_crash_risk(_mtum_monthly)
+        if _crash_info:
+            _cur_ret = _crash_info["current_ret"]
+            _cur_c = "#4ade80" if _cur_ret >= 0 else "#f87171"
+            _extreme_note = (
+                f'<div style="color:#f87171;font-weight:700;margin-top:6px">'
+                f'⚠️ 過去{_crash_info["total_months"]}ヶ月で最悪の月次リターンです'
+                f'（これまでの最悪は{_crash_info["worst_ever_month"]}の{_crash_info["worst_ever_val"]:+.1f}%）</div>'
+                if _crash_info["is_worst_ever"] else ""
+            )
+            st.markdown(
+                f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                f'padding:14px 18px;margin-bottom:10px;font-size:13px;color:#e2e8f0">'
+                f'<div style="display:flex;gap:20px;flex-wrap:wrap">'
+                f'<div><div style="color:#64748b;font-size:11px">対象月</div>'
+                f'<div style="font-weight:700">{_crash_info["current_month"]}</div></div>'
+                f'<div><div style="color:#64748b;font-size:11px">月次リターン</div>'
+                f'<div style="font-weight:700;color:{_cur_c}">{_cur_ret:+.1f}%</div></div>'
+                f'<div><div style="color:#64748b;font-size:11px">Zスコア</div>'
+                f'<div style="font-weight:700">{_crash_info["z_score"]:+.2f}</div></div>'
+                f'<div><div style="color:#64748b;font-size:11px">過去比パーセンタイル</div>'
+                f'<div style="font-weight:700">下位{_crash_info["percentile"]:.0f}%</div></div>'
+                f'<div><div style="color:#64748b;font-size:11px">悪い方から順位</div>'
+                f'<div style="font-weight:700">{_crash_info["rank_worst"]} / {_crash_info["total_months"]}ヶ月中</div></div>'
+                f'</div>{_extreme_note}</div>',
+                unsafe_allow_html=True,
+            )
+
+        import plotly.graph_objects as go
+        _bar_colors = ["#4ade80" if v >= 0 else "#f87171" for v in _mtum_monthly.values]
+        _bar_colors[-1] = "#facc15"  # 直近月は黄色で強調
+        _fig_factor = go.Figure()
+        _fig_factor.add_trace(go.Bar(
+            x=_mtum_monthly.index, y=_mtum_monthly.values,
+            marker=dict(color=_bar_colors, line=dict(width=0)),
+            hovertemplate="%{x|%Y-%m}: %{y:+.1f}%<extra></extra>",
+        ))
+        _fig_factor.update_layout(
+            title=dict(text="MTUM 月次リターン(%)", font=dict(size=13, color="#94a3b8")),
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            font=dict(color="#e2e8f0"),
+            height=320, margin=dict(l=40, r=20, t=36, b=32), showlegend=False,
+            yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b",
+                       zeroline=True, zerolinecolor="#475569", fixedrange=True),
+            xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", fixedrange=True),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(
+            _fig_factor, use_container_width=True, key="momentum_factor_monthly_chart",
+            config={"displayModeBar": False, "scrollZoom": False},
+        )
+        st.caption("⚠️ 情報提供目的のみ・投資助言ではありません。MTUMはモメンタムファクターの代表的な投資可能ETFです。")
 
 
 # =====================================================
