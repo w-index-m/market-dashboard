@@ -16148,8 +16148,10 @@ def fetch_margin_data_jquants(code: str) -> Dict:
         )
 
         result = {"ok": True, "margin": {}, "trade": {}}
+        _diag = []  # 実際に何が起きたかを正確に記録する（"成功したが0件"と誤表示しないため）
 
         if r_margin.status_code != 200:
+            _diag.append(f"margin-interest: HTTP {r_margin.status_code} {r_margin.text[:150]}")
             logger.debug(f"[jquants_margin] margin-interest失敗 {code}: HTTP {r_margin.status_code} {r_margin.text[:150]}")
         if r_margin.status_code == 200:
             data = r_margin.json().get("data", [])
@@ -16180,6 +16182,7 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                     )
 
         if r_trade.status_code != 200:
+            _diag.append(f"investor-types: HTTP {r_trade.status_code} {r_trade.text[:150]}")
             logger.debug(f"[jquants_margin] investor-types失敗 {code}: HTTP {r_trade.status_code} {r_trade.text[:150]}")
         if r_trade.status_code == 200:
             data = r_trade.json().get("data", [])
@@ -16195,7 +16198,10 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                 }
 
         if not result["margin"] and not result["trade"]:
-            result["reason"] = f"APIは成功したが対象銘柄(code={code_clean})のデータが0件でした"
+            if _diag:
+                result["reason"] = f"code={code_clean}: " + " / ".join(_diag)
+            else:
+                result["reason"] = f"APIは200 OKだが対象銘柄(code={code_clean})のdata配列が空でした"
         return result
 
     except Exception as e:
