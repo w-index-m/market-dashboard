@@ -16149,10 +16149,24 @@ def fetch_margin_data_jquants(code: str) -> Dict:
 
         result = {"ok": True, "margin": {}, "trade": {}}
         _diag = []  # 実際に何が起きたかを正確に記録する（"成功したが0件"と誤表示しないため）
+        _plan_restricted = False  # 契約プランの制限（HTTP 403）かどうか
+
+        def _diag_append(_endpoint_name: str, _resp) -> None:
+            nonlocal _plan_restricted
+            _msg = _resp.text[:150]
+            try:
+                _msg = _resp.json().get("message", _msg)
+            except Exception:
+                pass
+            if _resp.status_code == 403 and "subscription" in _msg.lower():
+                _plan_restricted = True
+                _diag.append(f"{_endpoint_name}: 契約プランでは利用できません")
+            else:
+                _diag.append(f"{_endpoint_name}: HTTP {_resp.status_code} {_msg}")
+            logger.debug(f"[jquants_margin] {_endpoint_name}失敗 {code}: HTTP {_resp.status_code} {_msg}")
 
         if r_margin.status_code != 200:
-            _diag.append(f"margin-interest: HTTP {r_margin.status_code} {r_margin.text[:150]}")
-            logger.debug(f"[jquants_margin] margin-interest失敗 {code}: HTTP {r_margin.status_code} {r_margin.text[:150]}")
+            _diag_append("margin-interest", r_margin)
         if r_margin.status_code == 200:
             data = r_margin.json().get("data", [])
             if data:
@@ -16182,8 +16196,7 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                     )
 
         if r_trade.status_code != 200:
-            _diag.append(f"investor-types: HTTP {r_trade.status_code} {r_trade.text[:150]}")
-            logger.debug(f"[jquants_margin] investor-types失敗 {code}: HTTP {r_trade.status_code} {r_trade.text[:150]}")
+            _diag_append("investor-types", r_trade)
         if r_trade.status_code == 200:
             data = r_trade.json().get("data", [])
             if data:
@@ -16198,7 +16211,12 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                 }
 
         if not result["margin"] and not result["trade"]:
-            if _diag:
+            if _plan_restricted:
+                result["reason"] = (
+                    "契約中のJ-Quantsプランではこのデータ（信用残・投資部門別情報）は利用できません。"
+                    "https://jpx-jquants.com/#dataset でプランをご確認ください。"
+                )
+            elif _diag:
                 result["reason"] = f"code={code_clean}: " + " / ".join(_diag)
             else:
                 result["reason"] = f"APIは200 OKだが対象銘柄(code={code_clean})のdata配列が空でした"
