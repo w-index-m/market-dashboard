@@ -9885,6 +9885,65 @@ def render_momentum_ranking():
         )
         st.caption("⚠️ 情報提供目的のみ・投資助言ではありません。MTUMはモメンタムファクターの代表的な投資可能ETFです。")
 
+    # ── AI/半導体株 乱高下検知（急落→急回復の"往って来い"パターン）─────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '🌀 AI/半導体株 乱高下検知（急落→急回復パターン・SMH基準）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "短期間で急落し、短期間で急回復した「往って来い」の局面を検出します。はっきりしたファンダメンタルズの"
+        "材料が無いのに短期間で往復する値動きは、需給・ポジション整理（強制的な売り／踏み上げ）が絡んでいる"
+        "可能性がある兆候です。SMH（半導体ETF・AI関連株の代表的な投資可能ETF）を対象に、10%以上の下落かつ"
+        "下落が10営業日以内・回復が15営業日以内だった局面のみを抽出しています。"
+        "※ 特定のファンドの強制清算など、値動きの「原因」までは特定できません。あくまでパターン検知です。"
+    )
+    with st.spinner("SMHのデータを取得中..."):
+        _smh_hist = _fetch_ticker_history_multi_year("SMH", years=2)
+    if _smh_hist.empty:
+        st.info("SMHのデータを取得できませんでした。")
+    else:
+        _whiplash_eps = _detect_whiplash_episodes(
+            _smh_hist, threshold_pct=-10.0, max_days_to_trough=10, max_days_to_recover=15,
+        )
+        if not _whiplash_eps:
+            st.success("直近2年間で該当する急落→急回復パターンは検出されませんでした。")
+        else:
+            _wl_cards = []
+            for ep in _whiplash_eps:
+                _peak_d   = ep["peak_date"].strftime("%Y-%m-%d")
+                _trough_d = ep["trough_date"].strftime("%Y-%m-%d")
+                _rec_d    = ep["recovery_date"].strftime("%Y-%m-%d") if ep["recovery_date"] is not None else "—"
+                _decline  = ep["decline_pct"]
+                _vr       = ep.get("vol_ratio_at_trough")
+                _vr_note  = (
+                    f"底値時点の出来高は20日平均の{_vr:.1f}倍（急増＝投げ売り的な動き）" if _vr and _vr >= 1.3 else
+                    f"底値時点の出来高は20日平均の{_vr:.1f}倍（薄商い気味）" if _vr and _vr < 0.8 else
+                    (f"底値時点の出来高は20日平均の{_vr:.1f}倍（平常並み）" if _vr else "出来高データなし")
+                )
+                _macro = _find_macro_events_in_range(_peak_d, _trough_d, impact_filter=("high",))
+                _macro_note = (
+                    f"下落期間中の主要指標: {', '.join(_macro)}" if _macro
+                    else "この期間に該当する主要指標（雇用統計/CPI/FOMC等・2025年以降のみ収録）は見当たりません"
+                )
+                _wl_cards.append(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                    'padding:14px 18px;margin-bottom:10px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
+                    f'<span style="font-size:13px;font-weight:700;color:#e2e8f0">{_peak_d} → {_trough_d}</span>'
+                    f'<span style="background:#f87171;color:#0f172a;font-size:13px;font-weight:700;'
+                    f'padding:4px 14px;border-radius:20px">{_decline:+.1f}%（{ep["days_to_trough"]}営業日で下落）</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#94a3b8;margin-top:6px">'
+                    f'↳ 回復: {_rec_d}（底値から{ep["days_to_recover"]}営業日で戻り）</div>'
+                    f'<div style="font-size:12px;color:#94a3b8;margin-top:2px">{_vr_note}</div>'
+                    f'<div style="font-size:12px;color:#64748b;margin-top:2px">{_macro_note}</div>'
+                    '</div>'
+                )
+            st.markdown("".join(_wl_cards), unsafe_allow_html=True)
+            st.caption("⚠️ 情報提供目的のみ。「往って来い」パターンの検知であり、原因の特定や投資助言ではありません。")
+
 
 # =====================================================
 # 米国経済イベント × ボラティリティ分析
@@ -17385,6 +17444,54 @@ def _find_drawdown_episodes(s: pd.Series, threshold_pct: float = -20.0, max_epis
         _finalize(None)  # 末尾時点でまだ未回復
 
     return episodes[-max_episodes:][::-1]  # 新しい順
+
+
+def _detect_whiplash_episodes(hist: pd.DataFrame, threshold_pct: float = -10.0,
+                               max_days_to_trough: int = 10, max_days_to_recover: int = 15,
+                               max_episodes: int = 6) -> list:
+    """「短期間で急落→短期間で急回復」する“往って来い”の局面を検出する。
+    ファンダメンタルズの材料が見当たらないのに短期間で往復する値動きは、
+    需給・ポジション整理（強制売り／踏み上げ）主導の可能性がある兆候として拾う。
+    _find_drawdown_episodesの結果を、下落・回復とも短期間だったものだけに絞り込む。
+    """
+    if "close" not in hist.columns or len(hist) < 30:
+        return []
+    _episodes = _find_drawdown_episodes(hist["close"], threshold_pct=threshold_pct, max_episodes=30)
+    _out = []
+    for ep in _episodes:
+        if ep["days_to_trough"] is None or ep["days_to_trough"] > max_days_to_trough:
+            continue
+        if ep["days_to_recover"] is None or ep["days_to_recover"] > max_days_to_recover:
+            continue
+        _vol_ratio = None
+        if "volume" in hist.columns:
+            try:
+                _vol20 = hist["volume"].rolling(20).mean()
+                _v   = hist["volume"].loc[ep["trough_date"]]
+                _v20 = _vol20.loc[ep["trough_date"]]
+                if pd.notna(_v) and pd.notna(_v20) and _v20 > 0:
+                    _vol_ratio = float(_v / _v20)
+            except Exception:
+                pass
+        _out.append({**ep, "vol_ratio_at_trough": _vol_ratio})
+    return _out[:max_episodes]
+
+
+def _find_macro_events_in_range(start_date, end_date, impact_filter: tuple = ("high",)) -> list:
+    """_US_ECO_CALENDAR（固定データ）から指定期間内の主要イベント名を返す。
+    カレンダーの収録期間（2025年〜）より前の日付は該当なしとして扱われる点に注意。
+    """
+    _out = []
+    _sd = pd.Timestamp(start_date).date()
+    _ed = pd.Timestamp(end_date).date()
+    for date_str, _time_et, name, _icon, impact, note in _US_ECO_CALENDAR:
+        try:
+            _d = dt.date(*map(int, date_str.split("-")))
+        except Exception:
+            continue
+        if _sd <= _d <= _ed and impact in impact_filter:
+            _out.append(f"{name}（{note}）" if note else name)
+    return _out
 
 
 def _detect_thin_volume_moves(hist: pd.DataFrame, recent_n: int = 15, move_mult: float = 1.5,
