@@ -16227,6 +16227,123 @@ def fetch_margin_data_jquants(code: str) -> Dict:
         return {"ok": False, "reason": str(e)}
 
 
+@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
+def fetch_irbank_margin_data(code: str) -> Dict:
+    """
+    IRBANK（irbank.net）の個別銘柄ページから信用残高推移を取得する無料フォールバック。
+    J-Quantsの契約プランでmargin-interest/investor-typesが利用できない場合に使う。
+    東証が毎週火曜に公表する「信用取引週末残高」と同一系列で、APIキー不要・無料。
+    列の並びはサイト側の見出し文字列（th）から動的に特定し、位置決め打ちにしない
+    （買残/売残の取り違えを防ぐため）。
+    """
+    try:
+        code_clean = code.replace(".T", "").replace(".t", "")
+        r = requests.get(
+            f"https://irbank.net/{code_clean}/margin",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "reason": f"HTTP {r.status_code}"}
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        target_table = None
+        headers_text: List[str] = []
+        for table in soup.find_all("table"):
+            ths = [th.get_text(strip=True) for th in table.find_all("th")]
+            joined = "".join(ths)
+            if "信用" in joined and ("買" in joined or "売" in joined):
+                target_table = table
+                headers_text = ths
+                break
+
+        if target_table is None:
+            return {"ok": False, "reason": "対象テーブルが見つかりませんでした（サイト構造が変更された可能性）"}
+
+        def _find_col(keywords):
+            for i, h in enumerate(headers_text):
+                if any(k in h for k in keywords):
+                    return i
+            return None
+
+        idx_date  = _find_col(["日付", "年月日"])
+        idx_long  = _find_col(["買残", "買い残", "信用買"])
+        idx_short = _find_col(["売残", "売り残", "信用売"])
+        idx_ratio = _find_col(["倍率"])
+        if idx_date is None:
+            idx_date = 0
+
+        _date_re = re.compile(r"(\d{2,4})[/\-](\d{1,2})[/\-](\d{1,2})")
+        rows = []
+        for tr in target_table.find_all("tr"):
+            cells = tr.find_all("td")
+            if not cells:
+                continue
+            texts = [c.get_text(strip=True) for c in cells]
+            if idx_date >= len(texts):
+                continue
+            date_val = texts[idx_date]
+            if not _date_re.match(date_val):
+                continue
+
+            def _num(i):
+                if i is None or i >= len(texts):
+                    return None
+                t = texts[i].replace(",", "").replace("株", "").replace("倍", "").replace("%", "")
+                try:
+                    return float(t)
+                except ValueError:
+                    return None
+
+            rows.append({
+                "date":  date_val,
+                "long":  _num(idx_long),
+                "short": _num(idx_short),
+                "ratio": _num(idx_ratio),
+            })
+
+        if not rows:
+            return {"ok": False, "reason": "データ行を解析できませんでした（サイト構造が変更された可能性）"}
+
+        def _dkey(d):
+            m = _date_re.match(d)
+            y, mo, da = m.groups()
+            y = int(y)
+            if y < 100:
+                y += 2000
+            return (y, int(mo), int(da))
+
+        rows.sort(key=lambda x: _dkey(x["date"]))
+        latest = rows[-1]
+        prev   = rows[-2] if len(rows) >= 2 else None
+
+        long_bal  = latest["long"]  or 0
+        short_bal = latest["short"] or 0
+        ratio = (
+            latest["ratio"] if latest["ratio"] is not None
+            else (round(long_bal / short_bal, 2) if short_bal else 0)
+        )
+
+        result = {
+            "ok": True,
+            "source": "irbank",
+            "date": latest["date"],
+            "long_balance":  long_bal,
+            "short_balance": short_bal,
+            "ratio": ratio,
+        }
+        if prev:
+            result["long_diff"]  = long_bal  - (prev["long"]  or 0)
+            result["short_diff"] = short_bal - (prev["short"] or 0)
+        return result
+
+    except Exception as e:
+        logger.debug(f"[irbank_margin] {code}: {e}")
+        return {"ok": False, "reason": str(e)}
+
+
 def _bar_html(label: str, value: float, max_val: float,
               color: str, sub_label: str = "") -> str:
     """横棒グラフHTML（kabuステーション風）"""
@@ -16497,14 +16614,22 @@ def render_stock_screener():
         mg    = {}
         tr    = {}
 
+        mg_source = "jquants"
         if is_jp:
             with st.spinner("信用残データを取得中..."):
                 mg_data = fetch_margin_data_jquants(sel_symbol)
             if mg_data.get("ok"):
                 mg = mg_data.get("margin", {})
                 tr = mg_data.get("trade",  {})
-            else:
-                st.caption(f"⚠️ J-Quants: {mg_data.get('reason','取得失敗')}")
+            if not mg:
+                # J-Quantsの契約プラン制限などで取得できない場合はIRBANK（無料）にフォールバック
+                with st.spinner("信用残データを取得中（IRBANKフォールバック）..."):
+                    ir_data = fetch_irbank_margin_data(sel_symbol)
+                if ir_data.get("ok"):
+                    mg = ir_data
+                    mg_source = "irbank"
+                elif not mg_data.get("ok"):
+                    st.caption(f"⚠️ J-Quants: {mg_data.get('reason','取得失敗')} / IRBANK: {ir_data.get('reason','取得失敗')}")
 
         # ── 現物売買動向 ──────────────────────────────
         if tr:
@@ -16536,6 +16661,7 @@ def render_stock_screener():
 
         # ── 信用買残 ────────────────────────────────
         if mg:
+            _has_breakdown = mg_source == "jquants"  # IRBANKは制度信用/一般信用の内訳が無い
             long_bal   = mg.get("long_balance", 0)
             long_std   = mg.get("long_std",     0)  # 制度信用（買）
             long_neg   = mg.get("long_neg",     0)  # 一般信用（買）
@@ -16555,10 +16681,11 @@ def render_stock_screener():
                 f'</div>'
                 f'<div style="font-size:22px;font-weight:800;color:#dc2626;margin:6px 0;">'
                 f'{long_bal/1000:,.1f}千株</div>'
-                f'<div style="margin-top:6px;">'
-                + _bar_html("制度信用", long_std, max_long, "#ef4444")
-                + _bar_html("一般信用", long_neg, max_long, "#93c5fd")
-                + f'</div></div>',
+                + ('<div style="margin-top:6px;">'
+                   + _bar_html("制度信用", long_std, max_long, "#ef4444")
+                   + _bar_html("一般信用", long_neg, max_long, "#93c5fd")
+                   + '</div>' if _has_breakdown else '')
+                + f'</div>',
                 unsafe_allow_html=True,
             )
 
@@ -16582,12 +16709,15 @@ def render_stock_screener():
                 f'</div>'
                 f'<div style="font-size:22px;font-weight:800;color:#16a34a;margin:6px 0;">'
                 f'{short_bal/1000:,.1f}千株</div>'
-                f'<div style="margin-top:6px;">'
-                + _bar_html("制度信用", short_std, max_short, "#3b82f6")
-                + _bar_html("一般信用", short_neg, max_short, "#6ee7b7")
-                + f'</div></div>',
+                + ('<div style="margin-top:6px;">'
+                   + _bar_html("制度信用", short_std, max_short, "#3b82f6")
+                   + _bar_html("一般信用", short_neg, max_short, "#6ee7b7")
+                   + '</div>' if _has_breakdown else '')
+                + f'</div>',
                 unsafe_allow_html=True,
             )
+            if not _has_breakdown:
+                st.caption("データ提供: IRBANK（東証公表の週次信用残・無料フォールバック。制度信用/一般信用の内訳なし）")
 
             # 信用倍率バッジ
             ratio = mg.get("ratio", 0)
@@ -18011,6 +18141,17 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
         else:
             _mg = _mg_data.get("margin", {})
             _tr = _mg_data.get("trade", {})
+            _mg_source = "jquants"
+            _ir_reason = ""
+            if not _mg:
+                # J-Quantsの契約プラン制限などで取得できない場合はIRBANK（無料）にフォールバック
+                with st.spinner("信用残データを取得中（IRBANKフォールバック）…"):
+                    _ir_data = fetch_irbank_margin_data(_tk_input)
+                if _ir_data.get("ok"):
+                    _mg = _ir_data
+                    _mg_source = "irbank"
+                else:
+                    _ir_reason = _ir_data.get("reason", "取得失敗")
             _supply_cards = []
 
             if _tr:
@@ -18038,6 +18179,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 )
 
             if _mg:
+                _has_breakdown = _mg_source == "jquants"  # IRBANKは制度信用/一般信用の内訳が無い
                 _long_bal   = _mg.get("long_balance", 0)
                 _long_std   = _mg.get("long_std", 0)   # 制度信用（買）
                 _long_neg   = _mg.get("long_neg", 0)   # 一般信用（買）
@@ -18053,10 +18195,12 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'<span style="background:{_ldiff_color};color:#0f172a;font-size:13px;font-weight:700;'
                     f'padding:4px 14px;border-radius:20px">{abs(_long_diff)/1000:,.0f}千株 {_ldiff_label}</span>'
                     f'</div><div style="font-size:22px;font-weight:800;color:#f87171;margin:6px 0">'
-                    f'{_long_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
-                    + _bar_html_dark("制度信用", _long_std, _max_long, "#f87171")
-                    + _bar_html_dark("一般信用", _long_neg, _max_long, "#93c5fd")
-                    + '</div></div>'
+                    f'{_long_bal/1000:,.1f}千株</div>'
+                    + ('<div style="margin-top:6px">'
+                       + _bar_html_dark("制度信用", _long_std, _max_long, "#f87171")
+                       + _bar_html_dark("一般信用", _long_neg, _max_long, "#93c5fd")
+                       + '</div>' if _has_breakdown else '')
+                    + '</div>'
                 )
 
                 _short_bal   = _mg.get("short_balance", 0)
@@ -18074,17 +18218,25 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'<span style="background:{_sdiff_color};color:#0f172a;font-size:13px;font-weight:700;'
                     f'padding:4px 14px;border-radius:20px">{abs(_short_diff)/1000:,.0f}千株 {_sdiff_label}</span>'
                     f'</div><div style="font-size:22px;font-weight:800;color:#4ade80;margin:6px 0">'
-                    f'{_short_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
-                    + _bar_html_dark("制度信用", _short_std, _max_short, "#60a5fa")
-                    + _bar_html_dark("一般信用", _short_neg, _max_short, "#6ee7b7")
-                    + '</div></div>'
+                    f'{_short_bal/1000:,.1f}千株</div>'
+                    + ('<div style="margin-top:6px">'
+                       + _bar_html_dark("制度信用", _short_std, _max_short, "#60a5fa")
+                       + _bar_html_dark("一般信用", _short_neg, _max_short, "#6ee7b7")
+                       + '</div>' if _has_breakdown else '')
+                    + '</div>'
                 )
 
             if _supply_cards:
                 st.markdown("".join(_supply_cards), unsafe_allow_html=True)
-                st.caption("データ提供: J-Quants（週次信用残・日次売買動向の推計値）")
+                if _mg_source == "irbank":
+                    st.caption("データ提供: IRBANK（東証公表の週次信用残・無料フォールバック。制度信用/一般信用の内訳なし）")
+                else:
+                    st.caption("データ提供: J-Quants（週次信用残・日次売買動向の推計値）")
             else:
-                st.info(f"需給データが見つかりませんでした（{_mg_data.get('reason', '原因不明')}）。")
+                _reason_combined = _mg_data.get("reason", "原因不明")
+                if _ir_reason:
+                    _reason_combined = f"J-Quants: {_reason_combined} / IRBANK: {_ir_reason}"
+                st.info(f"需給データが見つかりませんでした（{_reason_combined}）。")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
