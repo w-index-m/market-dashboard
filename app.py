@@ -15574,20 +15574,87 @@ def render_short_position_ranking(code: str, color: str):
 
 
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
+@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
+def _fetch_finnhub_insider_transactions(symbol: str) -> Dict:
+    """
+    Finnhubのインサイダー取引（/stock/insider-transactions）を取得。
+    無料プランで利用可能なため、Yahoo経由でレート制限されやすいyfinanceより
+    こちらを優先的に使う。
+    """
+    api_key = get_env_var("FINNHUB_API_KEY", "")
+    if not api_key:
+        return {"ok": False, "reason": "FINNHUB_API_KEY未設定"}
+    try:
+        r = requests.get(
+            "https://finnhub.io/api/v1/stock/insider-transactions",
+            params={"symbol": symbol, "token": api_key},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "reason": f"HTTP {r.status_code}"}
+        data = r.json().get("data", [])
+        if not data:
+            return {"ok": True, "insiders": []}
+
+        _sell_codes = {"S", "F"}  # S=市場内売却 / F=税務目的の株式処分
+        _buy_codes  = {"P", "A"}  # P=市場内購入 / A=付与（RSU等の取得）
+
+        rows = []
+        for item in data[:10]:
+            _code   = (item.get("transactionCode") or "").upper()
+            _change = item.get("change", 0) or 0
+            if _code in _sell_codes:
+                is_buy = False
+            elif _code in _buy_codes:
+                is_buy = True
+            else:
+                is_buy = _change > 0
+            _price  = item.get("transactionPrice", 0) or 0
+            _shares = abs(_change) if _change else (item.get("share") or 0)
+            rows.append({
+                "insider":  item.get("name", "") or "",
+                "position": "",
+                "txn":      f"{'取得' if is_buy else '処分'}（コード: {_code or '-'}）",
+                "shares":   int(_shares) if _shares else 0,
+                "value":    float(_shares * _price) if (_shares and _price) else 0,
+                "date":     item.get("transactionDate", "") or item.get("filingDate", ""),
+                "is_buy":   is_buy,
+            })
+        return {"ok": True, "insiders": rows}
+    except Exception as e:
+        logger.debug(f"[finnhub_insider] {symbol}: {e}")
+        return {"ok": False, "reason": str(e)}
+
+
 def fetch_us_institutional_holders(symbol: str) -> Dict:
     """
-    yfinanceから米国株の機関保有・インサイダー・空売り詳細を取得。
+    米国株の機関保有・インサイダー・空売り詳細を取得。
+    インサイダー売買はFinnhub（無料プランで利用可・レート制限されにくい）を優先し、
+    取得できなかった場合のみyfinanceにフォールバックする。
+    機関保有(13F)・ミューチュアルファンドはyfinance（Yahoo）のみが情報源。
     institutional_holders/mutualfund_holders/insider_transactionsはyfinance内部では
     同一のquoteSummaryリクエスト1回にまとめて取得される（最初のプロパティアクセスで
     3つとも一括取得・キャッシュされる）。そのため最初の呼び出しが失敗した場合
     （特にYahoo側のレート制限）、残り2つを個別に呼び直すと同じ失敗を3回繰り返して
     レート制限を悪化させるだけなので、その場合はここで打ち切る。
     """
+    # インサイダー売買はFinnhub（無料・レート制限されにくい）を先に試す
+    ins_rows = []
+    _fh_reason = ""
+    _fh_result = _fetch_finnhub_insider_transactions(symbol)
+    if _fh_result.get("ok"):
+        ins_rows = _fh_result.get("insiders", [])
+    else:
+        _fh_reason = _fh_result.get("reason", "")
+
     try:
         tk = yf.Ticker(symbol)
     except Exception as e:
         logger.debug(f"[us_holders] {symbol} Ticker init: {e}")
-        return {"ok": False, "reason": f"Ticker初期化エラー: {e}"}
+        return {
+            "ok": True, "institutions": [], "mutual_funds": [], "insiders": ins_rows,
+            "reason": "" if ins_rows else f"Ticker初期化エラー: {e}",
+        }
 
     _errors = []
 
@@ -15610,9 +15677,10 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
     except Exception as e:
         logger.debug(f"[us_holders] {symbol} institutional_holders: {e}")
         # 3種は同一リクエストの結果なので、ここで失敗した場合は再取得を試みず打ち切る
+        # （ただしFinnhubから取れたインサイダー情報はそのまま返す）
         return {
-            "ok": True, "institutions": [], "mutual_funds": [], "insiders": [],
-            "reason": f"institutional_holders: {e}",
+            "ok": True, "institutions": [], "mutual_funds": [], "insiders": ins_rows,
+            "reason": "" if ins_rows else f"institutional_holders: {e}",
         }
 
     # ミューチュアルファンド保有上位
@@ -15631,32 +15699,32 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
         _errors.append(f"mutualfund_holders: {e}")
         logger.debug(f"[us_holders] {symbol} mutualfund_holders: {e}")
 
-    # インサイダー取引履歴
-    ins_rows = []
-    try:
-        ins_df = tk.insider_transactions
-        if ins_df is not None and not ins_df.empty:
-            for _, row in ins_df.head(8).iterrows():
-                txn_text = str(row.get("Transaction", row.get("Text", "")))
-                shares   = row.get("Shares", 0)
-                value    = row.get("Value", 0)
-                insider  = row.get("Insider", row.get("Name", ""))
-                position = row.get("Position", row.get("Title", ""))
-                date     = str(row.get("Start Date", row.get("Date", "")))[:10]
-                is_buy   = any(kw in txn_text.lower()
-                               for kw in ["purchase", "buy", "acquisition", "award"])
-                ins_rows.append({
-                    "insider":   str(insider),
-                    "position":  str(position),
-                    "txn":       txn_text,
-                    "shares":    int(shares) if pd.notna(shares) else 0,
-                    "value":     float(value) if pd.notna(value) else 0,
-                    "date":      date,
-                    "is_buy":    is_buy,
-                })
-    except Exception as e:
-        _errors.append(f"insider_transactions: {e}")
-        logger.debug(f"[us_holders] {symbol} insider_transactions: {e}")
+    # インサイダー取引履歴（Finnhubで取れなかった場合のみyfinanceにフォールバック）
+    if not ins_rows:
+        try:
+            ins_df = tk.insider_transactions
+            if ins_df is not None and not ins_df.empty:
+                for _, row in ins_df.head(8).iterrows():
+                    txn_text = str(row.get("Transaction", row.get("Text", "")))
+                    shares   = row.get("Shares", 0)
+                    value    = row.get("Value", 0)
+                    insider  = row.get("Insider", row.get("Name", ""))
+                    position = row.get("Position", row.get("Title", ""))
+                    date     = str(row.get("Start Date", row.get("Date", "")))[:10]
+                    is_buy   = any(kw in txn_text.lower()
+                                   for kw in ["purchase", "buy", "acquisition", "award"])
+                    ins_rows.append({
+                        "insider":   str(insider),
+                        "position":  str(position),
+                        "txn":       txn_text,
+                        "shares":    int(shares) if pd.notna(shares) else 0,
+                        "value":     float(value) if pd.notna(value) else 0,
+                        "date":      date,
+                        "is_buy":    is_buy,
+                    })
+        except Exception as e:
+            _errors.append(f"insider_transactions: {e} (Finnhub: {_fh_reason or '0件'})")
+            logger.debug(f"[us_holders] {symbol} insider_transactions: {e}")
 
     return {
         "ok":           True,
