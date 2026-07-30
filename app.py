@@ -15577,8 +15577,11 @@ def render_short_position_ranking(code: str, color: str):
 def fetch_us_institutional_holders(symbol: str) -> Dict:
     """
     yfinanceから米国株の機関保有・インサイダー・空売り詳細を取得。
-    Yahoo側のquoteSummary API制限で3種のうち1つだけ失敗することがあるため、
-    それぞれ個別にtry/exceptし、1つの失敗が他を巻き込んで全滅しないようにする。
+    institutional_holders/mutualfund_holders/insider_transactionsはyfinance内部では
+    同一のquoteSummaryリクエスト1回にまとめて取得される（最初のプロパティアクセスで
+    3つとも一括取得・キャッシュされる）。そのため最初の呼び出しが失敗した場合
+    （特にYahoo側のレート制限）、残り2つを個別に呼び直すと同じ失敗を3回繰り返して
+    レート制限を悪化させるだけなので、その場合はここで打ち切る。
     """
     try:
         tk = yf.Ticker(symbol)
@@ -15588,7 +15591,7 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
 
     _errors = []
 
-    # 機関保有上位
+    # 機関保有上位（この呼び出しが実際のネットワーク取得を発生させる）
     inst_rows = []
     try:
         inst_df = tk.institutional_holders
@@ -15605,8 +15608,12 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
                     "pct": pct, "value": val, "date": date,
                 })
     except Exception as e:
-        _errors.append(f"institutional_holders: {e}")
         logger.debug(f"[us_holders] {symbol} institutional_holders: {e}")
+        # 3種は同一リクエストの結果なので、ここで失敗した場合は再取得を試みず打ち切る
+        return {
+            "ok": True, "institutions": [], "mutual_funds": [], "insiders": [],
+            "reason": f"institutional_holders: {e}",
+        }
 
     # ミューチュアルファンド保有上位
     mf_rows = []
