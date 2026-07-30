@@ -16125,28 +16125,24 @@ def fetch_margin_data_jquants(code: str) -> Dict:
 
         # J-Quants V2: 旧auth_user/auth_refreshのトークン方式は廃止され、
         # ダッシュボード発行のAPIキーをx-api-keyヘッダーで渡す方式に変更された
-        # （V1エンドポイントはHTTP 410 Goneで廃止済み）
+        # （V1エンドポイントはHTTP 410 Goneで廃止済み）。
+        # code単体を指定すれば「指定銘柄の全期間分データ」が返る仕様（公式ドキュメント確認済み）
+        # なのでfrom/toの日付形式を推測する必要はない。
         headers = {"x-api-key": jquants_key}
         _api_base = "https://api.jquants.com/v2"
 
-        # ① 信用残データ取得（週次）
-        import datetime as dt
-        today = dt.date.today()
-        from_date = (today - dt.timedelta(days=30)).strftime("%Y-%m-%d")
-        to_date   = today.strftime("%Y-%m-%d")
-
         r_margin = requests.get(
             f"{_api_base}/markets/margin-interest",
-            params={"code": code_clean, "from": from_date, "to": to_date},
+            params={"code": code_clean},
             headers=headers,
             timeout=10,
         )
 
-        # ② 売買内訳データ（投資部門別売買状況。市場区分単位の集計データのため
-        #    個別銘柄codeでは一致しないことが多い点に留意——ベストエフォートで試行）
+        # ② 投資部門別情報（市場区分単位の集計データのため個別銘柄codeでは
+        #    一致しないことがある点に留意——ベストエフォートで試行）
         r_trade = requests.get(
             f"{_api_base}/equities/investor-types",
-            params={"code": code_clean, "from": from_date, "to": to_date},
+            params={"code": code_clean},
             headers=headers,
             timeout=10,
         )
@@ -16159,26 +16155,28 @@ def fetch_margin_data_jquants(code: str) -> Dict:
             data = r_margin.json().get("data", [])
             if data:
                 latest = data[-1]
-                if "LongMarginTradeVolume" not in latest:
-                    logger.debug(f"[jquants_margin] margin-interest 想定外フィールド {code}: keys={list(latest.keys())}")
+                # V2の実フィールド名（公式ドキュメント確認済み。新規/返済の内訳はV2には存在しない）
+                _long_bal  = latest.get("LongVol", 0)
+                _short_bal = latest.get("ShrtVol", 0)
                 result["margin"] = {
                     "date":          latest.get("Date", ""),
-                    "long_balance":  latest.get("LongMarginTradeVolume", 0),     # 信用買残
-                    "short_balance": latest.get("ShortMarginTradeVolume", 0),    # 信用売残
-                    "long_new":      latest.get("LongNewMarginTradeVolume", 0),  # 新規買
-                    "long_repay":    latest.get("LongRepayMarginTradeVolume", 0),# 返済売
-                    "short_new":     latest.get("ShortNewMarginTradeVolume", 0), # 新規売
-                    "short_repay":   latest.get("ShortRepayMarginTradeVolume", 0),# 返済買
-                    "ratio":         latest.get("RatioOfMarginBalance", 0),       # 信用倍率
+                    "long_balance":  _long_bal,                      # 買合計信用残高
+                    "short_balance": _short_bal,                     # 売合計信用残高
+                    "long_std":      latest.get("LongStdVol", 0),    # 制度信用（買）
+                    "long_neg":      latest.get("LongNegVol", 0),    # 一般信用（買）
+                    "short_std":     latest.get("ShrtStdVol", 0),    # 制度信用（売）
+                    "short_neg":     latest.get("ShrtNegVol", 0),    # 一般信用（売）
+                    # V2にratioフィールドは無いため自前計算（買残÷売残）
+                    "ratio":         round(_long_bal / _short_bal, 2) if _short_bal > 0 else 0,
                 }
-                # 前週比
+                # 前回発表比
                 if len(data) >= 2:
                     prev = data[-2]
                     result["margin"]["long_diff"]  = (
-                        result["margin"]["long_balance"]  - prev.get("LongMarginTradeVolume", 0)
+                        result["margin"]["long_balance"]  - prev.get("LongVol", 0)
                     )
                     result["margin"]["short_diff"] = (
-                        result["margin"]["short_balance"] - prev.get("ShortMarginTradeVolume", 0)
+                        result["margin"]["short_balance"] - prev.get("ShrtVol", 0)
                     )
 
         if r_trade.status_code != 200:
@@ -16190,14 +16188,14 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                 if "ProprietaryBuying" not in latest:
                     logger.debug(f"[jquants_margin] investor-types 想定外フィールド {code}: keys={list(latest.keys())}")
                 result["trade"] = {
-                    "date":          latest.get("PublishedDate", ""),
+                    "date":          latest.get("PublishedDate", latest.get("Date", "")),
                     "spot_buy":      latest.get("ProprietaryBuying", 0),   # 現物買
                     "spot_sell":     latest.get("ProprietarySelling", 0),  # 現物売
                     "short_sell":    latest.get("ProprietaryShortSelling", 0), # 空売り
                 }
 
         if not result["margin"] and not result["trade"]:
-            result["reason"] = f"APIは成功したが対象期間・銘柄(code={code_clean})のデータが0件でした"
+            result["reason"] = f"APIは成功したが対象銘柄(code={code_clean})のデータが0件でした"
         return result
 
     except Exception as e:
@@ -16515,12 +16513,12 @@ def render_stock_screener():
         # ── 信用買残 ────────────────────────────────
         if mg:
             long_bal   = mg.get("long_balance", 0)
-            long_new   = mg.get("long_new",     0)
-            long_repay = mg.get("long_repay",   0)
+            long_std   = mg.get("long_std",     0)  # 制度信用（買）
+            long_neg   = mg.get("long_neg",     0)  # 一般信用（買）
             long_diff  = mg.get("long_diff",    0)
             diff_label = "買残増" if long_diff >= 0 else "買残減"
             diff_color = "#ef4444" if long_diff >= 0 else "#3b82f6"
-            max_long   = max(long_new, long_repay, 1)
+            max_long   = max(long_std, long_neg, 1)
 
             st.markdown(
                 f'<div style="background:#fff0f0;border:1px solid #fecaca;'
@@ -16534,20 +16532,20 @@ def render_stock_screener():
                 f'<div style="font-size:22px;font-weight:800;color:#dc2626;margin:6px 0;">'
                 f'{long_bal/1000:,.1f}千株</div>'
                 f'<div style="margin-top:6px;">'
-                + _bar_html("新規買", long_new,   max_long, "#ef4444")
-                + _bar_html("返済売", long_repay, max_long, "#93c5fd")
+                + _bar_html("制度信用", long_std, max_long, "#ef4444")
+                + _bar_html("一般信用", long_neg, max_long, "#93c5fd")
                 + f'</div></div>',
                 unsafe_allow_html=True,
             )
 
             # 信用売残
             short_bal   = mg.get("short_balance", 0)
-            short_new   = mg.get("short_new",     0)
-            short_repay = mg.get("short_repay",   0)
+            short_std   = mg.get("short_std",     0)  # 制度信用（売）
+            short_neg   = mg.get("short_neg",     0)  # 一般信用（売）
             short_diff  = mg.get("short_diff",    0)
             sdiff_label = "売残増" if short_diff >= 0 else "売残減"
             sdiff_color = "#3b82f6" if short_diff >= 0 else "#16a34a"
-            max_short   = max(short_new, short_repay, 1)
+            max_short   = max(short_std, short_neg, 1)
 
             st.markdown(
                 f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;'
@@ -16561,8 +16559,8 @@ def render_stock_screener():
                 f'<div style="font-size:22px;font-weight:800;color:#16a34a;margin:6px 0;">'
                 f'{short_bal/1000:,.1f}千株</div>'
                 f'<div style="margin-top:6px;">'
-                + _bar_html("新規売", short_new,   max_short, "#3b82f6")
-                + _bar_html("返済買", short_repay, max_short, "#6ee7b7")
+                + _bar_html("制度信用", short_std, max_short, "#3b82f6")
+                + _bar_html("一般信用", short_neg, max_short, "#6ee7b7")
                 + f'</div></div>',
                 unsafe_allow_html=True,
             )
@@ -16694,12 +16692,12 @@ def render_stock_screener():
                     f"信用倍率: {mg.get('ratio',0):.2f}倍"
                 )
                 supply_text_parts.append(
-                    f"新規買: {mg.get('long_new',0)/1000:,.1f}千株 / "
-                    f"返済売: {mg.get('long_repay',0)/1000:,.1f}千株"
+                    f"信用買残内訳: 制度信用 {mg.get('long_std',0)/1000:,.1f}千株 / "
+                    f"一般信用 {mg.get('long_neg',0)/1000:,.1f}千株"
                 )
                 supply_text_parts.append(
-                    f"新規売: {mg.get('short_new',0)/1000:,.1f}千株 / "
-                    f"返済買: {mg.get('short_repay',0)/1000:,.1f}千株"
+                    f"信用売残内訳: 制度信用 {mg.get('short_std',0)/1000:,.1f}千株 / "
+                    f"一般信用 {mg.get('short_neg',0)/1000:,.1f}千株"
                 )
             if tr:
                 net = tr.get("spot_buy",0) - tr.get("spot_sell",0)
@@ -18017,12 +18015,12 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
 
             if _mg:
                 _long_bal   = _mg.get("long_balance", 0)
-                _long_new   = _mg.get("long_new", 0)
-                _long_repay = _mg.get("long_repay", 0)
+                _long_std   = _mg.get("long_std", 0)   # 制度信用（買）
+                _long_neg   = _mg.get("long_neg", 0)   # 一般信用（買）
                 _long_diff  = _mg.get("long_diff", 0)
                 _ldiff_label = "買残増" if _long_diff >= 0 else "買残減"
                 _ldiff_color = "#f87171" if _long_diff >= 0 else "#60a5fa"
-                _max_long   = max(_long_new, _long_repay, 1)
+                _max_long   = max(_long_std, _long_neg, 1)
                 _supply_cards.append(
                     f'<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;'
                     f'padding:14px 18px;margin-bottom:10px">'
@@ -18032,18 +18030,18 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'padding:4px 14px;border-radius:20px">{abs(_long_diff)/1000:,.0f}千株 {_ldiff_label}</span>'
                     f'</div><div style="font-size:22px;font-weight:800;color:#f87171;margin:6px 0">'
                     f'{_long_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
-                    + _bar_html_dark("新規買", _long_new, _max_long, "#f87171")
-                    + _bar_html_dark("返済売", _long_repay, _max_long, "#93c5fd")
+                    + _bar_html_dark("制度信用", _long_std, _max_long, "#f87171")
+                    + _bar_html_dark("一般信用", _long_neg, _max_long, "#93c5fd")
                     + '</div></div>'
                 )
 
                 _short_bal   = _mg.get("short_balance", 0)
-                _short_new   = _mg.get("short_new", 0)
-                _short_repay = _mg.get("short_repay", 0)
+                _short_std   = _mg.get("short_std", 0)   # 制度信用（売）
+                _short_neg   = _mg.get("short_neg", 0)   # 一般信用（売）
                 _short_diff  = _mg.get("short_diff", 0)
                 _sdiff_label = "売残増" if _short_diff >= 0 else "売残減"
                 _sdiff_color = "#60a5fa" if _short_diff >= 0 else "#4ade80"
-                _max_short   = max(_short_new, _short_repay, 1)
+                _max_short   = max(_short_std, _short_neg, 1)
                 _supply_cards.append(
                     f'<div style="background:#031a0f;border:1px solid #14532d;border-radius:10px;'
                     f'padding:14px 18px;margin-bottom:10px">'
@@ -18053,8 +18051,8 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     f'padding:4px 14px;border-radius:20px">{abs(_short_diff)/1000:,.0f}千株 {_sdiff_label}</span>'
                     f'</div><div style="font-size:22px;font-weight:800;color:#4ade80;margin:6px 0">'
                     f'{_short_bal/1000:,.1f}千株</div><div style="margin-top:6px">'
-                    + _bar_html_dark("新規売", _short_new, _max_short, "#60a5fa")
-                    + _bar_html_dark("返済買", _short_repay, _max_short, "#6ee7b7")
+                    + _bar_html_dark("制度信用", _short_std, _max_short, "#60a5fa")
+                    + _bar_html_dark("一般信用", _short_neg, _max_short, "#6ee7b7")
                     + '</div></div>'
                 )
 
