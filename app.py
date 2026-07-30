@@ -15577,13 +15577,21 @@ def render_short_position_ranking(code: str, color: str):
 def fetch_us_institutional_holders(symbol: str) -> Dict:
     """
     yfinanceから米国株の機関保有・インサイダー・空売り詳細を取得。
+    Yahoo側のquoteSummary API制限で3種のうち1つだけ失敗することがあるため、
+    それぞれ個別にtry/exceptし、1つの失敗が他を巻き込んで全滅しないようにする。
     """
     try:
         tk = yf.Ticker(symbol)
+    except Exception as e:
+        logger.debug(f"[us_holders] {symbol} Ticker init: {e}")
+        return {"ok": False, "reason": f"Ticker初期化エラー: {e}"}
 
-        # 機関保有上位
+    _errors = []
+
+    # 機関保有上位
+    inst_rows = []
+    try:
         inst_df = tk.institutional_holders
-        inst_rows = []
         if inst_df is not None and not inst_df.empty:
             for _, row in inst_df.head(10).iterrows():
                 holder  = str(row.get("Holder", ""))
@@ -15595,10 +15603,14 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
                     "holder": holder, "shares": shares,
                     "pct": pct, "value": val, "date": date,
                 })
+    except Exception as e:
+        _errors.append(f"institutional_holders: {e}")
+        logger.debug(f"[us_holders] {symbol} institutional_holders: {e}")
 
-        # ミューチュアルファンド保有上位
+    # ミューチュアルファンド保有上位
+    mf_rows = []
+    try:
         mf_df = tk.mutualfund_holders
-        mf_rows = []
         if mf_df is not None and not mf_df.empty:
             for _, row in mf_df.head(5).iterrows():
                 mf_rows.append({
@@ -15607,10 +15619,14 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
                     "pct":    float(row.get("% Out", 0)) * 100,
                     "date":   str(row.get("Date Reported", ""))[:10],
                 })
+    except Exception as e:
+        _errors.append(f"mutualfund_holders: {e}")
+        logger.debug(f"[us_holders] {symbol} mutualfund_holders: {e}")
 
-        # インサイダー取引履歴
+    # インサイダー取引履歴
+    ins_rows = []
+    try:
         ins_df = tk.insider_transactions
-        ins_rows = []
         if ins_df is not None and not ins_df.empty:
             for _, row in ins_df.head(8).iterrows():
                 txn_text = str(row.get("Transaction", row.get("Text", "")))
@@ -15630,16 +15646,17 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
                     "date":      date,
                     "is_buy":    is_buy,
                 })
-
-        return {
-            "ok":           True,
-            "institutions": inst_rows,
-            "mutual_funds": mf_rows,
-            "insiders":     ins_rows,
-        }
     except Exception as e:
-        logger.debug(f"[us_holders] {symbol}: {e}")
-        return {"ok": False}
+        _errors.append(f"insider_transactions: {e}")
+        logger.debug(f"[us_holders] {symbol} insider_transactions: {e}")
+
+    return {
+        "ok":           True,
+        "institutions": inst_rows,
+        "mutual_funds": mf_rows,
+        "insiders":     ins_rows,
+        "reason":       " / ".join(_errors) if _errors else "",
+    }
 
 
 def render_us_supply_demand(symbol: str, d: Dict, color: str):
@@ -18244,7 +18261,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
             _us_data = fetch_us_institutional_holders(_tk_input)
 
         if not _us_data.get("ok"):
-            st.info("需給データを取得できませんでした（機関保有・インサイダー情報なし）。")
+            st.info(f"需給データを取得できませんでした（{_us_data.get('reason', '取得失敗')}）。")
         else:
             _us_cards = []
 
@@ -18325,7 +18342,9 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                     "インサイダー売買=SEC Form 4開示ベース）"
                 )
             else:
-                st.info("需給データが見つかりませんでした（機関保有・インサイダー情報なし）。")
+                _us_reason = _us_data.get("reason", "")
+                _msg = "機関保有・インサイダー情報なし" + (f"（{_us_reason}）" if _us_reason else "")
+                st.info(f"需給データが見つかりませんでした（{_msg}）。")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
