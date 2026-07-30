@@ -16121,37 +16121,29 @@ def fetch_margin_data_jquants(code: str) -> Dict:
         if not jquants_key:
             return {"ok": False, "reason": "JQUANTS_API_KEY未設定"}
 
-        # ① リフレッシュトークン(JQUANTS_API_KEYに保存済み)からidTokenを取得
-        #    旧実装はauth_userを空の認証情報で呼び出した結果を使わず、生のキーを
-        #    そのままBearerトークンとして使っていたため認証が通っていなかった
-        r1 = requests.post(
-            f"https://api.jquants.com/v1/token/auth_refresh?refreshtoken={jquants_key}",
-            timeout=10,
-        )
-        if r1.status_code != 200:
-            return {"ok": False, "reason": f"認証失敗(auth_refresh): HTTP {r1.status_code} {r1.text[:150]}"}
-        id_token = r1.json().get("idToken", "")
-        if not id_token:
-            return {"ok": False, "reason": "idToken取得失敗（レスポンスにidTokenが含まれない）"}
-        headers = {"Authorization": f"Bearer {id_token}"}
+        # J-Quants V2: 旧auth_user/auth_refreshのトークン方式は廃止され、
+        # ダッシュボード発行のAPIキーをx-api-keyヘッダーで渡す方式に変更された
+        # （V1エンドポイントはHTTP 410 Goneで廃止済み）
+        headers = {"x-api-key": jquants_key}
+        _api_base = "https://api.jquants.com/v2"
 
-        # ② 信用残データ取得（週次）
+        # ① 信用残データ取得（週次）
         import datetime as dt
         today = dt.date.today()
-        from_date = (today - dt.timedelta(days=30)).strftime("%Y%m%d")
-        to_date   = today.strftime("%Y%m%d")
+        from_date = (today - dt.timedelta(days=30)).strftime("%Y-%m-%d")
+        to_date   = today.strftime("%Y-%m-%d")
 
         r_margin = requests.get(
-            f"https://api.jquants.com/v1/markets/weekly_margin_interest",
+            f"{_api_base}/markets/margin-interest",
             params={"code": code_clean, "from": from_date, "to": to_date},
             headers=headers,
             timeout=10,
         )
 
-        # ③ 売買内訳データ（投資部門別売買状況。市場区分単位の集計データのため
+        # ② 売買内訳データ（投資部門別売買状況。市場区分単位の集計データのため
         #    個別銘柄codeでは一致しないことが多い点に留意——ベストエフォートで試行）
         r_trade = requests.get(
-            f"https://api.jquants.com/v1/markets/trades_spec",
+            f"{_api_base}/equities/investor-types",
             params={"code": code_clean, "from": from_date, "to": to_date},
             headers=headers,
             timeout=10,
@@ -16160,11 +16152,13 @@ def fetch_margin_data_jquants(code: str) -> Dict:
         result = {"ok": True, "margin": {}, "trade": {}}
 
         if r_margin.status_code != 200:
-            logger.debug(f"[jquants_margin] weekly_margin_interest失敗 {code}: HTTP {r_margin.status_code} {r_margin.text[:150]}")
+            logger.debug(f"[jquants_margin] margin-interest失敗 {code}: HTTP {r_margin.status_code} {r_margin.text[:150]}")
         if r_margin.status_code == 200:
-            data = r_margin.json().get("weekly_margin_interest", [])
+            data = r_margin.json().get("data", [])
             if data:
                 latest = data[-1]
+                if "LongMarginTradeVolume" not in latest:
+                    logger.debug(f"[jquants_margin] margin-interest 想定外フィールド {code}: keys={list(latest.keys())}")
                 result["margin"] = {
                     "date":          latest.get("Date", ""),
                     "long_balance":  latest.get("LongMarginTradeVolume", 0),     # 信用買残
@@ -16186,11 +16180,13 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                     )
 
         if r_trade.status_code != 200:
-            logger.debug(f"[jquants_margin] trades_spec失敗 {code}: HTTP {r_trade.status_code} {r_trade.text[:150]}")
+            logger.debug(f"[jquants_margin] investor-types失敗 {code}: HTTP {r_trade.status_code} {r_trade.text[:150]}")
         if r_trade.status_code == 200:
-            data = r_trade.json().get("trades_spec", [])
+            data = r_trade.json().get("data", [])
             if data:
                 latest = data[-1]
+                if "ProprietaryBuying" not in latest:
+                    logger.debug(f"[jquants_margin] investor-types 想定外フィールド {code}: keys={list(latest.keys())}")
                 result["trade"] = {
                     "date":          latest.get("PublishedDate", ""),
                     "spot_buy":      latest.get("ProprietaryBuying", 0),   # 現物買
