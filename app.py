@@ -18126,14 +18126,14 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     elif _div_ui.get("type") == "bearish":
         st.warning(f"📐 RSI弱気ダイバージェンス検出: {_div_ui['detail']}（上昇の勢い低下＝反落の可能性。ダマシの可能性もあるため他指標と併せて判断してください）")
 
-    # ── 需給分析（日本株のみ・J-Quants、kabuステーション風）─────────
+    # ── 需給分析（日本株: J-Quants/IRBANK、米国株等: 機関投資家・インサイダー）─────────
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
+        f'📊 {_tk_input} 需給分析（信用残・売買動向）</div>',
+        unsafe_allow_html=True,
+    )
     if _tk_input.endswith(".T"):
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="font-size:15px;font-weight:700;color:#e2e8f0;margin:4px 0 4px">'
-            f'📊 {_tk_input} 需給分析（信用残・売買動向）</div>',
-            unsafe_allow_html=True,
-        )
         with st.spinner("信用残データを取得中…"):
             _mg_data = fetch_margin_data_jquants(_tk_input)
         if not _mg_data.get("ok"):
@@ -18237,6 +18237,95 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 if _ir_reason:
                     _reason_combined = f"J-Quants: {_reason_combined} / IRBANK: {_ir_reason}"
                 st.info(f"需給データが見つかりませんでした（{_reason_combined}）。")
+
+    else:
+        # 米国株など: yfinance（機関投資家13F・インサイダーForm 4）による無料フォールバック
+        with st.spinner("機関投資家・インサイダーデータを取得中…"):
+            _us_data = fetch_us_institutional_holders(_tk_input)
+
+        if not _us_data.get("ok"):
+            st.info("需給データを取得できませんでした（機関保有・インサイダー情報なし）。")
+        else:
+            _us_cards = []
+
+            _inst = _us_data.get("institutions", [])[:5]
+            if _inst:
+                _max_pct = max((r["pct"] for r in _inst), default=0) or 1
+                _inst_rows = []
+                for i, row in enumerate(_inst, 1):
+                    _bar_pct = min(row["pct"] / _max_pct * 100, 100)
+                    _val_str = (
+                        f"${row['value']/1e9:.2f}B" if row["value"] >= 1e9 else
+                        f"${row['value']/1e6:.0f}M" if row["value"] >= 1e6 else
+                        f"${row['value']:,.0f}"
+                    ) if row["value"] else "—"
+                    _shares_str = (
+                        f"{row['shares']/1e6:.2f}M株" if row["shares"] >= 1e6 else
+                        f"{row['shares']/1e3:.0f}K株"
+                    ) if row["shares"] else "—"
+                    _inst_rows.append(
+                        f'<div style="margin-bottom:8px">'
+                        f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                        f'<span style="font-size:12px;color:#e2e8f0">{i}. {row["holder"]}</span>'
+                        f'<span style="font-size:13px;font-weight:700;color:#60a5fa">{row["pct"]:.2f}%</span>'
+                        f'</div>'
+                        f'<div style="background:#1e293b;border-radius:3px;height:6px;margin-top:2px">'
+                        f'<div style="background:#60a5fa;height:100%;border-radius:3px;width:{_bar_pct:.1f}%"></div></div>'
+                        f'<div style="font-size:10px;color:#64748b;margin-top:2px">'
+                        f'{_shares_str} | {_val_str} | {row["date"]}</div>'
+                        f'</div>'
+                    )
+                _us_cards.append(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                    'padding:14px 18px;margin-bottom:10px">'
+                    '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:8px">'
+                    '🏛️ 機関投資家 保有TOP5（13F）</div>'
+                    + "".join(_inst_rows)
+                    + '</div>'
+                )
+
+            _ins = _us_data.get("insiders", [])[:6]
+            if _ins:
+                _ins_rows = []
+                for row in _ins:
+                    _is_buy   = row["is_buy"]
+                    _bd_color = "#4ade80" if _is_buy else "#f87171"
+                    _tx_color = "#4ade80" if _is_buy else "#f87171"
+                    _badge    = "🟢 買い" if _is_buy else "🔴 売り"
+                    _val_str  = (
+                        f"${row['value']/1e6:.1f}M" if row["value"] >= 1e6 else
+                        f"${row['value']:,.0f}"
+                    ) if row["value"] else "—"
+                    _shares_str = f"{row['shares']:,}株" if row["shares"] else "—"
+                    _ins_rows.append(
+                        f'<div style="border-left:3px solid {_bd_color};padding-left:10px;margin-bottom:8px">'
+                        f'<div style="display:flex;align-items:center;gap:8px">'
+                        f'<span style="font-size:12px;font-weight:700;color:{_tx_color}">{_badge}</span>'
+                        f'<span style="font-size:12px;color:#e2e8f0">{row["insider"]}</span>'
+                        f'<span style="font-size:10px;color:#64748b">({row["position"]})</span>'
+                        f'</div>'
+                        f'<div style="font-size:11px;color:#94a3b8;margin-top:2px">{row["txn"]}</div>'
+                        f'<div style="font-size:10px;color:#64748b;margin-top:2px">'
+                        f'{_shares_str} | {_val_str} | {row["date"]}</div>'
+                        f'</div>'
+                    )
+                _us_cards.append(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                    'padding:14px 18px;margin-bottom:10px">'
+                    '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:8px">'
+                    '👤 インサイダー売買（Form 4）</div>'
+                    + "".join(_ins_rows)
+                    + '</div>'
+                )
+
+            if _us_cards:
+                st.markdown("".join(_us_cards), unsafe_allow_html=True)
+                st.caption(
+                    "データ提供: yfinance（機関保有=13F開示・四半期更新/最大45日遅延、"
+                    "インサイダー売買=SEC Form 4開示ベース）"
+                )
+            else:
+                st.info("需給データが見つかりませんでした（機関保有・インサイダー情報なし）。")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
