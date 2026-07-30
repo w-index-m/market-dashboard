@@ -15596,7 +15596,8 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
             for _, row in inst_df.head(10).iterrows():
                 holder  = str(row.get("Holder", ""))
                 shares  = int(row.get("Shares", 0))
-                pct     = float(row.get("% Out", 0)) * 100
+                # yfinanceは列名を"% Out"にリネームしておらず実際は"pctHeld"のまま（バージョン依存のため両対応）
+                pct     = float(row.get("pctHeld", row.get("% Out", 0))) * 100
                 val     = float(row.get("Value", 0))
                 date    = str(row.get("Date Reported", ""))[:10]
                 inst_rows.append({
@@ -15616,7 +15617,7 @@ def fetch_us_institutional_holders(symbol: str) -> Dict:
                 mf_rows.append({
                     "holder": str(row.get("Holder", "")),
                     "shares": int(row.get("Shares", 0)),
-                    "pct":    float(row.get("% Out", 0)) * 100,
+                    "pct":    float(row.get("pctHeld", row.get("% Out", 0))) * 100,
                     "date":   str(row.get("Date Reported", ""))[:10],
                 })
     except Exception as e:
