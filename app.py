@@ -16114,8 +16114,10 @@ def fetch_margin_data_jquants(code: str) -> Dict:
     code: 4桁または5桁（例: "5803" or "5803.T" → "5803"）
     """
     try:
-        # codeを正規化（5803.T → 5803）
+        # codeを正規化（5803.T → 5803 → J-Quants内部の5桁コード形式 58030 に変換）
         code_clean = code.replace(".T", "").replace(".t", "")
+        if len(code_clean) == 4 and code_clean.isdigit():
+            code_clean = code_clean + "0"
 
         jquants_key = get_env_var("JQUANTS_API_KEY", "")
         if not jquants_key:
@@ -16195,7 +16197,7 @@ def fetch_margin_data_jquants(code: str) -> Dict:
                 }
 
         if not result["margin"] and not result["trade"]:
-            result["reason"] = "APIは成功したが対象期間・銘柄のデータが0件でした"
+            result["reason"] = f"APIは成功したが対象期間・銘柄(code={code_clean})のデータが0件でした"
         return result
 
     except Exception as e:
