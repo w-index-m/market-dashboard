@@ -9885,6 +9885,64 @@ def render_momentum_ranking():
         )
         st.caption("⚠️ 情報提供目的のみ・投資助言ではありません。MTUMはモメンタムファクターの代表的な投資可能ETFです。")
 
+    # ── AI/半導体株 相対弱さ検知（市場 vs SMH の乖離・即時判定）───────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '⚡ AI/半導体株 相対弱さ検知（市場 vs SMH）</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "「下落→回復」の完了を待たず、今この瞬間の値動きを検知します。SMH（半導体ETF）の直近リターンを"
+        "S&P500と比較し、SMHだけが著しく劣後していないかを見ます。市場全体が横ばい〜上昇でSMHだけ弱ければ"
+        "セクターローテーション（資金が他へ逃げている）の可能性、市場ごと下落していればリスクオフ・マクロ要因の"
+        "可能性が高いと考えられます。"
+    )
+    _rw = _detect_relative_weakness("SMH", "^GSPC")
+    if not _rw.get("ok"):
+        st.info("相対弱さのデータを取得できませんでした。")
+    else:
+        _rw_windows = _rw["windows"]
+        _rw_rows = []
+        for _win in sorted(_rw_windows.keys()):
+            _r = _rw_windows[_win]
+            _gap_color = (
+                "#f87171" if _r["gap"] <= -5.0 else
+                "#facc15" if _r["gap"] <= -2.0 else "#4ade80"
+            )
+            _rw_rows.append(
+                f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'padding:6px 0;border-bottom:1px solid #1e293b">'
+                f'<span style="font-size:12px;color:#94a3b8">{_win}営業日</span>'
+                f'<span style="font-size:12px;color:#e2e8f0">SMH {_r["target_ret"]:+.1f}%</span>'
+                f'<span style="font-size:12px;color:#e2e8f0">S&amp;P500 {_r["benchmark_ret"]:+.1f}%</span>'
+                f'<span style="font-size:13px;font-weight:700;color:{_gap_color}">乖離 {_r["gap"]:+.1f}pt</span>'
+                f'</div>'
+            )
+        if _rw["is_weak"] and _rw["scenario"] == "rotation":
+            _rw_status = (
+                '<div style="color:#facc15;font-weight:700;margin-top:8px">'
+                '🔄 市場全体は堅調〜横ばいなのにSMHだけ弱い → セクターローテーションの可能性</div>'
+            )
+        elif _rw["is_weak"]:
+            _rw_status = (
+                '<div style="color:#f87171;font-weight:700;margin-top:8px">'
+                '⚠️ 市場全体も下落している → リスクオフ・マクロ要因の可能性</div>'
+            )
+        else:
+            _rw_status = '<div style="color:#4ade80;margin-top:8px">✅ 市場に対する著しい劣後は検出されていません</div>'
+
+        st.markdown(
+            '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+            'padding:14px 18px;margin-bottom:6px">'
+            f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
+            f'基準日: {_rw["as_of"]}（{_rw["base_window"]}営業日窓で判定）</div>'
+            + "".join(_rw_rows) + _rw_status +
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("⚠️ 情報提供目的のみ・投資助言ではありません。相対的な弱さの検知であり、原因の特定はできません。")
+
     # ── AI/半導体株 乱高下検知（急落→急回復の"往って来い"パターン）─────
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     st.markdown(
@@ -17492,6 +17550,57 @@ def _find_macro_events_in_range(start_date, end_date, impact_filter: tuple = ("h
         if _sd <= _d <= _ed and impact in impact_filter:
             _out.append(f"{name}（{note}）" if note else name)
     return _out
+
+
+@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+def _detect_relative_weakness(target_ticker: str = "SMH", benchmark_ticker: str = "^GSPC",
+                               windows: tuple = (1, 5, 10), weak_threshold: float = -5.0) -> dict:
+    """
+    対象銘柄が市場平均に対して直近で著しく劣後していないかを検知する。
+    「下落→回復」の完了を待たずに、今この瞬間の相対的な弱さを見られるのが
+    _detect_whiplash_episodes（後追い型）との違い。
+    市場全体が堅調なのに対象だけ弱い場合はセクターローテーションの可能性、
+    市場全体も下落している場合はリスクオフ・マクロ要因の可能性が高いと考えられる。
+    """
+    _tgt = _fetch_ticker_history_multi_year(target_ticker, years=1)
+    _bmk = _fetch_ticker_history_multi_year(benchmark_ticker, years=1)
+    if _tgt.empty or _bmk.empty:
+        return {"ok": False}
+
+    _tgt_close = _tgt["close"]
+    _bmk_close = _bmk["close"]
+
+    results = {}
+    for w in windows:
+        if len(_tgt_close) <= w or len(_bmk_close) <= w:
+            continue
+        _tgt_ret = float(_tgt_close.iloc[-1] / _tgt_close.iloc[-1 - w] - 1) * 100
+        _bmk_ret = float(_bmk_close.iloc[-1] / _bmk_close.iloc[-1 - w] - 1) * 100
+        results[w] = {
+            "target_ret":    _tgt_ret,
+            "benchmark_ret": _bmk_ret,
+            "gap":           _tgt_ret - _bmk_ret,
+        }
+
+    if not results:
+        return {"ok": False}
+
+    # 5営業日窓を基準に判定（ノイズと反応の鈍さのバランス）
+    _base_w = 5 if 5 in results else max(results.keys())
+    _base = results[_base_w]
+    _is_weak = _base["gap"] <= weak_threshold
+    _scenario = None
+    if _is_weak:
+        _scenario = "rotation" if _base["benchmark_ret"] >= -1.0 else "broad_selloff"
+
+    return {
+        "ok":          True,
+        "windows":     results,
+        "base_window": _base_w,
+        "is_weak":     _is_weak,
+        "scenario":    _scenario,
+        "as_of":       _tgt_close.index[-1].strftime("%Y-%m-%d"),
+    }
 
 
 def _detect_thin_volume_moves(hist: pd.DataFrame, recent_n: int = 15, move_mult: float = 1.5,
