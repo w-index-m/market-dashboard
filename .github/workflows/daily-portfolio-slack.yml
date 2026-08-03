@@ -1,0 +1,35 @@
+name: Daily AI Portfolio to Slack
+
+on:
+  schedule:
+    # 22:00 UTC = 07:00 JST（翌日）
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  send-portfolio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and send portfolio
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PORTFOLIO_BUDGET: "1000000"
+          PORTFOLIO_MODE: "growth"
+          PORTFOLIO_MODEL_TYPE: "etf"
+        run: python scripts/daily_portfolio_slack.py

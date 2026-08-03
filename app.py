@@ -93,17 +93,21 @@ except ImportError:
 JST = pytz.timezone("Asia/Tokyo")
 
 # ページ設定
-st.set_page_config(
-    page_title="Market Dashboard | リアルタイム株価・センチメント・Fear&Greed",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        "Get Help": "https://github.com/",
-        "Report a bug": None,
-        "About": "Market Dashboard — AI Sentiment Index (Claude Edition) | リアルタイム市場データ",
-    }
-)
+# __main__ ガード: このモジュールを外部スクリプト（例: scripts/daily_portfolio_slack.py）
+# から `import app` で読み込んだ際に、Streamlitのスクリプト実行コンテキスト外で
+# set_page_config() が実行されてしまわないようにする（streamlit run では通常通り動作する）。
+if __name__ == "__main__":
+    st.set_page_config(
+        page_title="Market Dashboard | リアルタイム株価・センチメント・Fear&Greed",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded",
+        menu_items={
+            "Get Help": "https://github.com/",
+            "Report a bug": None,
+            "About": "Market Dashboard — AI Sentiment Index (Claude Edition) | リアルタイム市場データ",
+        }
+    )
 
 # ===========================
 # ① 国ブロック（セキュリティリスク高い国をブロック）
