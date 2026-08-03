@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-毎朝、3種類のメッセージをSlackに送信するスクリプト:
+毎朝、3種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
   2. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
   3. AI推奨ポートフォリオ（新規投資先提案）
 
-GitHub Actionsのcronから `python scripts/daily_portfolio_slack.py` として直接実行される
-想定で、Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI関数はもともと
-st.*を呼ばない設計（fetch_*/compute_*レイヤー）なので、モジュールとしてimportして再利用する。
+GitHub Actionsのcronから `python scripts/daily_portfolio_line.py` として直接実行される想定で、
+Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI関数はもともとst.*を呼ばない
+設計（fetch_*/compute_*レイヤー）なので、モジュールとしてimportして再利用する。
 3つのメッセージは独立して送信され、どれか1つが失敗しても他は送られる。
 
+LINE Notify は2025年3月末にサービス終了したため、後継のLINE公式アカウント + Messaging API
+（ブロードキャスト配信）を使う。ブロードキャストはその公式アカウントを友だち追加している
+全員に届くので、個人利用（自分だけが友だち）を想定している。
+
 必要な環境変数（GitHub Secretsから渡す想定）:
-    SLACK_WEBHOOK_URL   必須。SlackのIncoming Webhook URL。
+    LINE_CHANNEL_ACCESS_TOKEN  必須。LINE Developersで発行するMessaging APIチャネルアクセストークン。
     GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY  いずれか（AIフォールバックチェーン）
     FMP_API_KEY, FINNHUB_API_KEY, ALPHA_VANTAGE_KEY, TIINGO_API_KEY  任意（市場データ取得に使用）
     PORTFOLIO_BUDGET      任意。予算（円）。デフォルト 1000000
@@ -30,6 +34,9 @@ import app  # noqa: E402  (app.py側でst.set_page_config()をimport時に実行
 
 JST = pytz.timezone("Asia/Tokyo")
 
+LINE_BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
+LINE_TEXT_MAX_LEN = 4900  # LINEのtextメッセージ上限は5000文字。安全マージンを取る。
+
 MODE_LABELS = {
     "growth": "🌱長期育成", "momentum": "⚡モメンタム", "autonomous": "🤖AI自律",
     "ai_mix": "✨AIミックス", "optical_mix": "💡光銘柄ミックス", "dividend_stable": "💰配当安定",
@@ -43,19 +50,29 @@ def _fmt_yen(n) -> str:
         return str(n)
 
 
-def _post_to_slack(slack_url: str, message: dict, label: str) -> None:
+def _post_to_line(token: str, text: str, label: str) -> None:
+    if len(text) > LINE_TEXT_MAX_LEN:
+        text = text[:LINE_TEXT_MAX_LEN - 3] + "..."
     try:
-        resp = requests.post(slack_url, json=message, timeout=15)
+        resp = requests.post(
+            LINE_BROADCAST_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"messages": [{"type": "text", "text": text}]},
+            timeout=15,
+        )
         resp.raise_for_status()
-        print(f"Posted {label} to Slack. status={resp.status_code}")
+        print(f"Posted {label} to LINE. status={resp.status_code}")
     except Exception as e:
-        print(f"Failed to post {label} to Slack: {e}", file=sys.stderr)
+        print(f"Failed to post {label} to LINE: {e}", file=sys.stderr)
 
 
 # ─────────────────────────────────────────────
 # 1) 市況サマリー
 # ─────────────────────────────────────────────
-def build_market_summary_message(market_ctx: dict, today: str) -> dict:
+def build_market_summary_message(market_ctx: dict, today: str) -> str:
     fg_score    = market_ctx.get("fg_score")
     fg_label    = market_ctx.get("fg_label", "")
     fg_c7       = market_ctx.get("fg_change_7d")
@@ -67,7 +84,7 @@ def build_market_summary_message(market_ctx: dict, today: str) -> dict:
     nikkei      = market_ctx.get("nikkei_pred") or {}
     us          = market_ctx.get("us_pred") or {}
 
-    lines = [f"*🌐 本日の市況サマリー（{today}）*", ""]
+    lines = [f"🌐 本日の市況サマリー（{today}）", ""]
 
     if fg_score is not None:
         chg_parts = []
@@ -76,7 +93,7 @@ def build_market_summary_message(market_ctx: dict, today: str) -> dict:
         if fg_c30 is not None:
             chg_parts.append(f"30日{fg_c30:+.0f}pt")
         chg_str = f"（{' / '.join(chg_parts)}）" if chg_parts else ""
-        lines.append(f"😨 Fear&Greed: *{fg_score:.0f}* {fg_label} {chg_str}")
+        lines.append(f"😨 Fear&Greed: {fg_score:.0f} {fg_label} {chg_str}")
     if vix is not None:
         lines.append(f"📉 VIX: {vix:.1f}")
     if naaim is not None:
@@ -101,18 +118,18 @@ def build_market_summary_message(market_ctx: dict, today: str) -> dict:
     if us:
         lines.append(_fmt_pred("S&P500", "🇺🇸", us, "sp500"))
 
-    return {"text": "\n".join(lines)}
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
 # 2) AI/半導体株 異常検知（相対弱さ・急落→急回復）
 # ─────────────────────────────────────────────
-def build_anomaly_alert_message(today: str) -> dict | None:
+def build_anomaly_alert_message(today: str) -> str | None:
     smh_hist = app._fetch_ticker_history_multi_year("SMH", years=2)
     if smh_hist.empty:
         return None
 
-    lines = [f"*⚡ AI/半導体株 異常検知（{today}・SMH基準）*", ""]
+    lines = [f"⚡ AI/半導体株 異常検知（{today}・SMH基準）", ""]
     has_content = False
 
     rw = app._detect_relative_weakness("SMH", "^GSPC")
@@ -155,25 +172,24 @@ def build_anomaly_alert_message(today: str) -> dict | None:
 
     lines.append("")
     lines.append("⚠️ 情報提供目的のみ。値動きパターンの検知であり、原因の特定はできません。")
-    return {"text": "\n".join(lines)}
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
 # 3) AI推奨ポートフォリオ
 # ─────────────────────────────────────────────
-def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> dict:
+def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> str:
     portfolio = result.get("portfolio") or []
     metrics = result.get("metrics") or {}
     error = result.get("error")
 
     if error or not portfolio:
-        text = (
-            f"*📊 本日のAI推奨ポートフォリオ（{today}）*\n"
+        return (
+            f"📊 本日のAI推奨ポートフォリオ（{today}）\n"
             f"⚠️ 生成に失敗しました: {error or '不明なエラー'}"
         )
-        return {"text": text}
 
-    lines = [f"*📊 本日のAI推奨ポートフォリオ（{today}・{mode_label}・予算{_fmt_yen(budget)}円）*", ""]
+    lines = [f"📊 本日のAI推奨ポートフォリオ（{today}・{mode_label}・予算{_fmt_yen(budget)}円）", ""]
 
     cash_pct = result.get("cash_reserve_pct", 0)
     crash_label = result.get("crash_risk_label", "")
@@ -190,7 +206,7 @@ def build_portfolio_message(result: dict, budget: int, mode_label: str, today: s
         entry       = item.get("entry_price")
         entry_note  = item.get("entry_note", "")
         conclusion  = item.get("conclusion", "")
-        lines.append(f"• *{flag} {ticker}* {name} — {alloc}%（{_fmt_yen(amount)}円）")
+        lines.append(f"◆ {flag} {ticker} {name} — {alloc}%（{_fmt_yen(amount)}円）")
         if entry:
             lines.append(f"   エントリー目安: {entry}　{entry_note}")
         if conclusion:
@@ -205,12 +221,12 @@ def build_portfolio_message(result: dict, budget: int, mode_label: str, today: s
             f"想定最大DD {metrics.get('max_drawdown_estimate', '-')}%"
         )
         if metrics.get("comment"):
-            lines.append(f"_{metrics['comment']}_")
+            lines.append(metrics["comment"])
 
     lines.append("")
     lines.append("⚠️ 情報提供目的のみ・投資助言ではありません。")
 
-    return {"text": "\n".join(lines)}
+    return "\n".join(lines)
 
 
 def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, model_type: str) -> dict:
@@ -246,9 +262,9 @@ def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, mod
 
 
 def main() -> None:
-    slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
-    if not slack_url:
-        print("SLACK_WEBHOOK_URL is not set. Aborting.", file=sys.stderr)
+    line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+    if not line_token:
+        print("LINE_CHANNEL_ACCESS_TOKEN is not set. Aborting.", file=sys.stderr)
         sys.exit(1)
 
     budget     = int(os.environ.get("PORTFOLIO_BUDGET", "1000000"))
@@ -263,7 +279,7 @@ def main() -> None:
 
     # 1) 市況サマリー
     try:
-        _post_to_slack(slack_url, build_market_summary_message(market_ctx, today), "market summary")
+        _post_to_line(line_token, build_market_summary_message(market_ctx, today), "market summary")
     except Exception as e:
         print(f"market summary failed: {e}", file=sys.stderr)
 
@@ -271,19 +287,19 @@ def main() -> None:
     try:
         alert_msg = build_anomaly_alert_message(today)
         if alert_msg:
-            _post_to_slack(slack_url, alert_msg, "anomaly alert")
+            _post_to_line(line_token, alert_msg, "anomaly alert")
     except Exception as e:
         print(f"anomaly alert failed: {e}", file=sys.stderr)
 
     # 3) AI推奨ポートフォリオ
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
-        _post_to_slack(slack_url, build_portfolio_message(result, budget, mode_label, today), "portfolio")
+        _post_to_line(line_token, build_portfolio_message(result, budget, mode_label, today), "portfolio")
     except Exception as e:
         print(f"portfolio generation failed: {e}", file=sys.stderr)
-        _post_to_slack(
-            slack_url,
-            {"text": f"*📊 本日のAI推奨ポートフォリオ（{today}）*\n⚠️ 生成に失敗しました: {e}"},
+        _post_to_line(
+            line_token,
+            f"📊 本日のAI推奨ポートフォリオ（{today}）\n⚠️ 生成に失敗しました: {e}",
             "portfolio (error)",
         )
 

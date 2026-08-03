@@ -1,4 +1,4 @@
-name: Daily AI Portfolio to Slack
+name: Daily AI Portfolio to LINE
 
 on:
   schedule:
@@ -28,8 +28,8 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
           TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           PORTFOLIO_BUDGET: "1000000"
           PORTFOLIO_MODE: "growth"
           PORTFOLIO_MODEL_TYPE: "etf"
-        run: python scripts/daily_portfolio_slack.py
+        run: python scripts/daily_portfolio_line.py
