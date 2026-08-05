@@ -295,6 +295,16 @@ def main() -> None:
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
         _post_to_line(line_token, build_portfolio_message(result, budget, mode_label, today), "portfolio")
+        # ベンチマーク比較用に、本日の推奨内容を銘柄単位でGoogle Sheetsに記録
+        # （手動生成では呼ばない＝1日1回のこの自動配信だけが履歴のソース）
+        if result.get("portfolio") and not result.get("error"):
+            try:
+                if app.record_portfolio_track(today, mode, budget, result["portfolio"]):
+                    print("Recorded portfolio_track for benchmark comparison.")
+                else:
+                    print("record_portfolio_track returned False (sheet unavailable?)", file=sys.stderr)
+            except Exception as e:
+                print(f"record_portfolio_track failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"portfolio generation failed: {e}", file=sys.stderr)
         _post_to_line(

@@ -22995,6 +22995,45 @@ def _save_invest_rec_cache(date: str, budget: int, model_type: str, risk_type: s
 
 
 # ─────────────────────────────────────────────
+# AI推奨ポートフォリオの実績追跡（VOO/VTV等ベンチマークとの比較用）
+# ─────────────────────────────────────────────
+
+_PORTFOLIO_TRACK_HEADERS = [
+    "date", "mode", "budget", "ticker", "name", "flag",
+    "allocation_pct", "amount", "entry_price_at_rec",
+]
+
+
+def record_portfolio_track(date: str, mode: str, budget: int, portfolio: list) -> bool:
+    """AI推奨ポートフォリオの内容を銘柄単位でGoogle Sheetsに記録する。
+    「AIの推奨は実際にどれくらいの成績だったか」をVOO/VTV等のベンチマークと後日比較する
+    ための履歴データ。1日1回、日次配信スクリプト（scripts/daily_portfolio_line.py）から
+    呼ばれる想定（手動生成のたびに記録すると同日に重複行ができてしまうため、そちらでは呼ばない）。
+    """
+    try:
+        ws = _trading_ws("portfolio_track", _PORTFOLIO_TRACK_HEADERS)
+        if not ws:
+            return False
+        rows = []
+        for item in portfolio:
+            alloc = item.get("allocation", 0)
+            if not alloc:
+                continue
+            rows.append([
+                date, mode, budget,
+                item.get("ticker", ""), item.get("name", ""), item.get("flag", ""),
+                alloc, item.get("amount", 0), item.get("entry_price", ""),
+            ])
+        if not rows:
+            return False
+        ws.append_rows(rows)
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] portfolio_track記録失敗: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
 # マルチエージェント分析 (Agent A / B)
 # ─────────────────────────────────────────────
 

@@ -29,6 +29,8 @@ jobs:
           ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
           TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           PORTFOLIO_BUDGET: "1000000"
           PORTFOLIO_MODE: "growth"
           PORTFOLIO_MODEL_TYPE: "etf"
