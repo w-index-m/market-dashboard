@@ -34,4 +34,5 @@ jobs:
           PORTFOLIO_BUDGET: "1000000"
           PORTFOLIO_MODE: "growth"
           PORTFOLIO_MODEL_TYPE: "etf"
+          TRADING_USERNAME: "admin"
         run: python scripts/daily_portfolio_line.py

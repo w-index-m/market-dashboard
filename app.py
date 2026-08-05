@@ -25029,6 +25029,16 @@ def render_claude_trading_project():
                 _n_stocks = len(open_pos)
                 _today    = datetime.now(JST).strftime("%Y-%m-%d")
 
+                # Step0: 保有銘柄の時価を取得し、market_valueを付与する
+                #        （_calc_positions_from_dfはmarket_valueを持たないため、
+                #        これをしないと_generate_full_portfolio_recommendation内で
+                #        評価額・含み損益・配分%が常に0/フル損扱いになってしまう）
+                _prices_for_rec = _fetch_portfolio_prices(tuple(open_pos.keys())) if open_pos else {}
+                open_pos = {
+                    _t: {**_p, "market_value": _p.get("qty", 0) * _prices_for_rec.get(_t, {}).get("price", 0)}
+                    for _t, _p in open_pos.items()
+                }
+
                 # Step1: 全銘柄データ取得（キャッシュキー算出に必要）
                 with st.spinner(f"全{_n_stocks}銘柄のデータ取得＋市場モデル取得中... （1〜2分）"):
                     import concurrent.futures as _cf_rec
@@ -25110,8 +25120,8 @@ def render_claude_trading_project():
                     _rec_text_full = _rec_result["text"]
                     # ### ヘッダーで分割（各銘柄セクション）
                     _rec_parts = _re_rec.split(r'(?m)^(?=###\s)', _rec_text_full)
-                    # 全銘柄価格データ（ボタン押下時の解放資金計算用）
-                    _all_prices_rec = _fetch_portfolio_prices(tuple(open_pos.keys())) if open_pos else {}
+                    # 全銘柄価格データ（ボタン押下時の解放資金計算用・Step0で取得済みのものを再利用）
+                    _all_prices_rec = _prices_for_rec
                     _usdjpy_rec = _all_prices_rec.get("_usdjpy", 155.0)
 
                     for _rp_idx, _rp in enumerate(_rec_parts):

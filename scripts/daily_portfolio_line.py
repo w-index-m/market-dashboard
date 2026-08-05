@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-毎朝、3種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
+毎朝、4種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
-  2. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
-  3. AI推奨ポートフォリオ（新規投資先提案）
+  2. 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却をAIが銘柄ごとに判定）
+  3. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
+  4. AI推奨ポートフォリオ（新規投資先提案）
+
+新規投資の提案だけだと「ポートフォリオの入れ替え」ができない（売る判断が無い）ため、
+既存保有銘柄の売買判定（2）を組み込んでいる。既存のインタラクティブUIが使っている
+_generate_full_portfolio_recommendation()をそのまま再利用する。
 
 GitHub Actionsのcronから `python scripts/daily_portfolio_line.py` として直接実行される想定で、
 Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI関数はもともとst.*を呼ばない
 設計（fetch_*/compute_*レイヤー）なので、モジュールとしてimportして再利用する。
-3つのメッセージは独立して送信され、どれか1つが失敗しても他は送られる。
+各メッセージは独立して送信され、どれか1つが失敗しても他は送られる。
 
 LINE Notify は2025年3月末にサービス終了したため、後継のLINE公式アカウント + Messaging API
 （ブロードキャスト配信）を使う。ブロードキャストはその公式アカウントを友だち追加している
@@ -18,11 +23,14 @@ LINE Notify は2025年3月末にサービス終了したため、後継のLINE�
     LINE_CHANNEL_ACCESS_TOKEN  必須。LINE Developersで発行するMessaging APIチャネルアクセストークン。
     GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY  いずれか（AIフォールバックチェーン）
     FMP_API_KEY, FINNHUB_API_KEY, ALPHA_VANTAGE_KEY, TIINGO_API_KEY  任意（市場データ取得に使用）
+    GOOGLE_SHEETS_ID, GOOGLE_SERVICE_ACCOUNT_JSON  取引記録読込・推奨履歴記録に必要
+    TRADING_USERNAME      任意。取引記録シートのユーザー名（"admin"ならclaude_tradesタブ）。デフォルト admin
     PORTFOLIO_BUDGET      任意。予算（円）。デフォルト 1000000
-    PORTFOLIO_MODE        任意。growth/momentum/autonomous/ai_mix/optical_mix/dividend_stable。デフォルト growth
+    PORTFOLIO_MODE        任意。growth/momentum/autonomous/ai_mix/optical_mix/dividend_stable/stable_growth。デフォルト growth
     PORTFOLIO_MODEL_TYPE  任意。etf/individual。デフォルト etf
 """
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -123,7 +131,66 @@ def build_market_summary_message(market_ctx: dict, today: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# 2) AI/半導体株 異常検知（相対弱さ・急落→急回復）
+# 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）
+# ─────────────────────────────────────────────
+def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, username: str) -> dict:
+    """
+    Google Sheetsの取引記録から現在の保有銘柄を計算し、既存のマルチエージェント分析
+    （_generate_full_portfolio_recommendation）で銘柄ごとの推奨アクションを判定する。
+    Returns: {"text": str, "model": str, "error": str|None}
+    """
+    trades_df, err = app._load_trades(username)
+    if trades_df.empty:
+        return {"text": "", "model": "", "error": err or "取引記録がありません"}
+
+    positions = app._calc_positions_from_df(trades_df)
+    if not positions:
+        return {"text": "", "model": "", "error": "保有銘柄がありません"}
+
+    # _calc_positions_from_df は market_value を持たないため、時価を取得して付与する
+    # （付与しないと評価額・含み損益・配分%が常に0/フル損扱いになってしまう）
+    prices = app._fetch_portfolio_prices(tuple(positions.keys()))
+    positions = {
+        _t: {**_p, "market_value": _p.get("qty", 0) * prices.get(_t, {}).get("price", 0)}
+        for _t, _p in positions.items()
+    }
+
+    stock_data_map = {}
+    for ticker in positions:
+        try:
+            stock_data_map[ticker] = app._fetch_trading_stock_data(ticker, ticker.endswith(".T"))
+        except Exception as e:
+            print(f"stock data fetch failed for {ticker}: {e}", file=sys.stderr)
+            stock_data_map[ticker] = {}
+
+    return app._generate_full_portfolio_recommendation(
+        positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,
+    )
+
+
+def build_holdings_action_message(result: dict, today: str) -> str | None:
+    error = result.get("error")
+    text = result.get("text", "")
+
+    if error:
+        # 保有銘柄が無い/取引記録が無いのは正常系なので、エラーとして送らずスキップする
+        if "保有銘柄がありません" in error or "取引記録がありません" in error:
+            return None
+        return f"📋 保有銘柄アクション判定（{today}）\n⚠️ 取得に失敗しました: {error}"
+    if not text:
+        return None
+
+    # Streamlit(markdown)向けの見出し・強調記法をLINEのプレーンテキスト向けに簡易変換
+    plain = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    plain = re.sub(r'\*\*(.+?)\*\*', r'\1', plain)
+    plain = re.sub(r'^-{3,}\s*$', '───────', plain, flags=re.MULTILINE)
+    plain = re.sub(r'\n{3,}', '\n\n', plain).strip()
+
+    return f"📋 保有銘柄アクション判定（{today}）\n\n{plain}"
+
+
+# ─────────────────────────────────────────────
+# 3) AI/半導体株 異常検知（相対弱さ・急落→急回復）
 # ─────────────────────────────────────────────
 def build_anomaly_alert_message(today: str) -> str | None:
     smh_hist = app._fetch_ticker_history_multi_year("SMH", years=2)
@@ -177,7 +244,7 @@ def build_anomaly_alert_message(today: str) -> str | None:
 
 
 # ─────────────────────────────────────────────
-# 3) AI推奨ポートフォリオ
+# 4) AI推奨ポートフォリオ
 # ─────────────────────────────────────────────
 def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> str:
     # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
@@ -274,6 +341,7 @@ def main() -> None:
     mode       = os.environ.get("PORTFOLIO_MODE", "growth")
     model_type = os.environ.get("PORTFOLIO_MODEL_TYPE", "etf")
     mode_label = MODE_LABELS.get(mode, mode)
+    username   = os.environ.get("TRADING_USERNAME", "admin")
 
     today = datetime.now(JST).strftime("%Y-%m-%d")
 
@@ -286,7 +354,16 @@ def main() -> None:
     except Exception as e:
         print(f"market summary failed: {e}", file=sys.stderr)
 
-    # 2) AI/半導体株 異常検知
+    # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）
+    try:
+        holdings_result = generate_holdings_action(market_ctx, mode, "auto", username)
+        holdings_msg = build_holdings_action_message(holdings_result, today)
+        if holdings_msg:
+            _post_to_line(line_token, holdings_msg, "holdings action")
+    except Exception as e:
+        print(f"holdings action failed: {e}", file=sys.stderr)
+
+    # 3) AI/半導体株 異常検知
     try:
         alert_msg = build_anomaly_alert_message(today)
         if alert_msg:
@@ -294,7 +371,7 @@ def main() -> None:
     except Exception as e:
         print(f"anomaly alert failed: {e}", file=sys.stderr)
 
-    # 3) AI推奨ポートフォリオ
+    # 4) AI推奨ポートフォリオ
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
         _post_to_line(line_token, build_portfolio_message(result, budget, mode_label, today), "portfolio")
