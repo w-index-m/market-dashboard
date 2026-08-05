@@ -23491,12 +23491,15 @@ _CLAUDE_DIVIDEND_BASKET = {
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
-def _fetch_stable_growth_candidates(top_n: int = 20) -> dict:
+def _fetch_stable_growth_candidates(top_n: int = 20, max_dd_threshold: float = -30.0) -> dict:
     """
     🪨 安定成長モード専用の候補選定。日経225+S&P500の全構成銘柄から、
     財務指標を一切使わず、過去5年の株価チャートの「滑らかな右肩上がり度」だけで
     上位top_n銘柄をスクリーニングする。1日キャッシュ（重い処理のため）。
     指標: 対数株価に対する5年線形回帰のR²（1に近いほど直線的）。傾きが正のもののみ対象。
+    max_dd_threshold: 過去5年の最大ドローダウンがこれより悪い（例: -35%等）銘柄は、
+    R²が高くても候補から除外する（R²だけだと急落からの急回復で高R²になることがあるため、
+    ドローダウンを直接の足切り条件として併用する）。
     Returns: _fetch_candidate_performance と同じ形式の {ticker: {...}} dict
              （price, ret_3m, ret_6m, ret_1y, ret_3y, max_dd_3y, stability_r2, name を含む）。
              stability_r2の高い順に並んでいる（辞書の挿入順で保持）。
@@ -23529,6 +23532,8 @@ def _fetch_stable_growth_candidates(top_n: int = 20) -> dict:
 
                 _roll_max = _s.cummax()
                 _max_dd = round(float(((_s - _roll_max) / _roll_max).min()) * 100, 1)
+                if _max_dd < max_dd_threshold:
+                    continue  # 5年最大ドローダウンが基準より悪い銘柄は直接除外
 
                 def _r(days, _s=_s, _cur=_cur):
                     _idx = max(0, len(_s) - days - 1)
@@ -23807,7 +23812,7 @@ def _generate_investment_portfolio_rec(
         "stable_growth": (
             "🪨 安定成長モード",
             "財務諸表を一切見ず、株価チャートの形だけで判断。日経225・S&P500の全構成銘柄から、"
-            "過去5年間の対数株価が直線的に右肩上がり（急騰急落が少なく、大きなドローダウンがない）"
+            "過去5年間の対数株価が直線的に右肩上がり、かつ5年最大ドローダウンが-30%以内の"
             "銘柄のみを機械的にスクリーニング済み。保有期間は長め（1年以上）を想定。"
             "損切-15〜20%・目標=トレンド継続前提の緩やかな上昇。",
         ),
@@ -23890,7 +23895,7 @@ def _generate_investment_portfolio_rec(
      対数株価の5年線形回帰R²が高い（急騰急落が少なく一直線に近い）銘柄を最優先
      データのstability_r2列（あれば）を根拠として言及すること
   ② 最大ドローダウンの小ささ【重要】
-     5年間で大きな急落を経験していない銘柄を優先
+     候補は既に5年最大ドローダウン-30%以内で足切り済み。その中でもより小さい銘柄を優先
   ③ 財務指標は不問（このモードでは意図的にファンダメンタルズを評価軸に含めない）
   ※ 「地味だが着実」なポジショニングを重視し、高PER・値動きの荒い銘柄は避けること""",
     }.get(trading_mode, "")
@@ -23983,8 +23988,9 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "損切ラインは-10〜15%（通常より短め）に設定すること"
             if trading_mode == "dividend_stable"
             else "\n・【安定成長モード専用】銘柄はAgent Bリストのティッカーのみから選定（日経225・S&P500全銘柄から"
-            "5年チャートの滑らかさで事前スクリーニング済み）。財務指標には触れず、株価トレンドの安定性を"
-            "meritsの根拠にすること。値動きが荒い・PERが極端に高い銘柄がリストに紛れていても選定しない"
+            "5年チャートの滑らかさ・5年最大ドローダウン-30%以内で事前スクリーニング済み）。財務指標には触れず、"
+            "株価トレンドの安定性・ドローダウンの小ささをmeritsの根拠にすること。"
+            "値動きが荒い・PERが極端に高い銘柄がリストに紛れていても選定しない"
             if trading_mode == "stable_growth"
             else ""
         )
