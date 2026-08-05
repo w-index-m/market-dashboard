@@ -7654,6 +7654,91 @@ _SP500_STOCKS = {
 }
 
 
+# ─────────────────────────────────────────────
+# 銘柄ユニバース拡張（日経225・S&P500の全構成銘柄）
+# バリュー・テーマ分散など新モードの候補銘柄探索用。_NK225_STOCKS/_SP500_STOCKS
+# （代表30銘柄のみ）とは別に、全構成銘柄をWikipediaから取得してキャッシュする。
+# ─────────────────────────────────────────────
+
+@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def fetch_sp500_constituents() -> dict:
+    """
+    S&P500の全構成銘柄をWikipediaから取得する（{ticker: 企業名}）。
+    構成銘柄は年数回程度しか入れ替わらないため7日キャッシュ。
+    取得失敗時は既存の代表30銘柄（_SP500_STOCKS）にフォールバックする。
+    """
+    try:
+        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        df = tables[0]
+        result = {}
+        for _, row in df.iterrows():
+            ticker = str(row["Symbol"]).strip().replace(".", "-")  # BRK.B → BRK-B（yfinance表記）
+            name = str(row["Security"]).strip()
+            if ticker and ticker.lower() != "nan":
+                result[ticker] = name
+        if len(result) < 400:
+            raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
+        return result
+    except Exception as e:
+        logger.warning(f"[sp500_constituents] 取得失敗、代表銘柄にフォールバック: {e}")
+        return dict(_SP500_STOCKS)
+
+
+@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def fetch_nikkei225_constituents() -> dict:
+    """
+    日経225の全構成銘柄をWikipediaから取得する（{ticker(.T付き): 企業名}）。7日キャッシュ。
+    取得失敗時は既存の代表30銘柄（_NK225_STOCKS）にフォールバックする。
+    """
+    try:
+        tables = pd.read_html("https://ja.wikipedia.org/wiki/日経平均株価")
+        result = {}
+        for df in tables:
+            code_col = next((c for c in df.columns if "コード" in str(c)), None)
+            name_col = next((c for c in df.columns if "銘柄" in str(c) or "会社" in str(c)), None)
+            if code_col is None or name_col is None:
+                continue
+            for _, row in df.iterrows():
+                code = str(row[code_col]).strip()
+                if code.isdigit() and len(code) == 4:
+                    result[f"{code}.T"] = str(row[name_col]).strip()
+            if len(result) > 100:
+                break
+        if len(result) < 150:
+            raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
+        return result
+    except Exception as e:
+        logger.warning(f"[nikkei225_constituents] 取得失敗、代表銘柄にフォールバック: {e}")
+        return dict(_NK225_STOCKS)
+
+
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def fetch_universe_prices(tickers: tuple, chunk_size: int = 80) -> pd.DataFrame:
+    """
+    幅広い銘柄群（日経225+S&P500など数百銘柄）の直近60日分の価格・出来高をまとめて取得する。
+    Yahoo側のレート制限を避けるため、個別Ticker().info呼び出しではなく、
+    yf.downloadでchunk_size件ずつバッチ取得する（1リクエストに詰め込みすぎない）。12hキャッシュ。
+    Returns: 各chunkのyf.download結果（MultiIndex DataFrame）を列方向に結合したもの
+    """
+    all_frames = []
+    tickers_list = list(tickers)
+    for i in range(0, len(tickers_list), chunk_size):
+        chunk = tickers_list[i:i + chunk_size]
+        try:
+            raw = yf.download(
+                chunk, period="60d", interval="1d",
+                progress=False, auto_adjust=True, group_by="ticker", threads=True,
+            )
+            if not raw.empty:
+                all_frames.append(raw)
+        except Exception as e:
+            logger.warning(f"[universe_prices] chunk {i}-{i+chunk_size} 取得失敗: {e}")
+            continue
+    if not all_frames:
+        return pd.DataFrame()
+    return pd.concat(all_frames, axis=1)
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_factor_monthly_returns(ticker: str, date_key: str, years: int = 15) -> pd.Series:
     """モメンタム/ハイベータ・ファクターETFの月次リターン履歴を取得する。
@@ -10005,6 +10090,44 @@ def render_momentum_ranking():
                 )
             st.markdown("".join(_wl_cards), unsafe_allow_html=True)
             st.caption("⚠️ 情報提供目的のみ。「往って来い」パターンの検知であり、原因の特定や投資助言ではありません。")
+
+    # ── 🔬 銘柄ユニバース取得テスト（開発用・手動実行のみ）─────────
+    # 新モード（バリュー/テーマ分散など）の候補探索用に、日経225・S&P500の
+    # 全構成銘柄取得とバッチ価格取得の動作確認をするための一時的なパネル。
+    # 自動実行するとページ読み込みが重くなるため、ボタンを押した時だけ実行する。
+    with st.expander("🔬 銘柄ユニバース取得テスト（開発用）", expanded=False):
+        st.caption(
+            "日経225・S&P500の全構成銘柄リストとバッチ価格取得が動くかを確認するための"
+            "テストパネルです。ボタンを押すと実行します（自動実行はしません）。"
+        )
+        if st.button("取得テスト実行", key="btn_universe_fetch_test"):
+            with st.spinner("構成銘柄リストを取得中…"):
+                _nk_universe = fetch_nikkei225_constituents()
+                _sp_universe = fetch_sp500_constituents()
+            st.write(f"🇯🇵 日経225構成銘柄: {len(_nk_universe)}件取得")
+            st.write(f"🇺🇸 S&P500構成銘柄: {len(_sp_universe)}件取得")
+
+            _sample_tickers = tuple(list(_nk_universe.keys())[:5] + list(_sp_universe.keys())[:5])
+            with st.spinner(f"サンプル{len(_sample_tickers)}銘柄の価格を取得中…"):
+                _sample_prices = fetch_universe_prices(_sample_tickers)
+            if _sample_prices.empty:
+                st.warning("サンプル価格の取得に失敗しました。")
+            else:
+                _rows = []
+                for _tk in _sample_tickers:
+                    try:
+                        _close = (_sample_prices[_tk]["Close"].dropna()
+                                  if isinstance(_sample_prices.columns, pd.MultiIndex)
+                                  else _sample_prices["Close"].dropna())
+                        if not _close.empty:
+                            _name = _nk_universe.get(_tk) or _sp_universe.get(_tk, "")
+                            _rows.append({"ticker": _tk, "name": _name, "price": round(float(_close.iloc[-1]), 2)})
+                    except Exception:
+                        continue
+                if _rows:
+                    st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
+                else:
+                    st.warning("サンプル価格を1件も取得できませんでした。")
 
 
 # =====================================================
