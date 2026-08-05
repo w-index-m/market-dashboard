@@ -180,7 +180,9 @@ def build_anomaly_alert_message(today: str) -> str | None:
 # 3) AI推奨ポートフォリオ
 # ─────────────────────────────────────────────
 def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> str:
-    portfolio = result.get("portfolio") or []
+    # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
+    portfolio = sorted(result.get("portfolio") or [],
+                        key=lambda it: float(it.get("allocation", 0) or 0), reverse=True)
     metrics = result.get("metrics") or {}
     error = result.get("error")
 

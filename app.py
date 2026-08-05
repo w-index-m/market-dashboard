@@ -25475,7 +25475,9 @@ def render_claude_trading_project():
                                 st.caption(f"モデル: {_ip_r['model']}")
                             continue
 
-                        _ip_pf  = _ip_r.get("portfolio", [])
+                        # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
+                        _ip_pf  = sorted(_ip_r.get("portfolio", []),
+                                          key=lambda _it: float(_it.get("allocation", 0) or 0), reverse=True)
                         _ip_met = _ip_r.get("metrics", {})
                         _ai_mdl = _ip_r.get("model", "")
 
