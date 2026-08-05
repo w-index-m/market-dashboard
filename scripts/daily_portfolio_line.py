@@ -40,6 +40,7 @@ LINE_TEXT_MAX_LEN = 4900  # LINEのtextメッセージ上限は5000文字。安�
 MODE_LABELS = {
     "growth": "🌱長期育成", "momentum": "⚡モメンタム", "autonomous": "🤖AI自律",
     "ai_mix": "✨AIミックス", "optical_mix": "💡光銘柄ミックス", "dividend_stable": "💰配当安定",
+    "stable_growth": "🪨安定成長",
 }
 
 
@@ -231,7 +232,7 @@ def build_portfolio_message(result: dict, budget: int, mode_label: str, today: s
 
 def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, model_type: str) -> dict:
     print("Fetching candidate performance...")
-    cand_perf = app._fetch_candidate_performance(today)
+    cand_perf = app._fetch_candidate_performance(today, mode)
 
     print("Running Agent A (macro analysis)...")
     agent_a = app._analyze_macro_agent(

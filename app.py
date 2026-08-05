@@ -7713,11 +7713,12 @@ def fetch_nikkei225_constituents() -> dict:
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
-def fetch_universe_prices(tickers: tuple, chunk_size: int = 80) -> pd.DataFrame:
+def fetch_universe_prices(tickers: tuple, period: str = "60d", chunk_size: int = 80) -> pd.DataFrame:
     """
-    幅広い銘柄群（日経225+S&P500など数百銘柄）の直近60日分の価格・出来高をまとめて取得する。
+    幅広い銘柄群（日経225+S&P500など数百銘柄）の価格・出来高をまとめて取得する。
     Yahoo側のレート制限を避けるため、個別Ticker().info呼び出しではなく、
     yf.downloadでchunk_size件ずつバッチ取得する（1リクエストに詰め込みすぎない）。12hキャッシュ。
+    period: yf.downloadのperiod文字列（例: "60d", "5y"）。安定成長モードのスクリーニングでは"5y"を使う。
     Returns: 各chunkのyf.download結果（MultiIndex DataFrame）を列方向に結合したもの
     """
     all_frames = []
@@ -7726,7 +7727,7 @@ def fetch_universe_prices(tickers: tuple, chunk_size: int = 80) -> pd.DataFrame:
         chunk = tickers_list[i:i + chunk_size]
         try:
             raw = yf.download(
-                chunk, period="60d", interval="1d",
+                chunk, period=period, interval="1d",
                 progress=False, auto_adjust=True, group_by="ticker", threads=True,
             )
             if not raw.empty:
@@ -21120,6 +21121,7 @@ def _generate_replacement_rec(
         "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
         "optical_mix":     "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
         "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り3%以上の銘柄のみ選定）",
+        "stable_growth":   "財務指標不使用・5年チャートが滑らかに右肩上がりの銘柄のみ（日経225・S&P500全銘柄からスクリーニング）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -23313,6 +23315,25 @@ def _run_stock_agents_parallel(
 
 def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: int = 15) -> list:
     """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
+    _usdjpy = 150.0
+    _max_per = budget * 0.35
+    if trading_mode == "stable_growth":
+        # cand_perfは_fetch_stable_growth_candidates()の時点でstability_r2降順に
+        # 既に絞り込み済みなので、ここではモメンタム基準の再スコアリングをせず、
+        # 予算内で購入可能なものを順に採用するだけにとどめる
+        _out = []
+        for _tk, _d in cand_perf.items():
+            _px = _d.get("price", 0) or 0
+            if _px <= 0:
+                continue
+            _min = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+                    else _px if _tk.endswith(".T") else _px * _usdjpy)
+            if _min > _max_per:
+                continue
+            _out.append((_tk, _d.get("ret_3m") or 0, _d.get("ret_6m") or 0, _d.get("ret_1y") or 0, _px))
+            if len(_out) >= n:
+                break
+        return _out
     if trading_mode == "ai_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     elif trading_mode == "optical_mix":
@@ -23320,8 +23341,6 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
     elif trading_mode == "dividend_stable":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_DIVIDEND_BASKET}
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
-    _usdjpy = 150.0
-    _max_per = budget * 0.35
     _scored = []
     for _tk, _d in cand_perf.items():
         _px = _d.get("price", 0) or 0
@@ -23471,11 +23490,80 @@ _CLAUDE_DIVIDEND_BASKET = {
 }
 
 
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_stable_growth_candidates(top_n: int = 20) -> dict:
+    """
+    🪨 安定成長モード専用の候補選定。日経225+S&P500の全構成銘柄から、
+    財務指標を一切使わず、過去5年の株価チャートの「滑らかな右肩上がり度」だけで
+    上位top_n銘柄をスクリーニングする。1日キャッシュ（重い処理のため）。
+    指標: 対数株価に対する5年線形回帰のR²（1に近いほど直線的）。傾きが正のもののみ対象。
+    Returns: _fetch_candidate_performance と同じ形式の {ticker: {...}} dict
+             （price, ret_3m, ret_6m, ret_1y, ret_3y, max_dd_3y, stability_r2, name を含む）。
+             stability_r2の高い順に並んでいる（辞書の挿入順で保持）。
+    """
+    try:
+        _universe = {**fetch_nikkei225_constituents(), **fetch_sp500_constituents()}
+        _tickers = tuple(_universe.keys())
+        _raw = fetch_universe_prices(_tickers, period="5y")
+        if _raw.empty:
+            return {}
+
+        _is_multi = isinstance(_raw.columns, pd.MultiIndex)
+        _scored = []
+        for _tk in _tickers:
+            try:
+                _s = (_raw[_tk]["Close"].dropna() if _is_multi else _raw["Close"].dropna())
+                if len(_s) < 1000:  # 5年 ≒ 1250営業日。欠損許容で1000本以上を条件にする
+                    continue
+                _cur = float(_s.iloc[-1])
+
+                _log_s = np.log(_s.values)
+                _x = np.arange(len(_log_s), dtype=float)
+                _slope, _intercept = np.polyfit(_x, _log_s, 1)
+                if _slope <= 0:
+                    continue  # 右肩下がり・横ばいは除外
+                _fit = _slope * _x + _intercept
+                _ss_res = float(np.sum((_log_s - _fit) ** 2))
+                _ss_tot = float(np.sum((_log_s - _log_s.mean()) ** 2))
+                _r2 = (1 - _ss_res / _ss_tot) if _ss_tot > 0 else 0.0
+
+                _roll_max = _s.cummax()
+                _max_dd = round(float(((_s - _roll_max) / _roll_max).min()) * 100, 1)
+
+                def _r(days, _s=_s, _cur=_cur):
+                    _idx = max(0, len(_s) - days - 1)
+                    _p = float(_s.iloc[_idx])
+                    return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
+
+                _scored.append((_tk, _r2, _cur, _max_dd, _r(63), _r(126), _r(252), _r(756)))
+            except Exception:
+                continue
+
+        _scored.sort(key=lambda x: x[1], reverse=True)
+        _result = {}
+        for _tk, _r2, _cur, _max_dd, _r3m, _r6m, _r1y, _r3y in _scored[:top_n]:
+            _result[_tk] = {
+                "price": _cur, "ret_3m": _r3m, "ret_6m": _r6m, "ret_1y": _r1y, "ret_3y": _r3y,
+                "max_dd_3y": _max_dd, "stability_r2": round(_r2, 3),
+                "name": _universe.get(_tk, _tk),
+            }
+        logger.info(f"[trading] stable_growth候補: {len(_result)}銘柄選定（母集団{len(_universe)}銘柄）")
+        return _result
+    except Exception as e:
+        logger.warning(f"[trading] stable_growth候補取得失敗: {e}")
+        return {}
+
+
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
-def _fetch_candidate_performance(today_str: str) -> dict:
-    """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + 12h TTL）。
+def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict:
+    """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + trading_mode + 12h TTL）。
+    trading_mode="stable_growth" の場合は_fetch_stable_growth_candidates()に委譲し、
+    日経225+S&P500全銘柄からのチャートベーススクリーニング結果を返す
+    （それ以外のモードは従来通り_TRADING_CANDIDATESが対象）。
     Returns: {ticker: {ret_1y, ret_6m, ret_3m, ret_1m}} — 全て %表記float
     """
+    if trading_mode == "stable_growth":
+        return _fetch_stable_growth_candidates()
     try:
         import yfinance as _yf
         _raw = _yf.download(
@@ -23716,6 +23804,13 @@ def _generate_investment_portfolio_rec(
             "連続増配・高配当利回り・財務健全性を評価軸とし、急落リスクを極力排除する。"
             "PG・KO・KDDI・三菱商事等のディフェンシブ株・高配当ETFが中心。損切-10〜15%。",
         ),
+        "stable_growth": (
+            "🪨 安定成長モード",
+            "財務諸表を一切見ず、株価チャートの形だけで判断。日経225・S&P500の全構成銘柄から、"
+            "過去5年間の対数株価が直線的に右肩上がり（急騰急落が少なく、大きなドローダウンがない）"
+            "銘柄のみを機械的にスクリーニング済み。保有期間は長め（1年以上）を想定。"
+            "損切-15〜20%・目標=トレンド継続前提の緩やかな上昇。",
+        ),
     }
     _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
@@ -23788,6 +23883,16 @@ def _generate_investment_portfolio_rec(
   ④ バリュエーション【10%ウェイト】
      光通信セクターは一般に中・小型株が多い。過去の業績変動リスクを注記すること
   ※ 日本株はフジクラ(5803.T)・古河電工(5801.T)を積極的に組み入れる""",
+
+        "stable_growth": """\
+評価軸の優先順位（🪨 安定成長モード — チャートの滑らかさのみで事前選定済み）:
+  ① 株価トレンドの滑らかさ【最重要】
+     対数株価の5年線形回帰R²が高い（急騰急落が少なく一直線に近い）銘柄を最優先
+     データのstability_r2列（あれば）を根拠として言及すること
+  ② 最大ドローダウンの小ささ【重要】
+     5年間で大きな急落を経験していない銘柄を優先
+  ③ 財務指標は不問（このモードでは意図的にファンダメンタルズを評価軸に含めない）
+  ※ 「地味だが着実」なポジショニングを重視し、高PER・値動きの荒い銘柄は避けること""",
     }.get(trading_mode, "")
 
     # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
@@ -23877,6 +23982,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "3yMDDが-25%以内の銘柄を最優先。配当利回り・連続増配年数をmeritsに必ず記載すること。"
             "損切ラインは-10〜15%（通常より短め）に設定すること"
             if trading_mode == "dividend_stable"
+            else "\n・【安定成長モード専用】銘柄はAgent Bリストのティッカーのみから選定（日経225・S&P500全銘柄から"
+            "5年チャートの滑らかさで事前スクリーニング済み）。財務指標には触れず、株価トレンドの安定性を"
+            "meritsの根拠にすること。値動きが荒い・PERが極端に高い銘柄がリストに紛れていても選定しない"
+            if trading_mode == "stable_growth"
             else ""
         )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
@@ -23959,6 +24068,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 "・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix"
 else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
 else "・【配当安定モード専用】3yMDD -35%以内の銘柄のみ選定可。日米ともに配当利回り3%以上を必須条件とする。損切ライン-10〜15%で統一" if trading_mode == "dividend_stable"
+else "・【安定成長モード専用】財務指標は評価に使わず、5年チャートの滑らかさ（stability_r2）と最大ドローダウンの小ささのみを根拠にすること" if trading_mode == "stable_growth"
 else ""}
 
 【キャッシュ留保指示（必ず守ること）】
@@ -24339,12 +24449,21 @@ def render_claude_trading_project():
             "color":  "#34d399", "sub_color": "#6ee7b7",
             "border": "#059669", "bg": "#022c22",
         },
+        {
+            "key":    "stable_growth",
+            "emoji":  "🪨",
+            "label":  "安定成長モード",
+            "sub":    "財務指標不使用 · 5年チャートが滑らかな右肩上がりの銘柄のみ",
+            "detail": "日経225・S&P500全銘柄からチャート形状だけでスクリーニング · 損切-15〜20%",
+            "color":  "#94a3b8", "sub_color": "#cbd5e1",
+            "border": "#64748b", "bg": "#161e2b",
+        },
     ]
 
-    # 3+3 の2行レイアウトでモードボタンを表示
+    # 3+4 の2行レイアウトでモードボタンを表示
     _mode_row1 = _MODE_DEFS[:3]
     _mode_row2 = _MODE_DEFS[3:]
-    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(3))]
+    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
     for _row_defs, _row_cols in _mode_pairs:
         for _md, _col in zip(_row_defs, _row_cols):
             _is_sel = _cur_mode == _md["key"]
@@ -25208,7 +25327,7 @@ def render_claude_trading_project():
                 _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
                 _ip_model_type  = "etf" if st.session_state.get("ip_etf_ok", True) else "individual"
                 # 候補銘柄の実株価モメンタムデータを当日キャッシュで取得
-                _ip_cand_perf   = _fetch_candidate_performance(_ip_today)
+                _ip_cand_perf   = _fetch_candidate_performance(_ip_today, _ip_trade_mode)
                 # キャッシュキーにモード・ETF可否を含める
                 _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}_{_ip_model_type}"
 
@@ -25388,7 +25507,9 @@ def render_claude_trading_project():
 
                         # 実績リターン（候補銘柄データから加重平均）
                         _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
-                        _disp_cperf = _fetch_candidate_performance(_today_disp)
+                        _disp_cperf = _fetch_candidate_performance(
+                            _today_disp, st.session_state.get("trading_mode", "growth")
+                        )
                         _w1y_num = _w3y_num = _w_den = 0.0
                         for _pit in _ip_pf:
                             _pa = float(_pit.get("allocation", 0))
