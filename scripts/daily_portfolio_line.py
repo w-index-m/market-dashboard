@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-毎朝、4種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
+毎朝、最大5種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
   2. 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却をAIが銘柄ごとに判定）
+  2b. 保有銘柄 関連ニュース見出し（2のためにfetch済みのデータを再利用・追加API呼び出しなし）
   3. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
   4. AI推奨ポートフォリオ（新規投資先提案）
 
 新規投資の提案だけだと「ポートフォリオの入れ替え」ができない（売る判断が無い）ため、
 既存保有銘柄の売買判定（2）を組み込んでいる。既存のインタラクティブUIが使っている
-_generate_full_portfolio_recommendation()をそのまま再利用する。
+_generate_full_portfolio_recommendation()をそのまま再利用する。保有銘柄が無い/取引記録が
+無い場合、2と2bは送信されない（正常系として静かにスキップ）。
 
 GitHub Actionsのcronから `python scripts/daily_portfolio_line.py` として直接実行される想定で、
 Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI関数はもともとst.*を呼ばない
@@ -133,19 +135,21 @@ def build_market_summary_message(market_ctx: dict, today: str) -> str:
 # ─────────────────────────────────────────────
 # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）
 # ─────────────────────────────────────────────
-def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, username: str) -> dict:
+def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, username: str) -> tuple:
     """
     Google Sheetsの取引記録から現在の保有銘柄を計算し、既存のマルチエージェント分析
     （_generate_full_portfolio_recommendation）で銘柄ごとの推奨アクションを判定する。
-    Returns: {"text": str, "model": str, "error": str|None}
+    stock_data_mapも返す（build_holdings_news_messageでニュース見出しを再利用するため、
+    ここで一度だけ取得すれば二重にAPIを叩かずに済む）。
+    Returns: ({"text": str, "model": str, "error": str|None}, stock_data_map)
     """
     trades_df, err = app._load_trades(username)
     if trades_df.empty:
-        return {"text": "", "model": "", "error": err or "取引記録がありません"}
+        return {"text": "", "model": "", "error": err or "取引記録がありません"}, {}
 
     positions = app._calc_positions_from_df(trades_df)
     if not positions:
-        return {"text": "", "model": "", "error": "保有銘柄がありません"}
+        return {"text": "", "model": "", "error": "保有銘柄がありません"}, {}
 
     # _calc_positions_from_df は market_value を持たないため、時価を取得して付与する
     # （付与しないと評価額・含み損益・配分%が常に0/フル損扱いになってしまう）
@@ -163,9 +167,10 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
             print(f"stock data fetch failed for {ticker}: {e}", file=sys.stderr)
             stock_data_map[ticker] = {}
 
-    return app._generate_full_portfolio_recommendation(
+    ai_result = app._generate_full_portfolio_recommendation(
         positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,
     )
+    return ai_result, stock_data_map
 
 
 def build_holdings_action_message(result: dict, today: str) -> str | None:
@@ -187,6 +192,39 @@ def build_holdings_action_message(result: dict, today: str) -> str | None:
     plain = re.sub(r'\n{3,}', '\n\n', plain).strip()
 
     return f"📋 保有銘柄アクション判定（{today}）\n\n{plain}"
+
+
+def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
+    """
+    保有銘柄ごとの直近ニュース見出し一覧。generate_holdings_actionで既に取得済みの
+    stock_data_map（_fetch_trading_stock_dataの戻り値）を再利用するので、追加のAPI
+    呼び出しは発生しない。ポジティブ/ネガティブの判定はここでは行わない
+    （見出しの機械的な感情分析は誤判定のリスクがあるため）— そちらは「📋 保有銘柄
+    アクション判定」内のAIによるIR・ニュース評価を参照する前提。
+    """
+    lines = [f"📰 保有銘柄 関連ニュース（{today}）", ""]
+    has_content = False
+    for ticker, data in stock_data_map.items():
+        items = (data or {}).get("news_items") or []
+        if not items:
+            continue
+        has_content = True
+        lines.append(f"◆ {ticker}")
+        for item in items[:3]:
+            headline = item.get("headline_ja") or item.get("headline") or ""
+            if not headline:
+                continue
+            date   = item.get("date", "")
+            source = item.get("source", "")
+            meta   = " ".join(p for p in (date, source) if p)
+            lines.append(f"・{headline}" + (f"（{meta}）" if meta else ""))
+        lines.append("")
+
+    if not has_content:
+        return None
+
+    lines.append("※ 見出しの一覧です。ポジティブ/ネガティブの評価は「📋 保有銘柄アクション判定」内のIR・ニュース評価を参照してください。")
+    return "\n".join(lines).strip()
 
 
 # ─────────────────────────────────────────────
@@ -354,12 +392,15 @@ def main() -> None:
     except Exception as e:
         print(f"market summary failed: {e}", file=sys.stderr)
 
-    # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）
+    # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）＋ 関連ニュース見出し
     try:
-        holdings_result = generate_holdings_action(market_ctx, mode, "auto", username)
+        holdings_result, holdings_stock_data = generate_holdings_action(market_ctx, mode, "auto", username)
         holdings_msg = build_holdings_action_message(holdings_result, today)
         if holdings_msg:
             _post_to_line(line_token, holdings_msg, "holdings action")
+        news_msg = build_holdings_news_message(holdings_stock_data, today)
+        if news_msg:
+            _post_to_line(line_token, news_msg, "holdings news")
     except Exception as e:
         print(f"holdings action failed: {e}", file=sys.stderr)
 
