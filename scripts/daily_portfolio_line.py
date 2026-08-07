@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-毎朝、最大5種類のメッセージをLINE（Messaging API・ブロードキャスト配信）に送信するスクリプト:
+毎朝、最大5種類のメッセージをLINE（Messaging API・ブロードキャスト配信）とSlack
+（Incoming Webhook）の両方に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
   2. 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却をAIが銘柄ごとに判定）
   2b. 保有銘柄 関連ニュース見出し（2のためにfetch済みのデータを再利用・追加API呼び出しなし）
@@ -17,12 +18,15 @@ Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI
 設計（fetch_*/compute_*レイヤー）なので、モジュールとしてimportして再利用する。
 各メッセージは独立して送信され、どれか1つが失敗しても他は送られる。
 
+配信先は環境変数で設定されている方だけ動く（両方設定すれば両方に届く。片方だけでもOK）。
 LINE Notify は2025年3月末にサービス終了したため、後継のLINE公式アカウント + Messaging API
 （ブロードキャスト配信）を使う。ブロードキャストはその公式アカウントを友だち追加している
 全員に届くので、個人利用（自分だけが友だち）を想定している。
 
 必要な環境変数（GitHub Secretsから渡す想定）:
-    LINE_CHANNEL_ACCESS_TOKEN  必須。LINE Developersで発行するMessaging APIチャネルアクセストークン。
+    LINE_CHANNEL_ACCESS_TOKEN  任意。LINE Developersで発行するMessaging APIチャネルアクセストークン。
+    SLACK_WEBHOOK_URL          任意。SlackのIncoming Webhook URL。
+    ※ LINE_CHANNEL_ACCESS_TOKEN / SLACK_WEBHOOK_URL の少なくとも1つは必須。
     GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY  いずれか（AIフォールバックチェーン）
     FMP_API_KEY, FINNHUB_API_KEY, ALPHA_VANTAGE_KEY, TIINGO_API_KEY  任意（市場データ取得に使用）
     GOOGLE_SHEETS_ID, GOOGLE_SERVICE_ACCOUNT_JSON  取引記録読込・推奨履歴記録に必要
@@ -78,6 +82,23 @@ def _post_to_line(token: str, text: str, label: str) -> None:
         print(f"Posted {label} to LINE. status={resp.status_code}")
     except Exception as e:
         print(f"Failed to post {label} to LINE: {e}", file=sys.stderr)
+
+
+def _post_to_slack(webhook_url: str, text: str, label: str) -> None:
+    try:
+        resp = requests.post(webhook_url, json={"text": text}, timeout=15)
+        resp.raise_for_status()
+        print(f"Posted {label} to Slack. status={resp.status_code}")
+    except Exception as e:
+        print(f"Failed to post {label} to Slack: {e}", file=sys.stderr)
+
+
+def _post_to_channels(line_token: str, slack_webhook: str, text: str, label: str) -> None:
+    """設定されている配信先（LINE/Slack、両方でも片方でも可）すべてに同じ内容を送る。"""
+    if line_token:
+        _post_to_line(line_token, text, label)
+    if slack_webhook:
+        _post_to_slack(slack_webhook, text, label)
 
 
 # ─────────────────────────────────────────────
@@ -370,10 +391,14 @@ def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, mod
 
 
 def main() -> None:
-    line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-    if not line_token:
-        print("LINE_CHANNEL_ACCESS_TOKEN is not set. Aborting.", file=sys.stderr)
+    line_token    = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+    slack_webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
+    if not line_token and not slack_webhook:
+        print("Neither LINE_CHANNEL_ACCESS_TOKEN nor SLACK_WEBHOOK_URL is set. Aborting.", file=sys.stderr)
         sys.exit(1)
+
+    def _post(text, label):
+        _post_to_channels(line_token, slack_webhook, text, label)
 
     budget     = int(os.environ.get("PORTFOLIO_BUDGET", "1000000"))
     mode       = os.environ.get("PORTFOLIO_MODE", "growth")
@@ -388,7 +413,7 @@ def main() -> None:
 
     # 1) 市況サマリー
     try:
-        _post_to_line(line_token, build_market_summary_message(market_ctx, today), "market summary")
+        _post(build_market_summary_message(market_ctx, today), "market summary")
     except Exception as e:
         print(f"market summary failed: {e}", file=sys.stderr)
 
@@ -397,10 +422,10 @@ def main() -> None:
         holdings_result, holdings_stock_data = generate_holdings_action(market_ctx, mode, "auto", username)
         holdings_msg = build_holdings_action_message(holdings_result, today)
         if holdings_msg:
-            _post_to_line(line_token, holdings_msg, "holdings action")
+            _post(holdings_msg, "holdings action")
         news_msg = build_holdings_news_message(holdings_stock_data, today)
         if news_msg:
-            _post_to_line(line_token, news_msg, "holdings news")
+            _post(news_msg, "holdings news")
     except Exception as e:
         print(f"holdings action failed: {e}", file=sys.stderr)
 
@@ -408,14 +433,14 @@ def main() -> None:
     try:
         alert_msg = build_anomaly_alert_message(today)
         if alert_msg:
-            _post_to_line(line_token, alert_msg, "anomaly alert")
+            _post(alert_msg, "anomaly alert")
     except Exception as e:
         print(f"anomaly alert failed: {e}", file=sys.stderr)
 
     # 4) AI推奨ポートフォリオ
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
-        _post_to_line(line_token, build_portfolio_message(result, budget, mode_label, today), "portfolio")
+        _post(build_portfolio_message(result, budget, mode_label, today), "portfolio")
         # ベンチマーク比較用に、本日の推奨内容を銘柄単位でGoogle Sheetsに記録
         # （手動生成では呼ばない＝1日1回のこの自動配信だけが履歴のソース）
         if result.get("portfolio") and not result.get("error"):
@@ -428,8 +453,7 @@ def main() -> None:
                 print(f"record_portfolio_track failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"portfolio generation failed: {e}", file=sys.stderr)
-        _post_to_line(
-            line_token,
+        _post(
             f"📊 本日のAI推奨ポートフォリオ（{today}）\n⚠️ 生成に失敗しました: {e}",
             "portfolio (error)",
         )
