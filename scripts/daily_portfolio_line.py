@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-毎朝、最大5種類のメッセージをLINE（Messaging API・ブロードキャスト配信）とSlack
+毎朝、最大6種類のメッセージをLINE（Messaging API・ブロードキャスト配信）とSlack
 （Incoming Webhook）の両方に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
   2. 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却をAIが銘柄ごとに判定）
   2b. 保有銘柄 関連ニュース見出し（2のためにfetch済みのデータを再利用・追加API呼び出しなし）
-  3. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
-  4. AI推奨ポートフォリオ（新規投資先提案）
+  3. 経済指標チェック（直近発表結果の前回比、本日の発表予定。FMP→BLS→FREDの既存データを再利用）
+  4. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
+  5. AI推奨ポートフォリオ（新規投資先提案）
 
 新規投資の提案だけだと「ポートフォリオの入れ替え」ができない（売る判断が無い）ため、
 既存保有銘柄の売買判定（2）を組み込んでいる。既存のインタラクティブUIが使っている
@@ -249,7 +250,75 @@ def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
 
 
 # ─────────────────────────────────────────────
-# 3) AI/半導体株 異常検知（相対弱さ・急落→急回復）
+# 3) 経済指標チェック（直近の発表結果・前回比、本日の発表予定）
+# ─────────────────────────────────────────────
+def build_eco_calendar_message(today: str) -> str | None:
+    """
+    既存の経済カレンダー機能（render_economic_events_section）が使っているのと同じ
+    データ取得関数（FMP→BLS→FREDの順、無ければ空辞書）を再利用する。yfinance/Finnhubは
+    経済指標カレンダーを持っていないため対象外 — FMP_API_KEYが主な情報源（無料のBLS/FREDが補完）。
+    """
+    events = app._get_upcoming_us_eco_events(days_back=10, days_ahead=1)
+    if not events:
+        return None
+
+    eco_actuals = dict(app._fetch_eco_actuals_fmp())
+    has_fmp = any(not k.startswith("_") for k in eco_actuals)
+    if not has_fmp:
+        for k, v in app._fetch_eco_actuals_bls().items():
+            eco_actuals.setdefault(k, v)
+    for k, v in app._fetch_eco_actuals_fred().items():
+        eco_actuals.setdefault(k, v)
+
+    lines = [f"📅 経済指標チェック（{today}）", ""]
+    has_content = False
+
+    # 直近発表済みイベントの実績・前回比（最大5件）
+    past_events = [e for e in events if e["is_past"]]
+    result_lines = []
+    for ev in past_events:
+        date_str = ev["date_str"]
+        name = ev["name"]
+        data = eco_actuals.get(f"{date_str}|{name}") or eco_actuals.get(date_str)
+        if not data or not isinstance(data, dict):
+            continue
+        actual = data.get("actual")
+        if actual is None:
+            continue
+        previous = data.get("previous")
+        unit = data.get("unit", "")
+        beat = data.get("beat")
+        chg_str = f"（前回{previous}{unit}から{actual - previous:+.1f}{unit}）" if previous is not None else ""
+        beat_str = " 📈予想上回り" if beat is True else " 📉予想下回り" if beat is False else ""
+        result_lines.append(f"・{ev['icon']} {name}: {actual}{unit}{chg_str}{beat_str}")
+    if result_lines:
+        has_content = True
+        lines.append("【直近の発表結果】")
+        lines.extend(result_lines[-5:])
+        lines.append("")
+
+    # 本日発表予定のイベント
+    today_events = [e for e in events if not e["is_past"] and e["jst_dt"].strftime("%Y-%m-%d") == today]
+    if today_events:
+        has_content = True
+        impact_labels = {"high": "重要度:高", "medium": "重要度:中", "low": "重要度:低"}
+        lines.append("【本日の発表予定】")
+        for ev in today_events:
+            lines.append(
+                f"・{ev['icon']} {ev['jst_dt'].strftime('%H:%M')} {ev['name']}"
+                f"（{impact_labels.get(ev['impact'], '')}）"
+            )
+        lines.append("")
+
+    if not has_content:
+        return None
+
+    lines.append("⚠️ 情報提供目的のみ・投資助言ではありません。")
+    return "\n".join(lines).strip()
+
+
+# ─────────────────────────────────────────────
+# 4) AI/半導体株 異常検知（相対弱さ・急落→急回復）
 # ─────────────────────────────────────────────
 def build_anomaly_alert_message(today: str) -> str | None:
     smh_hist = app._fetch_ticker_history_multi_year("SMH", years=2)
@@ -303,7 +372,7 @@ def build_anomaly_alert_message(today: str) -> str | None:
 
 
 # ─────────────────────────────────────────────
-# 4) AI推奨ポートフォリオ
+# 5) AI推奨ポートフォリオ
 # ─────────────────────────────────────────────
 def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> str:
     # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
@@ -429,7 +498,15 @@ def main() -> None:
     except Exception as e:
         print(f"holdings action failed: {e}", file=sys.stderr)
 
-    # 3) AI/半導体株 異常検知
+    # 3) 経済指標チェック（直近の発表結果・前回比、本日の発表予定）
+    try:
+        eco_msg = build_eco_calendar_message(today)
+        if eco_msg:
+            _post(eco_msg, "eco calendar")
+    except Exception as e:
+        print(f"eco calendar failed: {e}", file=sys.stderr)
+
+    # 4) AI/半導体株 異常検知
     try:
         alert_msg = build_anomaly_alert_message(today)
         if alert_msg:
@@ -437,7 +514,7 @@ def main() -> None:
     except Exception as e:
         print(f"anomaly alert failed: {e}", file=sys.stderr)
 
-    # 4) AI推奨ポートフォリオ
+    # 5) AI推奨ポートフォリオ
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
         _post(build_portfolio_message(result, budget, mode_label, today), "portfolio")
