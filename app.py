@@ -24552,6 +24552,8 @@ def _auth_signup(username: str, password: str, display_name: str) -> tuple[bool,
         return False, "パスワードは4文字以上にしてください"
     if username in _auth_get_users():
         return False, "そのユーザー名は既に使われています"
+    if len(_auth_get_users()) >= 10:
+        return False, "アカウント数の上限（10）に達しているため、新規登録できません"
     try:
         import gspread as _gs
         _sp = _auth_get_sheets_sp()
@@ -26543,20 +26545,36 @@ def render_claude_trading_project():
                     trade_name   = t_name.strip() or trade_ticker
                     if trade_ticker and t_price > 0:
                         action = "BUY" if "BUY" in t_action else "SELL"
-                        ok, err = _save_trade(
-                            str(t_date), trade_ticker, trade_name,
-                            action, int(t_qty), float(t_price), float(t_fee),
-                            t_memo, 0.0, 0.0,
-                            username=_usr,
-                        )
-                        if ok:
-                            st.session_state["_trade_ticker"] = ""
-                            st.session_state["_trade_name"]   = ""
-                            st.session_state["_trade_status"] = "ok"
-                            st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
-                        else:
-                            st.session_state["_trade_status"] = "error"
-                            st.session_state["_trade_msg"]    = err
+
+                        # 保有銘柄数の上限チェック（1ユーザーあたり20銘柄まで、新規銘柄のBUYのみ対象）
+                        _limit_blocked = False
+                        if action == "BUY":
+                            _lim_df, _lim_err = _load_trades(_usr)
+                            _lim_pos = (_calc_positions_from_df(_lim_df)
+                                        if not _lim_err and not _lim_df.empty else {})
+                            if trade_ticker not in _lim_pos and len(_lim_pos) >= 20:
+                                _limit_blocked = True
+                                st.session_state["_trade_status"] = "error"
+                                st.session_state["_trade_msg"] = (
+                                    "保有銘柄数の上限（20銘柄）に達しています。"
+                                    "新しい銘柄を追加するには、既存の保有銘柄を売却してください。"
+                                )
+
+                        if not _limit_blocked:
+                            ok, err = _save_trade(
+                                str(t_date), trade_ticker, trade_name,
+                                action, int(t_qty), float(t_price), float(t_fee),
+                                t_memo, 0.0, 0.0,
+                                username=_usr,
+                            )
+                            if ok:
+                                st.session_state["_trade_ticker"] = ""
+                                st.session_state["_trade_name"]   = ""
+                                st.session_state["_trade_status"] = "ok"
+                                st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
+                            else:
+                                st.session_state["_trade_status"] = "error"
+                                st.session_state["_trade_msg"]    = err
                     else:
                         st.session_state["_trade_status"] = "warn"
                         st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
