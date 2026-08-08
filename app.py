@@ -26904,7 +26904,6 @@ def render_claude_trading_project():
             if hist_df.empty:
                 st.info("取引記録がないか、株価データを取得できませんでした。")
             else:
-                import plotly.graph_objects as go
 
                 # ── 全期間メトリクス（常に全期間ベース）─────────────
                 latest      = hist_df.iloc[-1]
@@ -27263,7 +27262,6 @@ def render_claude_trading_project():
                     else:
                         return float(value_native) / usd_jpy if is_jp else float(value_native)
 
-                import plotly.graph_objects as go
 
                 # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
                 st.markdown(
@@ -27375,7 +27373,6 @@ def render_claude_trading_project():
                         })
 
                 if has_any_div:
-                    import plotly.graph_objects as go
                     fig_div = go.Figure()
                     for _ci, (_label, _mvals) in enumerate(ticker_month_div.items()):
                         _color = _ticker_colors[_ci % len(_ticker_colors)]
