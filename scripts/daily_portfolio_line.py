@@ -213,15 +213,18 @@ def build_holdings_action_message(result: dict, today: str, ticker_names: dict |
             return None
         return f"📋 保有銘柄アクション判定（{today}）\n⚠️ 取得に失敗しました: {error}"
 
-    # AIが見出し（### TICKER）に銘柄名を書き忘れることがあるため、取引記録上の名前を補う
+    # AIが見出しに銘柄名を書かない（またはティッカーをそのまま名前欄にも書く）ことがあるため、
+    # 取引記録上の名前で確実に上書きする。AIの見出し形式は "### TICKER"・"### 🇺🇸 TICKER | TICKER"
+    # など揺れがあるため、そのティッカーを含む見出し行を丸ごと決め打ちの形に置き換える
     # （プロンプトでは「銘柄名（ティッカー）」を指示しているが、従わないことがある保険）
     if ticker_names and text:
         for ticker, name in ticker_names.items():
-            if not name or name == ticker:
+            if not name:
                 continue
+            flag = "🇯🇵" if ticker.endswith(".T") else "🇺🇸"
             text = re.sub(
-                rf'(?m)^(#{{1,6}}\s*){re.escape(ticker)}\s*$',
-                rf'\g<1>{name}（{ticker}）',
+                rf'(?m)^#{{1,6}}[^\n]*\b{re.escape(ticker)}\b[^\n]*$',
+                f'### {flag} {name}（{ticker}）',
                 text,
             )
     if not text:
