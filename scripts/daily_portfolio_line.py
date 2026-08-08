@@ -394,7 +394,9 @@ def build_anomaly_alert_message(today: str) -> str | None:
 # ─────────────────────────────────────────────
 # 5) AI推奨ポートフォリオ
 # ─────────────────────────────────────────────
-def build_portfolio_message(result: dict, budget: int, mode_label: str, today: str) -> str:
+def build_portfolio_message(
+    result: dict, budget: int, mode_label: str, today: str, crash_signals: list | None = None,
+) -> str:
     # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
     portfolio = sorted(result.get("portfolio") or [],
                         key=lambda it: float(it.get("allocation", 0) or 0), reverse=True)
@@ -412,7 +414,10 @@ def build_portfolio_message(result: dict, budget: int, mode_label: str, today: s
     cash_pct = result.get("cash_reserve_pct", 0)
     crash_label = result.get("crash_risk_label", "")
     if cash_pct:
-        lines.append(f"⚠️ クラッシュ前兆シグナル検出（{crash_label}） → キャッシュ{cash_pct}%保持を推奨")
+        # crash_signals: market_ctxの_fetch_market_context_for_trading()が判定した具体的な理由
+        # （F&G極度の強欲・F&G7日急騰・NAAIM過剰投資・VIX高水準・米国市場弱気シグナル等）
+        reason_str = "、".join(crash_signals) if crash_signals else "複合リスクシグナル"
+        lines.append(f"⚠️ クラッシュ前兆シグナル検出（{reason_str}）（{crash_label}） → キャッシュ{cash_pct}%保持を推奨")
         lines.append("")
 
     for item in portfolio:
@@ -539,7 +544,10 @@ def main() -> None:
     # 5) AI推奨ポートフォリオ
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
-        _post(build_portfolio_message(result, budget, mode_label, today), "portfolio")
+        _post(
+            build_portfolio_message(result, budget, mode_label, today, market_ctx.get("crash_signals")),
+            "portfolio",
+        )
         # ベンチマーク比較用に、本日の推奨内容を銘柄単位でGoogle Sheetsに記録
         # （手動生成では呼ばない＝1日1回のこの自動配信だけが履歴のソース）
         if result.get("portfolio") and not result.get("error"):
