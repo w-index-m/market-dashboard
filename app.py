@@ -21900,20 +21900,22 @@ def _compute_portfolio_history() -> pd.DataFrame:
     df["fee"]      = pd.to_numeric(df["fee"],      errors="coerce").fillna(0)
     df = df.sort_values("date").reset_index(drop=True)
 
-    tickers     = df["ticker"].unique().tolist()
-    start_date  = df["date"].min() - timedelta(days=5)
+    tickers    = sorted(df["ticker"].unique().tolist())
+    start_date = df["date"].min() - timedelta(days=5)
 
-    # 各ティッカーの日次終値を取得
+    # 銘柄ごとに個別yf.downloadを連続実行するとYahooのレート制限にかかりやすいため、
+    # fetch_universe_pricesの一括バッチ取得（group_by="ticker", threads=True）を使う
+    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
+    if raw.empty:
+        return pd.DataFrame()
+
+    is_multi   = isinstance(raw.columns, pd.MultiIndex)
     price_dict = {}
     for tk in tickers:
         try:
-            raw = yf.download(tk, start=start_date, auto_adjust=True, progress=False)
-            if raw.empty:
-                continue
-            close = raw["Close"]
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-            price_dict[tk] = close.rename(tk)
+            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
+            if not close.empty:
+                price_dict[tk] = close.rename(tk)
         except Exception:
             pass
 
@@ -21921,6 +21923,9 @@ def _compute_portfolio_history() -> pd.DataFrame:
         return pd.DataFrame()
 
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
+    price_df = price_df[price_df.index >= start_date]
+    if price_df.empty:
+        return pd.DataFrame()
 
     # 各営業日のポートフォリオ評価額・投資元本を計算
     rows = []
@@ -21980,24 +21985,30 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
     df = df.sort_values("date").reset_index(drop=True)
 
-    tickers    = df["ticker"].unique().tolist()
+    tickers    = sorted(df["ticker"].unique().tolist())
     start_date = df["date"].min() - timedelta(days=5)
 
+    # 銘柄ごとに個別yf.downloadを連続実行するとYahooのレート制限にかかりやすいため、
+    # fetch_universe_pricesの一括バッチ取得（group_by="ticker", threads=True）を使う
+    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
+    if raw.empty:
+        return pd.DataFrame()
+
+    is_multi   = isinstance(raw.columns, pd.MultiIndex)
     price_dict = {}
     for tk in tickers:
         try:
-            raw = yf.download(tk, start=start_date, auto_adjust=True, progress=False)
-            if raw.empty:
-                continue
-            close = raw["Close"]
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-            price_dict[tk] = close.rename(tk)
+            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
+            if not close.empty:
+                price_dict[tk] = close.rename(tk)
         except Exception:
             pass
     if not price_dict:
         return pd.DataFrame()
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
+    price_df = price_df[price_df.index >= start_date]
+    if price_df.empty:
+        return pd.DataFrame()
 
     try:
         fx_raw   = yf.download("USDJPY=X", start=start_date, auto_adjust=True, progress=False)
