@@ -26540,6 +26540,9 @@ def render_claude_trading_project():
                     st.markdown("**保有中ポジション（現在値・含み損益）**")
                     _pnl_usdjpy = _fetch_usd_jpy()
                     pnl_rows = []
+                    _total_cost_jpy = 0.0
+                    _total_pnl_jpy  = 0.0
+                    _total_skipped  = 0  # 現在値取得に失敗した銘柄数（合計から除外）
                     for ticker, pos in open_pos.items():
                         is_jp_pos = ticker.endswith(".T")
                         cur_unit  = "円" if is_jp_pos else "USD"
@@ -26569,15 +26572,20 @@ def render_claude_trading_project():
                         # 含み損益はUSD・円を常に固定2列で出す（米国株はUSDが実額・円が換算値、
                         # 日本株は円が実額・USDが換算値）。列名は行によらず固定にする
                         if pnl is not None:
+                            _cost_jpy = avg_cost * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                            _pnl_jpy  = pnl if is_jp_pos else pnl * _pnl_usdjpy
+                            _total_cost_jpy += _cost_jpy
+                            _total_pnl_jpy  += _pnl_jpy
                             if is_jp_pos:
                                 _pnl_jpy_str = f"{pnl:+,.0f}"
                                 _pnl_usd_str = f"{pnl / _pnl_usdjpy:+,.0f}" if _pnl_usdjpy else "-"
                             else:
                                 _pnl_usd_str = f"{pnl:+,.0f}"
-                                _pnl_jpy_str = f"{pnl * _pnl_usdjpy:+,.0f}"
+                                _pnl_jpy_str = f"{_pnl_jpy:+,.0f}"
                         else:
                             _pnl_usd_str = "-"
                             _pnl_jpy_str = "-"
+                            _total_skipped += 1
 
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
@@ -26597,6 +26605,30 @@ def render_claude_trading_project():
                         })
 
                     st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+
+                    # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
+                    if _total_cost_jpy > 0:
+                        _total_pnl_pct = _total_pnl_jpy / _total_cost_jpy * 100
+                        _total_color = "#22c55e" if _total_pnl_jpy >= 0 else "#ef4444"
+                        _skip_note = (
+                            f"（現在値取得失敗の{_total_skipped}銘柄は集計対象外）" if _total_skipped else ""
+                        )
+                        st.markdown(
+                            '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
+                            'border:1px solid #334155;border-radius:8px;padding:12px 18px;margin-top:8px">'
+                            '<div><div style="font-size:11px;color:#64748b">取得単価合計（円換算）</div>'
+                            f'<div style="font-size:18px;font-weight:700">{_total_cost_jpy:,.0f}円</div></div>'
+                            '<div><div style="font-size:11px;color:#64748b">含み損益合計（円換算）</div>'
+                            f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
+                            f'{_total_pnl_jpy:+,.0f}円</div></div>'
+                            '<div><div style="font-size:11px;color:#64748b">合計損益率</div>'
+                            f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
+                            f'{_total_pnl_pct:+.2f}%</div></div>'
+                            '</div>',
+                            unsafe_allow_html=True,
+                        )
+                        if _skip_note:
+                            st.caption(_skip_note)
 
                     # ── ポートフォリオ全体AI分析 ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
