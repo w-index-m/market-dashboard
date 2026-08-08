@@ -21884,6 +21884,47 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     return result
 
 
+def _fetch_ticker_close_prices(tickers: list, period: str = "max") -> dict:
+    """複数銘柄の日次終値をまとめて取得する。まずfetch_universe_prices（バッチ取得、
+    Yahooのレート制限を受けにくい）を試み、取得できなかった銘柄が残っていれば
+    個別にyf.downloadでフォールバック取得する。
+    Returns: {ticker: pd.Series(close)}（取得できなかった銘柄は含まれない）
+    """
+    tickers = sorted(set(tickers))
+    price_dict = {}
+    try:
+        raw = fetch_universe_prices(tuple(tickers), period=period, chunk_size=80)
+    except Exception:
+        raw = pd.DataFrame()
+
+    if not raw.empty:
+        is_multi = isinstance(raw.columns, pd.MultiIndex)
+        for tk in tickers:
+            try:
+                close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
+                if not close.empty:
+                    price_dict[tk] = close.rename(tk)
+            except Exception:
+                pass
+
+    missing = [tk for tk in tickers if tk not in price_dict]
+    for tk in missing:
+        try:
+            raw1 = yf.download(tk, period=period, auto_adjust=True, progress=False)
+            if raw1.empty:
+                continue
+            close = raw1["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            close = close.dropna()
+            if not close.empty:
+                price_dict[tk] = close.rename(tk)
+        except Exception:
+            pass
+
+    return price_dict
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_portfolio_history() -> pd.DataFrame:
     """取引記録 × 日次終値でポートフォリオ資産推移を計算する。
@@ -21903,22 +21944,7 @@ def _compute_portfolio_history() -> pd.DataFrame:
     tickers    = sorted(df["ticker"].unique().tolist())
     start_date = df["date"].min() - timedelta(days=5)
 
-    # 銘柄ごとに個別yf.downloadを連続実行するとYahooのレート制限にかかりやすいため、
-    # fetch_universe_pricesの一括バッチ取得（group_by="ticker", threads=True）を使う
-    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
-    if raw.empty:
-        return pd.DataFrame()
-
-    is_multi   = isinstance(raw.columns, pd.MultiIndex)
-    price_dict = {}
-    for tk in tickers:
-        try:
-            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
-            if not close.empty:
-                price_dict[tk] = close.rename(tk)
-        except Exception:
-            pass
-
+    price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
         return pd.DataFrame()
 
@@ -21988,21 +22014,7 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     tickers    = sorted(df["ticker"].unique().tolist())
     start_date = df["date"].min() - timedelta(days=5)
 
-    # 銘柄ごとに個別yf.downloadを連続実行するとYahooのレート制限にかかりやすいため、
-    # fetch_universe_pricesの一括バッチ取得（group_by="ticker", threads=True）を使う
-    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
-    if raw.empty:
-        return pd.DataFrame()
-
-    is_multi   = isinstance(raw.columns, pd.MultiIndex)
-    price_dict = {}
-    for tk in tickers:
-        try:
-            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
-            if not close.empty:
-                price_dict[tk] = close.rename(tk)
-        except Exception:
-            pass
+    price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
         return pd.DataFrame()
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
@@ -22053,20 +22065,8 @@ def _compute_current_holdings_backtest() -> pd.DataFrame:
     if not open_pos:
         return pd.DataFrame()
 
-    tickers = sorted(open_pos.keys())
-    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
-    if raw.empty:
-        return pd.DataFrame()
-
-    is_multi   = isinstance(raw.columns, pd.MultiIndex)
-    price_dict = {}
-    for tk in tickers:
-        try:
-            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
-            if not close.empty:
-                price_dict[tk] = close.rename(tk)
-        except Exception:
-            pass
+    tickers    = sorted(open_pos.keys())
+    price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
         return pd.DataFrame()
 
