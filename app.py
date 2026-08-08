@@ -22797,12 +22797,11 @@ def _generate_portfolio_ai_comment(positions_key: str, changes_json: str) -> dic
         '}'
     )
 
-    res = call_ai_with_fallback(prompt, max_tokens=700, temperature=0.3)
-    if res.get("error"):
-        return {"narrative": "", "bullets": [], "error": res["error"]}
+    text, model = call_ai_with_fallback(prompt, max_output_tokens=700, temperature=0.3)
+    if model == "none":
+        return {"narrative": "", "bullets": [], "error": text}
 
     import re as _re
-    text = res.get("text", "")
     m = _re.search(r'\{[\s\S]*\}', text)
     if m:
         try:
