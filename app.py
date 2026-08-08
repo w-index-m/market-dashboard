@@ -26681,6 +26681,8 @@ def render_claude_trading_project():
 
                     # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
                     if _total_cost_jpy > 0:
+                        _mkt_val_jpy   = _total_cost_jpy + _total_pnl_jpy
+                        _mkt_val_usd   = _mkt_val_jpy / _pnl_usdjpy if _pnl_usdjpy else 0
                         _total_pnl_pct = _total_pnl_jpy / _total_cost_jpy * 100
                         _total_color = "#22c55e" if _total_pnl_jpy >= 0 else "#ef4444"
                         _skip_note = (
@@ -26692,9 +26694,12 @@ def render_claude_trading_project():
                             '<div><div style="font-size:11px;color:#64748b">取得単価合計（円換算）</div>'
                             f'<div style="font-size:18px;font-weight:700;color:#e2e8f0">'
                             f'{_total_cost_jpy:,.0f}円</div></div>'
-                            '<div><div style="font-size:11px;color:#64748b">含み損益合計（円換算）</div>'
+                            '<div><div style="font-size:11px;color:#64748b">現在評価額</div>'
+                            f'<div style="font-size:18px;font-weight:700;color:#e2e8f0">'
+                            f'{_mkt_val_jpy:,.0f}円 ／ ${_mkt_val_usd:,.0f}</div></div>'
+                            '<div><div style="font-size:11px;color:#64748b">含み損益合計（USD／円換算）</div>'
                             f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
-                            f'{_total_pnl_jpy:+,.0f}円</div></div>'
+                            f'${_total_pnl_jpy / _pnl_usdjpy:+,.0f} ／ {_total_pnl_jpy:+,.0f}円</div></div>'
                             '<div><div style="font-size:11px;color:#64748b">合計損益率</div>'
                             f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
                             f'{_total_pnl_pct:+.2f}%</div></div>'
@@ -26708,7 +26713,6 @@ def render_claude_trading_project():
                     if _total_cost_jpy > 0:
                         st.markdown("<br>", unsafe_allow_html=True)
                         st.markdown("**📊 保有資産（取得原価 vs 評価額）**")
-                        _mkt_val_jpy = _total_cost_jpy + _total_pnl_jpy
                         fig_gl = go.Figure(go.Bar(
                             x=["取得原価", "評価額"],
                             y=[_total_cost_jpy, _mkt_val_jpy],
@@ -26947,7 +26951,7 @@ def render_claude_trading_project():
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 # ── 期間セレクタ ────────────────────────────────────
-                _PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "全期間"]
+                _PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "3Y", "5Y", "全期間"]
                 sel_period = st.radio(
                     "表示期間", _PERIODS, index=5,
                     horizontal=True, key="hist_period",
@@ -26967,6 +26971,10 @@ def render_claude_trading_project():
                     chart_df = hist_df[hist_df.index >= pd.Timestamp(today.year, 1, 1)]
                 elif sel_period == "1Y":
                     chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=1)]
+                elif sel_period == "3Y":
+                    chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=3)]
+                elif sel_period == "5Y":
+                    chart_df = hist_df[hist_df.index >= today - pd.DateOffset(years=5)]
                 else:
                     chart_df = hist_df
                 if chart_df.empty:
@@ -27061,6 +27069,10 @@ def render_claude_trading_project():
                         alloc_chart_df = alloc_hist[alloc_hist.index >= pd.Timestamp(today.year, 1, 1)]
                     elif sel_period == "1Y":
                         alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(years=1)]
+                    elif sel_period == "3Y":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(years=3)]
+                    elif sel_period == "5Y":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(years=5)]
                     else:
                         alloc_chart_df = alloc_hist
                     if alloc_chart_df.empty:
