@@ -26457,8 +26457,11 @@ def render_claude_trading_project():
 
                 if open_pos:
                     st.markdown("**保有中ポジション（現在値・含み損益）**")
+                    _pnl_usdjpy = _fetch_usd_jpy()
                     pnl_rows = []
                     for ticker, pos in open_pos.items():
+                        is_jp_pos = ticker.endswith(".T")
+                        cur_unit  = "円" if is_jp_pos else "USD"
                         cur_price = None
                         try:
                             info = yf.Ticker(ticker).fast_info
@@ -26482,6 +26485,14 @@ def render_claude_trading_project():
                         pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
                         pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
 
+                        # 米国株は含み損益に円換算も併記する（日本円ベースで損益感覚を掴みやすくするため）
+                        if pnl is not None and not is_jp_pos:
+                            _pnl_str = f"{pnl:+,.0f} USD （≈{pnl * _pnl_usdjpy:+,.0f}円）"
+                        elif pnl is not None:
+                            _pnl_str = f"{pnl:+,.0f}円"
+                        else:
+                            _pnl_str = "-"
+
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
                             _pnl_name = _get_stock_display_name(ticker)
@@ -26489,9 +26500,12 @@ def render_claude_trading_project():
                             "銘柄":    _pnl_name,
                             "コード":  ticker,
                             "保有株数": int(pos["qty"]),
-                            "平均取得単価": round(avg_cost, 2),
-                            "現在株価": round(cur_price, 2) if cur_price else "取得失敗",
-                            "含み損益": f"{pnl:+,.0f}" if pnl is not None else "-",
+                            # 通貨単位は行ごとに変わる（米国株=USD/日本株=円）ため、列名ではなく
+                            # 値の中に埋め込む（列名を動的にするとpd.DataFrameが別々の列として
+                            # 分裂させてしまい表が崩れるため）
+                            "平均取得単価": f"{avg_cost:,.2f} {cur_unit}",
+                            "現在株価":   f"{cur_price:,.2f} {cur_unit}" if cur_price else "取得失敗",
+                            "含み損益": _pnl_str,
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
