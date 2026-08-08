@@ -24541,6 +24541,33 @@ def _auth_check_session(token: str) -> str:
     return ""
 
 
+def _auth_signup(username: str, password: str, display_name: str) -> tuple[bool, str]:
+    """新規ユーザーをusersタブに追加する。ユーザー名重複チェックあり。
+    Returns: (成功したか, エラーメッセージ)
+    """
+    username = (username or "").strip()
+    if not username:
+        return False, "ユーザー名を入力してください"
+    if not password or len(password) < 4:
+        return False, "パスワードは4文字以上にしてください"
+    if username in _auth_get_users():
+        return False, "そのユーザー名は既に使われています"
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("users")
+        except _gs.exceptions.WorksheetNotFound:
+            _ws = _sp.add_worksheet("users", rows=100, cols=3)
+            _ws.append_row(["username", "password_hash", "display_name"])
+        _ws.append_row([username, _auth_hash(password), (display_name or "").strip() or username])
+        _auth_get_users.clear()
+        return True, ""
+    except Exception as _e:
+        logger.warning(f"[auth] 新規登録失敗: {_e}")
+        return False, f"登録エラー: {str(_e)[:80]}"
+
+
 def render_claude_trading_project():
     """🤖 Claude 個別株トレーディングプロジェクト"""
     st.markdown('<a id="claude-trading"></a>', unsafe_allow_html=True)
@@ -26468,6 +26495,18 @@ def render_claude_trading_project():
                     else:
                         st.error("ユーザー名またはパスワードが違います")
                 st.markdown("</div>", unsafe_allow_html=True)
+
+                with st.expander("🆕 新しいアカウントを作成"):
+                    _su_u = st.text_input("ユーザー名（新規）", key="su_u_trade")
+                    _su_p = st.text_input("パスワード（4文字以上）", type="password", key="su_p_trade")
+                    _su_n = st.text_input("表示名（任意）", key="su_n_trade")
+                    if st.button("登録してログイン", key="su_b_trade"):
+                        _su_ok, _su_err = _auth_signup(_su_u, _su_p, _su_n)
+                        if _su_ok:
+                            st.query_params["token"] = _auth_create_session(_su_u.strip())
+                            st.rerun()
+                        else:
+                            st.error(_su_err)
         else:
             st.markdown("#### 約定後の取引記録入力")
 
