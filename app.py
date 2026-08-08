@@ -689,8 +689,8 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
         return "⚠️ GROQ_API_KEY が設定されていません", ""
     GROQ_MODELS = [
         "llama-3.1-8b-instant",    # TPM 6000 — 速くて制限緩い
-        "gemma2-9b-it",            # TPM 15000 — 最も緩い
         "llama-3.3-70b-versatile", # TPM 1500  — 高品質だが制限厳しい（最後）
+        # "gemma2-9b-it" はGroq側で廃止（decommission）されたため削除済み（全リクエストが400 Bad Requestになっていた）
     ]
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -21603,7 +21603,13 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         raw = yf.download(t_ticker, period="6mo", auto_adjust=True, progress=False)
         if raw.empty:
             return result
-        close = raw["Close"].dropna()
+        # yfinanceが単一銘柄でもMultiIndex列を返すことがあるため、DataFrameのままなら
+        # 最初の列だけ取り出してSeries化する（float()にDataFrame由来のSeriesを渡すと
+        # "must be a string or a real number, not 'Series'"で失敗するため）
+        close = raw["Close"]
+        if hasattr(close, "columns"):
+            close = close.iloc[:, 0]
+        close = close.dropna()
         if len(close) < 5:
             return result
 
