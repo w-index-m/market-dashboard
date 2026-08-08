@@ -26720,6 +26720,86 @@ def render_claude_trading_project():
                         if _skip_note:
                             st.caption(_skip_note)
 
+                    # ── 資産成長チャート（時系列）─────────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("**📈 ポートフォリオ資産成長**")
+                    with st.spinner("資産推移を計算中..."):
+                        _pnl_hist_df = _compute_portfolio_history()
+
+                    if _pnl_hist_df.empty:
+                        st.info("資産推移を計算するデータが不足しています（株価データ取得に失敗した可能性があります）。")
+                    else:
+                        _PNL_PERIODS = ["1D", "5D", "1M", "6M", "YTD", "1Y", "3Y", "5Y", "全期間"]
+                        _pnl_sel_period = st.radio(
+                            "表示期間", _PNL_PERIODS, index=5,
+                            horizontal=True, key="pnl_hist_period",
+                            label_visibility="collapsed",
+                        )
+                        _pnl_today = pd.Timestamp.today().normalize()
+                        if _pnl_sel_period == "1D":
+                            _pnl_chart_df = _pnl_hist_df.iloc[-2:] if len(_pnl_hist_df) >= 2 else _pnl_hist_df
+                        elif _pnl_sel_period == "5D":
+                            _pnl_chart_df = _pnl_hist_df.iloc[-5:] if len(_pnl_hist_df) >= 5 else _pnl_hist_df
+                        elif _pnl_sel_period == "1M":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= _pnl_today - pd.DateOffset(months=1)]
+                        elif _pnl_sel_period == "6M":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= _pnl_today - pd.DateOffset(months=6)]
+                        elif _pnl_sel_period == "YTD":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= pd.Timestamp(_pnl_today.year, 1, 1)]
+                        elif _pnl_sel_period == "1Y":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= _pnl_today - pd.DateOffset(years=1)]
+                        elif _pnl_sel_period == "3Y":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= _pnl_today - pd.DateOffset(years=3)]
+                        elif _pnl_sel_period == "5Y":
+                            _pnl_chart_df = _pnl_hist_df[_pnl_hist_df.index >= _pnl_today - pd.DateOffset(years=5)]
+                        else:
+                            _pnl_chart_df = _pnl_hist_df
+                        if _pnl_chart_df.empty:
+                            _pnl_chart_df = _pnl_hist_df
+
+                        _pnl_period_gain = _pnl_chart_df["pnl"].mean() if "pnl" in _pnl_chart_df.columns else 0
+                        _pnl_fill_color  = "rgba(34,197,94,0.12)" if _pnl_period_gain >= 0 else "rgba(239,68,68,0.10)"
+
+                        fig_growth = go.Figure()
+                        fig_growth.add_trace(go.Scatter(
+                            x=_pnl_chart_df.index, y=_pnl_chart_df["portfolio_value"],
+                            name="ポートフォリオ時価",
+                            line=dict(color="#60a5fa", width=2),
+                            hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
+                        ))
+                        fig_growth.add_trace(go.Scatter(
+                            x=_pnl_chart_df.index, y=_pnl_chart_df["invested_cost"],
+                            name="投資元本",
+                            line=dict(color="#94a3b8", width=1.5, dash="dot"),
+                            hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
+                        ))
+                        fig_growth.add_trace(go.Scatter(
+                            x=list(_pnl_chart_df.index) + list(_pnl_chart_df.index[::-1]),
+                            y=list(_pnl_chart_df["portfolio_value"]) + list(_pnl_chart_df["invested_cost"][::-1]),
+                            fill="toself",
+                            fillcolor=_pnl_fill_color,
+                            line=dict(width=0),
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ))
+                        fig_growth.update_layout(
+                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                            font=dict(color="#e2e8f0"),
+                            legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
+                                        bordercolor="#334155", borderwidth=1),
+                            xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                            yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                       title=dict(text="評価額", font=dict(color="#94a3b8"))),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=320,
+                        )
+                        st.plotly_chart(fig_growth, use_container_width=True)
+                        st.caption(
+                            "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。"
+                            "銘柄別配分の推移など詳細分析は「資産推移」タブへ。"
+                        )
+
                     # ── ① 取得原価 vs 評価額（棒グラフ）──────────────────
                     if _total_cost_jpy > 0:
                         st.markdown("<br>", unsafe_allow_html=True)
