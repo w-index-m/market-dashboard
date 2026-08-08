@@ -26478,6 +26478,8 @@ def render_claude_trading_project():
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
             st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -26585,6 +26587,8 @@ def render_claude_trading_project():
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
             st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -27127,6 +27131,8 @@ def render_claude_trading_project():
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
             st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
@@ -27469,6 +27475,8 @@ def render_claude_trading_project():
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
             st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
