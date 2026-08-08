@@ -174,7 +174,12 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
     if not positions:
         return {"text": "", "model": "", "error": "保有銘柄がありません"}, {}, {}
 
-    ticker_names = {_t: _p.get("name", _t) for _t, _p in positions.items()}
+    # 既知の日本語正式社名マスタ（app._KNOWN_NAMES）を優先し、無ければ取引記録の名前を使う
+    # （例: 285A.T → 取引記録の名前ではなく「キオクシアHD」を優先表示）
+    ticker_names = {
+        _t: app._KNOWN_NAMES.get(_t) or _p.get("name", _t) or _t
+        for _t, _p in positions.items()
+    }
 
     # _calc_positions_from_df は market_value を持たないため、時価を取得して付与する
     # （付与しないと評価額・含み損益・配分%が常に0/フル損扱いになってしまう）
