@@ -152,6 +152,10 @@ MA25: {data.get('ma25')}{cur}
     _post_to_slack_channel(channel, answer, thread_ts)
 
 
+_processed_event_ids: set = set()  # 二重応答防止用（プロセス内メモリのみ。再起動でリセットされる）
+_MAX_PROCESSED_EVENTS = 500
+
+
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     if not _verify_slack_signature(request):
@@ -163,11 +167,21 @@ def slack_events():
     if payload.get("type") == "url_verification":
         return jsonify({"challenge": payload.get("challenge", "")})
 
-    # Slackは3秒以内に200が返らないと再送してくる。二重応答を防ぐため再送は無視する
-    if request.headers.get("X-Slack-Retry-Num"):
-        return "", 200
+    event    = payload.get("event", {})
+    event_id = payload.get("event_id", "")
 
-    event = payload.get("event", {})
+    # Slackは3秒以内に200が返らないと再送してくる。Renderの無料プランはアイドル後スリープし、
+    # 初回リクエストがスリープからの復帰待ちでタイムアウトすることがある。その場合、再送が
+    # 「このイベントが実際に処理される最初の機会」になるため、単純に再送を無視すると
+    # メンションが永久に無応答になる。event_id単位で重複排除することで、初回が成功していた
+    # 場合の二重応答は防ぎつつ、初回が失敗していた場合は再送で正しく処理する。
+    if event_id:
+        if event_id in _processed_event_ids:
+            return "", 200
+        _processed_event_ids.add(event_id)
+        if len(_processed_event_ids) > _MAX_PROCESSED_EVENTS:
+            _processed_event_ids.pop()
+
     if event.get("type") == "app_mention" and not event.get("bot_id"):
         channel = event.get("channel", "")
         thread_ts = event.get("thread_ts") or event.get("ts", "")
