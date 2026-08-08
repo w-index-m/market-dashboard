@@ -21964,6 +21964,68 @@ def _compute_portfolio_history() -> pd.DataFrame:
     return result
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _compute_portfolio_allocation_history() -> pd.DataFrame:
+    """取引記録 × 日次終値 × 為替で、銘柄別の評価額（円換算）の日次推移を計算する。
+    ポートフォリオ配分（%）の時系列チャート用。USD建て銘柄はUSDJPY=Xの日次終値で円換算する。
+    Returns: DataFrame(index=date, columns=ticker, values=評価額（円換算）)。保有中の銘柄が
+    一度もなかった日（合計0円）は行ごと除外する。
+    """
+    df_trades, err = _load_trades()
+    if err or df_trades.empty:
+        return pd.DataFrame()
+
+    df = df_trades.copy()
+    df["date"]     = pd.to_datetime(df["date"])
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    df = df.sort_values("date").reset_index(drop=True)
+
+    tickers    = df["ticker"].unique().tolist()
+    start_date = df["date"].min() - timedelta(days=5)
+
+    price_dict = {}
+    for tk in tickers:
+        try:
+            raw = yf.download(tk, start=start_date, auto_adjust=True, progress=False)
+            if raw.empty:
+                continue
+            close = raw["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            price_dict[tk] = close.rename(tk)
+        except Exception:
+            pass
+    if not price_dict:
+        return pd.DataFrame()
+    price_df = pd.concat(price_dict.values(), axis=1).ffill()
+
+    try:
+        fx_raw   = yf.download("USDJPY=X", start=start_date, auto_adjust=True, progress=False)
+        fx_close = fx_raw["Close"]
+        if isinstance(fx_close, pd.DataFrame):
+            fx_close = fx_close.iloc[:, 0]
+        fx_series = fx_close.reindex(price_df.index).ffill().bfill()
+    except Exception:
+        fx_series = pd.Series(150.0, index=price_df.index)
+
+    # 銘柄別の保有株数（累積）を日次で復元
+    df["signed_qty"] = df["quantity"] * df["action"].map({"BUY": 1.0, "SELL": -1.0}).fillna(0.0)
+    daily_delta = df.groupby(["date", "ticker"])["signed_qty"].sum().unstack(fill_value=0.0)
+    daily_delta = daily_delta.reindex(price_df.index, fill_value=0.0).fillna(0.0)
+    qty_hist = daily_delta.cumsum().clip(lower=0.0)
+
+    value_hist = pd.DataFrame(index=price_df.index, columns=tickers, dtype=float)
+    for tk in tickers:
+        if tk not in qty_hist.columns or tk not in price_df.columns:
+            continue
+        native_value = qty_hist[tk] * price_df[tk]
+        value_hist[tk] = native_value if tk.endswith(".T") else native_value * fx_series
+
+    value_hist = value_hist.fillna(0.0)
+    value_hist = value_hist[value_hist.sum(axis=1) > 0]
+    return value_hist
+
+
 def _delete_trade_row(sheet_row_num: int) -> bool:
     """Google Sheetsの指定行（1始まり、ヘッダー=1）を削除する。"""
     try:
@@ -22846,6 +22908,31 @@ def _fetch_usd_jpy() -> float:
     return 150.0
 
 
+_SECTOR_NAME_MAP_JA = {
+    "Technology": "テクノロジー",
+    "Communication Services": "通信サービス",
+    "Consumer Cyclical": "一般消費財",
+    "Consumer Defensive": "生活必需品",
+    "Healthcare": "ヘルスケア",
+    "Financial Services": "金融",
+    "Industrials": "資本財",
+    "Basic Materials": "素材",
+    "Energy": "エネルギー",
+    "Utilities": "公益",
+    "Real Estate": "不動産",
+}
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_ticker_sector(ticker: str) -> str:
+    """銘柄のセクター（日本語）を取得。取得失敗時は「その他」。セクターは変動しないため24hキャッシュ。"""
+    try:
+        raw_sector = yf.Ticker(ticker).info.get("sector", "") or ""
+        return _SECTOR_NAME_MAP_JA.get(raw_sector, raw_sector or "その他")
+    except Exception:
+        return "その他"
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _compute_portfolio_summary() -> dict:
     """ポートフォリオサマリー計算。Yahoo Finance スタイルの4カードに必要なデータを返す。
@@ -22893,27 +22980,7 @@ def _compute_portfolio_summary() -> dict:
             except Exception:
                 pass
 
-        # セクター取得（失敗時は "その他"）
-        sector = "その他"
-        try:
-            info = yf.Ticker(ticker).info
-            raw_sector = info.get("sector", "") or ""
-            sector_map = {
-                "Technology": "テクノロジー",
-                "Communication Services": "通信サービス",
-                "Consumer Cyclical": "一般消費財",
-                "Consumer Defensive": "生活必需品",
-                "Healthcare": "ヘルスケア",
-                "Financial Services": "金融",
-                "Industrials": "資本財",
-                "Basic Materials": "素材",
-                "Energy": "エネルギー",
-                "Utilities": "公益",
-                "Real Estate": "不動産",
-            }
-            sector = sector_map.get(raw_sector, raw_sector or "その他")
-        except Exception:
-            pass
+        sector = _fetch_ticker_sector(ticker)
 
         # 配当履歴（過去6ヶ月）
         try:
@@ -26543,6 +26610,7 @@ def render_claude_trading_project():
                     _total_cost_jpy = 0.0
                     _total_pnl_jpy  = 0.0
                     _total_skipped  = 0  # 現在値取得に失敗した銘柄数（合計から除外）
+                    _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
                     for ticker, pos in open_pos.items():
                         is_jp_pos = ticker.endswith(".T")
                         cur_unit  = "円" if is_jp_pos else "USD"
@@ -26564,6 +26632,11 @@ def render_claude_trading_project():
                                         cur_price = float(vals.iloc[-1])
                             except Exception:
                                 pass
+
+                        if cur_price:
+                            _mval_jpy = cur_price * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                            _sec = _fetch_ticker_sector(ticker)
+                            _sector_values[_sec] = _sector_values.get(_sec, 0.0) + _mval_jpy
 
                         avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
                         pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
@@ -26630,6 +26703,116 @@ def render_claude_trading_project():
                         )
                         if _skip_note:
                             st.caption(_skip_note)
+
+                    # ── ① 取得原価 vs 評価額（棒グラフ）──────────────────
+                    if _total_cost_jpy > 0:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown("**📊 保有資産（取得原価 vs 評価額）**")
+                        _mkt_val_jpy = _total_cost_jpy + _total_pnl_jpy
+                        fig_gl = go.Figure(go.Bar(
+                            x=["取得原価", "評価額"],
+                            y=[_total_cost_jpy, _mkt_val_jpy],
+                            marker_color=["#64748b", _total_color],
+                            text=[f"{_total_cost_jpy:,.0f}円", f"{_mkt_val_jpy:,.0f}円"],
+                            textposition="outside",
+                            textfont=dict(color="#e2e8f0"),
+                        ))
+                        fig_gl.update_layout(
+                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                            font=dict(color="#e2e8f0"),
+                            xaxis=dict(tickfont=dict(color="#e2e8f0")),
+                            yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                       title=dict(text="円換算", font=dict(color="#94a3b8"))),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                            margin=dict(l=10, r=10, t=30, b=10),
+                            height=280, showlegend=False,
+                        )
+                        st.plotly_chart(fig_gl, use_container_width=True)
+
+                    # ── ② セクター別配分 ────────────────────────────
+                    if _sector_values:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown("**🏭 セクター別配分**")
+                        _sec_sorted = sorted(_sector_values.items(), key=lambda x: x[1], reverse=True)
+                        fig_sec = go.Figure(go.Pie(
+                            labels=[s for s, _ in _sec_sorted],
+                            values=[v for _, v in _sec_sorted],
+                            hole=0.45,
+                            textinfo="label+percent",
+                            textfont=dict(color="#e2e8f0"),
+                            marker=dict(line=dict(color="#0f172a", width=2)),
+                            hovertemplate="%{label}: %{value:,.0f}円 (%{percent})<extra></extra>",
+                        ))
+                        fig_sec.update_layout(
+                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                            font=dict(color="#e2e8f0"),
+                            legend=dict(font=dict(color="#e2e8f0")),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=340,
+                        )
+                        st.plotly_chart(fig_sec, use_container_width=True)
+                        if _total_skipped:
+                            st.caption(f"（現在値取得失敗の{_total_skipped}銘柄はセクター配分の集計対象外）")
+
+                    # ── ③ 保有銘柄ニュース・決算情報 ────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("**📰 保有銘柄ニュース・決算情報**")
+                    with st.spinner("ニュース・決算情報を取得中..."):
+                        _news_all      = []
+                        _earnings_rows = []
+                        for _n_ticker in open_pos.keys():
+                            _n_is_jp = _n_ticker.endswith(".T")
+                            try:
+                                _sdata = _fetch_trading_stock_data(_n_ticker, _n_is_jp)
+                            except Exception:
+                                _sdata = {}
+                            _n_name = _sdata.get("name") or _get_stock_display_name(_n_ticker)
+                            for _ni in (_sdata.get("news_items") or [])[:3]:
+                                _news_all.append({
+                                    "ticker":   _n_ticker,
+                                    "name":     _n_name,
+                                    "headline": _ni.get("headline_ja") or _ni.get("headline", ""),
+                                    "url":      _ni.get("url", ""),
+                                    "date":     _ni.get("date", ""),
+                                    "source":   _ni.get("source", ""),
+                                })
+                            if _sdata.get("next_earnings"):
+                                _earnings_rows.append({
+                                    "銘柄": _n_name, "コード": _n_ticker,
+                                    "次回決算予定日": _sdata["next_earnings"],
+                                })
+
+                    if _earnings_rows:
+                        _earnings_rows.sort(key=lambda r: r["次回決算予定日"])
+                        st.markdown("次回決算予定")
+                        st.dataframe(pd.DataFrame(_earnings_rows), hide_index=True, use_container_width=True)
+
+                    if _news_all:
+                        _news_all.sort(key=lambda n: n["date"], reverse=True)
+                        _news_html = ['<div style="display:flex;flex-direction:column;gap:8px">']
+                        for _ni in _news_all[:20]:
+                            _has_url    = bool(_ni["url"])
+                            _link_open  = (
+                                f'<a href="{html.escape(_ni["url"])}" target="_blank" '
+                                'style="color:#e2e8f0;text-decoration:none">'
+                            ) if _has_url else ""
+                            _link_close = "</a>" if _has_url else ""
+                            _news_html.append(
+                                '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                                'padding:10px 14px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
+                                f'<span style="font-size:11px;font-weight:700;color:#60a5fa;white-space:nowrap">'
+                                f'{html.escape(str(_ni["ticker"]))}</span>'
+                                f'{_link_open}<span style="font-size:13px;color:#e2e8f0">'
+                                f'{html.escape(str(_ni["headline"]))}</span>{_link_close}'
+                                f'<span style="font-size:11px;color:#64748b;margin-left:auto;white-space:nowrap">'
+                                f'{html.escape(str(_ni["date"]))} {html.escape(str(_ni["source"]))}</span>'
+                                '</div>'
+                            )
+                        _news_html.append('</div>')
+                        st.markdown("".join(_news_html), unsafe_allow_html=True)
+                    else:
+                        st.caption("保有銘柄の直近ニュースは見つかりませんでした。")
 
                     # ── ポートフォリオ全体AI分析 ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
@@ -26856,6 +27039,62 @@ def render_claude_trading_project():
                     st.plotly_chart(fig2, use_container_width=True)
 
                 st.caption("※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── 銘柄別配分の推移（%）─────────────────────────────
+                st.markdown("**📊 銘柄別配分の推移**")
+                with st.spinner("配分推移を計算中..."):
+                    alloc_hist = _compute_portfolio_allocation_history()
+
+                if alloc_hist.empty:
+                    st.info("配分推移を計算するデータが不足しています。")
+                else:
+                    if sel_period == "1D":
+                        alloc_chart_df = alloc_hist.iloc[-2:] if len(alloc_hist) >= 2 else alloc_hist
+                    elif sel_period == "5D":
+                        alloc_chart_df = alloc_hist.iloc[-5:] if len(alloc_hist) >= 5 else alloc_hist
+                    elif sel_period == "1M":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(months=1)]
+                    elif sel_period == "6M":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(months=6)]
+                    elif sel_period == "YTD":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= pd.Timestamp(today.year, 1, 1)]
+                    elif sel_period == "1Y":
+                        alloc_chart_df = alloc_hist[alloc_hist.index >= today - pd.DateOffset(years=1)]
+                    else:
+                        alloc_chart_df = alloc_hist
+                    if alloc_chart_df.empty:
+                        alloc_chart_df = alloc_hist
+
+                    # 期間中一度も保有していなかった銘柄（合計0）は凡例から除く
+                    _alloc_cols = [c for c in alloc_chart_df.columns if alloc_chart_df[c].sum() > 0]
+                    _alloc_names = {c: (_KNOWN_NAMES.get(c) or c) for c in _alloc_cols}
+
+                    fig3 = go.Figure()
+                    for c in _alloc_cols:
+                        fig3.add_trace(go.Scatter(
+                            x=alloc_chart_df.index, y=alloc_chart_df[c],
+                            name=f"{_alloc_names[c]}（{c}）",
+                            mode="lines", stackgroup="one", groupnorm="percent",
+                            hovertemplate="%{x|%Y-%m-%d}<br>" + _alloc_names[c] + ": %{y:.1f}%<extra></extra>",
+                        ))
+                    fig3.update_layout(
+                        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        font=dict(color="#e2e8f0"),
+                        legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
+                                    bordercolor="#334155", borderwidth=1),
+                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                   title=dict(font=dict(color="#94a3b8"))),
+                        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                   title=dict(text="配分（%）", font=dict(color="#94a3b8")),
+                                   ticksuffix="%"),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        height=360,
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+                    st.caption("※ 評価額は円換算（USD建て銘柄は日次USDJPYレートで換算）。売却済みで期間中の保有額が0の銘柄は非表示。")
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
