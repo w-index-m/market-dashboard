@@ -21977,6 +21977,24 @@ def _delete_trade_row(sheet_row_num: int) -> bool:
         return False
 
 
+def _update_trade_row(sheet_row_num: int, date: str, ticker: str, name: str, action: str,
+                       quantity: float, price: float, fee: float, memo: str) -> bool:
+    """Google Sheetsの指定行（1始まり、ヘッダー=1）の内容を書き換える。
+    ai_target/ai_stoploss列はフォームから廃止済みのため0で維持する。
+    """
+    try:
+        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
+        if not ws:
+            return False
+        ws.update(f"A{sheet_row_num}:J{sheet_row_num}", [[
+            date, ticker.upper(), name, action, quantity, price, fee, memo, 0.0, 0.0,
+        ]])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] trade更新失敗 row={sheet_row_num}: {e}")
+        return False
+
+
 def _calc_positions_from_df(df: "pd.DataFrame") -> dict:
     """取引記録 DataFrame から保有ポジションを計算する（平均取得単価法）。
     SELL時は平均取得コストを比例削減し avg_cost が正確になるよう修正済み。
@@ -26408,18 +26426,21 @@ def render_claude_trading_project():
             elif df_trades.empty:
                 st.info("取引記録がまだありません。")
             else:
-                # ── 取引履歴（削除ボタン付き）──────────────────────────
-                st.markdown("**取引履歴**　<span style='font-size:11px;color:#64748b'>🗑️ ボタンで誤記録を削除できます</span>",
-                            unsafe_allow_html=True)
-                _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
-                for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ",""], _hdr):
+                # ── 取引履歴（編集・削除ボタン付き）─────────────────────
+                st.markdown(
+                    "**取引履歴**　<span style='font-size:11px;color:#64748b'>"
+                    "✏️ ボタンで編集・🗑️ ボタンで誤記録を削除できます</span>",
+                    unsafe_allow_html=True,
+                )
+                _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5, 0.5])
+                for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ","",""], _hdr):
                     _c.markdown(f"<span style='font-size:11px;color:#64748b;font-weight:700'>{_lbl}</span>",
                                 unsafe_allow_html=True)
                 st.markdown('<hr style="margin:4px 0;border-color:#334155">', unsafe_allow_html=True)
 
                 _del_requested = None
                 for _seq, (_, _row) in enumerate(df_trades.iterrows()):
-                    _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5])
+                    _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5, 0.5])
                     _c[0].markdown(f"<span style='font-size:12px'>{str(_row.get('date',''))[:10]}</span>",
                                    unsafe_allow_html=True)
                     _c[1].markdown(f"<span style='font-size:12px;font-weight:700'>{_row.get('ticker','')}</span>",
@@ -26438,8 +26459,68 @@ def render_claude_trading_project():
                                    unsafe_allow_html=True)
                     _c[7].markdown(f"<span style='font-size:12px;color:#94a3b8'>{str(_row.get('memo',''))[:20]}</span>",
                                    unsafe_allow_html=True)
-                    if _c[8].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
+                    if _c[8].button("✏️", key=f"edit_tr_{_seq}", help="この記録を編集"):
+                        if st.session_state.get("_editing_trade_row") == _seq:
+                            st.session_state.pop("_editing_trade_row", None)
+                        else:
+                            st.session_state["_editing_trade_row"] = _seq
+                        st.rerun()
+                    if _c[9].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
                         _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
+
+                    # 編集フォーム（✏️が押された行の直下にのみ表示）
+                    if st.session_state.get("_editing_trade_row") == _seq:
+                        with st.form(f"edit_trade_form_{_seq}"):
+                            st.caption(f"✏️ この記録を編集（{_row.get('ticker','')}・{str(_row.get('date',''))[:10]}）")
+                            _ec1, _ec2 = st.columns(2)
+                            _e_ticker = _ec1.text_input("ティッカー", value=str(_row.get("ticker","")))
+                            _e_name   = _ec2.text_input("銘柄名", value=str(_row.get("name","")))
+                            _ec3, _ec4, _ec5 = st.columns(3)
+                            try:
+                                _e_date_val = pd.to_datetime(_row.get("date")).date()
+                            except Exception:
+                                _e_date_val = datetime.now(JST).date()
+                            _e_date   = _ec3.date_input("約定日", value=_e_date_val)
+                            _e_action = _ec4.selectbox(
+                                "売買区分", ["BUY（買い）", "SELL（売り）"],
+                                index=0 if _act == "BUY" else 1,
+                            )
+                            _e_qty    = _ec5.number_input(
+                                "数量（株）", min_value=1, step=1,
+                                value=max(1, int(_row.get("quantity", 1) or 1)),
+                            )
+                            _ec6, _ec7 = st.columns(2)
+                            _e_price  = _ec6.number_input(
+                                "約定価格", min_value=0.0, step=0.1, format="%.2f",
+                                value=float(_row.get("price", 0) or 0),
+                            )
+                            _e_fee    = _ec7.number_input(
+                                "手数料", min_value=0.0, step=1.0,
+                                value=float(_row.get("fee", 0) or 0),
+                            )
+                            _e_memo   = st.text_input("メモ（任意）", value=str(_row.get("memo","") or ""))
+                            _esc1, _esc2 = st.columns(2)
+                            _save_clicked   = _esc1.form_submit_button("💾 更新を保存", type="primary")
+                            _cancel_clicked = _esc2.form_submit_button("キャンセル")
+
+                        if _save_clicked:
+                            _e_act = "BUY" if "BUY" in _e_action else "SELL"
+                            with st.spinner("更新中..."):
+                                _ok = _update_trade_row(
+                                    _seq + 2, str(_e_date), _e_ticker.strip().upper(),
+                                    _e_name.strip() or _e_ticker.strip().upper(), _e_act,
+                                    int(_e_qty), float(_e_price), float(_e_fee), _e_memo,
+                                )
+                            if _ok:
+                                st.session_state.pop("_editing_trade_row", None)
+                                st.cache_data.clear()
+                                st.success("更新しました")
+                                st.rerun()
+                            else:
+                                st.error("更新に失敗しました。再試行してください。")
+                        elif _cancel_clicked:
+                            st.session_state.pop("_editing_trade_row", None)
+                            st.rerun()
 
                 if _del_requested is not None:
                     with st.spinner("削除中..."):
@@ -26485,13 +26566,18 @@ def render_claude_trading_project():
                         pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
                         pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
 
-                        # 米国株は含み損益に円換算も併記する（日本円ベースで損益感覚を掴みやすくするため）
-                        if pnl is not None and not is_jp_pos:
-                            _pnl_str = f"{pnl:+,.0f} USD （≈{pnl * _pnl_usdjpy:+,.0f}円）"
-                        elif pnl is not None:
-                            _pnl_str = f"{pnl:+,.0f}円"
+                        # 含み損益はUSD・円を常に固定2列で出す（米国株はUSDが実額・円が換算値、
+                        # 日本株は円が実額・USDが換算値）。列名は行によらず固定にする
+                        if pnl is not None:
+                            if is_jp_pos:
+                                _pnl_jpy_str = f"{pnl:+,.0f}"
+                                _pnl_usd_str = f"{pnl / _pnl_usdjpy:+,.0f}" if _pnl_usdjpy else "-"
+                            else:
+                                _pnl_usd_str = f"{pnl:+,.0f}"
+                                _pnl_jpy_str = f"{pnl * _pnl_usdjpy:+,.0f}"
                         else:
-                            _pnl_str = "-"
+                            _pnl_usd_str = "-"
+                            _pnl_jpy_str = "-"
 
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
@@ -26505,7 +26591,8 @@ def render_claude_trading_project():
                             # 分裂させてしまい表が崩れるため）
                             "平均取得単価": f"{avg_cost:,.2f} {cur_unit}",
                             "現在株価":   f"{cur_price:,.2f} {cur_unit}" if cur_price else "取得失敗",
-                            "含み損益": _pnl_str,
+                            "含み損益（USD）": _pnl_usd_str,
+                            "含み損益（円）":  _pnl_jpy_str,
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
