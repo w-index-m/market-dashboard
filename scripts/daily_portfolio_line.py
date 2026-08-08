@@ -162,16 +162,19 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
     Google Sheetsの取引記録から現在の保有銘柄を計算し、既存のマルチエージェント分析
     （_generate_full_portfolio_recommendation）で銘柄ごとの推奨アクションを判定する。
     stock_data_mapも返す（build_holdings_news_messageでニュース見出しを再利用するため、
-    ここで一度だけ取得すれば二重にAPIを叩かずに済む）。
-    Returns: ({"text": str, "model": str, "error": str|None}, stock_data_map)
+    ここで一度だけ取得すれば二重にAPIを叩かずに済む）。ticker_names（ticker→銘柄名）も
+    返す（build_holdings_action_messageが、AIが見出しに銘柄名を書き忘れた場合の保険に使う）。
+    Returns: ({"text": str, "model": str, "error": str|None}, stock_data_map, ticker_names)
     """
     trades_df, err = app._load_trades(username)
     if trades_df.empty:
-        return {"text": "", "model": "", "error": err or "取引記録がありません"}, {}
+        return {"text": "", "model": "", "error": err or "取引記録がありません"}, {}, {}
 
     positions = app._calc_positions_from_df(trades_df)
     if not positions:
-        return {"text": "", "model": "", "error": "保有銘柄がありません"}, {}
+        return {"text": "", "model": "", "error": "保有銘柄がありません"}, {}, {}
+
+    ticker_names = {_t: _p.get("name", _t) for _t, _p in positions.items()}
 
     # _calc_positions_from_df は market_value を持たないため、時価を取得して付与する
     # （付与しないと評価額・含み損益・配分%が常に0/フル損扱いになってしまう）
@@ -192,10 +195,10 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
     ai_result = app._generate_full_portfolio_recommendation(
         positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,
     )
-    return ai_result, stock_data_map
+    return ai_result, stock_data_map, ticker_names
 
 
-def build_holdings_action_message(result: dict, today: str) -> str | None:
+def build_holdings_action_message(result: dict, today: str, ticker_names: dict | None = None) -> str | None:
     error = result.get("error")
     text = result.get("text", "")
 
@@ -204,6 +207,18 @@ def build_holdings_action_message(result: dict, today: str) -> str | None:
         if "保有銘柄がありません" in error or "取引記録がありません" in error:
             return None
         return f"📋 保有銘柄アクション判定（{today}）\n⚠️ 取得に失敗しました: {error}"
+
+    # AIが見出し（### TICKER）に銘柄名を書き忘れることがあるため、取引記録上の名前を補う
+    # （プロンプトでは「銘柄名（ティッカー）」を指示しているが、従わないことがある保険）
+    if ticker_names and text:
+        for ticker, name in ticker_names.items():
+            if not name or name == ticker:
+                continue
+            text = re.sub(
+                rf'(?m)^(#{{1,6}}\s*){re.escape(ticker)}\s*$',
+                rf'\g<1>{name}（{ticker}）',
+                text,
+            )
     if not text:
         return None
 
@@ -488,8 +503,10 @@ def main() -> None:
 
     # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）＋ 関連ニュース見出し
     try:
-        holdings_result, holdings_stock_data = generate_holdings_action(market_ctx, mode, "auto", username)
-        holdings_msg = build_holdings_action_message(holdings_result, today)
+        holdings_result, holdings_stock_data, holdings_ticker_names = generate_holdings_action(
+            market_ctx, mode, "auto", username
+        )
+        holdings_msg = build_holdings_action_message(holdings_result, today, holdings_ticker_names)
         if holdings_msg:
             _post(holdings_msg, "holdings action")
         news_msg = build_holdings_news_message(holdings_stock_data, today)
