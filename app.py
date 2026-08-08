@@ -22037,6 +22037,62 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     return value_hist
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _compute_current_holdings_backtest() -> pd.DataFrame:
+    """現在の保有株数を固定したまま過去の株価に当てはめた場合の、合成ポートフォリオ評価額
+    （円換算）の推移を計算する。実際の売買タイミングを無視し「今の銘柄構成をずっと保有して
+    いたら」を検証するための合成チャート用（_compute_portfolio_historyとは異なり、株数は
+    時間変化させず現在値のまま固定する）。
+    Returns: DataFrame(index=date, columns=[portfolio_value])
+    """
+    df_trades, err = _load_trades()
+    if err or df_trades.empty:
+        return pd.DataFrame()
+
+    open_pos = _calc_positions_from_df(df_trades)
+    if not open_pos:
+        return pd.DataFrame()
+
+    tickers = sorted(open_pos.keys())
+    raw = fetch_universe_prices(tuple(tickers), period="max", chunk_size=80)
+    if raw.empty:
+        return pd.DataFrame()
+
+    is_multi   = isinstance(raw.columns, pd.MultiIndex)
+    price_dict = {}
+    for tk in tickers:
+        try:
+            close = raw[tk]["Close"].dropna() if is_multi else raw["Close"].dropna()
+            if not close.empty:
+                price_dict[tk] = close.rename(tk)
+        except Exception:
+            pass
+    if not price_dict:
+        return pd.DataFrame()
+
+    price_df = pd.concat(price_dict.values(), axis=1).ffill()
+
+    try:
+        fx_raw   = yf.download("USDJPY=X", period="max", auto_adjust=True, progress=False)
+        fx_close = fx_raw["Close"]
+        if isinstance(fx_close, pd.DataFrame):
+            fx_close = fx_close.iloc[:, 0]
+        fx_series = fx_close.reindex(price_df.index).ffill().bfill()
+    except Exception:
+        fx_series = pd.Series(150.0, index=price_df.index)
+
+    value = pd.Series(0.0, index=price_df.index)
+    for tk in tickers:
+        if tk not in price_df.columns:
+            continue
+        qty = open_pos[tk]["qty"]
+        native_value = price_df[tk] * qty
+        value = value.add(native_value if tk.endswith(".T") else native_value * fx_series, fill_value=0.0)
+
+    result = value[value > 0].to_frame("portfolio_value")
+    return result
+
+
 def _delete_trade_row(sheet_row_num: int) -> bool:
     """Google Sheetsの指定行（1始まり、ヘッダー=1）を削除する。"""
     try:
@@ -26782,6 +26838,66 @@ def render_claude_trading_project():
                             "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。"
                             "5年・全期間表示や銘柄別配分の推移など詳細分析は「資産推移」タブへ。"
                         )
+
+                    # ── 現在の保有株数のままバックテスト ────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("**🧪 現在の保有株数のままバックテスト**")
+                    st.caption(
+                        "実際の売買タイミングは無視し、今の保有株数をずっと保有していたと"
+                        "仮定した場合の合成評価額推移です（上の「資産成長」は実際の売買履歴ベース）。"
+                    )
+                    with st.spinner("バックテスト計算中..."):
+                        _bt_df = _compute_current_holdings_backtest()
+
+                    if _bt_df.empty:
+                        st.info("バックテストを計算するデータが不足しています。")
+                    else:
+                        _bt_today = pd.Timestamp.today().normalize()
+
+                        def _build_backtest_fig(_df):
+                            _fig = go.Figure()
+                            _fig.add_trace(go.Scatter(
+                                x=_df.index, y=_df["portfolio_value"],
+                                name="合成評価額（現保有株数固定）",
+                                line=dict(color="#a78bfa", width=2),
+                                fill="tozeroy", fillcolor="rgba(167,139,250,0.10)",
+                                hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}円<extra></extra>",
+                            ))
+                            _fig.update_layout(
+                                paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                                font=dict(color="#e2e8f0"),
+                                showlegend=False,
+                                xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                                yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                                           title=dict(text="評価額（円換算）", font=dict(color="#94a3b8"))),
+                                hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                                margin=dict(l=10, r=10, t=10, b=10),
+                                height=260,
+                            )
+                            return _fig
+
+                        def _period_return(_df):
+                            if len(_df) < 2:
+                                return None
+                            _start = float(_df["portfolio_value"].iloc[0])
+                            _end   = float(_df["portfolio_value"].iloc[-1])
+                            return (_end / _start - 1) * 100 if _start > 0 else None
+
+                        _bt_1y_df = _bt_df[_bt_df.index >= _bt_today - pd.DateOffset(years=1)]
+                        if _bt_1y_df.empty:
+                            _bt_1y_df = _bt_df
+                        _bt_3y_df = _bt_df[_bt_df.index >= _bt_today - pd.DateOffset(years=3)]
+                        if _bt_3y_df.empty:
+                            _bt_3y_df = _bt_df
+
+                        _bt_1y_ret = _period_return(_bt_1y_df)
+                        _bt_3y_ret = _period_return(_bt_3y_df)
+
+                        st.markdown("過去1年" + (f"（期間リターン {_bt_1y_ret:+.1f}%）" if _bt_1y_ret is not None else ""))
+                        st.plotly_chart(_build_backtest_fig(_bt_1y_df), use_container_width=True)
+                        st.markdown("過去3年" + (f"（期間リターン {_bt_3y_ret:+.1f}%）" if _bt_3y_ret is not None else ""))
+                        st.plotly_chart(_build_backtest_fig(_bt_3y_df), use_container_width=True)
+                        st.caption("※ 現在保有していない（既に売却済みの）銘柄は含まれません。")
 
                     # ── ① 取得原価 vs 評価額（棒グラフ）──────────────────
                     if _total_cost_jpy > 0:
