@@ -26345,9 +26345,6 @@ def render_claude_trading_project():
                 c4, c5 = st.columns(2)
                 t_price  = c4.number_input("約定価格", min_value=0.0, step=0.1, format="%.2f")
                 t_fee    = c5.number_input("手数料", min_value=0.0, step=1.0, value=0.0)
-                c7, c8 = st.columns(2)
-                t_target = c7.number_input("AIの目標株価（参考）", min_value=0.0, step=0.1, format="%.2f")
-                t_stop   = c8.number_input("AIの損切りライン（参考）", min_value=0.0, step=0.1, format="%.2f")
                 t_memo   = st.text_input("メモ（任意）")
 
                 if st.form_submit_button("💾 記録を保存", type="primary"):
@@ -26358,7 +26355,7 @@ def render_claude_trading_project():
                         ok, err = _save_trade(
                             str(t_date), trade_ticker, trade_name,
                             action, int(t_qty), float(t_price), float(t_fee),
-                            t_memo, float(t_target), float(t_stop),
+                            t_memo, 0.0, 0.0,
                             username=_usr,
                         )
                         if ok:
