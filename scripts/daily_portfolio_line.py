@@ -39,6 +39,7 @@ LINE Notify は2025年3月末にサービス終了したため、後継のLINE�
 import os
 import re
 import sys
+import time
 from datetime import datetime
 
 import pytz
@@ -189,8 +190,13 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
         for _t, _p in positions.items()
     }
 
+    # 銘柄ごとに連続でyf.downloadすると1回のスクリプト実行内でYahooのレート制限に
+    # かかりやすいため、銘柄間に小さく間隔を空ける（_fetch_trading_stock_data自体も
+    # 個別に3回までリトライするが、それとは別にバーストを避けるための間隔）
     stock_data_map = {}
-    for ticker in positions:
+    for i, ticker in enumerate(positions):
+        if i > 0:
+            time.sleep(1.0)
         try:
             stock_data_map[ticker] = app._fetch_trading_stock_data(ticker, ticker.endswith(".T"))
         except Exception as e:

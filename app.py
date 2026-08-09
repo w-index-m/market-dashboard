@@ -21600,7 +21600,18 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     result = {}
     try:
         t_ticker = ticker if not is_jp else ticker
-        raw = yf.download(t_ticker, period="6mo", auto_adjust=True, progress=False)
+        # Yahoo側の一時的なレート制限/タイムアウトで空データが返ることがあるため、
+        # 短い間隔を空けて最大3回リトライする
+        raw = pd.DataFrame()
+        for _attempt in range(3):
+            try:
+                raw = yf.download(t_ticker, period="6mo", auto_adjust=True, progress=False)
+                if not raw.empty:
+                    break
+            except Exception:
+                pass
+            if _attempt < 2:
+                time.sleep(1.5)
         if raw.empty:
             return result
         # yfinanceが単一銘柄でもMultiIndex列を返すことがあるため、DataFrameのままなら
