@@ -27344,13 +27344,66 @@ def render_claude_trading_project():
                                 _parts.append(f"VT {_vt_ret:+.1f}%")
                             return f"（{' / '.join(_parts)}）" if _parts else ""
 
+                        def _compute_risk_metrics(_series):
+                            _s = _series.dropna() if _series is not None else None
+                            if _s is None or len(_s) < 3:
+                                return None
+                            _daily_ret = _s.pct_change().dropna()
+                            if _daily_ret.empty:
+                                return None
+                            _vol = float(_daily_ret.std() * (252 ** 0.5) * 100)
+                            _roll_max = _s.cummax()
+                            _dd = (_s - _roll_max) / _roll_max * 100
+                            _max_dd = float(_dd.min())
+                            _total_ret = float(_s.iloc[-1] / _s.iloc[0] - 1)
+                            _years = len(_s) / 252
+                            _annual_ret = ((1 + _total_ret) ** (1 / _years) - 1) * 100 if _years > 0 else _total_ret * 100
+                            _risk_free = 1.5  # 無リスク金利の簡易仮定（他のリスク指標と統一）
+                            _sharpe = (_annual_ret - _risk_free) / _vol if _vol > 0 else None
+                            return {"volatility": _vol, "max_dd": _max_dd, "sharpe": _sharpe}
+
+                        def _risk_metrics_row(_label, _m):
+                            if _m is None:
+                                return (
+                                    f'<div style="margin-bottom:4px"><span style="font-size:11px;color:#64748b">'
+                                    f'{_label}</span> <span style="font-size:12px;color:#64748b">データ不足</span></div>'
+                                )
+                            _sharpe_str = f"{_m['sharpe']:.2f}" if _m["sharpe"] is not None else "—"
+                            return (
+                                f'<div style="margin-bottom:4px">'
+                                f'<span style="font-size:11px;color:#64748b;display:inline-block;width:88px">{_label}</span>'
+                                f'<span style="font-size:12px;color:#e2e8f0">'
+                                f'最大DD <b style="color:#f87171">{_m["max_dd"]:.1f}%</b>　'
+                                f'標準偏差(年率) <b>{_m["volatility"]:.1f}%</b>　'
+                                f'シャープレシオ <b>{_sharpe_str}</b></span></div>'
+                            )
+
+                        def _render_risk_metrics(_df):
+                            _port_m = _compute_risk_metrics(_df["portfolio_value"])
+                            _vt_line = _rebase_vt_series(
+                                _bt_vt_series, _df.index,
+                                float(_df["portfolio_value"].iloc[0]) if len(_df) else None,
+                            )
+                            _vt_m = _compute_risk_metrics(_vt_line) if _vt_line is not None else None
+                            st.markdown(
+                                '<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                                'padding:10px 14px;margin-bottom:10px">'
+                                + _risk_metrics_row("ポートフォリオ", _port_m)
+                                + _risk_metrics_row("VT", _vt_m)
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+
                         st.markdown("過去1年" + _bt_label(_bt_1y_ret, _bt_1y_vt_ret))
                         st.plotly_chart(_build_backtest_fig(_bt_1y_df), use_container_width=True)
+                        _render_risk_metrics(_bt_1y_df)
                         st.markdown("過去3年" + _bt_label(_bt_3y_ret, _bt_3y_vt_ret))
                         st.plotly_chart(_build_backtest_fig(_bt_3y_df), use_container_width=True)
+                        _render_risk_metrics(_bt_3y_df)
                         st.caption(
                             "※ 現在保有していない（既に売却済みの）銘柄は含まれません。VTは同時期に"
-                            "同額を一括投資していた場合の参考換算値です。"
+                            "同額を一括投資していた場合の参考換算値です。標準偏差・シャープレシオは日次リターンから"
+                            "年率換算（無リスク金利1.5%と仮定）。最大DDは対象期間内の高値からの最大下落率です。"
                         )
 
                     # ── 銘柄別配分の推移（%）─────────────────────────────
