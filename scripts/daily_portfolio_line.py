@@ -257,13 +257,20 @@ def build_holdings_action_message(result: dict, today: str, ticker_names: dict |
 
 def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
     """
-    保有銘柄ごとの直近ニュース見出し一覧。generate_holdings_actionで既に取得済みの
-    stock_data_map（_fetch_trading_stock_dataの戻り値）を再利用するので、追加のAPI
-    呼び出しは発生しない。ポジティブ/ネガティブの判定はここでは行わない
-    （見出しの機械的な感情分析は誤判定のリスクがあるため）— そちらは「📋 保有銘柄
-    アクション判定」内のAIによるIR・ニュース評価を参照する前提。
+    保有銘柄ごとの直近ニュース見出し一覧＋AIによる1銘柄1文の軽い要約。
+    generate_holdings_actionで既に取得済みのstock_data_map（_fetch_trading_stock_dataの
+    戻り値）を再利用するので、要約用のAI呼び出し1回以外に追加のAPI呼び出しは発生しない。
+    ポジティブ/ネガティブの判定はここでは行わない（見出しの機械的な感情分析は誤判定の
+    リスクがあるため）— そちらは「📋 保有銘柄アクション判定」内のAIによるIR・ニュース
+    評価を参照する前提。
     """
-    lines = [f"📰 保有銘柄 関連ニュース（{today}）", ""]
+    try:
+        summaries = app._summarize_holdings_news(stock_data_map)
+    except Exception as e:
+        print(f"holdings news summarize failed: {e}", file=sys.stderr)
+        summaries = {}
+
+    lines = [f"📰 保有銘柄 関連ニュースまとめ（{today}）", ""]
     has_content = False
     for ticker, data in stock_data_map.items():
         items = (data or {}).get("news_items") or []
@@ -271,6 +278,8 @@ def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
             continue
         has_content = True
         lines.append(f"◆ {ticker}")
+        if summaries.get(ticker):
+            lines.append(f"　要約: {summaries[ticker]}")
         for item in items[:3]:
             headline = item.get("headline_ja") or item.get("headline") or ""
             if not headline:
@@ -284,7 +293,7 @@ def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
     if not has_content:
         return None
 
-    lines.append("※ 見出しの一覧です。ポジティブ/ネガティブの評価は「📋 保有銘柄アクション判定」内のIR・ニュース評価を参照してください。")
+    lines.append("※ 要約はAIによる見出しの機械的な要約です。ポジティブ/ネガティブの評価は「📋 保有銘柄アクション判定」内のIR・ニュース評価を参照してください。")
     return "\n".join(lines).strip()
 
 

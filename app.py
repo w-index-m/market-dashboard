@@ -21347,6 +21347,52 @@ def _fetch_trading_stock_data_with_cache(ticker: str, is_jp: bool) -> dict:
     return data
 
 
+def _summarize_holdings_news(stock_data_map: dict) -> dict:
+    """保有銘柄ごとの直近ニュース見出しを、AI1回の呼び出しで銘柄ごと1文程度の日本語要約にする。
+    stock_data_map: {ticker: _fetch_trading_stock_data()の戻り値}
+    Returns: {ticker: summary_str}（ニュースが無い銘柄・要約失敗時はキーに含まれない）
+    """
+    blocks = []
+    tickers_with_news = []
+    for ticker, data in stock_data_map.items():
+        items = (data or {}).get("news_items") or []
+        headlines = [it.get("headline_ja") or it.get("headline") or "" for it in items[:4]]
+        headlines = [h for h in headlines if h]
+        if not headlines:
+            continue
+        tickers_with_news.append(ticker)
+        blocks.append(f"【{ticker}】\n" + "\n".join(f"- {h}" for h in headlines))
+
+    if not blocks:
+        return {}
+
+    prompt = (
+        "以下は保有銘柄ごとの直近ニュース見出しです。銘柄ごとに「何が起きているか」を"
+        "日本語1文（40字程度）で要約してください。見出しに書かれていない内容を憶測で"
+        "書かないこと。\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n出力形式（この形式のみ。他の文言・見出し・番号・前置きは一切不要）:\n"
+        "TICKER: 要約文"
+    )
+    try:
+        text, _model = _call_ai_for_trading(prompt, max_output_tokens=500, temperature=0.3)
+    except Exception:
+        return {}
+
+    summaries = {}
+    for line in text.splitlines():
+        line = line.strip().lstrip("-・*").strip()
+        sep = ":" if ":" in line else ("：" if "：" in line else "")
+        if not sep:
+            continue
+        tk, _, summary = line.partition(sep)
+        tk = tk.strip().upper()
+        summary = summary.strip()
+        if tk in tickers_with_news and summary:
+            summaries[tk] = summary
+    return summaries
+
+
 _EDINET_DOC_LABELS = {
     "020": "大量保有報告書",
     "030": "変更報告書（大量保有）",
