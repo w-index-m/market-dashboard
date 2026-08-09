@@ -440,7 +440,12 @@ def build_portfolio_message(
         conclusion  = item.get("conclusion", "")
         lines.append(f"◆ {flag} {ticker} {name} — {alloc}%（{_fmt_yen(amount)}円）")
         if entry:
-            lines.append(f"   エントリー目安: {entry}　{entry_note}")
+            try:
+                is_jp_entry = ticker.endswith(".T")
+                entry_str = f"¥{float(entry):,.0f}" if is_jp_entry else f"${float(entry):.2f}"
+            except (TypeError, ValueError):
+                entry_str = str(entry)
+            lines.append(f"   エントリー目安: {entry_str}　{entry_note}")
         if conclusion:
             lines.append(f"   {conclusion}")
 
