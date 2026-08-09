@@ -8348,8 +8348,12 @@ def _fetch_fred_pce_series(series_id: str, result_key: str, result: Dict[str, An
         result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
 
 
-def render_macro_indicators():
-    """🌐 マクロ経済指標（CAPE / LEI / PCE）セクション"""
+def render_macro_indicators(macro: dict | None = None):
+    """🌐 マクロ経済指標（CAPE / LEI / PCE）セクション。
+    macro: 呼び出し元がThreadPoolExecutorで先にfetch_macro_indicators()をバックグラウンド
+    実行しておいた結果を渡すことで、このセクションが後続セクションのレンダリングを
+    ブロックしないようにできる（未指定ならこの場でフェッチする＝従来通りの同期動作）。
+    """
     st.markdown('<a id="macro"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0a1628,#0d2137,#0a1628);'
@@ -8363,8 +8367,9 @@ def render_macro_indicators():
         unsafe_allow_html=True,
     )
 
-    with st.spinner("マクロ指標を取得中..."):
-        macro = fetch_macro_indicators()
+    if macro is None:
+        with st.spinner("マクロ指標を取得中..."):
+            macro = fetch_macro_indicators()
 
     cape  = macro.get("cape")
     lei   = macro.get("lei")
@@ -28279,8 +28284,12 @@ OPENROUTER_API_KEY = "sk-or-..."
 
     # ===================================================
     # ★ マクロ経済指標（CAPE / LEI / PCE）
+    # マクロ指標のfetch_macro_indicators()自体は既に内部で並列化済みだが、
+    # それでも数秒かかるため、経済カレンダーと同様にバックグラウンドで走らせて
+    # 後続セクションのレンダリングをブロックしないようにする
     # ===================================================
-    render_macro_indicators()
+    _f_macro = _cal_executor.submit(fetch_macro_indicators)
+    _macro_placeholder = st.empty()
 
     # ===================================================
     # ★ 弱気相場リスク判定
@@ -29026,7 +29035,7 @@ OPENROUTER_API_KEY = "sk-or-..."
             unsafe_password=None,
         )
 
-    # ── カレンダーセクションをプレースホルダーに埋め込む ──────
+    # ── カレンダー・マクロ指標セクションをプレースホルダーに埋め込む ──────
     # 後続セクションの描画が終わった時点でスレッドの結果を回収する。
     # キャッシュ済みなら即時返却、初回でも並列フェッチ中に他のセクションが描画済み。
     _preloaded = {
@@ -29035,9 +29044,12 @@ OPENROUTER_API_KEY = "sk-or-..."
         "bls":       _f_bls.result(),
         "fred":      _f_fred.result(),
     }
+    _macro_result = _f_macro.result()
     _cal_executor.shutdown(wait=False)
     with _calendar_placeholder.container():
         render_economic_events_section(preloaded=_preloaded)
+    with _macro_placeholder.container():
+        render_macro_indicators(macro=_macro_result)
 
 
 if __name__ == "__main__":
