@@ -8142,10 +8142,38 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     - CAPE    : multpl.com スクレイピング
     - OECD CLI: OECD SDMX API（FRED不使用）
     - PCE代替 : BLS API — CPI / Core CPI（FRED接続不可のため代替）
+    CAPE・LEI・PCE・Core PCEは互いに独立した別ホストへのHTTPリクエストなので、
+    ThreadPoolExecutorで並行実行する（PCEがリトライで時間がかかっても他の指標の
+    表示が遅れないようにするため）。各タスクは自身のtry/exceptで完結しており、
+    書き込み先キー（cape/lei/pce/core_pce、_ok/_errorsへの追記）は互いに重複しない。
     """
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
-    # ① CAPE — multpl.com (BS4 → pd.read_html フォールバック)
+    def _task_cape():
+        _fetch_macro_cape(result)
+
+    def _task_lei():
+        _fetch_macro_lei(result)
+
+    def _task_pce():
+        _fetch_fred_pce_series("PCEPI", "pce", result)
+
+    def _task_core_pce():
+        _fetch_fred_pce_series("PCEPILFE", "core_pce", result)
+
+    with ThreadPoolExecutor(max_workers=4) as _ex:
+        _futures = [_ex.submit(t) for t in (_task_cape, _task_lei, _task_pce, _task_core_pce)]
+        for _f in _futures:
+            try:
+                _f.result()
+            except Exception as _e:
+                logger.warning(f"[fetch_macro_indicators] タスク失敗: {_e}")
+
+    return result
+
+
+def _fetch_macro_cape(result: Dict[str, Any]) -> None:
+    """① CAPE — multpl.com (BS4 → pd.read_html フォールバック)"""
     try:
         from bs4 import BeautifulSoup
         from io import StringIO as _SIO
@@ -8189,7 +8217,9 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     except Exception as e:
         result["_errors"]["cape"] = str(e)[:120]
 
-    # ② OECD CLI — 旧 stats.oecd.org REST API → 失敗時は yfinance イールドカーブで代替
+
+def _fetch_macro_lei(result: Dict[str, Any]) -> None:
+    """② OECD CLI — 旧 stats.oecd.org REST API → 失敗時は yfinance イールドカーブで代替"""
     def _parse_lei_rows(lei_rows: list):
         latest_v = lei_rows[0][1]
         prev_v   = lei_rows[1][1] if len(lei_rows) > 1 else None
@@ -8256,69 +8286,66 @@ def fetch_macro_indicators() -> Dict[str, Any]:
         except Exception as e:
             result["_errors"]["OECD_CLI"] = f"OECD+YC両方失敗: {str(e)[:80]}"
 
-    # ③ インフレ指標 — FRED CSV（APIキー不要）
-    #    PCEPI    = PCE Price Index（ヘッドライン）
-    #    PCEPILFE = PCE Excluding Food and Energy（Core PCE）
-    def _fetch_fred_pce(series_id: str, result_key: str):
-        try:
-            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            # FREDが一時的に応答遅延することがあるため、タイムアウト/接続エラー時は
-            # 短い間隔を空けて最大3回までリトライする
-            r = None
-            last_err = None
-            for _attempt in range(3):
-                try:
-                    r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-                    break
-                except requests.exceptions.RequestException as _re:
-                    last_err = _re
-                    r = None
-                    if _attempt < 2:
-                        time.sleep(2)
-            if r is None:
-                result["_errors"][result_key] = f"{type(last_err).__name__}: {str(last_err)[:120]}"
-                return
-            if r.status_code != 200:
-                result["_errors"][result_key] = f"FRED HTTP {r.status_code}"
-                return
-            from io import StringIO as _SIO3
-            df = pd.read_csv(_SIO3(r.text))
-            df.columns = ["date", "value"]
-            df["value"] = pd.to_numeric(df["value"], errors="coerce")
-            df = df.dropna(subset=["value"]).sort_values("date", ascending=False).reset_index(drop=True)
-            if len(df) >= 13:
-                latest  = float(df.loc[0, "value"])
-                prev    = float(df.loc[1, "value"])
-                yr12    = float(df.loc[12, "value"])
-                mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-                yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
-                result[result_key] = {
-                    "value": latest,
-                    "date":  str(df.loc[0, "date"])[:7],
-                    "yoy":   yoy_pct,
-                    "mom":   mom_pct,
-                }
-                result["_ok"].append(result_key)
-            elif len(df) >= 2:
-                latest  = float(df.loc[0, "value"])
-                prev    = float(df.loc[1, "value"])
-                mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-                result[result_key] = {
-                    "value": latest,
-                    "date":  str(df.loc[0, "date"])[:7],
-                    "yoy":   None,
-                    "mom":   mom_pct,
-                }
-                result["_ok"].append(result_key)
-            else:
-                result["_errors"][result_key] = "データ行数不足"
-        except Exception as e:
-            result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
 
-    _fetch_fred_pce("PCEPI",    "pce")
-    _fetch_fred_pce("PCEPILFE", "core_pce")
-
-    return result
+def _fetch_fred_pce_series(series_id: str, result_key: str, result: Dict[str, Any]) -> None:
+    """③ インフレ指標 — FRED CSV（APIキー不要）
+    PCEPI    = PCE Price Index（ヘッドライン）
+    PCEPILFE = PCE Excluding Food and Energy（Core PCE）
+    """
+    try:
+        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+        # FREDが一時的に応答遅延することがあるため、タイムアウト/接続エラー時は
+        # 短い間隔を空けて最大3回までリトライする
+        r = None
+        last_err = None
+        for _attempt in range(3):
+            try:
+                r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                break
+            except requests.exceptions.RequestException as _re:
+                last_err = _re
+                r = None
+                if _attempt < 2:
+                    time.sleep(2)
+        if r is None:
+            result["_errors"][result_key] = f"{type(last_err).__name__}: {str(last_err)[:120]}"
+            return
+        if r.status_code != 200:
+            result["_errors"][result_key] = f"FRED HTTP {r.status_code}"
+            return
+        from io import StringIO as _SIO3
+        df = pd.read_csv(_SIO3(r.text))
+        df.columns = ["date", "value"]
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["value"]).sort_values("date", ascending=False).reset_index(drop=True)
+        if len(df) >= 13:
+            latest  = float(df.loc[0, "value"])
+            prev    = float(df.loc[1, "value"])
+            yr12    = float(df.loc[12, "value"])
+            mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+            yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
+            result[result_key] = {
+                "value": latest,
+                "date":  str(df.loc[0, "date"])[:7],
+                "yoy":   yoy_pct,
+                "mom":   mom_pct,
+            }
+            result["_ok"].append(result_key)
+        elif len(df) >= 2:
+            latest  = float(df.loc[0, "value"])
+            prev    = float(df.loc[1, "value"])
+            mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
+            result[result_key] = {
+                "value": latest,
+                "date":  str(df.loc[0, "date"])[:7],
+                "yoy":   None,
+                "mom":   mom_pct,
+            }
+            result["_ok"].append(result_key)
+        else:
+            result["_errors"][result_key] = "データ行数不足"
+    except Exception as e:
+        result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
 
 
 def render_macro_indicators():
