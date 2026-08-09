@@ -152,6 +152,9 @@ def build_market_summary_message(market_ctx: dict, today: str) -> str:
     if us:
         lines.append(_fmt_pred("S&P500", "🇺🇸", us, "sp500"))
 
+    lines.append("")
+    lines.append("🔗 ダッシュボード: https://windex.streamlit.app")
+
     return "\n".join(lines)
 
 
