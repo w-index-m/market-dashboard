@@ -22,7 +22,14 @@ Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI
 配信先は環境変数で設定されている方だけ動く（両方設定すれば両方に届く。片方だけでもOK）。
 LINE Notify は2025年3月末にサービス終了したため、後継のLINE公式アカウント + Messaging API
 （ブロードキャスト配信）を使う。ブロードキャストはその公式アカウントを友だち追加している
-全員に届くので、個人利用（自分だけが友だち）を想定している。
+全員に届くので、個人利用（自分だけが友だち）を想定している。LINEはこの性質上ユーザーごとの
+個別配信ができないため、TRADING_USERNAME（既定アカウント）のみに送る。
+
+アカウントごとのSlack個別配信: アプリの「取引記録入力」タブ→「🔔 通知設定」で、各アカウントが
+自分のSlack Incoming Webhook URLを登録できる（usersシートのslack_webhook_url列に保存）。
+登録済みの追加アカウント（TRADING_USERNAME以外）は、市況サマリー・経済指標・異常検知・
+AI推奨ポートフォリオは共通のまま、保有銘柄アクション判定だけそのアカウント自身の取引記録を
+もとに個別生成し、登録したWebhookへ配信する。
 
 必要な環境変数（GitHub Secretsから渡す想定）:
     LINE_CHANNEL_ACCESS_TOKEN  任意。LINE Developersで発行するMessaging APIチャネルアクセストークン。
@@ -501,15 +508,30 @@ def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, mod
     )
 
 
+def send_holdings_messages(username: str, mode: str, market_ctx: dict, today: str, post) -> None:
+    """アカウント個別の保有銘柄アクション判定＋関連ニュースを生成して送信する。
+    市況・経済指標・異常検知・AI推奨ポートフォリオは全アカウント共通なのでここには含まない。
+    """
+    try:
+        holdings_result, holdings_stock_data, holdings_ticker_names = generate_holdings_action(
+            market_ctx, mode, "auto", username
+        )
+        holdings_msg = build_holdings_action_message(holdings_result, today, holdings_ticker_names)
+        if holdings_msg:
+            post(holdings_msg, f"holdings action ({username})")
+        news_msg = build_holdings_news_message(holdings_stock_data, today)
+        if news_msg:
+            post(news_msg, f"holdings news ({username})")
+    except Exception as e:
+        print(f"holdings action failed for {username}: {e}", file=sys.stderr)
+
+
 def main() -> None:
     line_token    = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     slack_webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
     if not line_token and not slack_webhook:
         print("Neither LINE_CHANNEL_ACCESS_TOKEN nor SLACK_WEBHOOK_URL is set. Aborting.", file=sys.stderr)
         sys.exit(1)
-
-    def _post(text, label):
-        _post_to_channels(line_token, slack_webhook, text, label)
 
     budget     = int(os.environ.get("PORTFOLIO_BUDGET", "1000000"))
     mode       = os.environ.get("PORTFOLIO_MODE", "growth")
@@ -522,51 +544,47 @@ def main() -> None:
     print("Fetching market context...")
     market_ctx = app._fetch_market_context_for_trading()
 
-    # 1) 市況サマリー
+    # アカウントごとに個別のSlack Webhookが設定されていれば（アプリの取引記録入力タブの
+    # 「🔔 通知設定」から登録可能）、そのアカウントの保有銘柄アクション判定をそのWebhook
+    # 宛てに個別配信する。TRADING_USERNAME（GitHub Secrets側の既定アカウント、通常admin）は
+    # 従来通りLINE/SLACK_WEBHOOK_URLの環境変数を使うため、二重配信を避けるためここでは除外する。
+    per_user_targets = []
     try:
-        _post(build_market_summary_message(market_ctx, today), "market summary")
+        for _u, _info in app._auth_get_users().items():
+            _webhook = (_info.get("slack_webhook_url") or "").strip()
+            if _webhook and _u != username:
+                per_user_targets.append((_u, _webhook))
+    except Exception as e:
+        print(f"per-account notification settings fetch failed: {e}", file=sys.stderr)
+
+    # ── 全アカウント共通のメッセージを1回だけ生成 ──────────────────
+    market_summary_msg = None
+    try:
+        market_summary_msg = build_market_summary_message(market_ctx, today)
     except Exception as e:
         print(f"market summary failed: {e}", file=sys.stderr)
 
-    # 2) 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却）＋ 関連ニュース見出し
-    try:
-        holdings_result, holdings_stock_data, holdings_ticker_names = generate_holdings_action(
-            market_ctx, mode, "auto", username
-        )
-        holdings_msg = build_holdings_action_message(holdings_result, today, holdings_ticker_names)
-        if holdings_msg:
-            _post(holdings_msg, "holdings action")
-        news_msg = build_holdings_news_message(holdings_stock_data, today)
-        if news_msg:
-            _post(news_msg, "holdings news")
-    except Exception as e:
-        print(f"holdings action failed: {e}", file=sys.stderr)
-
-    # 3) 経済指標チェック（直近の発表結果・前回比、本日の発表予定）
+    eco_msg = None
     try:
         eco_msg = build_eco_calendar_message(today)
-        if eco_msg:
-            _post(eco_msg, "eco calendar")
     except Exception as e:
         print(f"eco calendar failed: {e}", file=sys.stderr)
 
-    # 4) AI/半導体株 異常検知
+    alert_msg = None
     try:
         alert_msg = build_anomaly_alert_message(today)
-        if alert_msg:
-            _post(alert_msg, "anomaly alert")
     except Exception as e:
         print(f"anomaly alert failed: {e}", file=sys.stderr)
 
-    # 5) AI推奨ポートフォリオ
+    portfolio_msg = None
     try:
         result = generate_portfolio(market_ctx, today, budget, mode, model_type)
-        _post(
-            build_portfolio_message(result, budget, mode_label, today, market_ctx.get("crash_signals")),
-            "portfolio",
+        portfolio_msg = build_portfolio_message(
+            result, budget, mode_label, today, market_ctx.get("crash_signals")
         )
         # ベンチマーク比較用に、本日の推奨内容を銘柄単位でGoogle Sheetsに記録
-        # （手動生成では呼ばない＝1日1回のこの自動配信だけが履歴のソース）
+        # （手動生成では呼ばない＝1日1回のこの自動配信だけが履歴のソース。アカウント数に
+        # 関係なく1日1回だけ記録すればよいのでループの外で行う）
         if result.get("portfolio") and not result.get("error"):
             try:
                 if app.record_portfolio_track(today, mode, budget, result["portfolio"]):
@@ -577,10 +595,34 @@ def main() -> None:
                 print(f"record_portfolio_track failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"portfolio generation failed: {e}", file=sys.stderr)
-        _post(
-            f"📊 本日のAI推奨ポートフォリオ（{today}）\n⚠️ 生成に失敗しました: {e}",
-            "portfolio (error)",
+        portfolio_msg = f"📊 本日のAI推奨ポートフォリオ（{today}）\n⚠️ 生成に失敗しました: {e}"
+
+    def _send_all(post, holdings_username: str, label_suffix: str = "") -> None:
+        if market_summary_msg:
+            post(market_summary_msg, f"market summary{label_suffix}")
+        send_holdings_messages(holdings_username, mode, market_ctx, today, post)
+        if eco_msg:
+            post(eco_msg, f"eco calendar{label_suffix}")
+        if alert_msg:
+            post(alert_msg, f"anomaly alert{label_suffix}")
+        if portfolio_msg:
+            post(portfolio_msg, f"portfolio{label_suffix}")
+
+    # ── 既定アカウント（TRADING_USERNAME）: 環境変数のLINE/Slackへ配信 ──────
+    _send_all(
+        lambda text, label: _post_to_channels(line_token, slack_webhook, text, label),
+        username,
+    )
+
+    # ── 個別Webhookを設定した追加アカウント: それぞれのSlackへ配信 ──────
+    for _u, _webhook in per_user_targets:
+        print(f"Sending per-account digest for {_u}...")
+        _send_all(
+            lambda text, label, _w=_webhook: _post_to_channels("", _w, text, label),
+            _u,
+            label_suffix=f" ({_u})",
         )
+        time.sleep(1.0)
 
 
 if __name__ == "__main__":

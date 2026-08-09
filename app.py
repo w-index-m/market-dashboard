@@ -24510,27 +24510,63 @@ def _auth_get_sheets_sp():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _auth_get_users(_dummy: str = "") -> dict:
-    """usersタブから {username: {password_hash, display_name}} を取得。初回はタブ自動作成。"""
+    """usersタブから {username: {password_hash, display_name, slack_webhook_url}} を取得。
+    初回はタブ自動作成。slack_webhook_url列は古いシートには無いことがあるが、
+    その場合は空文字扱いになる（_auth_update_notification_settingsが初回保存時に自動追加する）。
+    """
     try:
         import gspread as _gs
         _sp = _auth_get_sheets_sp()
         try:
             _ws = _sp.worksheet("users")
         except _gs.exceptions.WorksheetNotFound:
-            _ws = _sp.add_worksheet("users", rows=100, cols=3)
-            _ws.append_row(["username", "password_hash", "display_name"])
-            _ws.append_row(["admin",     _auth_hash("admin123"),   "Admin"])
-            _ws.append_row(["mshibuta1", _auth_hash("mshibuta1"),  "M.Shibuta"])
+            _ws = _sp.add_worksheet("users", rows=100, cols=4)
+            _ws.append_row(["username", "password_hash", "display_name", "slack_webhook_url"])
+            _ws.append_row(["admin",     _auth_hash("admin123"),   "Admin",      ""])
+            _ws.append_row(["mshibuta1", _auth_hash("mshibuta1"),  "M.Shibuta",  ""])
         return {
             r["username"]: {
-                "password_hash": r.get("password_hash", ""),
-                "display_name":  r.get("display_name", r["username"]),
+                "password_hash":     r.get("password_hash", ""),
+                "display_name":      r.get("display_name", r["username"]),
+                "slack_webhook_url": r.get("slack_webhook_url", ""),
             }
             for r in _ws.get_all_records() if r.get("username")
         }
     except Exception as _e:
         logger.warning(f"[auth] users取得失敗: {_e}")
         return {}
+
+
+def _auth_update_notification_settings(username: str, slack_webhook_url: str) -> tuple[bool, str]:
+    """ユーザーごとのSlack Webhook URLをusersタブに保存する。列が無い古いシートでも自動追加する。"""
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("users")
+        except _gs.exceptions.WorksheetNotFound:
+            return False, "usersシートが見つかりません"
+
+        header = _ws.row_values(1)
+        if "slack_webhook_url" not in header:
+            _ws.update_cell(1, len(header) + 1, "slack_webhook_url")
+            header = header + ["slack_webhook_url"]
+        col_idx = header.index("slack_webhook_url") + 1
+
+        row_num = None
+        for i, r in enumerate(_ws.get_all_records()):
+            if r.get("username") == username:
+                row_num = i + 2  # ヘッダー行(1) + 0始まりインデックス補正
+                break
+        if row_num is None:
+            return False, "ユーザーが見つかりません"
+
+        _ws.update_cell(row_num, col_idx, slack_webhook_url.strip())
+        _auth_get_users.clear()
+        return True, ""
+    except Exception as _e:
+        logger.warning(f"[auth] 通知設定更新失敗: {_e}")
+        return False, f"更新エラー: {str(_e)[:80]}"
 
 
 def _auth_validate(username: str, password: str) -> bool:
@@ -26518,6 +26554,25 @@ def render_claude_trading_project():
             st.session_state["_trading_user"] = _usr
             _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
             st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
+
+            with st.expander("🔔 通知設定（Slack）"):
+                st.caption(
+                    "ここにSlackのIncoming Webhook URLを設定すると、"
+                    "毎日の自動配信（市況サマリー・保有銘柄アクション判定など）が"
+                    "このアカウントの保有銘柄をもとに、このWebhook宛てに個別配信されます。"
+                    "空欄のままなら配信対象外です。"
+                )
+                _cur_webhook = _auth_get_users().get(_usr, {}).get("slack_webhook_url", "")
+                _new_webhook = st.text_input(
+                    "Slack Incoming Webhook URL", value=_cur_webhook,
+                    key="notif_slack_webhook", placeholder="https://hooks.slack.com/services/...",
+                )
+                if st.button("保存", key="notif_save_btn"):
+                    _ns_ok, _ns_err = _auth_update_notification_settings(_usr, _new_webhook)
+                    if _ns_ok:
+                        st.success("保存しました")
+                    else:
+                        st.error(_ns_err)
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
