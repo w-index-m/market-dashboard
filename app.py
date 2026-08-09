@@ -8707,8 +8707,11 @@ def render_macro_indicators(macro: dict | None = None):
         st.caption(f"⚠️ PERデータ取得失敗: {_pe_data['error']}")
 
 
-def render_bear_market_checker():
-    """🐻 弱気相場リスク判定セクション"""
+def render_bear_market_checker(data: dict | None = None):
+    """🐻 弱気相場リスク判定セクション。
+    data: 呼び出し元がバックグラウンドで先にcompute_bear_market_risk()を実行しておいた
+    結果。未指定ならこの場で同期フェッチする（従来通りの動作）。
+    """
     st.markdown('<a id="bear-risk"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#1a0a0a,#2d0a0a,#1a0a1a);'
@@ -8723,8 +8726,9 @@ def render_bear_market_checker():
         unsafe_allow_html=True,
     )
 
-    with st.spinner("市場リスク指標を取得中..."):
-        data = compute_bear_market_risk()
+    if data is None:
+        with st.spinner("市場リスク指標を取得中..."):
+            data = compute_bear_market_risk()
 
     if not data.get("ok"):
         st.warning(f"データ取得失敗: {data.get('reason', '不明')}")
@@ -9840,8 +9844,17 @@ def render_earnings_index_forecast():
         )
 
 
-def render_momentum_ranking():
-    """🚀 モメンタム上位 / 下位 銘柄ランキング"""
+def render_momentum_ranking(
+    df_nk: pd.DataFrame | None = None,
+    df_ndx: pd.DataFrame | None = None,
+    df_sp: pd.DataFrame | None = None,
+    mtum_monthly: pd.Series | None = None,
+):
+    """🚀 モメンタム上位 / 下位 銘柄ランキング。
+    df_nk/df_ndx/df_sp/mtum_monthly: 呼び出し元がバックグラウンドで先に
+    _fetch_momentum_ranking()/_fetch_factor_monthly_returns()を実行しておいた結果。
+    いずれもNoneならこの場で同期フェッチする（従来通りの動作）。
+    """
     st.markdown('<a id="momentum"></a>', unsafe_allow_html=True)
     st.markdown(
         '<div style="background:linear-gradient(135deg,#0d1117,#161b22,#1f2937);'
@@ -9907,13 +9920,15 @@ def render_momentum_ranking():
     tab_nk, tab_ndx, tab_sp = st.tabs(["🇯🇵 日経225", "🇺🇸 NASDAQ100", "🇺🇸 S&P500"])
 
     with tab_nk:
-        with st.spinner("日経225データを取得中..."):
-            df_nk = _fetch_momentum_ranking("nk225")
+        if df_nk is None:
+            with st.spinner("日経225データを取得中..."):
+                df_nk = _fetch_momentum_ranking("nk225")
         _render_cards(df_nk)
 
     with tab_ndx:
-        with st.spinner("NASDAQ100データを取得中..."):
-            df_ndx = _fetch_momentum_ranking("nasdaq")
+        if df_ndx is None:
+            with st.spinner("NASDAQ100データを取得中..."):
+                df_ndx = _fetch_momentum_ranking("nasdaq")
         _render_cards(df_ndx)
 
         with st.expander("📅 NASDAQ100 構成銘柄 入れ替え履歴（直近）"):
@@ -9947,8 +9962,9 @@ def render_momentum_ranking():
             st.caption("※ 出典: Nasdaq公式発表・各種報道。最新情報は nasdaq.com でご確認ください。")
 
     with tab_sp:
-        with st.spinner("S&P500データを取得中..."):
-            df_sp = _fetch_momentum_ranking("sp500")
+        if df_sp is None:
+            with st.spinner("S&P500データを取得中..."):
+                df_sp = _fetch_momentum_ranking("sp500")
         _render_cards(df_sp)
 
     # ── モメンタムファクター 月次崩れチェック（MTUM） ─────────────
@@ -9964,8 +9980,10 @@ def render_momentum_ranking():
         "極値（クラッシュ級の悪化）になっていないかを確認します。自前でモメンタム銘柄バスケットを"
         "組むとルック・アヘッド・バイアスが入るため、実在の投資可能なファクターETFをそのまま使っています。"
     )
-    _today_factor = datetime.now(JST).strftime("%Y-%m-%d")
-    _mtum_monthly = _fetch_factor_monthly_returns("MTUM", _today_factor, years=15)
+    if mtum_monthly is None:
+        _today_factor = datetime.now(JST).strftime("%Y-%m-%d")
+        mtum_monthly = _fetch_factor_monthly_returns("MTUM", _today_factor, years=15)
+    _mtum_monthly = mtum_monthly
     if _mtum_monthly.empty:
         st.info("MTUMの月次リターンデータを取得できませんでした。")
     else:
@@ -28274,7 +28292,9 @@ OPENROUTER_API_KEY = "sk-or-..."
     # カレンダーデータを4スレッドで並列フェッチしながら
     # 後続セクションを先にレンダリングして表示速度を改善する
     # ===================================================
-    _cal_executor = ThreadPoolExecutor(max_workers=4)
+    # max_workers: 経済カレンダー4 + マクロ指標1 + 弱気相場判定1 + モメンタム4 = 計10タスクを
+    # 同時に投入できるだけの余裕を持たせる（I/Oバウンドなスレッドなのでコスト自体は小さい）
+    _cal_executor = ThreadPoolExecutor(max_workers=10)
     _f_reactions  = _cal_executor.submit(_fetch_event_market_reactions)
     _f_fmp        = _cal_executor.submit(_fetch_eco_actuals_fmp)
     _f_bls        = _cal_executor.submit(_fetch_eco_actuals_bls)
@@ -28292,14 +28312,20 @@ OPENROUTER_API_KEY = "sk-or-..."
     _macro_placeholder = st.empty()
 
     # ===================================================
-    # ★ 弱気相場リスク判定
+    # ★ 弱気相場リスク判定（バックグラウンド並列取得）
     # ===================================================
-    render_bear_market_checker()
+    _f_bear = _cal_executor.submit(compute_bear_market_risk)
+    _bear_placeholder = st.empty()
 
     # ===================================================
-    # ★ モメンタムランキング（日経225 / ナスダック）
+    # ★ モメンタムランキング（日経225 / ナスダック・バックグラウンド並列取得）
     # ===================================================
-    render_momentum_ranking()
+    _today_factor = datetime.now(JST).strftime("%Y-%m-%d")
+    _f_mom_nk     = _cal_executor.submit(_fetch_momentum_ranking, "nk225")
+    _f_mom_ndx    = _cal_executor.submit(_fetch_momentum_ranking, "nasdaq")
+    _f_mom_sp     = _cal_executor.submit(_fetch_momentum_ranking, "sp500")
+    _f_mom_mtum   = _cal_executor.submit(_fetch_factor_monthly_returns, "MTUM", _today_factor, 15)
+    _momentum_placeholder = st.empty()
     st.divider()
 
     # ===================================================
@@ -29035,7 +29061,7 @@ OPENROUTER_API_KEY = "sk-or-..."
             unsafe_password=None,
         )
 
-    # ── カレンダー・マクロ指標セクションをプレースホルダーに埋め込む ──────
+    # ── カレンダー・マクロ指標・弱気相場・モメンタムをプレースホルダーに埋め込む ──
     # 後続セクションの描画が終わった時点でスレッドの結果を回収する。
     # キャッシュ済みなら即時返却、初回でも並列フェッチ中に他のセクションが描画済み。
     _preloaded = {
@@ -29045,11 +29071,22 @@ OPENROUTER_API_KEY = "sk-or-..."
         "fred":      _f_fred.result(),
     }
     _macro_result = _f_macro.result()
+    _bear_result  = _f_bear.result()
+    _mom_nk_df    = _f_mom_nk.result()
+    _mom_ndx_df   = _f_mom_ndx.result()
+    _mom_sp_df    = _f_mom_sp.result()
+    _mom_mtum_s   = _f_mom_mtum.result()
     _cal_executor.shutdown(wait=False)
     with _calendar_placeholder.container():
         render_economic_events_section(preloaded=_preloaded)
     with _macro_placeholder.container():
         render_macro_indicators(macro=_macro_result)
+    with _bear_placeholder.container():
+        render_bear_market_checker(data=_bear_result)
+    with _momentum_placeholder.container():
+        render_momentum_ranking(
+            df_nk=_mom_nk_df, df_ndx=_mom_ndx_df, df_sp=_mom_sp_df, mtum_monthly=_mom_mtum_s,
+        )
 
 
 if __name__ == "__main__":
