@@ -24437,6 +24437,23 @@ def _generate_full_portfolio_recommendation(
         if vol_r  is not None: ret_str_parts.append(f"出来高比:{vol_r:.1f}倍")
         ret_str = " | ".join(ret_str_parts) or "-"
         news_lines = [f"    ・{n}" for n in (data.get("news") or [])[:4] if n]
+
+        # 決算・ファンダメンタルズ（IR・ニュース評価を見出しの雰囲気だけでなく、
+        # 実際の売上・利益の数字に基づかせるために使う）
+        eps_ttm      = data.get("eps_ttm")
+        eps_fwd      = data.get("eps_fwd")
+        rev_growth_v = data.get("rev_growth")
+        earn_growth  = data.get("earn_growth")
+        next_earn    = data.get("next_earnings")
+        eps_hist     = data.get("eps_history") or []
+        funda_parts = []
+        if eps_ttm is not None:      funda_parts.append(f"EPS実績(TTM) {eps_ttm}")
+        if eps_fwd is not None:      funda_parts.append(f"EPS予想 {eps_fwd}")
+        if rev_growth_v is not None: funda_parts.append(f"売上高成長率(YoY) {rev_growth_v:+.1f}%")
+        if earn_growth is not None:  funda_parts.append(f"純利益成長率(YoY) {earn_growth:+.1f}%")
+        if next_earn:                funda_parts.append(f"次回決算日 {next_earn}")
+        funda_str = " | ".join(funda_parts)
+
         block = (
             f"【{flag} {ticker} | {p['name']}】\n"
             f"  現在値: {price}{cur} | RSI: {rsi} | MA25: {ma25}{cur} | MA75: {ma75}{cur}\n"
@@ -24445,6 +24462,10 @@ def _generate_full_portfolio_recommendation(
             f"  取得単価: {p.get('avg_cost',0):.1f}{cur} | 保有: {int(p.get('qty',0))}株\n"
             f"  セクター: {sec}\n"
         )
+        if funda_str:
+            block += f"  決算・ファンダメンタルズ: {funda_str}\n"
+        if eps_hist:
+            block += "  直近四半期EPS実績vs予想:\n" + "\n".join(f"    ・{h}" for h in eps_hist) + "\n"
         if news_lines:
             block += "  最新IR・ニュース:\n" + "\n".join(news_lines) + "\n"
         stock_blocks.append(block)
@@ -24477,7 +24498,7 @@ Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体�
 ### [実際の銘柄名（ティッカー）を記入]
 - **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い のいずれかを選択]
 - **テクニカル評価**: RSI=[保有銘柄データのRSI実数値]（70↑過熱/30↓売られ過ぎ）| MA25=[実数値]に対して株価は上/下 | 5日リターン=[実数値]%
-- **IR・ニュース評価**: 最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文
+- **IR・ニュース評価**: 上記データに「決算・ファンダメンタルズ」「直近四半期EPS実績vs予想」があれば、見出しの雰囲気だけでなく売上高成長率・純利益成長率・EPSサプライズ等の実際の数値に触れながら、最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文で評価すること（無ければニュース見出しのみで評価）
 - **市場環境との整合性**: Fear&Greed・RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
 - **アクション水準**: [この銘柄が「現在値: ○○USD」なら必ずUSDで、「現在値: ○○円」なら必ず円で価格を記載すること（上記データの通貨単位と厳密に一致させる。米国株に「円」を使うなど単位を間違えないこと）。あくまで条件付きの発動水準であり、現時点でその条件を満たしていない限り即座に実行すべき指示ではないことが分かる書き方にすること（例:「208USDを上回れば一部利確を検討」）。⚠️ 水準の価格は必ず「現在値」を基準に、MA25/MA75やRSIなど上記データのテクニカル指標から現実的なレンジ（目安として現在値の±20%以内）で算出すること。上記データの「取得単価」の数値をそのままここに転記することは絶対禁止（取得単価は保有者ごとに異なる個人的なコストであり、市場の売買判断の水準ではないため）]
 """

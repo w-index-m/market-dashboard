@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-毎朝、最大6種類のメッセージをLINE（Messaging API・ブロードキャスト配信）とSlack
+毎朝、最大7種類のメッセージをLINE（Messaging API・ブロードキャスト配信）とSlack
 （Incoming Webhook）の両方に送信するスクリプト:
   1. 市況サマリー（Fear&Greed・VIX・NAAIM・日経/US予測）
   2. 保有銘柄アクション判定（買い増し/保有継続/一部利確/売却をAIが銘柄ごとに判定）
-  2b. 保有銘柄 関連ニュース見出し（2のためにfetch済みのデータを再利用・追加API呼び出しなし）
+  2b. 保有銘柄 関連ニュースまとめ（2のためにfetch済みのデータを再利用・AI1回で銘柄ごと1文要約）
+  2c. 保有銘柄 決算ハイライト（2のためにfetch済みのEPS実績vs予想・売上/純利益成長率・次回決算日を
+      AIを介さずそのまま表示。追加API呼び出しなし）
   3. 経済指標チェック（直近発表結果の前回比、本日の発表予定。FMP→BLS→FREDの既存データを再利用）
   4. AI/半導体株の異常検知（相対弱さ・急落→急回復パターン）
   5. AI推奨ポートフォリオ（新規投資先提案）
@@ -12,7 +14,7 @@
 新規投資の提案だけだと「ポートフォリオの入れ替え」ができない（売る判断が無い）ため、
 既存保有銘柄の売買判定（2）を組み込んでいる。既存のインタラクティブUIが使っている
 _generate_full_portfolio_recommendation()をそのまま再利用する。保有銘柄が無い/取引記録が
-無い場合、2と2bは送信されない（正常系として静かにスキップ）。
+無い場合、2・2b・2cは送信されない（正常系として静かにスキップ）。
 
 GitHub Actionsのcronから `python scripts/daily_portfolio_line.py` として直接実行される想定で、
 Streamlitの実行環境（`streamlit run`）は不要。app.py側の各fetch/AI関数はもともとst.*を呼ばない
@@ -297,6 +299,48 @@ def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
     return "\n".join(lines).strip()
 
 
+def build_earnings_highlight_message(
+    stock_data_map: dict, ticker_names: dict, today: str
+) -> str | None:
+    """
+    保有銘柄の決算ハイライト（直近四半期のEPS実績vs予想・サプライズ%、売上高/純利益成長率、
+    次回決算日）。AIによる要約や解釈は行わず、_fetch_trading_stock_dataが既に取得済みの
+    数値をそのまま機械的にリスト表示する（数値の伝達は確実性を優先し、AIの言い換えを介さない）。
+    決算・EPSデータが1件も無ければNoneを返す（正常系として静かにスキップ）。
+    """
+    lines = [f"📈 保有銘柄 決算ハイライト（{today}）", ""]
+    has_content = False
+    for ticker, data in stock_data_map.items():
+        data = data or {}
+        eps_hist     = data.get("eps_history") or []
+        rev_growth   = data.get("rev_growth")
+        earn_growth  = data.get("earn_growth")
+        next_earn    = data.get("next_earnings")
+        if not eps_hist and rev_growth is None and earn_growth is None and not next_earn:
+            continue
+        has_content = True
+        name = ticker_names.get(ticker, ticker) if ticker_names else ticker
+        lines.append(f"◆ {ticker} {name}")
+        if eps_hist:
+            lines.append(f"   直近四半期EPS: {eps_hist[-1]}")
+        growth_parts = []
+        if rev_growth is not None:
+            growth_parts.append(f"売上高成長率(YoY) {rev_growth:+.1f}%")
+        if earn_growth is not None:
+            growth_parts.append(f"純利益成長率(YoY) {earn_growth:+.1f}%")
+        if growth_parts:
+            lines.append("   " + " | ".join(growth_parts))
+        if next_earn:
+            lines.append(f"   次回決算日: {next_earn}")
+        lines.append("")
+
+    if not has_content:
+        return None
+
+    lines.append("※ AIによる解釈を介さない、決算データのそのままの表示です。")
+    return "\n".join(lines).strip()
+
+
 # ─────────────────────────────────────────────
 # 3) 経済指標チェック（直近の発表結果・前回比、本日の発表予定）
 # ─────────────────────────────────────────────
@@ -531,6 +575,9 @@ def send_holdings_messages(username: str, mode: str, market_ctx: dict, today: st
         news_msg = build_holdings_news_message(holdings_stock_data, today)
         if news_msg:
             post(news_msg, f"holdings news ({username})")
+        earnings_msg = build_earnings_highlight_message(holdings_stock_data, holdings_ticker_names, today)
+        if earnings_msg:
+            post(earnings_msg, f"earnings highlight ({username})")
     except Exception as e:
         print(f"holdings action failed for {username}: {e}", file=sys.stderr)
 
