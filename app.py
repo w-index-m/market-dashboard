@@ -22047,6 +22047,35 @@ def _fetch_ticker_close_prices(tickers: list, period: str = "max") -> dict:
     return price_dict
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _fetch_vt_price_series(period: str = "max") -> pd.Series:
+    """VT（Vanguard Total World Stock ETF・全世界株インデックス）の日次終値を取得する。
+    ポートフォリオの資産成長・バックテストチャートに対するベンチマーク比較用。
+    """
+    try:
+        raw = yf.download("VT", period=period, auto_adjust=True, progress=False)
+        if raw.empty:
+            return pd.Series(dtype=float)
+        close = raw["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        return close.dropna()
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def _rebase_vt_series(vt_series: pd.Series, target_index, start_value) -> pd.Series | None:
+    """VT終値を、target_indexの日付に合わせてstart_value基準にリベースする
+    （「同じタイミングで同額をVTに投資していたら」の評価額系列を作る）。
+    """
+    if vt_series is None or vt_series.empty or start_value is None or start_value <= 0:
+        return None
+    aligned = vt_series.reindex(target_index).ffill().bfill()
+    if aligned.empty or pd.isna(aligned.iloc[0]) or aligned.iloc[0] == 0:
+        return None
+    return aligned / aligned.iloc[0] * start_value
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_portfolio_history() -> pd.DataFrame:
     """取引記録 × 日次終値でポートフォリオ資産推移を計算する。
@@ -27072,6 +27101,14 @@ def render_claude_trading_project():
                         st.info("資産推移を計算するデータが不足しています（株価データ取得に失敗した可能性があります）。")
                     else:
                         _pnl_today = pd.Timestamp.today().normalize()
+                        _vt_series = _fetch_vt_price_series()
+
+                        def _series_return(_s):
+                            if _s is None or len(_s) < 2:
+                                return None
+                            _start = float(_s.iloc[0])
+                            _end   = float(_s.iloc[-1])
+                            return (_end / _start - 1) * 100 if _start > 0 else None
 
                         def _build_growth_fig(_df):
                             _gain  = _df["pnl"].mean() if "pnl" in _df.columns else 0
@@ -27089,6 +27126,17 @@ def render_claude_trading_project():
                                 line=dict(color="#94a3b8", width=1.5, dash="dot"),
                                 hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
                             ))
+                            _vt_line = _rebase_vt_series(
+                                _vt_series, _df.index,
+                                float(_df["portfolio_value"].iloc[0]) if len(_df) else None,
+                            )
+                            if _vt_line is not None:
+                                _fig.add_trace(go.Scatter(
+                                    x=_df.index, y=_vt_line,
+                                    name="VT（同時期に同額投資した場合）",
+                                    line=dict(color="#f59e0b", width=1.5, dash="dash"),
+                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算: %{y:,.0f}<extra></extra>",
+                                ))
                             _fig.add_trace(go.Scatter(
                                 x=list(_df.index) + list(_df.index[::-1]),
                                 y=list(_df["portfolio_value"]) + list(_df["invested_cost"][::-1]),
@@ -27116,12 +27164,27 @@ def render_claude_trading_project():
                         if _pnl_3y_df.empty:
                             _pnl_3y_df = _pnl_hist_df
 
-                        st.markdown("過去1年")
+                        def _growth_period_label(_df):
+                            _port_ret = _series_return(_df["portfolio_value"]) if len(_df) else None
+                            _vt_aligned = _rebase_vt_series(
+                                _vt_series, _df.index,
+                                float(_df["portfolio_value"].iloc[0]) if len(_df) else None,
+                            )
+                            _vt_ret = _series_return(_vt_aligned) if _vt_aligned is not None else None
+                            _parts = []
+                            if _port_ret is not None:
+                                _parts.append(f"ポートフォリオ {_port_ret:+.1f}%")
+                            if _vt_ret is not None:
+                                _parts.append(f"VT {_vt_ret:+.1f}%")
+                            return f"（{' / '.join(_parts)}）" if _parts else ""
+
+                        st.markdown("過去1年" + _growth_period_label(_pnl_1y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_1y_df), use_container_width=True)
-                        st.markdown("過去3年")
+                        st.markdown("過去3年" + _growth_period_label(_pnl_3y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_3y_df), use_container_width=True)
                         st.caption(
-                            "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。"
+                            "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。VTは同時期に"
+                            "ポートフォリオと同額を一括投資していた場合の参考換算値です（積立timing差は考慮していません）。"
                             "5年・全期間表示や銘柄別配分の推移など詳細分析は「資産推移」タブへ。"
                         )
 
@@ -27139,6 +27202,7 @@ def render_claude_trading_project():
                         st.info("バックテストを計算するデータが不足しています。")
                     else:
                         _bt_today = pd.Timestamp.today().normalize()
+                        _bt_vt_series = _fetch_vt_price_series()
 
                         def _build_backtest_fig(_df):
                             _fig = go.Figure()
@@ -27149,10 +27213,23 @@ def render_claude_trading_project():
                                 fill="tozeroy", fillcolor="rgba(167,139,250,0.10)",
                                 hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}円<extra></extra>",
                             ))
+                            _vt_line = _rebase_vt_series(
+                                _bt_vt_series, _df.index,
+                                float(_df["portfolio_value"].iloc[0]) if len(_df) else None,
+                            )
+                            if _vt_line is not None:
+                                _fig.add_trace(go.Scatter(
+                                    x=_df.index, y=_vt_line,
+                                    name="VT（同額投資した場合）",
+                                    line=dict(color="#f59e0b", width=1.5, dash="dash"),
+                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算: %{y:,.0f}円<extra></extra>",
+                                ))
                             _fig.update_layout(
                                 paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
                                 font=dict(color="#e2e8f0"),
-                                showlegend=False,
+                                showlegend=True,
+                                legend=dict(font=dict(color="#e2e8f0"), bgcolor="#1e293b",
+                                            bordercolor="#334155", borderwidth=1),
                                 xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                                 yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
                                            title=dict(text="評価額（円換算）", font=dict(color="#94a3b8"))),
@@ -27169,6 +27246,13 @@ def render_claude_trading_project():
                             _end   = float(_df["portfolio_value"].iloc[-1])
                             return (_end / _start - 1) * 100 if _start > 0 else None
 
+                        def _bt_vt_period_return(_df):
+                            _vt_line = _rebase_vt_series(
+                                _bt_vt_series, _df.index,
+                                float(_df["portfolio_value"].iloc[0]) if len(_df) else None,
+                            )
+                            return _period_return(pd.DataFrame({"portfolio_value": _vt_line})) if _vt_line is not None else None
+
                         _bt_1y_df = _bt_df[_bt_df.index >= _bt_today - pd.DateOffset(years=1)]
                         if _bt_1y_df.empty:
                             _bt_1y_df = _bt_df
@@ -27176,14 +27260,27 @@ def render_claude_trading_project():
                         if _bt_3y_df.empty:
                             _bt_3y_df = _bt_df
 
-                        _bt_1y_ret = _period_return(_bt_1y_df)
-                        _bt_3y_ret = _period_return(_bt_3y_df)
+                        _bt_1y_ret    = _period_return(_bt_1y_df)
+                        _bt_3y_ret    = _period_return(_bt_3y_df)
+                        _bt_1y_vt_ret = _bt_vt_period_return(_bt_1y_df)
+                        _bt_3y_vt_ret = _bt_vt_period_return(_bt_3y_df)
 
-                        st.markdown("過去1年" + (f"（期間リターン {_bt_1y_ret:+.1f}%）" if _bt_1y_ret is not None else ""))
+                        def _bt_label(_ret, _vt_ret):
+                            _parts = []
+                            if _ret is not None:
+                                _parts.append(f"ポートフォリオ {_ret:+.1f}%")
+                            if _vt_ret is not None:
+                                _parts.append(f"VT {_vt_ret:+.1f}%")
+                            return f"（{' / '.join(_parts)}）" if _parts else ""
+
+                        st.markdown("過去1年" + _bt_label(_bt_1y_ret, _bt_1y_vt_ret))
                         st.plotly_chart(_build_backtest_fig(_bt_1y_df), use_container_width=True)
-                        st.markdown("過去3年" + (f"（期間リターン {_bt_3y_ret:+.1f}%）" if _bt_3y_ret is not None else ""))
+                        st.markdown("過去3年" + _bt_label(_bt_3y_ret, _bt_3y_vt_ret))
                         st.plotly_chart(_build_backtest_fig(_bt_3y_df), use_container_width=True)
-                        st.caption("※ 現在保有していない（既に売却済みの）銘柄は含まれません。")
+                        st.caption(
+                            "※ 現在保有していない（既に売却済みの）銘柄は含まれません。VTは同時期に"
+                            "同額を一括投資していた場合の参考換算値です。"
+                        )
 
                     # ── 銘柄別配分の推移（%）─────────────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
