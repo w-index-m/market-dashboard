@@ -8262,7 +8262,22 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     def _fetch_fred_pce(series_id: str, result_key: str):
         try:
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            # FREDが一時的に応答遅延することがあるため、タイムアウト/接続エラー時は
+            # 短い間隔を空けて最大3回までリトライする
+            r = None
+            last_err = None
+            for _attempt in range(3):
+                try:
+                    r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                    break
+                except requests.exceptions.RequestException as _re:
+                    last_err = _re
+                    r = None
+                    if _attempt < 2:
+                        time.sleep(2)
+            if r is None:
+                result["_errors"][result_key] = f"{type(last_err).__name__}: {str(last_err)[:120]}"
+                return
             if r.status_code != 200:
                 result["_errors"][result_key] = f"FRED HTTP {r.status_code}"
                 return
