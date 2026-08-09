@@ -42,7 +42,7 @@ AI推奨ポートフォリオは共通のまま、保有銘柄アクション判
     GOOGLE_SHEETS_ID, GOOGLE_SERVICE_ACCOUNT_JSON  取引記録読込・推奨履歴記録に必要
     TRADING_USERNAME      任意。取引記録シートのユーザー名（"admin"ならclaude_tradesタブ）。デフォルト admin
     PORTFOLIO_BUDGET      任意。予算（円）。デフォルト 1000000
-    PORTFOLIO_MODE        任意。growth/momentum/autonomous/ai_mix/optical_mix/dividend_stable/stable_growth。デフォルト growth
+    PORTFOLIO_MODE        任意。growth/momentum/ai_mix/optical_mix/dividend_stable/stable_growth。デフォルト growth
     PORTFOLIO_MODEL_TYPE  任意。etf/individual。デフォルト etf
 """
 import os
@@ -63,7 +63,7 @@ LINE_BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
 LINE_TEXT_MAX_LEN = 4900  # LINEのtextメッセージ上限は5000文字。安全マージンを取る。
 
 MODE_LABELS = {
-    "growth": "🌱長期育成", "momentum": "⚡モメンタム", "autonomous": "🤖AI自律",
+    "growth": "🌱長期育成", "momentum": "⚡モメンタム",
     "ai_mix": "✨AIミックス", "optical_mix": "💡光銘柄ミックス", "dividend_stable": "💰配当安定",
     "stable_growth": "🪨安定成長",
 }

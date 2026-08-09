@@ -20841,7 +20841,6 @@ def _generate_ai_allocation_scores(
     mode_desc = {
         "growth":     "長期育成（ファンダ重視・6ヶ月〜2年）",
         "momentum":   "モメンタム（テクニカル重視・1〜4週間）",
-        "autonomous": "AI自律（分析軸をAI決定）",
     }.get(mode, "長期育成")
 
     # 銘柄サマリー
@@ -21253,7 +21252,6 @@ def _generate_replacement_rec(
     _mode_guide = {
         "growth":     "ファンダメンタルズ重視・長期育成（PER/EPS成長率・配当安定性）",
         "momentum":   "テクニカル重視・上昇トレンド継続中の銘柄（RSI/ブレイクアウト）",
-        "autonomous": "AIが最適スタイルを自律判断（成長・モメンタム・決算プレイ等）",
         "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
         "optical_mix":     "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
         "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り3%以上の銘柄のみ選定）",
@@ -22413,7 +22411,7 @@ def _generate_ai_trade_signal(
     market_ctx: dict | None = None,
 ) -> dict:
     """AIによる売買シグナルを生成。
-    mode: "growth" | "momentum" | "autonomous"
+    mode: "growth" | "momentum"
     model_pref: "auto" | "gemini" | "groq" | "openrouter"
     market_ctx: _fetch_market_context_for_trading() の戻り値（任意）。
     """
@@ -22517,46 +22515,6 @@ def _generate_ai_trade_signal(
 {period_line}
 
 **決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点"""
-
-    elif mode == "autonomous":
-        mode_header  = "🤖 AI自律モード（分析軸・フレームワークはAIが自律決定）"
-        analyst_role = "完全自律型の株式アナリスト"
-        scenario     = f"{base_scenario}"
-        analysis_focus = """
-【あなたへの指示】
-提供されたデータを全て俯瞰し、この銘柄を「今どのような視点で見るべきか」を自分で判断してください。
-- 長期成長株として保有すべきか
-- 短期モメンタムで乗るべきか
-- バリュー株・ターンアラウンドとして評価すべきか
-- 決算プレイとして短期勝負すべきか
-- または今は見送りが最善か
-
-最初にあなたが選んだ「分析フレームワーク」を明示し、そのフレームで判断してください。
-自由な視点で、あなたが最も投資家の意思決定に役立つと考える観点を優先してください。"""
-        output_fmt = f"""🏷️ モード: {mode_header}
-
-**あなたが選んだ分析フレームワーク**: （成長株/モメンタム/バリュー/決算プレイ/その他）とその理由を1文で
-
-{judgment}
-
-**核心的な根拠**: （あなたが最も重要と判断した視点から150〜300字で）
-
-**テクニカル評価**: RSI={rsi}（過熱/適正/売られ過ぎの判定）| MA25={ma25}{currency}に対する株価位置 | トレンド方向
-
-**最も注目すべき指標/データ**: このデータセットの中でこの銘柄の評価に決定的な情報を2〜3点
-
-**目標株価**: X{currency}（+Y%）｜あなた独自の根拠
-
-**損切りライン**: X{currency}（-Y%）｜このフレームが崩れる水準
-
-**推奨保有期間**: （あなたが選んだフレームに応じて自由に設定）
-
-**AIとしての独自見解**: 人間のアナリストが見落としがちな、データから読み取れる非線形なシグナルや反直感的な観点を1点
-
-**決算リスク**: 次回決算（{next_earn or "日程不明"}）に向けた注意点"""
-        analysis_focus = analysis_focus  # already set above
-        # autonomous は output_fmt 直接使用するので他の変数は不要
-        extra_section = reason_note = target_line = stop_line = period_line = ""
 
     else:  # growth モード（デフォルト）
         mode_header  = "🌱 長期育成モード（タイムフレーム: 月足 + 週足）"
@@ -23053,7 +23011,6 @@ def _generate_portfolio_wide_analysis(
     mode_desc = {
         "growth":     "長期育成（ファンダ重視・6ヶ月〜2年保有）",
         "momentum":   "モメンタム（テクニカル重視・1〜4週間保有）",
-        "autonomous": "AI自律（分析軸をAIが自律決定）",
     }.get(mode, "長期育成")
 
     prompt = f"""あなたはプロのポートフォリオマネージャーです。以下の保有ポートフォリオ全体を分析し、具体的なアクション提言を行ってください。
@@ -24011,7 +23968,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     if trading_mode == "momentum":
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
     else:
-        weights = (0.2, 0.3, 0.5)  # growth/autonomous/ai_mix: 1y重視
+        weights = (0.2, 0.3, 0.5)  # growth/ai_mix等: 1y重視
     # 予算内で購入不可能な銘柄を特定
     _max_per_stock = budget * 0.3  # 1銘柄最大30%配分
     _unaffordable = []
@@ -24099,7 +24056,7 @@ def _generate_investment_portfolio_rec(
     market_ctx: dict,
     existing_holdings: list | None = None,
     model_pref: str = "auto",
-    trading_mode: str = "growth",  # "growth" | "momentum" | "autonomous"
+    trading_mode: str = "growth",  # "growth" | "momentum"
     candidate_perf: dict | None = None,  # _fetch_candidate_performance() の戻り値
     agent_a: dict | None = None,  # _analyze_macro_agent() の結果
     agent_b: dict | None = None,  # {ticker: _analyze_stock_agent() の結果}
@@ -24164,12 +24121,6 @@ def _generate_investment_portfolio_rec(
             "保有期間1〜4週間の中短期トレードを想定。上昇トレンド継続中の銘柄を優先。"
             "損切-5〜8%・目標=直近レジスタンス突破後の次の節目。",
         ),
-        "autonomous": (
-            "🤖 AI自律モード",
-            "投資スタイルをAIが自律決定。成長株・モメンタム・バリュー・決算プレイ等を"
-            "市場環境に応じて最適に組み合わせ。保有期間・損切ラインもAIが柔軟に判断。"
-            "独自の視点で通常は注目されにくい銘柄も積極的に提案してよい。",
-        ),
         "ai_mix": (
             "✨ Claude AIミックス",
             "AI産業の3層（インフラ・プラットフォーム・ソフトウェア）に集中投資。"
@@ -24218,14 +24169,6 @@ def _generate_investment_portfolio_rec(
   ③ 株価モメンタム: 直近トレンドが崩壊していない銘柄（1y -20%以上の下落は原則避ける）
   ④ バリュエーション: PEG<2.0を目安に割高すぎる銘柄は避ける
   ⑤ 財務健全性: 自己資本比率・キャッシュフロー安定性""",
-
-        "autonomous": """\
-評価軸の優先順位（🤖 AI自律モード — 市場環境に応じてAIが最適ウェイトを決定）:
-  現在の市場環境（F&G・セクターローテーション）を考慮して、以下を柔軟に組み合わせる:
-  - モメンタム株（上昇トレンド継続）: 積極的に組み入れる
-  - バリュー株（割安・高配当）: 市場が調整局面なら比率を上げる
-  - グロース株（高成長・高PER）: F&G高値圏では比率を抑える
-  あなたの判断で最もリターンが期待できる組み合わせを選んでよい""",
 
         "ai_mix": """\
 評価軸の優先順位（✨ Claude AIミックス — AI特化テーマバスケット）:
@@ -24571,7 +24514,6 @@ def _generate_full_portfolio_recommendation(
     mode_desc = {
         "growth":     "長期育成（ファンダ重視・6ヶ月〜2年保有）",
         "momentum":   "モメンタム（テクニカル重視・1〜4週間保有）",
-        "autonomous": "AI自律（分析軸をAIが自律決定）",
     }.get(mode, "長期育成")
 
     total_cost = sum(p.get("cost", 0) for p in positions.values())
@@ -24912,15 +24854,6 @@ def render_claude_trading_project():
             "border": "#f59e0b", "bg": "#1c1400",
         },
         {
-            "key":    "autonomous",
-            "emoji":  "🤖",
-            "label":  "AI自律モード",
-            "sub":    "AIが分析軸を自律決定 · 保有期間は状況次第",
-            "detail": "成長/モメンタム/バリュー/決算プレイ etc. を最適選択 · 独自見解あり",
-            "color":  "#a78bfa", "sub_color": "#c4b5fd",
-            "border": "#8b5cf6", "bg": "#1e0040",
-        },
-        {
             "key":    "ai_mix",
             "emoji":  "✨",
             "label":  "Claude AIミックス",
@@ -24958,7 +24891,7 @@ def render_claude_trading_project():
         },
     ]
 
-    # 3+4 の2行レイアウトでモードボタンを表示
+    # 3+3 の2行レイアウトでモードボタンを表示
     _mode_row1 = _MODE_DEFS[:3]
     _mode_row2 = _MODE_DEFS[3:]
     _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
@@ -25797,8 +25730,8 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
-            # コントロール行（リスクプロファイル選択は廃止 — 長期育成/モメンタム/AI自律/AIミックス/
-            # 光銘柄ミックス/配当安定の6モードで既にリスク志向が分かれているため常に「balanced」評価で統一）
+            # コントロール行（リスクプロファイル選択は廃止 — 長期育成/モメンタム/AIミックス/
+            # 光銘柄ミックス/配当安定/安定成長の6モードで既にリスク志向が分かれているため常に「balanced」評価で統一）
             _ip_c1, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.2, 1.2, 1.2])
             _ip_budget = _ip_c1.radio(
                 "投資予算", ["100万円", "500万円"],
@@ -26513,7 +26446,6 @@ def render_claude_trading_project():
             _mode_meta = {
                 "growth":     ("🌱 長期育成", "#4ade80"),
                 "momentum":   ("⚡ モメンタム", "#fbbf24"),
-                "autonomous": ("🤖 AI自律", "#a78bfa"),
             }
             mode_badge, mode_color = _mode_meta.get(current_mode, ("🌱 長期育成", "#4ade80"))
             st.markdown(
