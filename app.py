@@ -15936,6 +15936,38 @@ def _fetch_finnhub_insider_transactions(symbol: str) -> Dict:
         return {"ok": False, "reason": str(e)}
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_put_call_ratio(ticker: str) -> Dict:
+    """yfinanceのオプションチェーンから、直近満期のプットコールレシオ（出来高・建玉ベース）を
+    計算する。yfinanceが提供するのは常に「現時点のスナップショット」のみで、過去の
+    レシオ推移は取得できない（履歴が必要な場合は有料のオプションデータAPIが必要）。
+    Returns: {"ok": bool, "expiration", "call_volume", "put_volume", "call_oi", "put_oi",
+              "pc_ratio_volume", "pc_ratio_oi", "reason"}
+    """
+    try:
+        tk = yf.Ticker(ticker)
+        expirations = tk.options
+        if not expirations:
+            return {"ok": False, "reason": "オプション取引がありません"}
+        exp = expirations[0]  # 直近満期
+        chain = tk.option_chain(exp)
+        calls, puts = chain.calls, chain.puts
+        call_volume = int(calls["volume"].fillna(0).sum())
+        put_volume  = int(puts["volume"].fillna(0).sum())
+        call_oi     = int(calls["openInterest"].fillna(0).sum())
+        put_oi      = int(puts["openInterest"].fillna(0).sum())
+        return {
+            "ok": True,
+            "expiration": exp,
+            "call_volume": call_volume, "put_volume": put_volume,
+            "call_oi": call_oi, "put_oi": put_oi,
+            "pc_ratio_volume": (put_volume / call_volume) if call_volume > 0 else None,
+            "pc_ratio_oi":     (put_oi / call_oi) if call_oi > 0 else None,
+        }
+    except Exception as e:
+        return {"ok": False, "reason": str(e)[:120]}
+
+
 def fetch_us_institutional_holders(symbol: str) -> Dict:
     """
     米国株の機関保有・インサイダー・空売り詳細を取得。
@@ -18830,6 +18862,41 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
                 _us_reason = _us_data.get("reason", "")
                 _msg = "機関保有・インサイダー情報なし" + (f"（{_us_reason}）" if _us_reason else "")
                 st.info(f"需給データが見つかりませんでした（{_msg}）。")
+
+            # ── プットコールレシオ（直近満期のオプションチェーン・現時点のスナップショット）──
+            with st.spinner("オプションチェーンを取得中…"):
+                _pc_data = _fetch_put_call_ratio(_tk_input)
+            if _pc_data.get("ok"):
+                _pcv = _pc_data.get("pc_ratio_volume")
+                _pco = _pc_data.get("pc_ratio_oi")
+                _pcv_str = f"{_pcv:.2f}" if _pcv is not None else "—"
+                _pco_str = f"{_pco:.2f}" if _pco is not None else "—"
+                _pcv_color = "#f87171" if (_pcv is not None and _pcv >= 1.0) else "#4ade80"
+                _pco_color = "#f87171" if (_pco is not None and _pco >= 1.0) else "#4ade80"
+                st.markdown(
+                    '<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                    'padding:14px 18px;margin-bottom:10px">'
+                    '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:8px">'
+                    f'📐 プットコールレシオ（直近満期: {_pc_data.get("expiration", "-")}）</div>'
+                    '<div style="display:flex;gap:24px;flex-wrap:wrap">'
+                    '<div><div style="font-size:11px;color:#64748b">出来高ベース</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:{_pcv_color}">{_pcv_str}</div></div>'
+                    '<div><div style="font-size:11px;color:#64748b">建玉ベース</div>'
+                    f'<div style="font-size:20px;font-weight:800;color:{_pco_color}">{_pco_str}</div></div>'
+                    '</div>'
+                    '<div style="font-size:10px;color:#64748b;margin-top:8px">'
+                    f'コール出来高 {_pc_data.get("call_volume", 0):,} / プット出来高 {_pc_data.get("put_volume", 0):,}'
+                    f' ｜ コール建玉 {_pc_data.get("call_oi", 0):,} / プット建玉 {_pc_data.get("put_oi", 0):,}</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "データ提供: yfinance（直近満期のオプションチェーン、現時点のスナップショットのみ）。"
+                    "レシオ>1はプット優勢（弱気・ヘッジ需要優勢）、<1はコール優勢（強気）の目安ですが、"
+                    "過去からの推移は取得できないため、この数値単独での判断は避けてください。"
+                )
+            else:
+                st.caption(f"📐 プットコールレシオ: 取得できませんでした（{_pc_data.get('reason', '')}）")
 
     # ── 下段: 年別（1月1日起点）トレンド比較 ──────────────────
     st.markdown(
