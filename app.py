@@ -23826,6 +23826,41 @@ _CLAUDE_DIVIDEND_BASKET = {
 }
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _screen_diversification_candidates_by_return(exclude_tickers: tuple = ()) -> list:
+    """分散投資の候補銘柄（_TRADING_CANDIDATESからAI/光ミックスバスケット・除外指定銘柄を
+    除いたもの＝既にAI/半導体・光通信テーマに寄っていない銘柄群）について、実績の
+    1年・3年リターンを計算する。ポートフォリオ自体の実績リターンと比較して、
+    「別テーマでも同等以上に伸びた銘柄はあるか」を確認するための素材。
+    Returns: [{"ticker", "ret_1y", "ret_3y"}, ...]（リターン計算不能な銘柄は除外）
+    """
+    candidates = sorted({
+        t for t in _TRADING_CANDIDATES
+        if t not in _CLAUDE_AI_BASKET
+        and t not in _CLAUDE_OPTICAL_BASKET
+        and t not in exclude_tickers
+    })
+    price_dict = _fetch_ticker_close_prices(candidates, period="3y")
+    rows = []
+    for tk, s in price_dict.items():
+        s = s.dropna()
+        if len(s) < 30:
+            continue
+        cur = float(s.iloc[-1])
+
+        def _ret(days, _s=s, _cur=cur):
+            idx = max(0, len(_s) - days - 1)
+            base = float(_s.iloc[idx])
+            return (_cur / base - 1) * 100 if base > 0 else None
+
+        rows.append({
+            "ticker": tk,
+            "ret_1y": _ret(252) if len(s) > 252 else None,
+            "ret_3y": _ret(756) if len(s) > 756 else None,
+        })
+    return rows
+
+
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_stable_growth_candidates(top_n: int = 20, max_dd_threshold: float = -30.0) -> dict:
     """
@@ -27337,6 +27372,52 @@ def render_claude_trading_project():
                             "同額を一括投資していた場合の参考換算値です。標準偏差・シャープレシオは日次リターンから"
                             "年率換算（無リスク金利1.5%と仮定）。最大DDは対象期間内の高値からの最大下落率です。"
                         )
+
+                        # ── 分散候補: ポートフォリオと同等リターンを狙える別テーマ銘柄 ──
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.markdown("**🔍 同等リターンを狙える分散銘柄（参考）**")
+                        st.caption(
+                            "現在の保有銘柄はAI/半導体インフラ・光通信テーマに偏っているため、"
+                            "それ以外のテーマ（ヘルスケア・金融・エネルギー・生活必需品・サイバーセキュリティ等）の"
+                            "候補銘柄について、実際に上のバックテストと同水準以上のリターンだったものがあるか確認します。"
+                        )
+                        with st.spinner("分散候補銘柄のリターンを計算中..."):
+                            _div_candidates = _screen_diversification_candidates_by_return(
+                                exclude_tickers=tuple(open_pos.keys())
+                            )
+                        if not _div_candidates:
+                            st.info("分散候補銘柄のデータを取得できませんでした。")
+                        else:
+                            _div_rows = []
+                            for _c in _div_candidates:
+                                _r1, _r3 = _c.get("ret_1y"), _c.get("ret_3y")
+                                if _r1 is None and _r3 is None:
+                                    continue
+                                _match_1y = _r1 is not None and _bt_1y_ret is not None and _r1 >= _bt_1y_ret
+                                _match_3y = _r3 is not None and _bt_3y_ret is not None and _r3 >= _bt_3y_ret
+                                _div_rows.append({
+                                    "_sort": _r1 if _r1 is not None else -1e9,
+                                    "銘柄":  _KNOWN_NAMES.get(_c["ticker"], _c["ticker"]),
+                                    "コード": _c["ticker"],
+                                    "実績1年リターン": f"{_r1:+.1f}%" if _r1 is not None else "-",
+                                    "実績3年リターン": f"{_r3:+.1f}%" if _r3 is not None else "-",
+                                    "1年で到達": "✅" if _match_1y else "",
+                                    "3年で到達": "✅" if _match_3y else "",
+                                })
+                            _div_rows.sort(key=lambda r: r["_sort"], reverse=True)
+                            for _r in _div_rows:
+                                _r.pop("_sort")
+                            _div_matches = [r for r in _div_rows if r["1年で到達"] or r["3年で到達"]]
+                            if _div_matches:
+                                st.success(f"ポートフォリオの実績リターン以上だった分散候補銘柄が{len(_div_matches)}件見つかりました。")
+                            else:
+                                st.warning(
+                                    f"ポートフォリオの実績リターン（1年{_bt_1y_ret:+.1f}% / 3年{_bt_3y_ret:+.1f}%）に"
+                                    "到達した分散候補銘柄は見つかりませんでした（AI/半導体テーマ特有の急騰だった"
+                                    "可能性が高いです）。参考までにリターン上位を表示します。"
+                                )
+                            st.dataframe(pd.DataFrame(_div_rows[:15]), hide_index=True, use_container_width=True)
+                            st.caption("※ 実績リターンは配当を含まない株価ベース。過去の実績であり将来を保証するものではありません。")
 
                     # ── 銘柄別配分の推移（%）─────────────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
