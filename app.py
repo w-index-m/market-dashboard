@@ -20799,6 +20799,45 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
         return list(headlines_tuple)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _summarize_news_ja_with_context(ticker: str, articles_tuple: tuple, stock_ctx: str) -> list:
+    """英語ニュース（見出し＋Finnhubの短い要約）を、保有銘柄の直近テクニカルデータも
+    踏まえて3〜5文程度の日本語要約に翻訳・補足する（Groq使用、TTL=1h）。
+    articles_tuple: "見出し || 元の短い要約" 形式の文字列のtuple
+    Returns: list[str]（入力と同じ長さ）。失敗時は元の要約（"||"の後半）をそのまま返す。
+    """
+    _fallback = [a.split("||", 1)[-1].strip() for a in articles_tuple]
+    if not articles_tuple:
+        return []
+    numbered = "\n".join(f"{i+1}. {a}" for i, a in enumerate(articles_tuple))
+    prompt = (
+        f"あなたは株式ニュースの解説者です。{ticker}に関する以下の英語ニュース"
+        "（見出し || 元記事の短い要約）を、日本語で3〜5文程度に翻訳・解説してください。\n"
+        "元記事に書かれていない数値や出来事を断定的に創作しないこと。"
+        "背景説明が必要な場合のみ、下記の直近テクニカルデータを参考にしてよい"
+        "（データに基づかない推測は書かないこと）。\n"
+        f"【{ticker}の直近データ】{stock_ctx}\n\n"
+        "各項目は改行せず1行にまとめ、番号付きリスト（1. 〜\\n2. 〜）の形式で"
+        "日本語の要約のみ返してください。余分な説明不要。\n\n"
+        + numbered
+    )
+    try:
+        text, _ = _call_ai_for_trading(
+            prompt, model_pref="groq", max_output_tokens=1200, temperature=0.3
+        )
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        result = []
+        for line in lines:
+            m = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+            if m:
+                result.append(m.group(1))
+        while len(result) < len(articles_tuple):
+            result.append(_fallback[len(result)])
+        return result[:len(articles_tuple)]
+    except Exception:
+        return _fallback
+
+
 _STOCK_CACHE_HEADERS    = ["date", "ticker", "data_json", "updated_at"]
 _AI_SCORE_CACHE_HEADERS = ["date", "tickers_key", "mode", "scores_json", "model", "created_at"]
 
@@ -21898,10 +21937,27 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                 ja_list = _translate_headlines_to_ja(en_headlines)
                 for i, n in enumerate(news_items):
                     n["headline_ja"] = ja_list[i] if i < len(ja_list) else n["headline"]
-                # Finnhubのsummaryは長文になりがちなので300字で切ってから翻訳（翻訳コスト削減）
-                en_summaries = tuple((n["summary"] or "")[:300] for n in news_items)
-                if any(en_summaries):
-                    ja_summaries = _translate_headlines_to_ja(en_summaries)
+                # Finnhubのsummaryは1〜2文の短い一言メモのことが多いため、単純翻訳ではなく
+                # 保有銘柄の直近テクニカルデータも渡してAIに3〜5文程度に補足してもらう
+                # （元記事にない情報の創作を防ぐため、プロンプト側で明示的に禁止している）
+                _ctx_parts = []
+                if result.get("price") is not None:
+                    _cur = "円" if is_jp else "USD"
+                    _ctx_parts.append(f"現在値{result['price']}{_cur}")
+                if result.get("ret_1d") is not None:
+                    _ctx_parts.append(f"1日{result['ret_1d']:+.1f}%")
+                if result.get("ret_5d") is not None:
+                    _ctx_parts.append(f"5日{result['ret_5d']:+.1f}%")
+                if result.get("ret_20d") is not None:
+                    _ctx_parts.append(f"20日{result['ret_20d']:+.1f}%")
+                if result.get("rsi") is not None:
+                    _ctx_parts.append(f"RSI(14)={result['rsi']}")
+                _stock_ctx = "、".join(_ctx_parts) if _ctx_parts else "データなし"
+                _articles = tuple(
+                    f"{n['headline']} || {(n['summary'] or '')[:400]}" for n in news_items
+                )
+                if any(n["summary"] for n in news_items):
+                    ja_summaries = _summarize_news_ja_with_context(ticker, _articles, _stock_ctx)
                     for i, n in enumerate(news_items):
                         if n["summary"]:
                             n["summary_ja"] = ja_summaries[i] if i < len(ja_summaries) else n["summary"]
@@ -27948,6 +28004,7 @@ def render_claude_trading_project():
                             _link_close = "</a>" if _has_url else ""
                             _summary_html = (
                                 f'<div style="font-size:12px;color:#94a3b8;margin-top:5px;line-height:1.6">'
+                                f'<span style="color:#a78bfa;font-size:10px">🤖 AI要約（原文の短い要約＋テクニカルデータで補足）</span><br>'
                                 f'{html.escape(str(_ni["summary"]))}</div>'
                             ) if _ni.get("summary") else ""
                             _news_html.append(
