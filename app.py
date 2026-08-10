@@ -27195,18 +27195,26 @@ def render_claude_trading_project():
                     _total_pnl_jpy  = 0.0
                     _total_skipped  = 0  # 現在値取得に失敗した銘柄数（合計から除外）
                     _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
+                    _total_today_jpy     = 0.0  # 前日比計算用（今日の株数×今日の株価）
+                    _total_prevclose_jpy = 0.0  # 前日比計算用（今日の株数×前日終値）
+                    _prevclose_skipped   = 0
                     for ticker, pos in open_pos.items():
                         is_jp_pos = ticker.endswith(".T")
                         cur_unit  = "円" if is_jp_pos else "USD"
                         cur_price = None
+                        prev_close = None
                         try:
                             info = yf.Ticker(ticker).fast_info
-                            cur_price = float(info.get("lastPrice") or info.get("last_price") or 0) or None
+                            cur_price  = float(info.get("lastPrice") or info.get("last_price") or 0) or None
+                            prev_close = float(
+                                info.get("previousClose") or info.get("previous_close")
+                                or info.get("regularMarketPreviousClose") or 0
+                            ) or None
                         except Exception:
                             pass
                         if not cur_price:
                             try:
-                                cur_raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                                cur_raw = yf.download(ticker, period="5d", auto_adjust=True, progress=False)
                                 if not cur_raw.empty:
                                     close_col = cur_raw["Close"]
                                     if isinstance(close_col, pd.DataFrame):
@@ -27214,6 +27222,8 @@ def render_claude_trading_project():
                                     vals = close_col.dropna()
                                     if len(vals) > 0:
                                         cur_price = float(vals.iloc[-1])
+                                    if prev_close is None and len(vals) > 1:
+                                        prev_close = float(vals.iloc[-2])
                             except Exception:
                                 pass
 
@@ -27221,6 +27231,11 @@ def render_claude_trading_project():
                             _mval_jpy = cur_price * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
                             _sec = _fetch_ticker_sector(ticker)
                             _sector_values[_sec] = _sector_values.get(_sec, 0.0) + _mval_jpy
+                            _total_today_jpy += _mval_jpy
+                            if prev_close:
+                                _total_prevclose_jpy += prev_close * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                            else:
+                                _prevclose_skipped += 1
 
                         avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
                         pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
@@ -27284,6 +27299,20 @@ def render_claude_trading_project():
                         _skip_note = (
                             f"（現在値取得失敗の{_total_skipped}銘柄は集計対象外）" if _total_skipped else ""
                         )
+
+                        # 前日比: 保有株数を固定し、今日の株価 vs 前日終値で計算（プレマーケット等の
+                        # タイミング差はあるため参考値）
+                        _day_chg_html = ""
+                        if _total_prevclose_jpy > 0:
+                            _day_chg_jpy = _total_today_jpy - _total_prevclose_jpy
+                            _day_chg_pct = _day_chg_jpy / _total_prevclose_jpy * 100
+                            _day_color   = "#22c55e" if _day_chg_jpy >= 0 else "#ef4444"
+                            _day_chg_html = (
+                                '<div><div style="font-size:11px;color:#64748b">前日比</div>'
+                                f'<div style="font-size:18px;font-weight:700;color:{_day_color}">'
+                                f'{_day_chg_jpy:+,.0f}円（{_day_chg_pct:+.2f}%）</div></div>'
+                            )
+
                         st.markdown(
                             '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
                             'border:1px solid #334155;border-radius:8px;padding:12px 18px;margin-top:8px">'
@@ -27293,6 +27322,7 @@ def render_claude_trading_project():
                             '<div><div style="font-size:11px;color:#64748b">現在評価額</div>'
                             f'<div style="font-size:18px;font-weight:700;color:#e2e8f0">'
                             f'{_mkt_val_jpy:,.0f}円 ／ ${_mkt_val_usd:,.0f}</div></div>'
+                            f'{_day_chg_html}'
                             '<div><div style="font-size:11px;color:#64748b">含み損益合計（USD／円換算）</div>'
                             f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
                             f'${_total_pnl_jpy / _pnl_usdjpy:+,.0f} ／ {_total_pnl_jpy:+,.0f}円</div></div>'
@@ -27304,6 +27334,8 @@ def render_claude_trading_project():
                         )
                         if _skip_note:
                             st.caption(_skip_note)
+                        if _prevclose_skipped:
+                            st.caption(f"（前日終値取得失敗の{_prevclose_skipped}銘柄は前日比の計算対象外）")
 
                     # ── 資産成長チャート（過去1年・過去3年）───────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
