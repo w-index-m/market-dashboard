@@ -23292,15 +23292,52 @@ def _fetch_ticker_sector(ticker: str) -> str:
         return "その他"
 
 
+# 日本株ティッカー → 米国ADR（米国預託証券）ティッカーの対応表。手動でWeb検索により確認
+# したもののみ収録（未確認の推測でティッカーを載せると誤った銘柄の株価を表示しかねないため、
+# 確認が取れていない銘柄は含めていない＝網羅的ではない）
+_JP_ADR_MAP = {
+    "5801.T": "FUWAY",  # 古河電気工業
+    "5802.T": "SMTOY",  # 住友電気工業
+    "5803.T": "FJIKY",  # フジクラ
+    "6857.T": "ATEYY",  # アドバンテスト
+    "8001.T": "ITOCY",  # 伊藤忠商事
+    "8306.T": "MUFG",   # 三菱UFJフィナンシャル・グループ（NYSE本則上場）
+    "9432.T": "NTTYY",  # 日本電信電話（NTT）
+    "4755.T": "RKUNY",  # 楽天グループ
+    "5334.T": "NGKSY",  # 日本特殊陶業
+    "2801.T": "KIKOY",  # キッコーマン
+}
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _fetch_extended_hours_price(ticker: str) -> dict:
-    """時間外（アフターアワーズ/プレマーケット）の株価を取得する。日本株のPTSはyfinanceでは
-    取得できないため米国株のみ対象。Yahoo Financeの「At close」「Overnight」表示に相当。
-    Returns: {"price": float, "change_pct": float|None, "label": "時間外"|"プレマーケット"} または
-    データが無ければ {}
+    """時間外（アフターアワーズ/プレマーケット）の株価を取得する。日本株はPTS（夜間取引）
+    自体はyfinanceでは取得できないため、代わりに_JP_ADR_MAPに載っているADR（米国預託証券）
+    の直近株価を参考情報として返す（ADR⇔現地株の換算比率は銘柄により異なるため円換算はせず、
+    ADR自体の価格・騰落率をそのまま返す）。
+    Returns:
+      米国株: {"price": float, "change_pct": float|None, "label": "時間外"|"プレマーケット"}
+      日本株（ADR対応銘柄）: {"price": float, "change_pct": float|None, "label": "ADR",
+                              "adr_ticker": str}
+      データが無ければ {}
     """
     if ticker.endswith(".T"):
-        return {}
+        adr_ticker = _JP_ADR_MAP.get(ticker)
+        if not adr_ticker:
+            return {}
+        try:
+            adr_info = yf.Ticker(adr_ticker).fast_info
+            adr_price = adr_info.get("lastPrice") or adr_info.get("last_price")
+            adr_prev  = adr_info.get("previousClose") or adr_info.get("previous_close")
+            if not adr_price:
+                return {}
+            adr_chg = (float(adr_price) / float(adr_prev) - 1) * 100 if adr_prev else None
+            return {
+                "price": float(adr_price), "change_pct": adr_chg,
+                "label": "ADR", "adr_ticker": adr_ticker,
+            }
+        except Exception:
+            return {}
     try:
         info = yf.Ticker(ticker).info or {}
         post_price = info.get("postMarketPrice")
@@ -27384,8 +27421,9 @@ def render_claude_trading_project():
                         _ext = _fetch_extended_hours_price(ticker)
                         if _ext:
                             _ext_chg = _ext.get("change_pct")
+                            _ext_prefix = f'ADR {_ext["adr_ticker"]} ' if _ext.get("label") == "ADR" else ""
                             _ext_str = (
-                                f'{_ext["price"]:,.2f} USD'
+                                f'{_ext_prefix}{_ext["price"]:,.2f} USD'
                                 + (f'（{_ext_chg:+.2f}%）' if _ext_chg is not None else '')
                             )
                         else:
@@ -27410,7 +27448,12 @@ def render_claude_trading_project():
                         })
 
                     st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
-                    st.caption("※ 時間外/PTSは米国株の時間外・プレマーケット取引価格（Yahoo Financeの「Overnight」相当）。日本株のPTSは取得元の都合上非対応です。")
+                    st.caption(
+                        "※ 時間外/PTSは米国株の時間外・プレマーケット取引価格（Yahoo Financeの「Overnight」相当）。"
+                        "日本株はPTS（夜間取引）自体は取得元の都合上非対応ですが、ADR（米国預託証券）が"
+                        "存在する銘柄はADRの直近株価を参考表示します（換算比率は銘柄ごとに異なるためADR"
+                        "自体の価格をそのまま表示。ADR対応は手動確認した一部銘柄のみで網羅的ではありません）。"
+                    )
 
                     # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
                     if _total_cost_jpy > 0:
