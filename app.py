@@ -23827,17 +23827,21 @@ _CLAUDE_DIVIDEND_BASKET = {
 
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
-def _screen_diversification_candidates_by_return(exclude_tickers: tuple = ()) -> list:
-    """分散投資の候補銘柄（_TRADING_CANDIDATESからAI/光ミックスバスケット・除外指定銘柄を
-    除いたもの＝既にAI/半導体・光通信テーマに寄っていない銘柄群）について、実績の
+def _screen_diversification_candidates_by_return(
+    exclude_tickers: tuple = (), include_theme_baskets: bool = False,
+) -> list:
+    """候補銘柄（_TRADING_CANDIDATESから除外指定銘柄を除いたもの）について、実績の
     1年・3年リターンを計算する。ポートフォリオ自体の実績リターンと比較して、
-    「別テーマでも同等以上に伸びた銘柄はあるか」を確認するための素材。
+    「同等以上に伸びた銘柄はあるか」を確認するための素材。
+    include_theme_baskets=False（既定）: AI/光ミックスバスケットの銘柄も除外し、
+    既に保有テーマと違う「本当の分散候補」だけに絞る。
+    include_theme_baskets=True: 除外せず、保有中のAI/光通信テーマ銘柄と同テーマの
+    未保有銘柄（例: CIEN・AAOI等）も含めて比較する。
     Returns: [{"ticker", "ret_1y", "ret_3y"}, ...]（リターン計算不能な銘柄は除外）
     """
     candidates = sorted({
         t for t in _TRADING_CANDIDATES
-        if t not in _CLAUDE_AI_BASKET
-        and t not in _CLAUDE_OPTICAL_BASKET
+        if (include_theme_baskets or (t not in _CLAUDE_AI_BASKET and t not in _CLAUDE_OPTICAL_BASKET))
         and t not in exclude_tickers
     })
     price_dict = _fetch_ticker_close_prices(candidates, period="3y")
@@ -27381,9 +27385,14 @@ def render_claude_trading_project():
                             "それ以外のテーマ（ヘルスケア・金融・エネルギー・生活必需品・サイバーセキュリティ等）の"
                             "候補銘柄について、実際に上のバックテストと同水準以上のリターンだったものがあるか確認します。"
                         )
+                        _div_include_theme = st.checkbox(
+                            "AI/光ミックスと同テーマの未保有銘柄（CIEN・AAOI等）も含める",
+                            value=False, key="div_include_theme",
+                        )
                         with st.spinner("分散候補銘柄のリターンを計算中..."):
                             _div_candidates = _screen_diversification_candidates_by_return(
-                                exclude_tickers=tuple(open_pos.keys())
+                                exclude_tickers=tuple(open_pos.keys()),
+                                include_theme_baskets=_div_include_theme,
                             )
                         if not _div_candidates:
                             st.info("分散候補銘柄のデータを取得できませんでした。")
