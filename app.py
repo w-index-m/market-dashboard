@@ -24794,7 +24794,7 @@ import hashlib as _hl
 import uuid as _uuid
 from datetime import timedelta as _tdelta
 
-_SESSION_DAYS = 3
+_SESSION_DAYS = 30  # localStorage併用の「再ログイン省略」と組み合わせるため、短すぎない期間にする
 
 
 def _auth_hash(pw: str) -> str:
@@ -24924,6 +24924,46 @@ def _auth_check_session(token: str) -> str:
     except Exception as _e:
         logger.warning(f"[auth] セッション確認失敗: {_e}")
     return ""
+
+
+_LOGIN_TOKEN_JS_KEY = "windex_trading_login_token"
+
+
+def _auto_restore_login_token(key: str) -> None:
+    """localStorageに保存されたログイントークンがあれば、URLクエリパラメータへ復元する。
+    Cookieの代わりにブラウザのlocalStorageを使い、同じ端末・同じブラウザなら再ログイン
+    せずに済むようにする（streamlit-javascript経由）。URLに既にtokenがあれば何もしない。
+    key: st_javascriptの内部コンポーネントIDに使う一意な文字列（複数タブで毎回呼ばれるため、
+    タブごとに別のkeyを渡さないとStreamlitDuplicateElementIdで落ちる）。
+    """
+    if st.query_params.get("token"):
+        return
+    try:
+        from streamlit_javascript import st_javascript
+        _saved = st_javascript(f"localStorage.getItem('{_LOGIN_TOKEN_JS_KEY}')", key=f"restore_tok_{key}")
+    except Exception:
+        return
+    if isinstance(_saved, str) and len(_saved) > 10:
+        st.query_params["token"] = _saved
+        st.rerun()
+
+
+def _persist_login_token(token: str, key: str) -> None:
+    """ログイントークンをlocalStorageへ保存する（次回アクセス時の自動ログイン用）。"""
+    try:
+        from streamlit_javascript import st_javascript
+        st_javascript(f"localStorage.setItem('{_LOGIN_TOKEN_JS_KEY}', '{token}')", key=f"persist_tok_{key}")
+    except Exception:
+        pass
+
+
+def _clear_persisted_login_token(key: str) -> None:
+    """localStorageに保存済みのログイントークンを削除する（ログアウト用）。"""
+    try:
+        from streamlit_javascript import st_javascript
+        st_javascript(f"localStorage.removeItem('{_LOGIN_TOKEN_JS_KEY}')", key=f"clear_tok_{key}")
+    except Exception:
+        pass
 
 
 def _auth_signup(username: str, password: str, display_name: str) -> tuple[bool, str]:
@@ -26849,12 +26889,19 @@ def render_claude_trading_project():
 
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     with tab_trade:
+        _auto_restore_login_token("trade")
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
             st.session_state["_trading_user"] = _usr
             _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
-            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
+            _lo_c1, _lo_c2 = st.columns([5, 1])
+            _lo_c1.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
+            if _lo_c2.button("🔓 ログアウト", key="logout_btn_trade"):
+                _clear_persisted_login_token("trade")
+                st.query_params.pop("token", None)
+                st.session_state.pop("_trading_user", None)
+                st.rerun()
 
             with st.expander("🔔 通知設定（Slack）"):
                 st.caption(
@@ -26888,7 +26935,9 @@ def render_claude_trading_project():
                 _p = st.text_input("パスワード", type="password", key="tl_p_trade")
                 if st.button("ログイン", type="primary", key="tl_b_trade"):
                     if _auth_validate(_u, _p):
-                        st.query_params["token"] = _auth_create_session(_u)
+                        _new_tok = _auth_create_session(_u)
+                        st.query_params["token"] = _new_tok
+                        _persist_login_token(_new_tok, "trade_login")
                         st.rerun()
                     else:
                         st.error("ユーザー名またはパスワードが違います")
@@ -26901,7 +26950,9 @@ def render_claude_trading_project():
                     if st.button("登録してログイン", key="su_b_trade"):
                         _su_ok, _su_err = _auth_signup(_su_u, _su_p, _su_n)
                         if _su_ok:
-                            st.query_params["token"] = _auth_create_session(_su_u.strip())
+                            _new_tok = _auth_create_session(_su_u.strip())
+                            st.query_params["token"] = _new_tok
+                            _persist_login_token(_new_tok, "trade_signup")
                             st.rerun()
                         else:
                             st.error(_su_err)
@@ -26981,6 +27032,7 @@ def render_claude_trading_project():
 
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
+        _auto_restore_login_token("pnl")
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
@@ -27001,7 +27053,9 @@ def render_claude_trading_project():
                 _p = st.text_input("パスワード", type="password", key="tl_p_pnl")
                 if st.button("ログイン", type="primary", key="tl_b_pnl"):
                     if _auth_validate(_u, _p):
-                        st.query_params["token"] = _auth_create_session(_u)
+                        _new_tok = _auth_create_session(_u)
+                        st.query_params["token"] = _new_tok
+                        _persist_login_token(_new_tok, "pnl_login")
                         st.rerun()
                     else:
                         st.error("ユーザー名またはパスワードが違います")
@@ -27868,6 +27922,7 @@ def render_claude_trading_project():
 
     # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
     with tab_summary:
+        _auto_restore_login_token("summary")
         _tok = st.query_params.get("token", "")
         _usr = _auth_check_session(_tok) if _tok else ""
         if _usr:
@@ -27888,7 +27943,9 @@ def render_claude_trading_project():
                 _p = st.text_input("パスワード", type="password", key="tl_p_summary")
                 if st.button("ログイン", type="primary", key="tl_b_summary"):
                     if _auth_validate(_u, _p):
-                        st.query_params["token"] = _auth_create_session(_u)
+                        _new_tok = _auth_create_session(_u)
+                        st.query_params["token"] = _new_tok
+                        _persist_login_token(_new_tok, "summary_login")
                         st.rerun()
                     else:
                         st.error("ユーザー名またはパスワードが違います")
