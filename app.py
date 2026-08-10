@@ -27293,9 +27293,9 @@ def render_claude_trading_project():
                             return f"（{' / '.join(_parts)}）" if _parts else ""
 
                         st.markdown("過去1年" + _growth_period_label(_pnl_1y_df))
-                        st.plotly_chart(_build_growth_fig(_pnl_1y_df), use_container_width=True)
+                        st.plotly_chart(_build_growth_fig(_pnl_1y_df), use_container_width=True, key="growth_fig_1y")
                         st.markdown("過去3年" + _growth_period_label(_pnl_3y_df))
-                        st.plotly_chart(_build_growth_fig(_pnl_3y_df), use_container_width=True)
+                        st.plotly_chart(_build_growth_fig(_pnl_3y_df), use_container_width=True, key="growth_fig_3y")
                         st.caption(
                             "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。VTは同時期に"
                             "ポートフォリオと同額を一括投資していた場合の参考換算値です（積立timing差は考慮していません）。"
@@ -27438,10 +27438,10 @@ def render_claude_trading_project():
                             )
 
                         st.markdown("過去1年" + _bt_label(_bt_1y_ret, _bt_1y_vt_ret))
-                        st.plotly_chart(_build_backtest_fig(_bt_1y_df), use_container_width=True)
+                        st.plotly_chart(_build_backtest_fig(_bt_1y_df), use_container_width=True, key="backtest_fig_1y")
                         _render_risk_metrics(_bt_1y_df)
                         st.markdown("過去3年" + _bt_label(_bt_3y_ret, _bt_3y_vt_ret))
-                        st.plotly_chart(_build_backtest_fig(_bt_3y_df), use_container_width=True)
+                        st.plotly_chart(_build_backtest_fig(_bt_3y_df), use_container_width=True, key="backtest_fig_3y")
                         _render_risk_metrics(_bt_3y_df)
                         st.caption(
                             "※ 現在保有していない（既に売却済みの）銘柄は含まれません。VTは同時期に"
@@ -27534,7 +27534,7 @@ def render_claude_trading_project():
                             margin=dict(l=10, r=10, t=10, b=10),
                             height=360,
                         )
-                        st.plotly_chart(fig_alloc, use_container_width=True)
+                        st.plotly_chart(fig_alloc, use_container_width=True, key="alloc_fig_pnl_tab")
                         st.caption(
                             "※ 評価額は円換算（USD建て銘柄は日次USDJPYレートで換算）。"
                             "売却済みで保有額が0の銘柄は非表示。全期間表示です。"
@@ -27669,7 +27669,7 @@ def render_claude_trading_project():
                             margin=dict(l=10, r=10, t=30, b=10),
                             height=280, showlegend=False,
                         )
-                        st.plotly_chart(fig_gl, use_container_width=True)
+                        st.plotly_chart(fig_gl, use_container_width=True, key="cost_vs_value_fig_pnl_tab")
 
                     # ── ② セクター別配分 ────────────────────────────
                     if _sector_values:
@@ -27693,7 +27693,7 @@ def render_claude_trading_project():
                             margin=dict(l=10, r=10, t=10, b=10),
                             height=340,
                         )
-                        st.plotly_chart(fig_sec, use_container_width=True)
+                        st.plotly_chart(fig_sec, use_container_width=True, key="sector_alloc_fig_pnl_tab")
                         if _total_skipped:
                             st.caption(f"（現在値取得失敗の{_total_skipped}銘柄はセクター配分の集計対象外）")
 
@@ -27918,7 +27918,7 @@ def render_claude_trading_project():
                         height=100,
                         showlegend=False,
                     )
-                    st.plotly_chart(fig_gl, use_container_width=True)
+                    st.plotly_chart(fig_gl, use_container_width=True, key="cost_vs_value_fig_summary_tab")
 
                 with c_right:
                     st.markdown(
@@ -28080,7 +28080,7 @@ def render_claude_trading_project():
                             margin=dict(l=10, r=10, t=10, b=10),
                             height=220,
                         )
-                        st.plotly_chart(fig_alloc, use_container_width=True)
+                        st.plotly_chart(fig_alloc, use_container_width=True, key="jpus_alloc_fig_summary_tab")
                         st.markdown(
                             f'<div style="display:flex;gap:16px;justify-content:center;font-size:12px">'
                             f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% ({cur_label} {jp_val:,.0f})</span>'
@@ -28143,7 +28143,7 @@ def render_claude_trading_project():
                             height=max(160, len(sec_labels) * 36),
                             showlegend=False,
                         )
-                        st.plotly_chart(fig_sec, use_container_width=True)
+                        st.plotly_chart(fig_sec, use_container_width=True, key="sector_alloc_fig_summary_tab")
                     else:
                         st.info("データなし")
 
