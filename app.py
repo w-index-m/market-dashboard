@@ -26900,17 +26900,17 @@ def render_claude_trading_project():
                     if trade_ticker and t_price > 0:
                         action = "BUY" if "BUY" in t_action else "SELL"
 
-                        # 保有銘柄数の上限チェック（1ユーザーあたり20銘柄まで、新規銘柄のBUYのみ対象）
+                        # 保有銘柄数の上限チェック（1ユーザーあたり30銘柄まで、新規銘柄のBUYのみ対象）
                         _limit_blocked = False
                         if action == "BUY":
                             _lim_df, _lim_err = _load_trades(_usr)
                             _lim_pos = (_calc_positions_from_df(_lim_df)
                                         if not _lim_err and not _lim_df.empty else {})
-                            if trade_ticker not in _lim_pos and len(_lim_pos) >= 20:
+                            if trade_ticker not in _lim_pos and len(_lim_pos) >= 30:
                                 _limit_blocked = True
                                 st.session_state["_trade_status"] = "error"
                                 st.session_state["_trade_msg"] = (
-                                    "保有銘柄数の上限（20銘柄）に達しています。"
+                                    "保有銘柄数の上限（30銘柄）に達しています。"
                                     "新しい銘柄を追加するには、既存の保有銘柄を売却してください。"
                                 )
 
