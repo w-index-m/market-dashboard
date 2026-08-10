@@ -25430,31 +25430,46 @@ def render_claude_trading_project():
                     _sw_badge = (' <span style="font-size:9px;background:#7f1d1d;color:#fca5a5;'
                                  'border-radius:3px;padding:1px 4px">⚠️乗換検討</span>'
                                  if _sw_flag else "")
+                    _disp_name = _get_stock_display_name(_atk)
+                    # 各セルに明示的な背景色を付けて、Streamlitのテーマ（ライト/ダーク）に
+                    # 依存せず文字が見えるようにする（背景を指定しないと薄い文字色がページの
+                    # 背景色に埋もれて見えにくくなるため）
+                    _CELL_BG = "background:#0f172a;border-radius:6px;padding:5px 8px;margin-bottom:3px"
                     _cols[0].markdown(
+                        f'<div style="{_CELL_BG}">'
                         f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">'
-                        f'{_atk}{_sw_badge}</div>'
-                        f'<div style="font-size:10px;color:#64748b">{_ar.get("sector","")[:16]}</div>',
+                        f'{_disp_name}{_sw_badge}</div>'
+                        f'<div style="font-size:10px;color:#94a3b8">{_atk} ・ {_ar.get("sector","")[:16]}</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
                     _cols[1].markdown(
-                        f'<div style="font-size:13px;color:#94a3b8">{_ar["current_alloc"]:.1f}%</div>',
+                        f'<div style="{_CELL_BG}">'
+                        f'<div style="font-size:13px;color:#94a3b8">{_ar["current_alloc"]:.1f}%</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
                     _cols[2].markdown(
-                        f'<div style="font-size:13px;font-weight:700;color:#38bdf8">{_ar["rec_alloc"]:.1f}%</div>',
+                        f'<div style="{_CELL_BG}">'
+                        f'<div style="font-size:13px;font-weight:700;color:#38bdf8">{_ar["rec_alloc"]:.1f}%</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
                     _cols[3].markdown(
+                        f'<div style="{_CELL_BG}">'
                         f'<div style="font-size:13px;font-weight:700;color:{_dc}">'
-                        f'{_di}{abs(_delta):.1f}pp</div>',
+                        f'{_di}{abs(_delta):.1f}pp</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
                     # ルールスコア（バー付き）
                     _cols[4].markdown(
+                        f'<div style="{_CELL_BG}">'
                         f'<div style="font-size:11px;color:{_sc_color};font-weight:700">'
                         f'{_rule_sc:+.1f}</div>'
                         f'<div style="background:#1e293b;border-radius:3px;height:4px;margin-top:3px">'
                         f'<div style="background:{_sc_color};width:{_bar_w}%;height:4px;border-radius:3px"></div>'
+                        f'</div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
@@ -25465,41 +25480,51 @@ def render_claude_trading_project():
                         _ai_txt = f'{_ai_sc:+.1f}' if _ai_sc is not None else "─"
                         _ai_reason = _ar.get("ai_reasoning", "")
                         _cols[5].markdown(
+                            f'<div style="{_CELL_BG}">'
                             f'<div style="font-size:11px;color:{_ai_color};font-weight:700" '
-                            f'title="{_ai_reason}">{_ai_txt}</div>',
+                            f'title="{_ai_reason}">{_ai_txt}</div>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
                         # vs BM (col 6)
                         _bm_c = "#4ade80" if _bm_diff > 0 else "#ef4444" if _bm_diff < -1 else "#f97316"
                         _cols[6].markdown(
+                            f'<div style="{_CELL_BG}">'
                             f'<div style="font-size:11px;color:{_bm_c};font-weight:700"'
                             f' title="vs {_bm_lbl} ({_bm_diff:+.2f})">'
                             f'{_bm_diff:+.1f}<br>'
-                            f'<span style="font-size:9px;color:#64748b">{_bm_lbl}</span></div>',
+                            f'<span style="font-size:9px;color:#94a3b8">{_bm_lbl}</span></div>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
                         # シグナル + AI根拠
                         _sig_str  = "  ".join(_ar["signals"][:3])
                         _aif_str  = " / ".join(_ar.get("ai_factors", [])[:2])
                         _cols[7].markdown(
-                            f'<div style="font-size:10px;color:#94a3b8;line-height:1.5">{_sig_str}</div>'
-                            + (f'<div style="font-size:10px;color:#a78bfa;line-height:1.5">🤖 {_aif_str}</div>'
-                               if _aif_str else ""),
+                            f'<div style="{_CELL_BG}">'
+                            f'<div style="font-size:10px;color:#e2e8f0;line-height:1.5">{_sig_str}</div>'
+                            + (f'<div style="font-size:10px;color:#c4b5fd;line-height:1.5">🤖 {_aif_str}</div>'
+                               if _aif_str else "")
+                            + f'</div>',
                             unsafe_allow_html=True,
                         )
                     else:
                         # vs BM (col 5)
                         _bm_c = "#4ade80" if _bm_diff > 0 else "#ef4444" if _bm_diff < -1 else "#f97316"
                         _cols[5].markdown(
+                            f'<div style="{_CELL_BG}">'
                             f'<div style="font-size:11px;color:{_bm_c};font-weight:700"'
                             f' title="vs {_bm_lbl} ({_bm_diff:+.2f})">'
                             f'{_bm_diff:+.1f}<br>'
-                            f'<span style="font-size:9px;color:#64748b">{_bm_lbl}</span></div>',
+                            f'<span style="font-size:9px;color:#94a3b8">{_bm_lbl}</span></div>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
                         _chip_str = "  ".join(_ar["signals"][:3])
                         _cols[6].markdown(
-                            f'<div style="font-size:10px;color:#94a3b8;line-height:1.6">{_chip_str}</div>',
+                            f'<div style="{_CELL_BG}">'
+                            f'<div style="font-size:10px;color:#e2e8f0;line-height:1.6">{_chip_str}</div>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
 
@@ -25529,10 +25554,14 @@ def render_claude_trading_project():
 
                 # ── 乗り換え候補 ────────────────────────────────────────
                 if _switch_flags:
+                    _switch_flags_disp = [
+                        f"{_get_stock_display_name(t)}（{t}）" for t in _switch_flags
+                    ]
                     st.markdown(
                         f'<div style="font-size:12px;color:#fca5a5;margin:10px 0 6px">'
-                        f'⚠️ ベンチマークを大幅に下回る銘柄: '
-                        f'<b>{" / ".join(_switch_flags)}</b> — 乗り換えを検討してください</div>',
+                        f'⚠️ 現在の技術スコアがベンチマークを大幅に下回る銘柄'
+                        f'（短期的なシグナルであり、長期リターンの良し悪しとは別軸です）: '
+                        f'<b>{" / ".join(_switch_flags_disp)}</b> — 乗り換えを検討してください</div>',
                         unsafe_allow_html=True,
                     )
                     _sw_col1, _sw_col2 = st.columns([3, 1])
@@ -25567,10 +25596,18 @@ def render_claude_trading_project():
                             f'🤖 {_sw_model_name} による乗り換え分析</div>',
                             unsafe_allow_html=True,
                         )
+                        def _sw_disp(_tk: str) -> str:
+                            """乗り換え候補の表示用（銘柄名（ティッカー）。ETFなど名称解決できない場合はティッカーのまま）"""
+                            _tk = (_tk or "").strip()
+                            if not _tk:
+                                return _tk
+                            _nm = _get_stock_display_name(_tk)
+                            return f"{_nm}（{_tk}）" if _nm != _tk else _tk
+
                         for _sw in _sw_result:
-                            _sw_from = _sw.get("from", "?")
-                            _sw_to_s = ", ".join(_sw.get("to_stocks", []))
-                            _sw_to_e = _sw.get("to_etf", "")
+                            _sw_from = _sw_disp(_sw.get("from", "?"))
+                            _sw_to_s = ", ".join(_sw_disp(_t) for _t in _sw.get("to_stocks", []))
+                            _sw_to_e = _sw_disp(_sw.get("to_etf", ""))
                             _sw_rat  = _sw.get("rationale", "")
                             _sw_tim  = _sw.get("timing", "")
                             _sw_sec  = _sw.get("sector", "")
