@@ -20630,8 +20630,15 @@ def _trades_tab(username: str = "") -> str:
     return "claude_trades" if u in ("admin", "") else f"claude_trades_{u}"
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _load_trades(username: str = "") -> tuple[pd.DataFrame, str | None]:
-    """取引記録をGoogle Sheetsから読み込む。(DataFrame, error_msg) を返す。"""
+    """取引記録をGoogle Sheetsから読み込む。(DataFrame, error_msg) を返す。
+    1ページの描画中に何度も呼ばれる（保有ポジション表・資産成長・バックテスト・配分推移・
+    分散候補スクリーニング等）ため、キャッシュ無しだと1回のページ読み込みだけでGoogle
+    Sheets APIの読み取りクォータ（429 Quota exceeded）を使い切ってしまう。60秒キャッシュで
+    同一ページ内の重複読み込みを1回にまとめる（取引の追加・編集・削除時はcache_data.clear()
+    で即時反映する）。
+    """
     try:
         ws = _trading_ws(_trades_tab(username), _TRADES_HEADERS)
         if not ws:
@@ -21830,10 +21837,14 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         rs    = gain / loss.replace(0, float("nan"))
         rsi   = float(100 - 100 / (1 + rs.iloc[-1])) if not rs.iloc[-1] != rs.iloc[-1] else None
 
-        # 出来高（存在する場合）
+        # 出来高（存在する場合）。Closeと同様、単一銘柄でもMultiIndex列になることがあるため
+        # DataFrameのままなら最初の列だけ取り出してSeries化する
         vol_ratio = None
         if "Volume" in raw.columns:
-            vol = raw["Volume"].dropna()
+            vol = raw["Volume"]
+            if hasattr(vol, "columns"):
+                vol = vol.iloc[:, 0]
+            vol = vol.dropna()
             if len(vol) >= 20:
                 vol_ratio = float(vol.iloc[-1] / vol.rolling(20).mean().iloc[-1])
 
@@ -26922,6 +26933,7 @@ def render_claude_trading_project():
                                 username=_usr,
                             )
                             if ok:
+                                st.cache_data.clear()
                                 st.session_state["_trade_ticker"] = ""
                                 st.session_state["_trade_name"]   = ""
                                 st.session_state["_trade_status"] = "ok"
