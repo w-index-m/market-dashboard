@@ -27910,11 +27910,19 @@ def render_claude_trading_project():
                                     "date":     _ni.get("date", ""),
                                     "source":   _ni.get("source", ""),
                                 })
-                            if _sdata.get("next_earnings"):
-                                _earnings_rows.append({
-                                    "銘柄": _n_name, "コード": _n_ticker,
-                                    "次回決算予定日": _sdata["next_earnings"],
-                                })
+                            _n_earn = _sdata.get("next_earnings")
+                            if _n_earn:
+                                # yfinanceの決算予定日は実際の決算発表後もしばらく過去日のまま
+                                # 残ることがあるため、今日より前の日付は「次回」ではないので除外する
+                                try:
+                                    _n_earn_past = pd.Timestamp(_n_earn).normalize() < pd.Timestamp.today().normalize()
+                                except Exception:
+                                    _n_earn_past = False
+                                if not _n_earn_past:
+                                    _earnings_rows.append({
+                                        "銘柄": _n_name, "コード": _n_ticker,
+                                        "次回決算予定日": _n_earn,
+                                    })
 
                     if _earnings_rows:
                         _earnings_rows.sort(key=lambda r: r["次回決算予定日"])
