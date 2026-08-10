@@ -25214,9 +25214,9 @@ def render_claude_trading_project():
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    tab_signal, tab_trade, tab_pnl, tab_summary, tab_chart = st.tabs([
+    tab_signal, tab_trade, tab_pnl, tab_summary = st.tabs([
         "🤖 AI分析・シグナル", "✏️ 取引記録入力",
-        "💰 損益・ポートフォリオ", "💹 サマリー", "📊 チャート比較",
+        "💰 損益・ポートフォリオ", "💹 サマリー",
     ])
 
     # ── タブ①: AI分析・シグナル ────────────────────────────────
@@ -28605,13 +28605,6 @@ def render_claude_trading_project():
 
                 st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
 
-    # ── タブ⑥: チャート比較（ページ最下部にも常時表示）─────────────
-    with tab_chart:
-        render_ticker_chart_compare()
-
-    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-    st.markdown("---")
-    render_ticker_chart_compare(key_prefix="bottom")
 
 # =====================================================
 # 🔐 管理者用チェンジログ（パスワード保護）
