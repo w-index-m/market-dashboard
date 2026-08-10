@@ -27387,7 +27387,7 @@ def render_claude_trading_project():
                         )
                         _div_include_theme = st.checkbox(
                             "AI/光ミックスと同テーマの未保有銘柄（CIEN・AAOI等）も含める",
-                            value=False, key="div_include_theme",
+                            value=True, key="div_include_theme",
                         )
                         with st.spinner("分散候補銘柄のリターンを計算中..."):
                             _div_candidates = _screen_diversification_candidates_by_return(
