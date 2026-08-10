@@ -27480,7 +27480,12 @@ def render_claude_trading_project():
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
-                    st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+                    st.dataframe(
+                        pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True,
+                        column_config={
+                            "時間外/PTS": st.column_config.TextColumn(width="large"),
+                        },
+                    )
                     st.caption(
                         "※ 時間外/PTSは米国株の時間外・プレマーケット取引価格（Yahoo Financeの「Overnight」相当）。"
                         "日本株はPTS（夜間取引）自体は取得元の都合上非対応ですが、ADR（米国預託証券）が"
