@@ -27188,6 +27188,15 @@ def render_claude_trading_project():
                 open_pos = _calc_positions_from_df(df_trades)
 
                 if open_pos:
+                    _privacy = st.checkbox(
+                        "🙈 金額非表示モード（画面共有時などに金額を隠す。比率・パーセントは表示されます）",
+                        key="pnl_privacy_mode",
+                    )
+
+                    def _mv(s: str) -> str:
+                        """金額非表示モード用マスク。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
+                        return "●●●" if _privacy else s
+
                     st.markdown("**保有中ポジション（現在値・含み損益）**")
                     _pnl_usdjpy = _fetch_usd_jpy()
                     pnl_rows = []
@@ -27279,11 +27288,11 @@ def render_claude_trading_project():
                             # 通貨単位は行ごとに変わる（米国株=USD/日本株=円）ため、列名ではなく
                             # 値の中に埋め込む（列名を動的にするとpd.DataFrameが別々の列として
                             # 分裂させてしまい表が崩れるため）
-                            "平均取得単価": f"{avg_cost:,.2f} {cur_unit}",
-                            "現在株価":   f"{cur_price:,.2f} {cur_unit}" if cur_price else "取得失敗",
-                            "時間外/PTS": _ext_str,
-                            "含み損益（USD）": _pnl_usd_str,
-                            "含み損益（円）":  _pnl_jpy_str,
+                            "平均取得単価": _mv(f"{avg_cost:,.2f} {cur_unit}"),
+                            "現在株価":   _mv(f"{cur_price:,.2f} {cur_unit}") if cur_price else "取得失敗",
+                            "時間外/PTS": _mv(_ext_str),
+                            "含み損益（USD）": _mv(_pnl_usd_str),
+                            "含み損益（円）":  _mv(_pnl_jpy_str),
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
@@ -27310,7 +27319,7 @@ def render_claude_trading_project():
                             _day_chg_html = (
                                 '<div><div style="font-size:11px;color:#64748b">前日比</div>'
                                 f'<div style="font-size:18px;font-weight:700;color:{_day_color}">'
-                                f'{_day_chg_jpy:+,.0f}円（{_day_chg_pct:+.2f}%）</div></div>'
+                                f'{_mv(f"{_day_chg_jpy:+,.0f}円")}（{_day_chg_pct:+.2f}%）</div></div>'
                             )
 
                         st.markdown(
@@ -27318,14 +27327,14 @@ def render_claude_trading_project():
                             'border:1px solid #334155;border-radius:8px;padding:12px 18px;margin-top:8px">'
                             '<div><div style="font-size:11px;color:#64748b">取得単価合計（円換算）</div>'
                             f'<div style="font-size:18px;font-weight:700;color:#e2e8f0">'
-                            f'{_total_cost_jpy:,.0f}円</div></div>'
+                            f'{_mv(f"{_total_cost_jpy:,.0f}円")}</div></div>'
                             '<div><div style="font-size:11px;color:#64748b">現在評価額</div>'
                             f'<div style="font-size:18px;font-weight:700;color:#e2e8f0">'
-                            f'{_mkt_val_jpy:,.0f}円 ／ ${_mkt_val_usd:,.0f}</div></div>'
+                            f'{_mv(f"{_mkt_val_jpy:,.0f}円 ／ ${_mkt_val_usd:,.0f}")}</div></div>'
                             f'{_day_chg_html}'
                             '<div><div style="font-size:11px;color:#64748b">含み損益合計（USD／円換算）</div>'
                             f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
-                            f'${_total_pnl_jpy / _pnl_usdjpy:+,.0f} ／ {_total_pnl_jpy:+,.0f}円</div></div>'
+                            f'{_mv(f"${_total_pnl_jpy / _pnl_usdjpy:+,.0f} ／ {_total_pnl_jpy:+,.0f}円")}</div></div>'
                             '<div><div style="font-size:11px;color:#64748b">合計損益率</div>'
                             f'<div style="font-size:18px;font-weight:700;color:{_total_color}">'
                             f'{_total_pnl_pct:+.2f}%</div></div>'
@@ -27359,18 +27368,19 @@ def render_claude_trading_project():
                         def _build_growth_fig(_df):
                             _gain  = _df["pnl"].mean() if "pnl" in _df.columns else 0
                             _fill  = "rgba(34,197,94,0.12)" if _gain >= 0 else "rgba(239,68,68,0.10)"
+                            _hover_val = "<extra></extra>" if _privacy else ": %{y:,.0f}<extra></extra>"
                             _fig = go.Figure()
                             _fig.add_trace(go.Scatter(
                                 x=_df.index, y=_df["portfolio_value"],
                                 name="ポートフォリオ時価",
                                 line=dict(color="#60a5fa", width=2),
-                                hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}<extra></extra>",
+                                hovertemplate="%{x|%Y-%m-%d}<br>評価額" + _hover_val,
                             ))
                             _fig.add_trace(go.Scatter(
                                 x=_df.index, y=_df["invested_cost"],
                                 name="投資元本",
                                 line=dict(color="#94a3b8", width=1.5, dash="dot"),
-                                hovertemplate="%{x|%Y-%m-%d}<br>元本: %{y:,.0f}<extra></extra>",
+                                hovertemplate="%{x|%Y-%m-%d}<br>元本" + _hover_val,
                             ))
                             _vt_line = _rebase_vt_series(
                                 _vt_series, _df.index,
@@ -27381,7 +27391,7 @@ def render_claude_trading_project():
                                     x=_df.index, y=_vt_line,
                                     name="VT（同時期に同額投資した場合）",
                                     line=dict(color="#f59e0b", width=1.5, dash="dash"),
-                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算: %{y:,.0f}<extra></extra>",
+                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算" + _hover_val,
                                 ))
                             _fig.add_trace(go.Scatter(
                                 x=list(_df.index) + list(_df.index[::-1]),
@@ -27396,7 +27406,8 @@ def render_claude_trading_project():
                                             bordercolor="#334155", borderwidth=1),
                                 xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                                 yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                                           title=dict(text="評価額", font=dict(color="#94a3b8"))),
+                                           title=dict(text="評価額", font=dict(color="#94a3b8")),
+                                           showticklabels=not _privacy),
                                 hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                                 margin=dict(l=10, r=10, t=10, b=10),
                                 height=280,
@@ -27451,13 +27462,14 @@ def render_claude_trading_project():
                         _bt_vt_series = _fetch_vt_price_series()
 
                         def _build_backtest_fig(_df):
+                            _hover_val = "<extra></extra>" if _privacy else ": %{y:,.0f}円<extra></extra>"
                             _fig = go.Figure()
                             _fig.add_trace(go.Scatter(
                                 x=_df.index, y=_df["portfolio_value"],
                                 name="合成評価額（現保有株数固定）",
                                 line=dict(color="#a78bfa", width=2),
                                 fill="tozeroy", fillcolor="rgba(167,139,250,0.10)",
-                                hovertemplate="%{x|%Y-%m-%d}<br>評価額: %{y:,.0f}円<extra></extra>",
+                                hovertemplate="%{x|%Y-%m-%d}<br>評価額" + _hover_val,
                             ))
                             _vt_line = _rebase_vt_series(
                                 _bt_vt_series, _df.index,
@@ -27468,7 +27480,7 @@ def render_claude_trading_project():
                                     x=_df.index, y=_vt_line,
                                     name="VT（同額投資した場合）",
                                     line=dict(color="#f59e0b", width=1.5, dash="dash"),
-                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算: %{y:,.0f}円<extra></extra>",
+                                    hovertemplate="%{x|%Y-%m-%d}<br>VT換算" + _hover_val,
                                 ))
                             _fig.update_layout(
                                 paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
@@ -27478,7 +27490,8 @@ def render_claude_trading_project():
                                             bordercolor="#334155", borderwidth=1),
                                 xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                                 yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                                           title=dict(text="評価額（円換算）", font=dict(color="#94a3b8"))),
+                                           title=dict(text="評価額（円換算）", font=dict(color="#94a3b8")),
+                                           showticklabels=not _privacy),
                                 hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                                 margin=dict(l=10, r=10, t=10, b=10),
                                 height=260,
@@ -27787,16 +27800,18 @@ def render_claude_trading_project():
                             x=["取得原価", "評価額"],
                             y=[_total_cost_jpy, _mkt_val_jpy],
                             marker_color=["#64748b", _total_color],
-                            text=[f"{_total_cost_jpy:,.0f}円", f"{_mkt_val_jpy:,.0f}円"],
+                            text=(["", ""] if _privacy else [f"{_total_cost_jpy:,.0f}円", f"{_mkt_val_jpy:,.0f}円"]),
                             textposition="outside",
                             textfont=dict(color="#e2e8f0"),
+                            hovertemplate=("%{x}<extra></extra>" if _privacy else "%{x}: %{y:,.0f}円<extra></extra>"),
                         ))
                         fig_gl.update_layout(
                             paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
                             font=dict(color="#e2e8f0"),
                             xaxis=dict(tickfont=dict(color="#e2e8f0")),
                             yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                                       title=dict(text="円換算", font=dict(color="#94a3b8"))),
+                                       title=dict(text="円換算", font=dict(color="#94a3b8")),
+                                       showticklabels=not _privacy),
                             hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                             margin=dict(l=10, r=10, t=30, b=10),
                             height=280, showlegend=False,
@@ -27815,7 +27830,10 @@ def render_claude_trading_project():
                             textinfo="label+percent",
                             textfont=dict(color="#e2e8f0"),
                             marker=dict(line=dict(color="#0f172a", width=2)),
-                            hovertemplate="%{label}: %{value:,.0f}円 (%{percent})<extra></extra>",
+                            hovertemplate=(
+                                "%{label}: %{percent}<extra></extra>" if _privacy
+                                else "%{label}: %{value:,.0f}円 (%{percent})<extra></extra>"
+                            ),
                         ))
                         fig_sec.update_layout(
                             paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
@@ -28006,6 +28024,15 @@ def render_claude_trading_project():
                 dividends = summary["dividends"]
                 usd_jpy   = summary["usd_jpy"]
 
+                _privacy_s = st.checkbox(
+                    "🙈 金額非表示モード（画面共有時などに金額を隠す。比率・パーセントは表示されます）",
+                    key="summary_privacy_mode",
+                )
+
+                def _mvs(s: str) -> str:
+                    """金額非表示モード用マスク（サマリータブ用）。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
+                    return "●●●" if _privacy_s else s
+
                 def _to_display(value_native, is_jp: bool) -> float:
                     """ネイティブ通貨の値を表示通貨に変換"""
                     if value_native is None:
@@ -28046,16 +28073,16 @@ def render_claude_trading_project():
                         x=[total_cost, total_mkt],
                         orientation="h",
                         marker_color=["#475569", "#3b82f6"],
-                        text=[f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"],
+                        text=(["", ""] if _privacy_s else [f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"]),
                         textposition="outside",
                         textfont=dict(color="#e2e8f0", size=12),
-                        hovertemplate="%{y}: %{x:,.0f}<extra></extra>",
+                        hovertemplate=("%{y}<extra></extra>" if _privacy_s else "%{y}: %{x:,.0f}<extra></extra>"),
                     ))
                     fig_gl.update_layout(
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(color="#e2e8f0"),
                         xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
-                                   tickformat=",.0f"),
+                                   tickformat=",.0f", showticklabels=not _privacy_s),
                         yaxis=dict(tickfont=dict(color="#e2e8f0")),
                         margin=dict(l=10, r=60, t=5, b=5),
                         height=100,
@@ -28068,7 +28095,7 @@ def render_claude_trading_project():
                         f'<div style="text-align:center;padding-top:10px">'
                         f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
                         f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
-                        f'{gain_sign}{cur_label} {total_gain:,.0f}</div>'
+                        f'{_mvs(f"{gain_sign}{cur_label} {total_gain:,.0f}")}</div>'
                         f'<div style="font-size:14px;color:{gain_color}">'
                         f'{gain_sign}{total_gp:.2f}%</div>'
                         f'</div>',
@@ -28134,7 +28161,10 @@ def render_claude_trading_project():
                             x=list(_mvals.keys()),
                             y=list(_mvals.values()),
                             marker_color=_color,
-                            hovertemplate=f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>",
+                            hovertemplate=(
+                                f"{_label}<br>%{{x}}<extra></extra>" if _privacy_s
+                                else f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>"
+                            ),
                         ))
                     fig_div.update_layout(
                         barmode="stack",
@@ -28142,7 +28172,7 @@ def render_claude_trading_project():
                         font=dict(color="#e2e8f0"),
                         xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                         yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
-                                   tickprefix=f"{cur_label} "),
+                                   tickprefix=f"{cur_label} ", showticklabels=not _privacy_s),
                         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                         legend=dict(font=dict(color="#e2e8f0", size=11),
                                     orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
@@ -28164,15 +28194,15 @@ def render_claude_trading_project():
                                 f'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
                                 f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
                                 f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
-                                f'<span style="color:#64748b">{dr["1株配当"]}</span>'
+                                f'<span style="color:#64748b">{_mvs(dr["1株配当"])}</span>'
                                 f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
-                                f'<span style="color:#f59e0b;font-weight:700">{dr["受取配当"]}</span>'
+                                f'<span style="color:#f59e0b;font-weight:700">{_mvs(dr["受取配当"])}</span>'
                                 f'</div>',
                                 unsafe_allow_html=True,
                             )
                         st.markdown(
                             f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
-                            f'過去6ヶ月合計: <b style="color:#f59e0b">{cur_label} {total_div:,.2f}</b></div>',
+                            f'過去6ヶ月合計: <b style="color:#f59e0b">{_mvs(f"{cur_label} {total_div:,.2f}")}</b></div>',
                             unsafe_allow_html=True,
                         )
                 else:
@@ -28213,7 +28243,10 @@ def render_claude_trading_project():
                             textinfo="label+percent",
                             textfont=dict(color="#e2e8f0", size=12),
                             hole=0.5,
-                            hovertemplate="%{label}<br>%{value:,.0f} (%{percent})<extra></extra>",
+                            hovertemplate=(
+                                "%{label}: %{percent}<extra></extra>" if _privacy_s
+                                else "%{label}<br>%{value:,.0f} (%{percent})<extra></extra>"
+                            ),
                         ))
                         fig_alloc.update_layout(
                             paper_bgcolor="rgba(0,0,0,0)",
@@ -28226,8 +28259,8 @@ def render_claude_trading_project():
                         st.plotly_chart(fig_alloc, use_container_width=True, key="jpus_alloc_fig_summary_tab")
                         st.markdown(
                             f'<div style="display:flex;gap:16px;justify-content:center;font-size:12px">'
-                            f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% ({cur_label} {jp_val:,.0f})</span>'
-                            f'<span style="color:#3b82f6">🇺🇸 {us_pct:.1f}% ({cur_label} {us_val:,.0f})</span>'
+                            f'<span style="color:#f97316">🇯🇵 {jp_pct:.1f}% {_mvs(f"({cur_label} {jp_val:,.0f})")}</span>'
+                            f'<span style="color:#3b82f6">🇺🇸 {us_pct:.1f}% {_mvs(f"({cur_label} {us_val:,.0f})")}</span>'
                             f'</div>',
                             unsafe_allow_html=True,
                         )
@@ -28273,13 +28306,16 @@ def render_claude_trading_project():
                             text=[f"{v / sum(sec_values) * 100:.1f}%" for v in sec_values],
                             textposition="outside",
                             textfont=dict(color="#94a3b8", size=11),
-                            hovertemplate="%{y}<br>%{x:,.0f}<extra></extra>",
+                            hovertemplate=(
+                                "%{y}<extra></extra>" if _privacy_s
+                                else "%{y}<br>%{x:,.0f}<extra></extra>"
+                            ),
                         ))
                         fig_sec.update_layout(
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                             font=dict(color="#e2e8f0"),
                             xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
-                                       tickformat=",.0f"),
+                                       tickformat=",.0f", showticklabels=not _privacy_s),
                             yaxis=dict(tickfont=dict(color="#e2e8f0"), autorange="reversed"),
                             hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
                             margin=dict(l=10, r=60, t=5, b=5),
