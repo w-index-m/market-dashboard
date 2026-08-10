@@ -21886,6 +21886,8 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                         news_items.append({
                             "headline":    headline,
                             "headline_ja": "",
+                            "summary":     (item.get("summary") or "").strip(),
+                            "summary_ja":  "",
                             "url":         item.get("url", ""),
                             "date":        date_s,
                             "source":      item.get("source", ""),
@@ -21896,6 +21898,13 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                 ja_list = _translate_headlines_to_ja(en_headlines)
                 for i, n in enumerate(news_items):
                     n["headline_ja"] = ja_list[i] if i < len(ja_list) else n["headline"]
+                # Finnhubのsummaryは長文になりがちなので300字で切ってから翻訳（翻訳コスト削減）
+                en_summaries = tuple((n["summary"] or "")[:300] for n in news_items)
+                if any(en_summaries):
+                    ja_summaries = _translate_headlines_to_ja(en_summaries)
+                    for i, n in enumerate(news_items):
+                        if n["summary"]:
+                            n["summary_ja"] = ja_summaries[i] if i < len(ja_summaries) else n["summary"]
         else:
             # 日本株: みんかぶ + EDINET + TDnet を並列取得してマージ
             import concurrent.futures as _cf_news
@@ -27752,6 +27761,7 @@ def render_claude_trading_project():
                                     "ticker":   _n_ticker,
                                     "name":     _n_name,
                                     "headline": _ni.get("headline_ja") or _ni.get("headline", ""),
+                                    "summary":  _ni.get("summary_ja") or _ni.get("summary", ""),
                                     "url":      _ni.get("url", ""),
                                     "date":     _ni.get("date", ""),
                                     "source":   _ni.get("source", ""),
@@ -27777,15 +27787,22 @@ def render_claude_trading_project():
                                 'style="color:#e2e8f0;text-decoration:none">'
                             ) if _has_url else ""
                             _link_close = "</a>" if _has_url else ""
+                            _summary_html = (
+                                f'<div style="font-size:12px;color:#94a3b8;margin-top:5px;line-height:1.6">'
+                                f'{html.escape(str(_ni["summary"]))}</div>'
+                            ) if _ni.get("summary") else ""
                             _news_html.append(
                                 '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
-                                'padding:10px 14px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
+                                'padding:10px 14px">'
+                                '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
                                 f'<span style="font-size:11px;font-weight:700;color:#60a5fa;white-space:nowrap">'
                                 f'{html.escape(str(_ni["ticker"]))}</span>'
-                                f'{_link_open}<span style="font-size:13px;color:#e2e8f0">'
+                                f'{_link_open}<span style="font-size:13px;color:#e2e8f0;font-weight:600">'
                                 f'{html.escape(str(_ni["headline"]))}</span>{_link_close}'
                                 f'<span style="font-size:11px;color:#64748b;margin-left:auto;white-space:nowrap">'
                                 f'{html.escape(str(_ni["date"]))} {html.escape(str(_ni["source"]))}</span>'
+                                '</div>'
+                                f'{_summary_html}'
                                 '</div>'
                             )
                         _news_html.append('</div>')
