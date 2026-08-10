@@ -20643,6 +20643,12 @@ def _load_trades(username: str = "") -> tuple[pd.DataFrame, str | None]:
         for col in ["quantity", "price", "fee", "ai_target", "ai_stoploss"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        # gspreadのget_all_records()は数字だけのセル（例: 証券コード"2568"）を
+        # 文字列ではなくint/floatとして返すことがあり、文字列前提のticker/name等の列に
+        # 型が混在すると.sort()や.endswith()でTypeErrorになるため、明示的に文字列化する
+        for col in ["ticker", "name", "action", "date", "memo"]:
+            if col in df.columns:
+                df[col] = df[col].fillna("").astype(str)
         return df, None
     except Exception as e:
         logger.warning(f"[trading] trades読込失敗: {e}")
