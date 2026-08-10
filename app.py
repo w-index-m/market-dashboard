@@ -27435,9 +27435,8 @@ def render_claude_trading_project():
                         _ext = _fetch_extended_hours_price(ticker)
                         if _ext:
                             _ext_chg = _ext.get("change_pct")
-                            _ext_prefix = f'ADR {_ext["adr_ticker"]} ' if _ext.get("label") == "ADR" else ""
                             _ext_str = (
-                                f'{_ext_prefix}{_ext["price"]:,.2f} USD'
+                                f'{_ext["price"]:,.2f} USD'
                                 + (f'（{_ext_chg:+.2f}%）' if _ext_chg is not None else '')
                             )
                         else:
