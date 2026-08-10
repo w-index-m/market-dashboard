@@ -27455,6 +27455,7 @@ def render_claude_trading_project():
                             # 分裂させてしまい表が崩れるため）
                             "平均取得単価": _mv(f"{avg_cost:,.2f} {cur_unit}"),
                             "現在株価":   _mv(f"{cur_price:,.2f} {cur_unit}") if cur_price else "取得失敗",
+                            "評価額":    _mv(f"{cur_price * pos['qty']:,.2f} {cur_unit}") if cur_price else "取得失敗",
                             "時間外/PTS": _mv(_ext_str),
                             "含み損益（USD）": _mv(_pnl_usd_str),
                             "含み損益（円）":  _mv(_pnl_jpy_str),
