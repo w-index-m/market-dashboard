@@ -27442,6 +27442,15 @@ def render_claude_trading_project():
                         else:
                             _ext_str = "-"
 
+                        if cur_price and prev_close:
+                            _day_chg_native   = (cur_price - prev_close) * pos["qty"]
+                            _day_chg_pct_row  = (cur_price / prev_close - 1) * 100
+                            _day_chg_row_str  = _mv(f"{_day_chg_native:+,.2f} {cur_unit}")
+                            _day_chg_pct_str  = f"{_day_chg_pct_row:+.2f}%"
+                        else:
+                            _day_chg_row_str = "-"
+                            _day_chg_pct_str = "-"
+
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
                             _pnl_name = _get_stock_display_name(ticker)
@@ -27453,6 +27462,8 @@ def render_claude_trading_project():
                             # 値の中に埋め込む（列名を動的にするとpd.DataFrameが別々の列として
                             # 分裂させてしまい表が崩れるため）
                             "平均取得単価": _mv(f"{avg_cost:,.2f} {cur_unit}"),
+                            "前日比（額）": _day_chg_row_str,
+                            "前日比（%）": _day_chg_pct_str,
                             "現在株価":   _mv(f"{cur_price:,.2f} {cur_unit}") if cur_price else "取得失敗",
                             "評価額":    _mv(f"{cur_price * pos['qty']:,.2f} {cur_unit}") if cur_price else "取得失敗",
                             "時間外/PTS": _mv(_ext_str),
