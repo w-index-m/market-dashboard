@@ -27197,11 +27197,11 @@ def render_claude_trading_project():
                     _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
                     _act_label = "買い" if _act == "BUY" else "売り"
                     _memo_s = str(_row.get("memo", "") or "").strip()
-                    _row_c1, _row_c2, _row_c3 = st.columns([10, 1, 1])
+                    _row_c1, _row_c2 = st.columns([10, 2])
                     with _row_c1:
                         st.markdown(
                             '<div style="background:#0f172a;border:1px solid #334155;'
-                            'border-radius:8px;padding:8px 12px;margin-bottom:4px;'
+                            'border-radius:8px;padding:8px 12px;margin-bottom:0;'
                             'display:flex;flex-wrap:wrap;gap:5px 14px;align-items:baseline">'
                             f'<span style="font-size:11px;color:#64748b">{str(_row.get("date",""))[:10]}</span>'
                             f'<span style="font-size:13px;font-weight:700;color:#e2e8f0">{_row.get("ticker","")}</span>'
@@ -27215,15 +27215,18 @@ def render_claude_trading_project():
                             unsafe_allow_html=True,
                         )
                     with _row_c2:
-                        if st.button("✏️", key=f"edit_tr_{_seq}", help="この記録を編集"):
-                            if st.session_state.get("_editing_trade_row") == _seq:
-                                st.session_state.pop("_editing_trade_row", None)
-                            else:
-                                st.session_state["_editing_trade_row"] = _seq
-                            st.rerun()
-                    with _row_c3:
-                        if st.button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
-                            _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
+                        _btn_c1, _btn_c2 = st.columns(2)
+                        with _btn_c1:
+                            if st.button("✏️", key=f"edit_tr_{_seq}", help="この記録を編集"):
+                                if st.session_state.get("_editing_trade_row") == _seq:
+                                    st.session_state.pop("_editing_trade_row", None)
+                                else:
+                                    st.session_state["_editing_trade_row"] = _seq
+                                st.rerun()
+                        with _btn_c2:
+                            if st.button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
+                                _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
+                    st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
 
                     # 編集フォーム（✏️が押された行の直下にのみ表示）
                     if st.session_state.get("_editing_trade_row") == _seq:
