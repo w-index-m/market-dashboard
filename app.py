@@ -25164,7 +25164,22 @@ def render_claude_trading_project():
 
     # ── タブ①: AI分析・シグナル ────────────────────────────────
     with tab_signal:
-        _trades_df, _trades_err = _load_trades()
+        _auto_restore_login_token("signal")
+        _sig_tok = st.query_params.get("token", "")
+        _sig_usr = _auth_check_session(_sig_tok) if _sig_tok else ""
+
+        if _sig_usr:
+            st.session_state["_trading_user"] = _sig_usr
+            _sig_login_disp = _auth_get_users().get(_sig_usr, {}).get("display_name") or _sig_usr
+            st.caption(f"🔐 ログイン中: {_sig_login_disp}（{_sig_usr}）の保有銘柄を表示中")
+            _trades_df, _trades_err = _load_trades(_sig_usr)
+        else:
+            st.info(
+                "🔐 未ログインです。保有銘柄に基づく分析は「✏️ 取引記録入力」タブから"
+                "ログインすると表示されます（ログインするまでは保有銘柄は表示されません）。"
+            )
+            _trades_df, _trades_err = pd.DataFrame(), None
+
         open_pos = _calc_positions_from_df(_trades_df) if not _trades_df.empty else {}
 
         # Google Sheets接続失敗時の自動リトライ（最大10回、3秒間隔）
