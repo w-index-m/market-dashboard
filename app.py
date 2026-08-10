@@ -22123,18 +22123,24 @@ def _fetch_ticker_close_prices(tickers: list, period: str = "max") -> dict:
 
     missing = [tk for tk in tickers if tk not in price_dict]
     for tk in missing:
-        try:
-            raw1 = yf.download(tk, period=period, auto_adjust=True, progress=False)
-            if raw1.empty:
-                continue
-            close = raw1["Close"]
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-            close = close.dropna()
-            if not close.empty:
-                price_dict[tk] = close.rename(tk)
-        except Exception:
-            pass
+        # fetch_universe_pricesが（一時的な失敗を含めて）12hキャッシュされているため、
+        # そのキャッシュが古い空データを返している場合でもここは影響を受けない。
+        # Yahoo側の一時的なレート制限に備え、短い間隔を空けて最大2回までリトライする
+        for _attempt in range(2):
+            try:
+                raw1 = yf.download(tk, period=period, auto_adjust=True, progress=False)
+                if not raw1.empty:
+                    close = raw1["Close"]
+                    if isinstance(close, pd.DataFrame):
+                        close = close.iloc[:, 0]
+                    close = close.dropna()
+                    if not close.empty:
+                        price_dict[tk] = close.rename(tk)
+                        break
+            except Exception:
+                pass
+            if _attempt == 0:
+                time.sleep(1.5)
 
     return price_dict
 
