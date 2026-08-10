@@ -27133,9 +27133,8 @@ def render_claude_trading_project():
                         if _ext:
                             _ext_chg = _ext.get("change_pct")
                             _ext_str = (
-                                f'{_ext["price"]:,.2f} USD（{_ext["label"]}'
-                                + (f'{_ext_chg:+.2f}%' if _ext_chg is not None else '')
-                                + '）'
+                                f'{_ext["price"]:,.2f} USD'
+                                + (f'（{_ext_chg:+.2f}%）' if _ext_chg is not None else '')
                             )
                         else:
                             _ext_str = "-"
