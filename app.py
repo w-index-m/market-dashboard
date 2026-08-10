@@ -20589,7 +20589,11 @@ _KNOWN_NAMES: dict = {
     "LITE":    "Lumentum Holdings",
     "APH":     "Amphenol Corporation",
     "GLW":     "Corning Incorporated",
+    "CSCO":    "Cisco Systems",
+    "TEL":     "TE Connectivity",
     "285A.T":  "キオクシアHD",
+    "5802.T":  "住友電気工業",
+    "9432.T":  "日本電信電話（NTT）",
     "8306.T":  "三菱UFJフィナンシャル・グループ",
     "8316.T":  "三井住友フィナンシャルグループ",
     "8411.T":  "みずほフィナンシャルグループ",
@@ -23713,6 +23717,9 @@ _TRADING_CANDIDATES = [
     "QQQ",
     # 光通信・フォトニクス（光銘柄ミックスモード用）
     "CIEN", "COHR", "LITE", "VIAV", "AAOI", "GLW", "APH", "VRT", "INFN",
+    "MRVL",     # Marvell（AI/光電融合向けカスタムシリコン）
+    "CSCO",     # Cisco（DCネットワーク機器・CPO）
+    "TEL",      # TE Connectivity（CPOコネクター・光学整列部品）
     # 配当安定株・米国（配当安定モード用）
     "JNJ", "PG", "KO", "PEP", "MCD", "O", "VZ", "CVX", "ABT", "PM",
     "VYM", "SCHD", "HDV",  # 高配当ETF
@@ -23731,7 +23738,9 @@ _TRADING_CANDIDATES = [
     # ※ 1570.T(日経レバ)/1571.T(日経インバース)等のレバ・インバース系は除外
     # Japan 光通信関連（光銘柄ミックスモード用）
     "5803.T",   # フジクラ（光ファイバー）
-    "5801.T",   # 古河電工（光ファイバー）
+    "5801.T",   # 古河電工（光ファイバー・外部レーザー光源で先行）
+    "5802.T",   # 住友電工（光ファイバー世界大手・CPO供給網へ参入）
+    "9432.T",   # NTT（IOWN構想で光電融合デバイス生産開始）
     # Japan 配当安定株（配当安定モード用）
     "8058.T",   # 三菱商事（高配当・連続増配）
     "8031.T",   # 三井物産（高配当・安定）
@@ -23787,9 +23796,15 @@ _CLAUDE_OPTICAL_BASKET = {
     "GLW",      # Corning（光ファイバー世界最大手）
     "APH",      # Amphenol（光コネクタ・高速伝送）
     "VRT",      # Vertiv（AIデータセンター電源・冷却）
+    # 光電融合（CPO）・シリコンフォトニクス関連
+    "MRVL",     # Marvell（AI/光電融合向けカスタムシリコン）
+    "CSCO",     # Cisco（DCネットワーク機器・CPO市場立ち上げ）
+    "TEL",      # TE Connectivity（CPOコネクター・光学整列部品）
     # 日本 光通信関連
     "5803.T",   # フジクラ（光ファイバー・AI需要急拡大）
-    "5801.T",   # 古河電工（光ファイバー・電線）
+    "5801.T",   # 古河電工（光ファイバー・電線・外部レーザー光源）
+    "5802.T",   # 住友電工（光ファイバー世界大手・CPO供給網参入）
+    "9432.T",   # NTT（IOWN構想・光電融合デバイス生産）
 }
 
 # Claude 配当安定バスケット（配当安定モード専用候補銘柄）
