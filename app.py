@@ -27187,41 +27187,43 @@ def render_claude_trading_project():
                     "✏️ ボタンで編集・🗑️ ボタンで誤記録を削除できます</span>",
                     unsafe_allow_html=True,
                 )
-                _hdr = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5, 0.5])
-                for _lbl, _c in zip(["日付","ティッカー","銘柄名","売買","数量","単価","手数料","メモ","",""], _hdr):
-                    _c.markdown(f"<span style='font-size:11px;color:#64748b;font-weight:700'>{_lbl}</span>",
-                                unsafe_allow_html=True)
-                st.markdown('<hr style="margin:4px 0;border-color:#334155">', unsafe_allow_html=True)
-
+                # 1行=10列のst.columns()はスマホ縦画面だと自動的に縦積みになり見た目が
+                # 崩れるため、編集・削除ボタン以外の項目は1枚のHTMLカードにまとめて
+                # flex-wrapで折り返させ、ボタンだけ別カラムに置く（3カラムなら縦積みでも
+                # まだ読める）
                 _del_requested = None
                 for _seq, (_, _row) in enumerate(df_trades.iterrows()):
-                    _c = st.columns([1.5, 1.2, 1.8, 0.8, 0.8, 1.2, 0.8, 2, 0.5, 0.5])
-                    _c[0].markdown(f"<span style='font-size:12px'>{str(_row.get('date',''))[:10]}</span>",
-                                   unsafe_allow_html=True)
-                    _c[1].markdown(f"<span style='font-size:12px;font-weight:700'>{_row.get('ticker','')}</span>",
-                                   unsafe_allow_html=True)
-                    _c[2].markdown(f"<span style='font-size:12px'>{_row.get('name','')}</span>",
-                                   unsafe_allow_html=True)
-                    _act = str(_row.get("action",""))
+                    _act = str(_row.get("action", ""))
                     _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
-                    _c[3].markdown(f"<span style='font-size:12px;color:{_act_color};font-weight:700'>{_act}</span>",
-                                   unsafe_allow_html=True)
-                    _c[4].markdown(f"<span style='font-size:12px'>{int(_row.get('quantity',0)):,}</span>",
-                                   unsafe_allow_html=True)
-                    _c[5].markdown(f"<span style='font-size:12px'>{float(_row.get('price',0)):,.1f}</span>",
-                                   unsafe_allow_html=True)
-                    _c[6].markdown(f"<span style='font-size:12px'>{int(_row.get('fee',0)):,}</span>",
-                                   unsafe_allow_html=True)
-                    _c[7].markdown(f"<span style='font-size:12px;color:#94a3b8'>{str(_row.get('memo',''))[:20]}</span>",
-                                   unsafe_allow_html=True)
-                    if _c[8].button("✏️", key=f"edit_tr_{_seq}", help="この記録を編集"):
-                        if st.session_state.get("_editing_trade_row") == _seq:
-                            st.session_state.pop("_editing_trade_row", None)
-                        else:
-                            st.session_state["_editing_trade_row"] = _seq
-                        st.rerun()
-                    if _c[9].button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
-                        _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
+                    _act_label = "買い" if _act == "BUY" else "売り"
+                    _memo_s = str(_row.get("memo", "") or "").strip()
+                    _row_c1, _row_c2, _row_c3 = st.columns([10, 1, 1])
+                    with _row_c1:
+                        st.markdown(
+                            '<div style="background:#0f172a;border:1px solid #334155;'
+                            'border-radius:8px;padding:8px 12px;margin-bottom:4px;'
+                            'display:flex;flex-wrap:wrap;gap:5px 14px;align-items:baseline">'
+                            f'<span style="font-size:11px;color:#64748b">{str(_row.get("date",""))[:10]}</span>'
+                            f'<span style="font-size:13px;font-weight:700;color:#e2e8f0">{_row.get("ticker","")}</span>'
+                            f'<span style="font-size:12px;color:#94a3b8">{_row.get("name","")}</span>'
+                            f'<span style="font-size:12px;font-weight:700;color:{_act_color}">{_act_label}</span>'
+                            f'<span style="font-size:12px;color:#e2e8f0">{int(_row.get("quantity",0)):,}株</span>'
+                            f'<span style="font-size:12px;color:#e2e8f0">@ {float(_row.get("price",0)):,.1f}</span>'
+                            f'<span style="font-size:11px;color:#64748b">手数料 {int(_row.get("fee",0)):,}</span>'
+                            + (f'<span style="font-size:11px;color:#64748b">📝 {_memo_s[:20]}</span>' if _memo_s else "")
+                            + '</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with _row_c2:
+                        if st.button("✏️", key=f"edit_tr_{_seq}", help="この記録を編集"):
+                            if st.session_state.get("_editing_trade_row") == _seq:
+                                st.session_state.pop("_editing_trade_row", None)
+                            else:
+                                st.session_state["_editing_trade_row"] = _seq
+                            st.rerun()
+                    with _row_c3:
+                        if st.button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
+                            _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
 
                     # 編集フォーム（✏️が押された行の直下にのみ表示）
                     if st.session_state.get("_editing_trade_row") == _seq:
