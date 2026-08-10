@@ -23328,11 +23328,14 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
     """時間外（アフターアワーズ/プレマーケット）の株価を取得する。日本株はPTS（夜間取引）
     自体はyfinanceでは取得できないため、代わりに_JP_ADR_MAPに載っているADR（米国預託証券）
     の直近株価を参考情報として返す（ADR⇔現地株の換算比率は銘柄により異なるため円換算はせず、
-    ADR自体の価格・騰落率をそのまま返す）。
+    ADR自体の価格・騰落率をそのまま返す）。ADRは米国市場の取引時間中しか値が動かないため、
+    米国市場が閉まっている間（週末・祝日・日本の日中など）は直近の米国取引日時点のデータの
+    まま止まっている。誤って「現在の値動き」と誤解されないよう、その日付を"as_of"として
+    履歴データ（.history()）から取得して返す（fast_infoにはこの日付情報が含まれないため）。
     Returns:
       米国株: {"price": float, "change_pct": float|None, "label": "時間外"|"プレマーケット"}
       日本株（ADR対応銘柄）: {"price": float, "change_pct": float|None, "label": "ADR",
-                              "adr_ticker": str}
+                              "adr_ticker": str, "as_of": "M/D"}
       データが無ければ {}
     """
     if ticker.endswith(".T"):
@@ -23340,15 +23343,18 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
         if not adr_ticker:
             return {}
         try:
-            adr_info = yf.Ticker(adr_ticker).fast_info
-            adr_price = adr_info.get("lastPrice") or adr_info.get("last_price")
-            adr_prev  = adr_info.get("previousClose") or adr_info.get("previous_close")
-            if not adr_price:
+            adr_hist  = yf.Ticker(adr_ticker).history(period="5d")
+            adr_close = adr_hist["Close"].dropna() if not adr_hist.empty else pd.Series(dtype=float)
+            if len(adr_close) == 0:
                 return {}
-            adr_chg = (float(adr_price) / float(adr_prev) - 1) * 100 if adr_prev else None
+            adr_price = float(adr_close.iloc[-1])
+            adr_prev  = float(adr_close.iloc[-2]) if len(adr_close) > 1 else None
+            adr_chg   = (adr_price / adr_prev - 1) * 100 if adr_prev else None
+            adr_date  = adr_close.index[-1]
             return {
-                "price": float(adr_price), "change_pct": adr_chg,
+                "price": adr_price, "change_pct": adr_chg,
                 "label": "ADR", "adr_ticker": adr_ticker,
+                "as_of": f"{adr_date.month}/{adr_date.day}",
             }
         except Exception:
             return {}
@@ -27439,6 +27445,8 @@ def render_claude_trading_project():
                                 f'{_ext["price"]:,.2f} USD'
                                 + (f'（{_ext_chg:+.2f}%）' if _ext_chg is not None else '')
                             )
+                            if _ext.get("label") == "ADR" and _ext.get("as_of"):
+                                _ext_str += f' [{_ext["as_of"]}時点]'
                         else:
                             _ext_str = "-"
 
@@ -27478,6 +27486,9 @@ def render_claude_trading_project():
                         "日本株はPTS（夜間取引）自体は取得元の都合上非対応ですが、ADR（米国預託証券）が"
                         "存在する銘柄はADRの直近株価を参考表示します（換算比率は銘柄ごとに異なるためADR"
                         "自体の価格をそのまま表示。ADR対応は手動確認した一部銘柄のみで網羅的ではありません）。"
+                        "ADRは米国市場の取引時間中しか更新されないため、米国市場が閉まっている間"
+                        "（週末・祝日・日本の日中など）は［M/D時点］と表示された直近の米国取引日の"
+                        "データのまま止まっており、東証本体の当日の値動きはまだ反映されていません。"
                     )
 
                     # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
