@@ -23183,6 +23183,36 @@ def _fetch_ticker_sector(ticker: str) -> str:
         return "その他"
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_extended_hours_price(ticker: str) -> dict:
+    """時間外（アフターアワーズ/プレマーケット）の株価を取得する。日本株のPTSはyfinanceでは
+    取得できないため米国株のみ対象。Yahoo Financeの「At close」「Overnight」表示に相当。
+    Returns: {"price": float, "change_pct": float|None, "label": "時間外"|"プレマーケット"} または
+    データが無ければ {}
+    """
+    if ticker.endswith(".T"):
+        return {}
+    try:
+        info = yf.Ticker(ticker).info or {}
+        post_price = info.get("postMarketPrice")
+        if post_price:
+            return {
+                "price": float(post_price),
+                "change_pct": info.get("postMarketChangePercent"),
+                "label": "時間外",
+            }
+        pre_price = info.get("preMarketPrice")
+        if pre_price:
+            return {
+                "price": float(pre_price),
+                "change_pct": info.get("preMarketChangePercent"),
+                "label": "プレマーケット",
+            }
+        return {}
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _compute_portfolio_summary() -> dict:
     """ポートフォリオサマリー計算。Yahoo Finance スタイルの4カードに必要なデータを返す。
@@ -27099,6 +27129,17 @@ def render_claude_trading_project():
                             _pnl_jpy_str = "-"
                             _total_skipped += 1
 
+                        _ext = _fetch_extended_hours_price(ticker)
+                        if _ext:
+                            _ext_chg = _ext.get("change_pct")
+                            _ext_str = (
+                                f'{_ext["price"]:,.2f} USD（{_ext["label"]}'
+                                + (f'{_ext_chg:+.2f}%' if _ext_chg is not None else '')
+                                + '）'
+                            )
+                        else:
+                            _ext_str = "-"
+
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
                             _pnl_name = _get_stock_display_name(ticker)
@@ -27111,12 +27152,14 @@ def render_claude_trading_project():
                             # 分裂させてしまい表が崩れるため）
                             "平均取得単価": f"{avg_cost:,.2f} {cur_unit}",
                             "現在株価":   f"{cur_price:,.2f} {cur_unit}" if cur_price else "取得失敗",
+                            "時間外/PTS": _ext_str,
                             "含み損益（USD）": _pnl_usd_str,
                             "含み損益（円）":  _pnl_jpy_str,
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
                     st.dataframe(pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True)
+                    st.caption("※ 時間外/PTSは米国株の時間外・プレマーケット取引価格（Yahoo Financeの「Overnight」相当）。日本株のPTSは取得元の都合上非対応です。")
 
                     # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
                     if _total_cost_jpy > 0:
