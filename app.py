@@ -22122,25 +22122,32 @@ def _fetch_ticker_close_prices(tickers: list, period: str = "max") -> dict:
                 pass
 
     missing = [tk for tk in tickers if tk not in price_dict]
-    for tk in missing:
+    if missing:
         # fetch_universe_pricesが（一時的な失敗を含めて）12hキャッシュされているため、
         # そのキャッシュが古い空データを返している場合でもここは影響を受けない。
-        # Yahoo側の一時的なレート制限に備え、短い間隔を空けて最大2回までリトライする
-        for _attempt in range(2):
-            try:
-                raw1 = yf.download(tk, period=period, auto_adjust=True, progress=False)
-                if not raw1.empty:
-                    close = raw1["Close"]
-                    if isinstance(close, pd.DataFrame):
-                        close = close.iloc[:, 0]
-                    close = close.dropna()
-                    if not close.empty:
-                        price_dict[tk] = close.rename(tk)
-                        break
-            except Exception:
-                pass
-            if _attempt == 0:
-                time.sleep(1.5)
+        # 銘柄数が多いと逐次リトライは時間がかかりすぎる（例: 30銘柄×最大2回×間隔待ち）ため、
+        # ThreadPoolExecutorで並行フェッチし、全体の所要時間を銘柄数にほぼ依存させない
+        def _fetch_one(tk: str):
+            for _attempt in range(2):
+                try:
+                    raw1 = yf.download(tk, period=period, auto_adjust=True, progress=False)
+                    if not raw1.empty:
+                        close = raw1["Close"]
+                        if isinstance(close, pd.DataFrame):
+                            close = close.iloc[:, 0]
+                        close = close.dropna()
+                        if not close.empty:
+                            return tk, close.rename(tk)
+                except Exception:
+                    pass
+                if _attempt == 0:
+                    time.sleep(1.5)
+            return tk, None
+
+        with ThreadPoolExecutor(max_workers=min(10, len(missing))) as _ex:
+            for tk, close in _ex.map(_fetch_one, missing):
+                if close is not None:
+                    price_dict[tk] = close
 
     return price_dict
 
@@ -22181,6 +22188,7 @@ def _compute_portfolio_history() -> pd.DataFrame:
     """
     df_trades, err = _load_trades()
     if err or df_trades.empty:
+        logger.warning(f"[pf_history] _load_trades失敗またはtrades空: err={err}")
         return pd.DataFrame()
 
     df = df_trades.copy()
@@ -22195,11 +22203,13 @@ def _compute_portfolio_history() -> pd.DataFrame:
 
     price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
+        logger.warning(f"[pf_history] price_dict空。対象ticker={tickers}")
         return pd.DataFrame()
 
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
     price_df = price_df[price_df.index >= start_date]
     if price_df.empty:
+        logger.warning(f"[pf_history] start_date={start_date}以降のデータが無い")
         return pd.DataFrame()
 
     # 各営業日のポートフォリオ評価額・投資元本を計算
@@ -22253,6 +22263,7 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     """
     df_trades, err = _load_trades()
     if err or df_trades.empty:
+        logger.warning(f"[alloc_history] _load_trades失敗またはtrades空: err={err}")
         return pd.DataFrame()
 
     df = df_trades.copy()
@@ -22265,10 +22276,12 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
 
     price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
+        logger.warning(f"[alloc_history] price_dict空。対象ticker={tickers}")
         return pd.DataFrame()
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
     price_df = price_df[price_df.index >= start_date]
     if price_df.empty:
+        logger.warning(f"[alloc_history] start_date={start_date}以降のデータが無い")
         return pd.DataFrame()
 
     try:
@@ -22308,16 +22321,22 @@ def _compute_current_holdings_backtest() -> pd.DataFrame:
     """
     df_trades, err = _load_trades()
     if err or df_trades.empty:
+        logger.warning(f"[backtest] _load_trades失敗またはtrades空: err={err}, empty={df_trades.empty if df_trades is not None else '?'}")
         return pd.DataFrame()
 
     open_pos = _calc_positions_from_df(df_trades)
     if not open_pos:
+        logger.warning("[backtest] open_pos空（保有ポジションなし）")
         return pd.DataFrame()
 
     tickers    = sorted(open_pos.keys())
     price_dict = _fetch_ticker_close_prices(tickers, period="max")
     if not price_dict:
+        logger.warning(f"[backtest] price_dict空。対象ticker={tickers}")
         return pd.DataFrame()
+    _missing_bt = [t for t in tickers if t not in price_dict]
+    if _missing_bt:
+        logger.warning(f"[backtest] 一部ticker取得失敗: {_missing_bt}")
 
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
 
