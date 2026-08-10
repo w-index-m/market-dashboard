@@ -22246,6 +22246,20 @@ def _rebase_vt_series(vt_series: pd.Series, target_index, start_value) -> pd.Ser
     return aligned / aligned.iloc[0] * start_value
 
 
+def _value_as_of(df: pd.DataFrame, target_date: pd.Timestamp, col: str = "portfolio_value",
+                  max_lookback_days: int = 10):
+    """dfのインデックス（不定期な営業日ベース）の中でtarget_date以前で最も近い行の値を返す。
+    休日・データ欠測日に対応するため多少のズレは許容するが、max_lookback_days以上近傍に
+    データが無ければ「その時点のデータが無い」とみなしNoneを返す。
+    """
+    sub = df[df.index <= target_date]
+    if sub.empty:
+        return None
+    if (target_date - sub.index[-1]).days > max_lookback_days:
+        return None
+    return float(sub[col].iloc[-1])
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_portfolio_history() -> pd.DataFrame:
     """取引記録 × 日次終値でポートフォリオ資産推移を計算する。
@@ -27514,6 +27528,38 @@ def render_claude_trading_project():
                         _pnl_today = pd.Timestamp.today().normalize()
                         _vt_series = _fetch_vt_price_series()
 
+                        # ── 先週比・前月比・前年比 ──────────────────────
+                        # 実際の取引履歴ベースの評価額推移（_pnl_hist_df）を使うため、
+                        # 前日比（保有株数固定＋当日株価）とは異なり、期間中の入金・買い増しの
+                        # 影響も含めた「実際の資産推移」になる
+                        _cur_val = float(_pnl_hist_df["portfolio_value"].iloc[-1])
+
+                        def _period_chg_html(_label, _target_date):
+                            _past_val = _value_as_of(_pnl_hist_df, _target_date)
+                            if _past_val is None or _past_val <= 0:
+                                return (
+                                    f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
+                                    f'<div style="font-size:14px;color:#64748b">データ不足</div></div>'
+                                )
+                            _chg = _cur_val - _past_val
+                            _pct = _chg / _past_val * 100
+                            _color = "#22c55e" if _chg >= 0 else "#ef4444"
+                            return (
+                                f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
+                                f'<div style="font-size:16px;font-weight:700;color:{_color}">'
+                                f'{_mv(f"{_chg:+,.0f}円")}（{_pct:+.2f}%）</div></div>'
+                            )
+
+                        st.markdown(
+                            '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
+                            'border:1px solid #334155;border-radius:8px;padding:10px 18px;margin-bottom:10px">'
+                            + _period_chg_html("先週比", _pnl_today - pd.Timedelta(days=7))
+                            + _period_chg_html("前月比", _pnl_today - pd.DateOffset(months=1))
+                            + _period_chg_html("前年比", _pnl_today - pd.DateOffset(years=1))
+                            + '</div>',
+                            unsafe_allow_html=True,
+                        )
+
                         def _series_return(_s):
                             if _s is None or len(_s) < 2:
                                 return None
@@ -27599,7 +27645,7 @@ def render_claude_trading_project():
                         st.caption(
                             "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。VTは同時期に"
                             "ポートフォリオと同額を一括投資していた場合の参考換算値です（積立timing差は考慮していません）。"
-                            "5年・全期間表示や銘柄別配分の推移など詳細分析は「資産推移」タブへ。"
+                            "銘柄別配分の推移はこのページ下部の「📊 銘柄別配分の推移」セクションをご覧ください。"
                         )
 
                     # ── 現在の保有株数のままバックテスト ────────────────────
