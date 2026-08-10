@@ -26887,7 +26887,10 @@ def render_claude_trading_project():
 
                 if st.form_submit_button("💾 記録を保存", type="primary"):
                     trade_ticker = t_ticker.strip().upper()
-                    trade_name   = t_name.strip() or trade_ticker
+                    # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
+                    if re.fullmatch(r"\d{4}", trade_ticker):
+                        trade_ticker += ".T"
+                    trade_name = t_name.strip() or _get_stock_display_name(trade_ticker)
                     if trade_ticker and t_price > 0:
                         action = "BUY" if "BUY" in t_action else "SELL"
 
@@ -27043,10 +27046,14 @@ def render_claude_trading_project():
 
                         if _save_clicked:
                             _e_act = "BUY" if "BUY" in _e_action else "SELL"
+                            _e_ticker_norm = _e_ticker.strip().upper()
+                            # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
+                            if re.fullmatch(r"\d{4}", _e_ticker_norm):
+                                _e_ticker_norm += ".T"
                             with st.spinner("更新中..."):
                                 _ok = _update_trade_row(
-                                    _seq + 2, str(_e_date), _e_ticker.strip().upper(),
-                                    _e_name.strip() or _e_ticker.strip().upper(), _e_act,
+                                    _seq + 2, str(_e_date), _e_ticker_norm,
+                                    _e_name.strip() or _get_stock_display_name(_e_ticker_norm), _e_act,
                                     int(_e_qty), float(_e_price), float(_e_fee), _e_memo,
                                 )
                             if _ok:
