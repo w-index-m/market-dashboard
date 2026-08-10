@@ -27780,31 +27780,38 @@ def render_claude_trading_project():
                         with col_narr:
                             if narrative:
                                 st.markdown(
-                                    f'<p style="color:#cbd5e1;font-size:13.5px;line-height:1.7;'
-                                    f'margin:0">{narrative}</p>',
+                                    f'<div style="background:#1e293b;border:1px solid #334155;'
+                                    f'border-radius:8px;padding:12px 14px;height:100%">'
+                                    f'<p style="color:#f1f5f9;font-size:13.5px;line-height:1.7;'
+                                    f'margin:0">{narrative}</p></div>',
                                     unsafe_allow_html=True,
                                 )
                             else:
                                 st.markdown(
-                                    '<p style="color:#64748b;font-size:13px">取引記録を入力するとAI分析が表示されます。</p>',
+                                    '<div style="background:#1e293b;border:1px solid #334155;'
+                                    'border-radius:8px;padding:12px 14px">'
+                                    '<p style="color:#94a3b8;font-size:13px;margin:0">'
+                                    '取引記録を入力するとAI分析が表示されます。</p></div>',
                                     unsafe_allow_html=True,
                                 )
 
                         with col_bullets:
                             if bullets:
-                                st.markdown(
-                                    '<div style="font-size:12px;font-weight:700;color:#94a3b8;'
-                                    'margin-bottom:8px">一目でわかる</div>',
-                                    unsafe_allow_html=True,
+                                _bullets_html = (
+                                    '<div style="background:#1e293b;border:1px solid #334155;'
+                                    'border-radius:8px;padding:12px 14px;height:100%">'
+                                    '<div style="font-size:12px;font-weight:700;color:#60a5fa;'
+                                    'margin-bottom:8px">一目でわかる</div>'
                                 )
                                 for b in bullets:
-                                    st.markdown(
+                                    _bullets_html += (
                                         f'<div style="display:flex;gap:8px;margin-bottom:6px">'
-                                        f'<span style="color:#3b82f6;flex-shrink:0">•</span>'
-                                        f'<span style="color:#cbd5e1;font-size:13px">{b}</span>'
-                                        f'</div>',
-                                        unsafe_allow_html=True,
+                                        f'<span style="color:#4ade80;flex-shrink:0">•</span>'
+                                        f'<span style="color:#f1f5f9;font-size:13px">{b}</span>'
+                                        f'</div>'
                                     )
+                                _bullets_html += '</div>'
+                                st.markdown(_bullets_html, unsafe_allow_html=True)
 
                     if ai_tickers_gainers or ai_tickers_losers:
                         st.markdown("<div style='margin-top:14px'>", unsafe_allow_html=True)
