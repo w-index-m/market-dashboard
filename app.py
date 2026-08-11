@@ -896,6 +896,57 @@ def _call_ai_for_trading(
         return call_ai_with_fallback(prompt, max_output_tokens, temperature)
 
 
+def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> dict:
+    """証券口座の保有銘柄一覧スクリーンショットから、Geminiの画像認識で銘柄・数量・
+    取得単価を抽出する。GroqとOpenRouterはこのアプリでは画像入力に対応していないため
+    Gemini限定（_call_ai_for_trading()のテキスト専用フォールバックとは別経路）。
+    Returns: {"holdings": [{"name": str, "ticker": str, "qty": float|None,
+                             "avg_cost": float|None}, ...], "error": str|None}
+    """
+    if not (GENAI_AVAILABLE and GEMINI_API_KEY):
+        return {"holdings": [], "error": "Gemini APIキーが設定されていません"}
+
+    prompt = """これは証券口座アプリの「保有銘柄一覧」画面のスクリーンショットです。
+表示されている保有銘柄それぞれについて、以下の項目を読み取ってください:
+- name: 銘柄名（表示されている通り）
+- ticker: 証券コード・ティッカー（日本株は4桁の証券コード、投資信託は銘柄名と
+  同じでよい、米国株はティッカーシンボル）
+- qty: 保有数量・口数（数値のみ、カンマは除く）
+- avg_cost: 平均取得単価・取得単価（数値のみ、カンマは除く。表示されていなければnull）
+
+画像に写っていない・不鮮明で読み取れない項目はnullにしてください。数字を推測で
+埋めないこと。合計行・小計行は含めないこと。
+以下のJSON形式のみで回答してください（説明文は不要）:
+{"holdings": [{"name": "...", "ticker": "...", "qty": 100, "avg_cost": 1234.5}]}
+"""
+    for model_name in MODEL_FALLBACKS:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            gm = genai.GenerativeModel(model_name)
+            resp = gm.generate_content(
+                [prompt, {"mime_type": mime_type, "data": image_bytes}],
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=2000,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                ),
+            )
+            if not (hasattr(resp, "text") and resp.text):
+                continue
+            import json as _json
+            data = _json.loads(resp.text)
+            holdings = data.get("holdings", [])
+            if not isinstance(holdings, list):
+                continue
+            return {"holdings": holdings, "error": None}
+        except Exception as e:
+            if is_gemini_quota_error(e):
+                continue  # 次のモデルへフォールバック
+            logger.warning(f"[trading] スクショ読み取り失敗（{model_name}）: {e}")
+            continue
+    return {"holdings": [], "error": "画像から銘柄を読み取れませんでした"}
+
+
 # ===========================
 # 関連ダッシュボードリンク HTML
 # ===========================
@@ -27526,6 +27577,92 @@ def render_claude_trading_project():
                 st.error(f"❌ 保存失敗: {_tr_msg}")
             elif _tr_status == "warn":
                 st.warning(_tr_msg)
+
+            # ── 📸 スクリーンショットから一括登録（実験的機能） ──────────────
+            with st.expander("📸 証券口座スクリーンショットから一括登録（実験的機能）"):
+                st.caption(
+                    "証券口座の保有銘柄一覧画面のスクリーンショットをアップロードすると、"
+                    "AI（Gemini）が銘柄・数量・取得単価を読み取り、一括で取引記録を作成します。"
+                    "日本株・米国株・投資信託（対応済みの銘柄のみ）に対応。"
+                    "読み取り結果は保存前に必ず確認・修正できます。"
+                    "スクリーンショットからは実際の購入日が分からないため、約定日は本日の"
+                    "日付で記録されます（正確な損益推移が必要な場合は、後で✏️編集から"
+                    "実際の購入日に直してください）。"
+                )
+                _bulk_files = st.file_uploader(
+                    "スクリーンショット（複数可）", type=["png", "jpg", "jpeg"],
+                    accept_multiple_files=True, key="bulk_import_files",
+                )
+                if _bulk_files and st.button("🤖 AIで読み取る", key="bulk_import_extract_btn"):
+                    _all_holdings = []
+                    _extract_errors = []
+                    with st.spinner(f"{len(_bulk_files)}枚の画像を解析中..."):
+                        for _img_file in _bulk_files:
+                            _mime = _img_file.type or "image/png"
+                            _result = _extract_holdings_from_screenshot(_img_file.getvalue(), _mime)
+                            if _result.get("error"):
+                                _extract_errors.append(f"{_img_file.name}: {_result['error']}")
+                            else:
+                                _all_holdings.extend(_result.get("holdings", []))
+                    if _extract_errors:
+                        st.warning("一部読み取り失敗: " + " / ".join(_extract_errors))
+                    if _all_holdings:
+                        st.session_state["_bulk_import_rows"] = _all_holdings
+                        st.rerun()
+                    elif not _extract_errors:
+                        st.warning("銘柄を読み取れませんでした")
+
+                _bulk_rows = st.session_state.get("_bulk_import_rows")
+                if _bulk_rows:
+                    st.markdown("**読み取り結果（保存前に確認・修正してください）**")
+                    _bulk_df = pd.DataFrame(_bulk_rows)
+                    for _col in ["ticker", "name", "qty", "avg_cost"]:
+                        if _col not in _bulk_df.columns:
+                            _bulk_df[_col] = None
+                    _bulk_df = _bulk_df[["ticker", "name", "qty", "avg_cost"]].rename(columns={
+                        "ticker": "ティッカー/コード", "name": "銘柄名",
+                        "qty": "数量", "avg_cost": "取得単価",
+                    })
+                    _edited_df = st.data_editor(
+                        _bulk_df, num_rows="dynamic", use_container_width=True,
+                        key="bulk_import_editor",
+                    )
+                    st.caption(f"約定日は本日（{datetime.now(JST).strftime('%Y-%m-%d')}）として一括登録されます。")
+                    _bic1, _bic2 = st.columns([1, 4])
+                    if _bic1.button("💾 一括登録", key="bulk_import_save_btn", type="primary"):
+                        _saved, _failed = 0, []
+                        for _, _row in _edited_df.iterrows():
+                            _raw_ticker = str(_row["ティッカー/コード"] or "").strip().upper()
+                            if not _raw_ticker:
+                                continue
+                            if re.fullmatch(r"\d{4}", _raw_ticker):
+                                _raw_ticker += ".T"
+                            _raw_ticker = _resolve_fund_ticker_alias(_raw_ticker)
+                            _qty   = _row["数量"]
+                            _price = _row["取得単価"]
+                            if not _qty or not _price:
+                                _failed.append(f"{_raw_ticker}（数量または取得単価が未入力）")
+                                continue
+                            _name = str(_row["銘柄名"] or "").strip() or _get_stock_display_name(_raw_ticker)
+                            _bok, _berr = _save_trade(
+                                datetime.now(JST).strftime("%Y-%m-%d"), _raw_ticker, _name,
+                                "BUY", float(_qty), float(_price), 0.0, "スクショ一括登録",
+                                0.0, 0.0, username=_usr,
+                            )
+                            if _bok:
+                                _saved += 1
+                            else:
+                                _failed.append(f"{_raw_ticker}（{_berr}）")
+                        if _saved:
+                            st.cache_data.clear()
+                            st.session_state.pop("_bulk_import_rows", None)
+                            st.success(f"✅ {_saved}件を登録しました" + (f"（失敗: {' / '.join(_failed)}）" if _failed else ""))
+                            st.rerun()
+                        else:
+                            st.error("登録できた銘柄がありませんでした: " + " / ".join(_failed))
+                    if _bic2.button("キャンセル（読み取り結果を破棄）", key="bulk_import_cancel_btn"):
+                        st.session_state.pop("_bulk_import_rows", None)
+                        st.rerun()
 
             st.session_state.setdefault("_trade_ticker", "")
             st.session_state.setdefault("_trade_name", "")
