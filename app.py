@@ -22756,10 +22756,14 @@ def _update_trade_row(sheet_row_num: int, date: str, ticker: str, name: str, act
             return False
         # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
         # 「04317188」のような数字だけの文字列の先頭0が失われて数値化されてしまう
-        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する
+        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する。
+        # gspread 6.x でWorksheet.updateの引数順が (range_name, values) から
+        # (values, range_name) に変更された（5.x以前と逆）。旧順のまま呼んでいたため、
+        # 実際にはrange文字列がvaluesとして、更新データがrange_nameとして渡ってしまい、
+        # 意図した行が一切更新されていなかった（編集が常に無反応に見えたバグの真因）。
         ws.update(
-            f"A{sheet_row_num}:J{sheet_row_num}",
             [[date, ticker.upper(), name, action, quantity, price, fee, memo, 0.0, 0.0]],
+            f"A{sheet_row_num}:J{sheet_row_num}",
             value_input_option="RAW",
         )
         return True
