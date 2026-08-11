@@ -20923,9 +20923,12 @@ def _generate_ai_allocation_scores(
         _disp = data.get("name") or pos.get("name") or ticker
         if _disp == ticker:
             _disp = _get_stock_display_name(ticker)
+        _px_s   = f"{price:,.0f}" if isinstance(price, (int, float)) and is_jp else (f"{price:,.2f}" if isinstance(price, (int, float)) else price)
+        _ma25_s = f"{ma25:,.0f}" if isinstance(ma25, (int, float)) and is_jp else (f"{ma25:,.2f}" if isinstance(ma25, (int, float)) else ma25)
+        _ma75_s = f"{ma75:,.0f}" if isinstance(ma75, (int, float)) and is_jp else (f"{ma75:,.2f}" if isinstance(ma75, (int, float)) else ma75)
         stock_blocks.append(
             f"{flag} {ticker}({_disp}) | "
-            f"株価:{price}{cur} RSI:{rsi} MA25:{ma25}{cur} MA75:{ma75}{cur} | "
+            f"株価:{_px_s}{cur} RSI:{rsi} MA25:{_ma25_s}{cur} MA75:{_ma75_s}{cur} | "
             f"20日:{ret_str} 含み:{gp:+.1f}% | セクター:{sec} | "
             f"IR/ニュース: {news_str}"
         )
@@ -24784,6 +24787,9 @@ def _generate_full_portfolio_recommendation(
         rsi     = data.get("rsi", "-")
         ma25    = data.get("ma25", "-")
         ma75    = data.get("ma75", "-")
+        _px_s   = f"{price:,.0f}" if isinstance(price, (int, float)) and is_jp else (f"{price:,.2f}" if isinstance(price, (int, float)) else price)
+        _ma25_s = f"{ma25:,.0f}" if isinstance(ma25, (int, float)) and is_jp else (f"{ma25:,.2f}" if isinstance(ma25, (int, float)) else ma25)
+        _ma75_s = f"{ma75:,.0f}" if isinstance(ma75, (int, float)) and is_jp else (f"{ma75:,.2f}" if isinstance(ma75, (int, float)) else ma75)
         ret_1d  = data.get("ret_1d")
         ret_5d  = data.get("ret_5d")
         vol_r   = data.get("vol_ratio")
@@ -24811,12 +24817,14 @@ def _generate_full_portfolio_recommendation(
         if next_earn:                funda_parts.append(f"次回決算日 {next_earn}")
         funda_str = " | ".join(funda_parts)
 
+        _avg_cost_v = p.get('avg_cost', 0)
+        _avg_cost_s = f"{_avg_cost_v:,.0f}" if is_jp else f"{_avg_cost_v:,.2f}"
         block = (
             f"【{flag} {ticker} | {p['name']}】\n"
-            f"  現在値: {price}{cur} | RSI: {rsi} | MA25: {ma25}{cur} | MA75: {ma75}{cur}\n"
+            f"  現在値: {_px_s}{cur} | RSI: {rsi} | MA25: {_ma25_s}{cur} | MA75: {_ma75_s}{cur}\n"
             f"  リターン: {ret_str}\n"
             f"  評価額: {mval:,.0f}{cur}({alloc:.1f}%) | 含み: {gain:+,.0f}{cur}({gp:+.1f}%)\n"
-            f"  取得単価: {p.get('avg_cost',0):.1f}{cur} | 保有: {int(p.get('qty',0))}株\n"
+            f"  取得単価: {_avg_cost_s}{cur} | 保有: {int(p.get('qty',0))}株\n"
             f"  セクター: {sec}\n"
         )
         if funda_str:
@@ -25271,7 +25279,8 @@ def render_claude_trading_project():
                 _disp_name = pos.get("name") or ticker
                 if _disp_name == ticker or not _disp_name:
                     _disp_name = _get_stock_display_name(ticker)
-                lbl = f"📂 {ticker} — {_disp_name}（取得単価 {avg:.1f}{cur}）"
+                _avg_str = f"{avg:,.0f}{cur}" if is_jp_pos else f"{avg:,.2f}{cur}"
+                lbl = f"📂 {ticker} — {_disp_name}（取得単価 {_avg_str}）"
                 all_options[lbl] = {
                     "ticker": ticker, "name": _disp_name,
                     "market": "JP" if is_jp_pos else "US",
@@ -26849,13 +26858,21 @@ def render_claude_trading_project():
                     st.error(f"AI分析エラー: {signal['error']}")
                 else:
                     cur   = "円" if is_jp else "USD"
-                    price = data.get("price", "-")
+
+                    def _px_str(v):
+                        """株価系の数値を円なら小数無し・USDなら小数2桁で表示する。数値でなければそのまま"""
+                        if not isinstance(v, (int, float)):
+                            return v
+                        return f"{v:,.0f}" if is_jp else f"{v:,.2f}"
+
+                    price = _px_str(data.get("price", "-"))
                     rsi   = data.get("rsi", "-")
-                    ma25  = data.get("ma25", "-")
-                    ma75  = data.get("ma75", "-")
+                    ma25  = _px_str(data.get("ma25", "-"))
+                    ma75  = _px_str(data.get("ma75", "-"))
 
                     mode_label = "ポジション管理" if pos_ctx else "新規エントリー検討"
                     hdr_color  = "#f59e0b" if pos_ctx else "#60a5fa"
+                    _avg_cost_str = _px_str(pos_ctx["avg_cost"]) if pos_ctx else ""
 
                     st.markdown(
                         f'<div style="background:#0f2744;border-radius:10px;padding:14px 18px;'
@@ -26869,7 +26886,7 @@ def render_claude_trading_project():
                         f'MA25: <b style="color:#f1f5f9">{ma25}{cur}</b> ｜ '
                         f'MA75: <b style="color:#f1f5f9">{ma75}{cur}</b>'
                         + (f' ｜ 保有 <b style="color:#f1f5f9">{int(pos_ctx["qty"])}株</b>'
-                           f' 取得単価 <b style="color:#f1f5f9">{pos_ctx["avg_cost"]:.1f}{cur}</b>'
+                           f' 取得単価 <b style="color:#f1f5f9">{_avg_cost_str}{cur}</b>'
                            if pos_ctx else "")
                         + f'</div></div>',
                         unsafe_allow_html=True,
@@ -27254,6 +27271,9 @@ def render_claude_trading_project():
                     _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
                     _act_label = "買い" if _act == "BUY" else "売り"
                     _memo_s = str(_row.get("memo", "") or "").strip()
+                    _row_is_jp = str(_row.get("ticker", "")).endswith(".T")
+                    _row_price = float(_row.get("price", 0))
+                    _row_price_str = f"{_row_price:,.0f}" if _row_is_jp else f"{_row_price:,.2f}"
                     _row_c1, _row_c2 = st.columns([10, 2])
                     with _row_c1:
                         st.markdown(
@@ -27265,7 +27285,7 @@ def render_claude_trading_project():
                             f'<span style="font-size:12px;color:#94a3b8">{_row.get("name","")}</span>'
                             f'<span style="font-size:12px;font-weight:700;color:{_act_color}">{_act_label}</span>'
                             f'<span style="font-size:12px;color:#e2e8f0">{int(_row.get("quantity",0)):,}株</span>'
-                            f'<span style="font-size:12px;color:#e2e8f0">@ {float(_row.get("price",0)):,.1f}</span>'
+                            f'<span style="font-size:12px;color:#e2e8f0">@ {_row_price_str}</span>'
                             f'<span style="font-size:11px;color:#64748b">手数料 {int(_row.get("fee",0)):,}</span>'
                             + (f'<span style="font-size:11px;color:#64748b">📝 {_memo_s[:20]}</span>' if _memo_s else "")
                             + '</div>',
@@ -27380,6 +27400,12 @@ def render_claude_trading_project():
                     for ticker, pos in open_pos.items():
                         is_jp_pos = ticker.endswith(".T")
                         cur_unit  = "円" if is_jp_pos else "USD"
+
+                        def _cur_fmt(val, signed=False):
+                            """円は小数無し・USDは小数2桁でcur_unit付き文字列を返す"""
+                            _spec = f"{{:{'+' if signed else ''},.0f}}" if is_jp_pos else f"{{:{'+' if signed else ''},.2f}}"
+                            return f"{_spec.format(val)} {cur_unit}"
+
                         cur_price = None
                         prev_close = None
                         try:
@@ -27453,7 +27479,7 @@ def render_claude_trading_project():
                         if cur_price and prev_close:
                             _day_chg_native   = (cur_price - prev_close) * pos["qty"]
                             _day_chg_pct_row  = (cur_price / prev_close - 1) * 100
-                            _day_chg_row_str  = _mv(f"{_day_chg_native:+,.2f} {cur_unit}")
+                            _day_chg_row_str  = _mv(_cur_fmt(_day_chg_native, signed=True))
                             _day_chg_pct_str  = f"{_day_chg_pct_row:+.2f}%"
                         else:
                             _day_chg_row_str = "-"
@@ -27469,11 +27495,11 @@ def render_claude_trading_project():
                             # 通貨単位は行ごとに変わる（米国株=USD/日本株=円）ため、列名ではなく
                             # 値の中に埋め込む（列名を動的にするとpd.DataFrameが別々の列として
                             # 分裂させてしまい表が崩れるため）
-                            "平均取得単価": _mv(f"{avg_cost:,.2f} {cur_unit}"),
+                            "平均取得単価": _mv(_cur_fmt(avg_cost)),
                             "前日比（額）": _day_chg_row_str,
                             "前日比（%）": _day_chg_pct_str,
-                            "現在株価":   _mv(f"{cur_price:,.2f} {cur_unit}") if cur_price else "取得失敗",
-                            "評価額":    _mv(f"{cur_price * pos['qty']:,.2f} {cur_unit}") if cur_price else "取得失敗",
+                            "現在株価":   _mv(_cur_fmt(cur_price)) if cur_price else "取得失敗",
+                            "評価額":    _mv(_cur_fmt(cur_price * pos['qty'])) if cur_price else "取得失敗",
                             "時間外/PTS": _mv(_ext_str),
                             "含み損益（USD）": _mv(_pnl_usd_str),
                             "含み損益（円）":  _mv(_pnl_jpy_str),
@@ -28395,9 +28421,9 @@ def render_claude_trading_project():
                         detail_rows.append({
                             "銘柄":     _label,
                             "権利落日": ev["date"],
-                            "1株配当":  f"{_ps:,.4f} {cur_label}",
+                            "1株配当":  f"{_ps:,.2f} {cur_label}",
                             "保有株数": int(ev["qty"]),
-                            "受取配当": f"{_disp:,.2f} {cur_label}",
+                            "受取配当": (f"{_disp:,.0f} {cur_label}" if use_jpy else f"{_disp:,.2f} {cur_label}"),
                         })
 
                 if has_any_div:
@@ -28411,6 +28437,7 @@ def render_claude_trading_project():
                             marker_color=_color,
                             hovertemplate=(
                                 f"{_label}<br>%{{x}}<extra></extra>" if _privacy_s
+                                else f"{_label}<br>%{{x}}<br>配当: %{{y:,.0f}}<extra></extra>" if use_jpy
                                 else f"{_label}<br>%{{x}}<br>配当: %{{y:,.2f}}<extra></extra>"
                             ),
                         ))
@@ -28448,9 +28475,10 @@ def render_claude_trading_project():
                                 f'</div>',
                                 unsafe_allow_html=True,
                             )
+                        _total_div_str = f"{cur_label} {total_div:,.0f}" if use_jpy else f"{cur_label} {total_div:,.2f}"
                         st.markdown(
                             f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
-                            f'過去6ヶ月合計: <b style="color:#f59e0b">{_mvs(f"{cur_label} {total_div:,.2f}")}</b></div>',
+                            f'過去6ヶ月合計: <b style="color:#f59e0b">{_mvs(_total_div_str)}</b></div>',
                             unsafe_allow_html=True,
                         )
                 else:
