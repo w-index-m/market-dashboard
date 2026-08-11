@@ -20730,6 +20730,28 @@ def _strip_ticker_quote_prefix(s: str) -> str:
     return (s or "").lstrip("'‘’“”`")
 
 
+def _ticker_for_sheet(ticker: str) -> str:
+    """Google Sheetsに書き込む直前にティッカーを変換する。
+    value_input_option="RAW"を指定しても投信協会コードのような数字だけの文字列
+    （例:「04317188」）の先頭0が消える事象が再現し続けたため（原因が
+    gspread/Sheets API側の挙動なのか特定できず、こちらのコードからは検証不能）、
+    そもそも「数字だけの文字列」をSheetsに渡さないようにして問題を回避する。
+    数字だけのティッカー（＝投信協会コード。日本株コードは.Tが必ず付き、
+    米国株は英字のみなのでこのケースには該当しない）の先頭に非数字の印「F」を
+    付けて保存し、_ticker_from_sheet()で読み込み時に外す。
+    """
+    t = (ticker or "").strip()
+    return f"F{t}" if t.isdigit() else t
+
+
+def _ticker_from_sheet(ticker: str) -> str:
+    """_ticker_for_sheet()の逆変換。読み込み時に投信協会コードの先頭Fを外す。"""
+    t = (ticker or "").strip()
+    if t.startswith("F") and t[1:].isdigit():
+        return t[1:]
+    return t
+
+
 def _resolve_fund_ticker_alias(raw: str) -> str:
     """取引記録のティッカー欄に投信協会コードではなくファンド名（例:「結い2101」）が
     そのまま入力された場合に、_JP_FUND_MAPの対応コードへ正規化する。
@@ -20793,6 +20815,8 @@ def _load_trades(username: str = "") -> tuple[pd.DataFrame, str | None]:
         for col in ["ticker", "name", "action", "date", "memo"]:
             if col in df.columns:
                 df[col] = df[col].fillna("").astype(str)
+        if "ticker" in df.columns:
+            df["ticker"] = df["ticker"].apply(_ticker_from_sheet)
         return df, None
     except Exception as e:
         logger.warning(f"[trading] trades読込失敗: {e}")
@@ -20811,11 +20835,10 @@ def _save_trade(date: str, ticker: str, name: str, action: str,
         ])
         if not ws:
             return False, "Google Sheets接続失敗（Secretsを確認）"
-        # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
-        # 「04317188」のような数字だけの文字列の先頭0が失われて数値化されてしまう
-        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する
+        # 数字だけの投信コードの先頭0が失われないよう_ticker_for_sheet()で保護する
+        # （詳細はその関数のdocstring参照）。value_input_option="RAW"も念のため維持。
         ws.append_row(
-            [date, ticker.upper(), name, action, quantity, price, fee, memo, ai_target, ai_stoploss],
+            [date, _ticker_for_sheet(ticker.upper()), name, action, quantity, price, fee, memo, ai_target, ai_stoploss],
             value_input_option="RAW",
         )
         return True, ""
@@ -22766,15 +22789,14 @@ def _update_trade_row(sheet_row_num: int, date: str, ticker: str, name: str, act
         ws = _trading_ws(_trades_tab(username), _TRADES_HEADERS)
         if not ws:
             return False
-        # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
-        # 「04317188」のような数字だけの文字列の先頭0が失われて数値化されてしまう
-        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する。
+        # 数字だけの投信コードの先頭0が失われないよう_ticker_for_sheet()で保護する
+        # （詳細はその関数のdocstring参照）。value_input_option="RAW"も念のため維持。
         # gspread 6.x でWorksheet.updateの引数順が (range_name, values) から
         # (values, range_name) に変更された（5.x以前と逆）。旧順のまま呼んでいたため、
         # 実際にはrange文字列がvaluesとして、更新データがrange_nameとして渡ってしまい、
         # 意図した行が一切更新されていなかった（編集が常に無反応に見えたバグの真因）。
         ws.update(
-            [[date, ticker.upper(), name, action, quantity, price, fee, memo, 0.0, 0.0]],
+            [[date, _ticker_for_sheet(ticker.upper()), name, action, quantity, price, fee, memo, 0.0, 0.0]],
             f"A{sheet_row_num}:J{sheet_row_num}",
             value_input_option="RAW",
         )
