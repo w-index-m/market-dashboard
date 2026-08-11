@@ -908,14 +908,22 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
 
     prompt = """これは証券口座アプリの「保有銘柄一覧」画面のスクリーンショットです。
 表示されている保有銘柄それぞれについて、以下の項目を読み取ってください:
-- name: 銘柄名（表示されている通り）
-- ticker: 証券コード・ティッカー（日本株は4桁の証券コード、投資信託は銘柄名と
-  同じでよい、米国株はティッカーシンボル）
+- name: 銘柄名（表示されている通り。全角文字はそのままでよい）
+- ticker: 証券コード・ティッカー（日本株は4桁の証券コード、投資信託は証券コードが
+  表示されていないことが多いので銘柄名と同じ文字列でよい、米国株はティッカー
+  シンボル）。**必ずJSON文字列として（ダブルクォートで囲んで）返すこと。数値の
+  ように見えるコードでも先頭の0を絶対に省略しないこと**（例: "04317188"を
+  4317188のように数値として返すのは厳禁）
 - qty: 保有数量・口数（数値のみ、カンマは除く）
 - avg_cost: 平均取得単価・取得単価（数値のみ、カンマは除く。表示されていなければnull）
 
 画像に写っていない・不鮮明で読み取れない項目はnullにしてください。数字を推測で
-埋めないこと。合計行・小計行は含めないこと。
+埋めないこと。合計行・小計行は含めないこと。同じような名前の銘柄（例:
+「iFreeNEXT NASDAQ100インデックス」と「iFreeNEXT FANG+インデックス」）が
+複数の区分（特定預り・NISA成長投資枠・NISAつみたて投資枠等）に分けて表示されて
+いることがあるので、各行の数量・取得単価は、その行の**すぐ左または直上にある
+銘柄名**と正しく対応付けること（別の行の数値と取り違えないよう、上から順に
+1行ずつ丁寧に対応させること）。
 以下のJSON形式のみで回答してください（説明文は不要）:
 {"holdings": [{"name": "...", "ticker": "...", "qty": 100, "avg_cost": 1234.5}]}
 """
@@ -938,6 +946,12 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
             holdings = data.get("holdings", [])
             if not isinstance(holdings, list):
                 continue
+            # tickerが数値型で返ってきた場合（プロンプトの指示に反して先頭の0が
+            # 失われている可能性がある）は文字列化だけしておく。実際の桁欠落自体は
+            # 呼び出し側の銘柄名フォールバック解決（_resolve_fund_ticker_alias）で救う
+            for _h in holdings:
+                if isinstance(_h, dict) and "ticker" in _h and _h["ticker"] is not None:
+                    _h["ticker"] = str(_h["ticker"])
             return {"holdings": holdings, "error": None}
         except Exception as e:
             if is_gemini_quota_error(e):
@@ -27646,19 +27660,29 @@ def render_claude_trading_project():
                         _saved, _failed = 0, []
                         for _, _row in _edited_df.iterrows():
                             _raw_ticker = str(_row["ティッカー/コード"] or "").strip().upper()
-                            if not _raw_ticker:
+                            _raw_name_field = str(_row["銘柄名"] or "").strip()
+                            if not _raw_ticker and not _raw_name_field:
                                 continue
                             # 4桁の証券コード（新形式の英数混在コード「200A」等も含む）は
                             # 日本株なので自動で.Tを補完する
                             if re.fullmatch(r"\d[0-9A-Z]{3}", _raw_ticker):
                                 _raw_ticker += ".T"
                             _raw_ticker = _resolve_fund_ticker_alias(_raw_ticker)
+                            # AI読み取りで投信コードの桁（先頭の0等）が欠落することがあるため、
+                            # コード側で解決できなければ銘柄名からもフォールバックで解決を試みる
+                            if _raw_ticker not in _JP_FUND_MAP and _raw_name_field:
+                                _alias_from_name = _resolve_fund_ticker_alias(_raw_name_field)
+                                if _alias_from_name in _JP_FUND_MAP:
+                                    _raw_ticker = _alias_from_name
+                            if not _raw_ticker:
+                                _failed.append(f"{_raw_name_field}（ティッカー/コードが空欄）")
+                                continue
                             _qty   = _row["数量"]
                             _price = _row["取得単価"]
                             if not _qty or not _price:
                                 _failed.append(f"{_raw_ticker}（数量または取得単価が未入力）")
                                 continue
-                            _name = str(_row["銘柄名"] or "").strip() or _get_stock_display_name(_raw_ticker)
+                            _name = _raw_name_field or _get_stock_display_name(_raw_ticker)
                             _bok, _berr = _save_trade(
                                 datetime.now(JST).strftime("%Y-%m-%d"), _raw_ticker, _name,
                                 "BUY", float(_qty), float(_price), 0.0, "スクショ一括登録",
