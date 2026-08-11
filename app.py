@@ -20718,6 +20718,18 @@ def _normalize_fund_name(s: str) -> str:
     return _ud.normalize("NFKC", s or "").replace(" ", "").replace("　", "").strip()
 
 
+def _strip_ticker_quote_prefix(s: str) -> str:
+    """ティッカー欄の先頭についた ' ' ` 等の引用符を除去する。
+    Google Sheetsの通常UIでは先頭の'は「数値変換しないでテキスト扱いにする」ための
+    エスケープ記号であり保存はされないが、本アプリはvalue_input_option="RAW"で書き込む
+    ため、RAWモードではこの'がエスケープとして解釈されず**文字通り保存されてしまう**。
+    数字だけの投信コードの先頭0を消さないよう昔からの癖で'を手入力するユーザーがいる
+    ため、そのまま保存されるとティッカーが壊れる（例: "'04317188"）。RAWモードなら
+    先頭0はこの記号なしでもそのまま保持されるので、単純に除去してよい。
+    """
+    return (s or "").lstrip("'‘’“”`")
+
+
 def _resolve_fund_ticker_alias(raw: str) -> str:
     """取引記録のティッカー欄に投信協会コードではなくファンド名（例:「結い2101」）が
     そのまま入力された場合に、_JP_FUND_MAPの対応コードへ正規化する。
@@ -27679,7 +27691,7 @@ def render_claude_trading_project():
                     if _bic1.button("💾 一括登録", key="bulk_import_save_btn", type="primary"):
                         _saved, _failed = 0, []
                         for _, _row in _edited_df.iterrows():
-                            _raw_ticker = str(_row["ティッカー/コード"] or "").strip().upper()
+                            _raw_ticker = _strip_ticker_quote_prefix(str(_row["ティッカー/コード"] or "").strip().upper())
                             _raw_name_field = str(_row["銘柄名"] or "").strip()
                             if not _raw_ticker and not _raw_name_field:
                                 continue
@@ -27772,7 +27784,7 @@ def render_claude_trading_project():
                 t_memo   = st.text_input("メモ（任意）")
 
                 if st.form_submit_button("💾 記録を保存", type="primary"):
-                    trade_ticker = t_ticker.strip().upper()
+                    trade_ticker = _strip_ticker_quote_prefix(t_ticker.strip().upper())
                     # 4桁の証券コード（例: "2801"、新形式の英数混在コード「200A」等も含む）は
                     # 日本株なので自動で.Tを補完する
                     if re.fullmatch(r"\d[0-9A-Z]{3}", trade_ticker):
@@ -27957,7 +27969,7 @@ def render_claude_trading_project():
 
                         if _save_clicked:
                             _e_act = "BUY" if "BUY" in _e_action else "SELL"
-                            _e_ticker_norm = _e_ticker.strip().upper()
+                            _e_ticker_norm = _strip_ticker_quote_prefix(_e_ticker.strip().upper())
                             # 4桁の証券コード（例: "2801"、新形式の英数混在コード「200A」等も含む）は
                             # 日本株なので自動で.Tを補完する
                             if re.fullmatch(r"\d[0-9A-Z]{3}", _e_ticker_norm):
