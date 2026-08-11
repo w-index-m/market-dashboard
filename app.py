@@ -28206,7 +28206,7 @@ def render_claude_trading_project():
                     st.dataframe(
                         pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True,
                         column_config={
-                            "時間外/PTS": st.column_config.TextColumn(width="large"),
+                            "時間外/PTS": st.column_config.TextColumn(width=150),
                         },
                     )
                     st.caption(
