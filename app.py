@@ -20745,10 +20745,18 @@ def _ticker_for_sheet(ticker: str) -> str:
 
 
 def _ticker_from_sheet(ticker: str) -> str:
-    """_ticker_for_sheet()の逆変換。読み込み時に投信協会コードの先頭Fを外す。"""
+    """_ticker_for_sheet()の逆変換。読み込み時に投信協会コードの先頭Fを外す。
+    このF付与対策より前に保存され、先頭0が欠けたまま数値化されて壊れている
+    既存レコード（例:「4317188」7桁）も、0埋めして8桁化したコードが投信マスタに
+    存在すれば自動的に復元する（ユーザーが再編集しなくても直る）。
+    """
     t = (ticker or "").strip()
     if t.startswith("F") and t[1:].isdigit():
         return t[1:]
+    if t.isdigit() and 0 < len(t) < 8:
+        padded = t.zfill(8)
+        if padded in _JP_FUND_MAP:
+            return padded
     return t
 
 
@@ -20764,6 +20772,15 @@ def _resolve_fund_ticker_alias(raw: str) -> str:
     for code, name in _JP_FUND_MAP.items():
         if raw == name or raw_norm == _normalize_fund_name(name):
             return code
+    # 投信協会コードは8桁固定。手入力時やスクショ読み取り時に先頭0が欠けて
+    # 桁数が足りない数字列（例:「4317188」7桁）で入力された場合、0埋めして
+    # 8桁化したコードが既知の投信マスタに存在すればそちらを採用する
+    # （4桁の日本株コードは呼び出し元で先に.T補完されるため、ここに到達する
+    # 数字だけの文字列は投信コードの桁欠けとみなしてよい）
+    if raw.isdigit() and 0 < len(raw) < 8:
+        padded = raw.zfill(8)
+        if padded in _JP_FUND_MAP:
+            return padded
     return raw
 
 
