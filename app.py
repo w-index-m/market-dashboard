@@ -20621,6 +20621,21 @@ _JP_FUND_MAP = {
 _JP_FUND_NAV_UNIT = 10000
 
 
+def _ticker_exists(ticker: str) -> bool:
+    """ティッカーが実在するか軽く確認する（投信マップ→yfinanceの順）。
+    取引記録の保存直後に1回だけ呼ぶ想定（ネットワーク越しの確認のため）。
+    """
+    if not ticker:
+        return False
+    if ticker in _JP_FUND_MAP:
+        return True
+    try:
+        info = yf.Ticker(ticker).fast_info
+        return bool(info.get("lastPrice") or info.get("last_price"))
+    except Exception:
+        return False
+
+
 def _resolve_fund_ticker_alias(raw: str) -> str:
     """取引記録のティッカー欄に投信協会コードではなくファンド名（例:「結い2101」）が
     そのまま入力された場合に、_JP_FUND_MAPの対応コードへ正規化する。
@@ -27566,8 +27581,16 @@ def render_claude_trading_project():
                                 st.cache_data.clear()
                                 st.session_state["_trade_ticker"] = ""
                                 st.session_state["_trade_name"]   = ""
-                                st.session_state["_trade_status"] = "ok"
-                                st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
+                                if _ticker_exists(trade_ticker):
+                                    st.session_state["_trade_status"] = "ok"
+                                    st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
+                                else:
+                                    st.session_state["_trade_status"] = "warn"
+                                    st.session_state["_trade_msg"] = (
+                                        f"{trade_ticker} は記録しましたが、この銘柄は見つかりませんでした"
+                                        "（ティッカーが間違っているか、未対応の投信の可能性があります。"
+                                        "記録自体は保存済みなので、必要であれば✏️編集で修正してください）"
+                                    )
                             else:
                                 st.session_state["_trade_status"] = "error"
                                 st.session_state["_trade_msg"]    = err
@@ -27721,7 +27744,15 @@ def render_claude_trading_project():
                             if _ok:
                                 st.session_state.pop("_editing_trade_row", None)
                                 st.cache_data.clear()
-                                st.success("更新しました")
+                                if _ticker_exists(_e_ticker_norm):
+                                    st.session_state["_trade_status"] = "ok"
+                                    st.session_state["_trade_msg"]    = "更新しました"
+                                else:
+                                    st.session_state["_trade_status"] = "warn"
+                                    st.session_state["_trade_msg"] = (
+                                        f"{_e_ticker_norm} で更新しましたが、この銘柄は見つかりませんでした"
+                                        "（ティッカーが間違っているか、未対応の投信の可能性があります）"
+                                    )
                                 st.rerun()
                             else:
                                 st.error("更新に失敗しました。再試行してください。")
