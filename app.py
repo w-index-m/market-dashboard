@@ -20617,6 +20617,18 @@ _JP_FUND_MAP = {
 }
 
 
+def _resolve_fund_ticker_alias(raw: str) -> str:
+    """取引記録のティッカー欄に投信協会コードではなくファンド名（例:「結い2101」）が
+    そのまま入力された場合に、_JP_FUND_MAPの対応コードへ正規化する。
+    一致しなければ入力をそのまま返す（4桁JPコードの自動.T補完と同じ位置づけ）。
+    """
+    raw = (raw or "").strip()
+    for code, name in _JP_FUND_MAP.items():
+        if raw == name:
+            return code
+    return raw
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _get_stock_display_name(ticker: str) -> str:
     """ティッカーから銘柄表示名を取得（既知マスタ→投信マスタ→yfinance shortName の順）。
@@ -27435,6 +27447,9 @@ def render_claude_trading_project():
                     # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
                     if re.fullmatch(r"\d{4}", trade_ticker):
                         trade_ticker += ".T"
+                    # 投信をコードではなくファンド名で入力した場合（例:「結い2101」）は
+                    # 対応する投信協会コードへ正規化する
+                    trade_ticker = _resolve_fund_ticker_alias(trade_ticker)
                     trade_name = t_name.strip() or _get_stock_display_name(trade_ticker)
                     if trade_ticker and t_price > 0:
                         action = "BUY" if "BUY" in t_action else "SELL"
@@ -27607,6 +27622,9 @@ def render_claude_trading_project():
                             # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
                             if re.fullmatch(r"\d{4}", _e_ticker_norm):
                                 _e_ticker_norm += ".T"
+                            # 投信をコードではなくファンド名で入力した場合（例:「結い2101」）は
+                            # 対応する投信協会コードへ正規化する
+                            _e_ticker_norm = _resolve_fund_ticker_alias(_e_ticker_norm)
                             with st.spinner("更新中..."):
                                 _ok = _update_trade_row(
                                     _seq + 2, str(_e_date), _e_ticker_norm,
