@@ -22726,10 +22726,14 @@ def _compute_current_holdings_backtest() -> pd.DataFrame:
     return result
 
 
-def _delete_trade_row(sheet_row_num: int) -> bool:
-    """Google Sheetsの指定行（1始まり、ヘッダー=1）を削除する。"""
+def _delete_trade_row(sheet_row_num: int, username: str = "") -> bool:
+    """Google Sheetsの指定行（1始まり、ヘッダー=1）を削除する。
+    username: ログイン中ユーザーの取引記録シート（claude_trades_{username}）を
+    正しく指定するために必須（未指定/空だと常にadminの既定シートを操作して
+    しまい、ログイン中ユーザー自身のデータには反映されないバグがあったため）。
+    """
     try:
-        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
+        ws = _trading_ws(_trades_tab(username), _TRADES_HEADERS)
         if not ws:
             return False
         ws.delete_rows(sheet_row_num)
@@ -22740,12 +22744,14 @@ def _delete_trade_row(sheet_row_num: int) -> bool:
 
 
 def _update_trade_row(sheet_row_num: int, date: str, ticker: str, name: str, action: str,
-                       quantity: float, price: float, fee: float, memo: str) -> bool:
+                       quantity: float, price: float, fee: float, memo: str,
+                       username: str = "") -> bool:
     """Google Sheetsの指定行（1始まり、ヘッダー=1）の内容を書き換える。
     ai_target/ai_stoploss列はフォームから廃止済みのため0で維持する。
+    username: 削除と同じ理由でログイン中ユーザーのシートを正しく指定するために必須。
     """
     try:
-        ws = _trading_ws("claude_trades", _TRADES_HEADERS)
+        ws = _trading_ws(_trades_tab(username), _TRADES_HEADERS)
         if not ws:
             return False
         # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
@@ -27960,6 +27966,7 @@ def render_claude_trading_project():
                                     _seq + 2, str(_e_date), _e_ticker_norm,
                                     _e_name.strip() or _get_stock_display_name(_e_ticker_norm), _e_act,
                                     int(_e_qty), float(_e_price), float(_e_fee), _e_memo,
+                                    username=_usr,
                                 )
                             if _ok:
                                 st.session_state.pop("_editing_trade_row", None)
@@ -27982,7 +27989,7 @@ def render_claude_trading_project():
 
                 if _del_requested is not None:
                     with st.spinner("削除中..."):
-                        if _delete_trade_row(_del_requested):
+                        if _delete_trade_row(_del_requested, username=_usr):
                             st.success("削除しました")
                             st.cache_data.clear()
                             st.rerun()
