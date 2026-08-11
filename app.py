@@ -22683,9 +22683,9 @@ def _calc_positions_from_df(df: "pd.DataFrame") -> dict:
     }
 
 
-def _get_open_positions() -> dict:
+def _get_open_positions(username: str = "") -> dict:
     """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
-    df, _ = _load_trades()
+    df, _ = _load_trades(username)
     if df.empty:
         return {}
     return _calc_positions_from_df(df)
@@ -23561,8 +23561,9 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _compute_portfolio_summary() -> dict:
+def _compute_portfolio_summary(username: str = "") -> dict:
     """ポートフォリオサマリー計算。Yahoo Finance スタイルの4カードに必要なデータを返す。
+    username: 空なら現在ログイン中ユーザー（_load_trades()のデフォルト挙動）。
     Returns: {
         "positions": {ticker: {name, qty, avg_cost, cost, cur_price, market_value, gain, gain_pct, is_jp, sector}},
         "dividends": {ticker: {is_jp, divs_by_month: {YYYY-MM: amount_in_native_currency}}},
@@ -23570,14 +23571,14 @@ def _compute_portfolio_summary() -> dict:
         "error": str | None,
     }
     """
-    df_trades, err = _load_trades()
+    df_trades, err = _load_trades(username)
     if err:
         return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": err}
     if df_trades.empty:
         return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": None}
 
     usd_jpy = _fetch_usd_jpy()
-    open_pos = _get_open_positions()
+    open_pos = _get_open_positions(username)
     if not open_pos:
         return {"positions": {}, "dividends": {}, "usd_jpy": usd_jpy, "error": None}
 
@@ -23676,6 +23677,49 @@ def _compute_portfolio_summary() -> dict:
         "usd_jpy":   usd_jpy,
         "error":     None,
     }
+
+
+_ASSET_HISTORY_HEADERS = ["date", "username", "total_value_jpy", "total_cost_jpy", "gain_jpy", "gain_pct"]
+
+
+def _save_daily_asset_snapshot(username: str, date: str) -> bool:
+    """指定ユーザーのその日時点の資産評価額をasset_historyシートに追記する。
+    取引記録の日付（過去に遡って入力したかどうか）に関係なく、実行した日の実際の
+    評価額を積み上げていくための記録用（日次配信スクリプトから1日1回だけ呼ぶ想定。
+    同日に複数回呼ぶと重複行が増えるため、呼び出し側で1日1回に制御すること）。
+    """
+    try:
+        summary = _compute_portfolio_summary(username)
+        positions = summary.get("positions", {})
+        if not positions:
+            return False
+        usd_jpy = summary.get("usd_jpy", 150.0)
+
+        total_value_jpy = 0.0
+        total_cost_jpy  = 0.0
+        for p in positions.values():
+            _rate = 1.0 if p.get("is_jp") else usd_jpy
+            if p.get("market_value") is not None:
+                total_value_jpy += p["market_value"] * _rate
+            total_cost_jpy += (p.get("cost") or 0) * _rate
+
+        if total_cost_jpy <= 0:
+            return False
+        gain_jpy = total_value_jpy - total_cost_jpy
+        gain_pct = gain_jpy / total_cost_jpy * 100
+
+        ws = _trading_ws("asset_history", _ASSET_HISTORY_HEADERS)
+        if not ws:
+            return False
+        ws.append_row([
+            date, username or "admin",
+            round(total_value_jpy, 2), round(total_cost_jpy, 2),
+            round(gain_jpy, 2), round(gain_pct, 2),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] 資産スナップショット保存失敗 {username}: {e}")
+        return False
 
 
 _REC_CACHE_HEADERS = ["date", "mode", "tickers_key", "news_key", "text", "model", "created_at"]

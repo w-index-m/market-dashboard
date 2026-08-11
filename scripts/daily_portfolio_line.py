@@ -639,13 +639,25 @@ def main() -> None:
     # 宛てに個別配信する。TRADING_USERNAME（GitHub Secrets側の既定アカウント、通常admin）は
     # 従来通りLINE/SLACK_WEBHOOK_URLの環境変数を使うため、二重配信を避けるためここでは除外する。
     per_user_targets = []
+    all_usernames = []
     try:
+        all_usernames = list(app._auth_get_users().keys())
         for _u, _info in app._auth_get_users().items():
             _webhook = (_info.get("slack_webhook_url") or "").strip()
             if _webhook and _u != username:
                 per_user_targets.append((_u, _webhook))
     except Exception as e:
         print(f"per-account notification settings fetch failed: {e}", file=sys.stderr)
+
+    # 全登録アカウント分、その日時点の資産評価額をasset_historyシートに記録する
+    # （取引記録の日付に関係なく、実行日ベースの本物の資産推移を積み上げるため）。
+    # Slack Webhook未登録のアカウントも対象（通知の有無とは無関係に記録する）
+    for _u in all_usernames:
+        try:
+            if app._save_daily_asset_snapshot(_u, today):
+                print(f"Saved asset snapshot for {_u}.")
+        except Exception as e:
+            print(f"asset snapshot failed for {_u}: {e}", file=sys.stderr)
 
     # ── 全アカウント共通のメッセージを1回だけ生成 ──────────────────
     market_summary_msg = None
