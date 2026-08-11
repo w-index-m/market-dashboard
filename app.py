@@ -20799,8 +20799,13 @@ def _save_trade(date: str, ticker: str, name: str, action: str,
         ])
         if not ws:
             return False, "Google Sheets接続失敗（Secretsを確認）"
-        ws.append_row([date, ticker.upper(), name, action,
-                       quantity, price, fee, memo, ai_target, ai_stoploss])
+        # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
+        # 「04317188」のような数字だけの文字列の先頭0が失われて数値化されてしまう
+        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する
+        ws.append_row(
+            [date, ticker.upper(), name, action, quantity, price, fee, memo, ai_target, ai_stoploss],
+            value_input_option="RAW",
+        )
         return True, ""
     except Exception as e:
         logger.warning(f"[trading] trade保存失敗: {e}")
@@ -22743,9 +22748,14 @@ def _update_trade_row(sheet_row_num: int, date: str, ticker: str, name: str, act
         ws = _trading_ws("claude_trades", _TRADES_HEADERS)
         if not ws:
             return False
-        ws.update(f"A{sheet_row_num}:J{sheet_row_num}", [[
-            date, ticker.upper(), name, action, quantity, price, fee, memo, 0.0, 0.0,
-        ]])
+        # value_input_option未指定だとGoogle Sheets側の自動型判定により、投信コード
+        # 「04317188」のような数字だけの文字列の先頭0が失われて数値化されてしまう
+        # ことがあるため、RAW（パースせずそのまま保存）を明示指定する
+        ws.update(
+            f"A{sheet_row_num}:J{sheet_row_num}",
+            [[date, ticker.upper(), name, action, quantity, price, fee, memo, 0.0, 0.0]],
+            value_input_option="RAW",
+        )
         return True
     except Exception as e:
         logger.warning(f"[trading] trade更新失敗 row={sheet_row_num}: {e}")
