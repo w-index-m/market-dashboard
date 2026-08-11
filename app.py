@@ -28123,6 +28123,31 @@ def render_claude_trading_project():
                         "データのまま止まっており、東証本体の当日の値動きはまだ反映されていません。"
                     )
 
+                    # ── 保有中ポジション表のダウンロード（CSV/Excel） ─────────────
+                    _dl_date = datetime.now(JST).strftime("%Y-%m-%d")
+                    _dl_df = pd.DataFrame(pnl_rows)
+                    _dl_c1, _dl_c2 = st.columns(2)
+                    if _privacy:
+                        st.caption("🙈 金額非表示モード中はダウンロードできません（画面共有時に金額を漏らさないため）。")
+                    _dl_c1.download_button(
+                        "📥 CSVダウンロード",
+                        data=_dl_df.to_csv(index=False).encode("utf-8-sig"),
+                        file_name=f"portfolio_{_dl_date}.csv",
+                        mime="text/csv",
+                        disabled=_privacy,
+                        key="pnl_dl_csv",
+                    )
+                    _xlsx_buf = io.BytesIO()
+                    _dl_df.to_excel(_xlsx_buf, index=False, engine="openpyxl", sheet_name="保有中ポジション")
+                    _dl_c2.download_button(
+                        "📥 Excelダウンロード",
+                        data=_xlsx_buf.getvalue(),
+                        file_name=f"portfolio_{_dl_date}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        disabled=_privacy,
+                        key="pnl_dl_xlsx",
+                    )
+
                     # ── 合計（取得単価合計・含み損益合計・損益率）円ベースで集計 ──────
                     if _total_cost_jpy > 0:
                         _mkt_val_jpy   = _total_cost_jpy + _total_pnl_jpy
