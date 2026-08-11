@@ -20615,6 +20615,10 @@ _KNOWN_NAMES: dict = {
 _JP_FUND_MAP = {
     "9Q311103": "結い2101",  # 鎌倉投信
 }
+# 日本の投資信託の基準価額は「1万口あたり」の値で公表される慣習のため、
+# 保有口数×基準価額をそのまま金額として使うと1万倍の誤りになる。
+# 評価額・取得金額など金額換算が必要な箇所ではこの単位で割る。
+_JP_FUND_NAV_UNIT = 10000
 
 
 def _resolve_fund_ticker_alias(raw: str) -> str:
@@ -27696,6 +27700,10 @@ def render_claude_trading_project():
                         is_jp_fund = ticker in _JP_FUND_MAP
                         is_jp_pos = ticker.endswith(".T") or is_jp_fund
                         cur_unit  = "円" if is_jp_pos else "USD"
+                        # 投信は基準価額が「1万口あたり」表記のため、金額計算では
+                        # 保有口数を1万で割った実効口数を使う（保有株数の表示自体は
+                        # 実際の口数のまま変えない）
+                        _money_qty = pos["qty"] / _JP_FUND_NAV_UNIT if is_jp_fund else pos["qty"]
 
                         def _cur_fmt(val, signed=False):
                             """円は小数無し・USDは小数2桁でcur_unit付き文字列を返す"""
@@ -27742,23 +27750,23 @@ def render_claude_trading_project():
                                     pass
 
                         if cur_price:
-                            _mval_jpy = cur_price * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                            _mval_jpy = cur_price * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
                             _sec = _fetch_ticker_sector(ticker)
                             _sector_values[_sec] = _sector_values.get(_sec, 0.0) + _mval_jpy
                             _total_today_jpy += _mval_jpy
                             if prev_close:
-                                _total_prevclose_jpy += prev_close * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                                _total_prevclose_jpy += prev_close * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
                             else:
                                 _prevclose_skipped += 1
 
                         avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
-                        pnl      = (cur_price - avg_cost) * pos["qty"] if cur_price else None
+                        pnl      = (cur_price - avg_cost) * _money_qty if cur_price else None
                         pnl_pct  = (cur_price / avg_cost - 1) * 100 if cur_price and avg_cost > 0 else None
 
                         # 含み損益はUSD・円を常に固定2列で出す（米国株はUSDが実額・円が換算値、
                         # 日本株は円が実額・USDが換算値）。列名は行によらず固定にする
                         if pnl is not None:
-                            _cost_jpy = avg_cost * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
+                            _cost_jpy = avg_cost * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
                             _pnl_jpy  = pnl if is_jp_pos else pnl * _pnl_usdjpy
                             _total_cost_jpy += _cost_jpy
                             _total_pnl_jpy  += _pnl_jpy
@@ -27786,7 +27794,7 @@ def render_claude_trading_project():
                             _ext_str = "-"
 
                         if cur_price and prev_close:
-                            _day_chg_native   = (cur_price - prev_close) * pos["qty"]
+                            _day_chg_native   = (cur_price - prev_close) * _money_qty
                             _day_chg_pct_row  = (cur_price / prev_close - 1) * 100
                             _day_chg_row_str  = _mv(_cur_fmt(_day_chg_native, signed=True))
                             _day_chg_pct_str  = f"{_day_chg_pct_row:+.2f}%"
@@ -27808,7 +27816,7 @@ def render_claude_trading_project():
                             "前日比（額）": _day_chg_row_str,
                             "前日比（%）": _day_chg_pct_str,
                             "現在株価":   _mv(_cur_fmt(cur_price)) if cur_price else "取得失敗",
-                            "評価額":    _mv(_cur_fmt(cur_price * pos['qty'])) if cur_price else "取得失敗",
+                            "評価額":    _mv(_cur_fmt(cur_price * _money_qty)) if cur_price else "取得失敗",
                             "時間外/PTS": _mv(_ext_str),
                             "含み損益（USD）": _mv(_pnl_usd_str),
                             "含み損益（円）":  _mv(_pnl_jpy_str),
