@@ -22475,6 +22475,11 @@ def _compute_portfolio_history() -> pd.DataFrame:
         invested  = 0.0
         for _, row in trades_so_far.iterrows():
             tk  = row["ticker"]
+            if tk in _JP_FUND_MAP:
+                # 投資信託はyfinanceで日次終値を取得できずport_valueの計算対象外
+                # なので、投資元本(invested)の計算からも除外する（含めると評価額と
+                # 元本の対象銘柄がズレて元本だけ過大になるため）
+                continue
             qty = float(row["quantity"])
             prc = float(row["price"])
             fee = float(row["fee"])
@@ -23580,27 +23585,35 @@ def _compute_portfolio_summary() -> dict:
     dividends = {}
 
     for ticker, pos in open_pos.items():
-        is_jp = ticker.endswith(".T")
+        is_jp_fund = ticker in _JP_FUND_MAP
+        is_jp = ticker.endswith(".T") or is_jp_fund
         cur_price = None
 
         # 現在値取得
-        try:
-            fi = yf.Ticker(ticker).fast_info
-            cur_price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
-        except Exception:
-            pass
-        if not cur_price:
+        if is_jp_fund:
             try:
-                raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
-                if not raw.empty:
-                    close = raw["Close"]
-                    if isinstance(close, pd.DataFrame):
-                        close = close.iloc[:, 0]
-                    vals = close.dropna()
-                    if len(vals) > 0:
-                        cur_price = float(vals.iloc[-1])
+                _fund_data = _fetch_jp_fund_nav(ticker)
+                cur_price = _fund_data.get("nav") if _fund_data else None
             except Exception:
                 pass
+        else:
+            try:
+                fi = yf.Ticker(ticker).fast_info
+                cur_price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+            except Exception:
+                pass
+            if not cur_price:
+                try:
+                    raw = yf.download(ticker, period="2d", auto_adjust=True, progress=False)
+                    if not raw.empty:
+                        close = raw["Close"]
+                        if isinstance(close, pd.DataFrame):
+                            close = close.iloc[:, 0]
+                        vals = close.dropna()
+                        if len(vals) > 0:
+                            cur_price = float(vals.iloc[-1])
+                except Exception:
+                    pass
 
         sector = _fetch_ticker_sector(ticker)
 
@@ -23635,8 +23648,12 @@ def _compute_portfolio_summary() -> dict:
 
         qty        = pos["qty"]
         avg_cost   = pos["avg_cost"]
-        cost_total = pos["cost"]
-        mkt_val    = qty * cur_price if cur_price else None
+        # 投信は基準価額が1万口あたり表記のため、金額計算では保有口数を1万で
+        # 割った実効口数を使う（pos["cost"]は生の口数ベースで蓄積されているため
+        # ここで組み直す。保有株数の表示自体（qty）は変えない）
+        _money_qty = qty / _JP_FUND_NAV_UNIT if is_jp_fund else qty
+        cost_total = avg_cost * _money_qty
+        mkt_val    = _money_qty * cur_price if cur_price else None
         gain       = (mkt_val - cost_total) if mkt_val is not None else None
         gain_pct   = (gain / cost_total * 100) if (gain is not None and cost_total > 0) else None
 
