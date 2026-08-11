@@ -20694,14 +20694,27 @@ def _ticker_exists(ticker: str) -> bool:
         return False
 
 
+def _normalize_fund_name(s: str) -> str:
+    """全角英数字・全角スペースを半角化し、空白を除去して比較しやすくする。
+    証券会社サイトのファンド名は「ｉＦｒｅｅＮＥＸＴ　ＦＡＮＧ＋インデックス」のように
+    全角＋文字間スペースで表示されることがあり、これをそのまま完全一致させようとすると
+    _JP_FUND_MAPの半角表記と食い違ってしまうため。
+    """
+    import unicodedata as _ud
+    return _ud.normalize("NFKC", s or "").replace(" ", "").replace("　", "").strip()
+
+
 def _resolve_fund_ticker_alias(raw: str) -> str:
     """取引記録のティッカー欄に投信協会コードではなくファンド名（例:「結い2101」）が
     そのまま入力された場合に、_JP_FUND_MAPの対応コードへ正規化する。
+    全角/半角・空白の差異は_normalize_fund_name()で吸収した上で比較する
+    （証券会社のスクリーンショットから読み取ったファンド名は全角表記のことがあるため）。
     一致しなければ入力をそのまま返す（4桁JPコードの自動.T補完と同じ位置づけ）。
     """
     raw = (raw or "").strip()
+    raw_norm = _normalize_fund_name(raw)
     for code, name in _JP_FUND_MAP.items():
-        if raw == name:
+        if raw == name or raw_norm == _normalize_fund_name(name):
             return code
     return raw
 
@@ -27635,7 +27648,9 @@ def render_claude_trading_project():
                             _raw_ticker = str(_row["ティッカー/コード"] or "").strip().upper()
                             if not _raw_ticker:
                                 continue
-                            if re.fullmatch(r"\d{4}", _raw_ticker):
+                            # 4桁の証券コード（新形式の英数混在コード「200A」等も含む）は
+                            # 日本株なので自動で.Tを補完する
+                            if re.fullmatch(r"\d[0-9A-Z]{3}", _raw_ticker):
                                 _raw_ticker += ".T"
                             _raw_ticker = _resolve_fund_ticker_alias(_raw_ticker)
                             _qty   = _row["数量"]
@@ -27714,8 +27729,9 @@ def render_claude_trading_project():
 
                 if st.form_submit_button("💾 記録を保存", type="primary"):
                     trade_ticker = t_ticker.strip().upper()
-                    # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
-                    if re.fullmatch(r"\d{4}", trade_ticker):
+                    # 4桁の証券コード（例: "2801"、新形式の英数混在コード「200A」等も含む）は
+                    # 日本株なので自動で.Tを補完する
+                    if re.fullmatch(r"\d[0-9A-Z]{3}", trade_ticker):
                         trade_ticker += ".T"
                     # 投信をコードではなくファンド名で入力した場合（例:「結い2101」）は
                     # 対応する投信協会コードへ正規化する
@@ -27898,8 +27914,9 @@ def render_claude_trading_project():
                         if _save_clicked:
                             _e_act = "BUY" if "BUY" in _e_action else "SELL"
                             _e_ticker_norm = _e_ticker.strip().upper()
-                            # 4桁数字のみ（例: "2801"）は日本株の証券コードなので自動で.Tを補完する
-                            if re.fullmatch(r"\d{4}", _e_ticker_norm):
+                            # 4桁の証券コード（例: "2801"、新形式の英数混在コード「200A」等も含む）は
+                            # 日本株なので自動で.Tを補完する
+                            if re.fullmatch(r"\d[0-9A-Z]{3}", _e_ticker_norm):
                                 _e_ticker_norm += ".T"
                             # 投信をコードではなくファンド名で入力した場合（例:「結い2101」）は
                             # 対応する投信協会コードへ正規化する
