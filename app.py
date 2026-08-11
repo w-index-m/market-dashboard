@@ -927,6 +927,11 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
 以下のJSON形式のみで回答してください（説明文は不要）:
 {"holdings": [{"name": "...", "ticker": "...", "qty": 100, "avg_cost": 1234.5}]}
 """
+    # 失敗理由が「クォータ超過で全モデル失敗」なのか「安全性フィルタでブロック」なのか
+    # 「JSON解析失敗」なのかを区別できるよう、最後の失敗理由を保持してエラーメッセージに
+    # 含める（原因不明のまま「読み取れませんでした」とだけ表示すると、この開発環境からは
+    # 実際のGemini応答を直接確認できず、以後の切り分けができないため）
+    _last_err = ""
     for model_name in MODEL_FALLBACKS:
         try:
             genai.configure(api_key=GEMINI_API_KEY)
@@ -939,12 +944,30 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
                     response_mime_type="application/json",
                 ),
             )
-            if not (hasattr(resp, "text") and resp.text):
+            try:
+                _text = resp.text
+            except Exception as _te:
+                # 安全性フィルタ等でブロックされた場合、.text自体へのアクセスで例外になる
+                _feedback = getattr(resp, "prompt_feedback", None)
+                _last_err = f"{model_name}: 応答取得失敗（block_reason={_feedback}）"
+                logger.warning(f"[trading] スクショ読み取り失敗 {_last_err} / {_te}")
+                continue
+            if not _text:
+                _cands = getattr(resp, "candidates", None) or []
+                _finish = getattr(_cands[0], "finish_reason", None) if _cands else None
+                _last_err = f"{model_name}: 空レスポンス（finish_reason={_finish}）"
+                logger.warning(f"[trading] スクショ読み取り失敗 {_last_err}")
                 continue
             import json as _json
-            data = _json.loads(resp.text)
+            try:
+                data = _json.loads(_text)
+            except Exception as _je:
+                _last_err = f"{model_name}: JSON解析失敗（{str(_je)[:80]}）"
+                logger.warning(f"[trading] スクショ読み取り失敗 {_last_err}: {_text[:200]}")
+                continue
             holdings = data.get("holdings", [])
             if not isinstance(holdings, list):
+                _last_err = f"{model_name}: holdings形式不正"
                 continue
             # tickerが数値型で返ってきた場合（プロンプトの指示に反して先頭の0が
             # 失われている可能性がある）は文字列化だけしておく。実際の桁欠落自体は
@@ -955,10 +978,13 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
             return {"holdings": holdings, "error": None}
         except Exception as e:
             if is_gemini_quota_error(e):
+                _last_err = f"{model_name}: クォータ超過"
                 continue  # 次のモデルへフォールバック
+            _last_err = f"{model_name}: {str(e)[:120]}"
             logger.warning(f"[trading] スクショ読み取り失敗（{model_name}）: {e}")
             continue
-    return {"holdings": [], "error": "画像から銘柄を読み取れませんでした"}
+    _err_msg = "画像から銘柄を読み取れませんでした" + (f"（{_last_err}）" if _last_err else "")
+    return {"holdings": [], "error": _err_msg}
 
 
 # ===========================
