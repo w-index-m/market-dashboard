@@ -25142,6 +25142,88 @@ def _auth_update_notification_settings(username: str, slack_webhook_url: str) ->
         return False, f"更新エラー: {str(_e)[:80]}"
 
 
+def _auth_change_password(username: str, old_password: str, new_password: str) -> tuple[bool, str]:
+    """本人確認の上でusersタブのpassword_hashを更新する。"""
+    if not _auth_validate(username, old_password):
+        return False, "現在のパスワードが違います"
+    if not new_password or len(new_password) < 4:
+        return False, "新しいパスワードは4文字以上にしてください"
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("users")
+        except _gs.exceptions.WorksheetNotFound:
+            return False, "usersシートが見つかりません"
+
+        header = _ws.row_values(1)
+        col_idx = header.index("password_hash") + 1
+
+        row_num = None
+        for i, r in enumerate(_ws.get_all_records()):
+            if r.get("username") == username:
+                row_num = i + 2  # ヘッダー行(1) + 0始まりインデックス補正
+                break
+        if row_num is None:
+            return False, "ユーザーが見つかりません"
+
+        _ws.update_cell(row_num, col_idx, _auth_hash(new_password))
+        _auth_get_users.clear()
+        return True, ""
+    except Exception as _e:
+        logger.warning(f"[auth] パスワード変更失敗: {_e}")
+        return False, f"更新エラー: {str(_e)[:80]}"
+
+
+def _auth_delete_account(username: str, password: str) -> tuple[bool, str]:
+    """本人確認の上で、usersタブから該当アカウントを削除し、個人の取引記録
+    シート（claude_trades_{username}）とsessionsタブの該当セッションも
+    ベストエフォートで削除する（取引記録・セッションの削除に失敗しても
+    アカウント自体の削除は成功として扱う）。
+    adminは_trades_tab()の既定シート扱いと結びついているため削除不可。
+    """
+    if username == "admin":
+        return False, "adminアカウントは削除できません"
+    if not _auth_validate(username, password):
+        return False, "パスワードが違います"
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        try:
+            _ws = _sp.worksheet("users")
+        except _gs.exceptions.WorksheetNotFound:
+            return False, "usersシートが見つかりません"
+
+        row_num = None
+        for i, r in enumerate(_ws.get_all_records()):
+            if r.get("username") == username:
+                row_num = i + 2
+                break
+        if row_num is None:
+            return False, "ユーザーが見つかりません"
+        _ws.delete_rows(row_num)
+        _auth_get_users.clear()
+    except Exception as _e:
+        logger.warning(f"[auth] アカウント削除失敗: {_e}")
+        return False, f"削除エラー: {str(_e)[:80]}"
+
+    try:
+        _sp.del_worksheet(_sp.worksheet(_trades_tab(username)))
+    except Exception as _e:
+        logger.warning(f"[auth] 取引記録シート削除失敗（アカウント自体の削除は成功） {username}: {_e}")
+
+    try:
+        _sws = _sp.worksheet("sessions")
+        _srows = _sws.get_all_records()
+        for i in range(len(_srows) - 1, -1, -1):
+            if _srows[i].get("username") == username:
+                _sws.delete_rows(i + 2)
+    except Exception as _e:
+        logger.warning(f"[auth] セッション削除失敗（アカウント自体の削除は成功） {username}: {_e}")
+
+    return True, ""
+
+
 def _auth_validate(username: str, password: str) -> bool:
     _u = _auth_get_users().get(username)
     return bool(_u and _u.get("password_hash") == _auth_hash(password))
@@ -27244,6 +27326,44 @@ def render_claude_trading_project():
                         st.success("保存しました")
                     else:
                         st.error(_ns_err)
+
+            with st.expander("🔑 パスワード変更"):
+                _pw_old = st.text_input("現在のパスワード", type="password", key="pw_change_old")
+                _pw_new = st.text_input("新しいパスワード（4文字以上）", type="password", key="pw_change_new")
+                _pw_new2 = st.text_input("新しいパスワード（確認用）", type="password", key="pw_change_new2")
+                if st.button("パスワードを変更", key="pw_change_btn"):
+                    if _pw_new != _pw_new2:
+                        st.error("新しいパスワードが一致しません")
+                    else:
+                        _pc_ok, _pc_err = _auth_change_password(_usr, _pw_old, _pw_new)
+                        if _pc_ok:
+                            st.success("パスワードを変更しました")
+                        else:
+                            st.error(_pc_err)
+
+            if _usr == "admin":
+                with st.expander("🗑️ アカウント削除"):
+                    st.caption("adminアカウントは削除できません。")
+            else:
+                with st.expander("🗑️ アカウント削除（取り消せません）"):
+                    st.markdown(
+                        '<span style="color:#f87171">⚠️ このアカウントと、これまでの取引記録を'
+                        '完全に削除します。この操作は取り消せません。</span>',
+                        unsafe_allow_html=True,
+                    )
+                    _del_pw = st.text_input("パスワード（本人確認）", type="password", key="acct_del_pw")
+                    _del_confirm = st.checkbox("取引記録も含めて完全に削除することを理解しました", key="acct_del_confirm")
+                    if st.button("🗑️ アカウントを削除する", key="acct_del_btn",
+                                 disabled=not (_del_confirm and _del_pw)):
+                        _ad_ok, _ad_err = _auth_delete_account(_usr, _del_pw)
+                        if _ad_ok:
+                            _clear_persisted_login_token("trade")
+                            st.query_params.pop("token", None)
+                            st.session_state.pop("_trading_user", None)
+                            st.success("アカウントを削除しました")
+                            st.rerun()
+                        else:
+                            st.error(_ad_err)
         if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
