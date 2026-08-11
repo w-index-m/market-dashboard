@@ -28069,9 +28069,21 @@ def render_claude_trading_project():
                                 _parts.append(f"VT {_vt_ret:+.1f}%")
                             return f"（{' / '.join(_parts)}）" if _parts else ""
 
-                        st.markdown("過去1年" + _growth_period_label(_pnl_1y_df))
+                        def _growth_period_header(_df, _nominal_label):
+                            """フィルタ名（過去1年/過去3年）ではなく、実際にデータがある期間を
+                            見出しに出す。取引記録の日付範囲が狭いと「過去1年」等の名目上の
+                            フィルタ幅より実データがずっと短くなり、表示上0%付近に見えて
+                            誤解を招くため、実データの開始〜終了日をそのまま示す。
+                            """
+                            if len(_df) == 0:
+                                return f"{_nominal_label}（データ不足）"
+                            _start = _df.index.min().strftime("%Y-%m-%d")
+                            _end   = _df.index.max().strftime("%Y-%m-%d")
+                            return f"{_nominal_label}以内・実データ期間 {_start}〜{_end}"
+
+                        st.markdown(_growth_period_header(_pnl_1y_df, "過去1年") + _growth_period_label(_pnl_1y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_1y_df), use_container_width=True, key="growth_fig_1y")
-                        st.markdown("過去3年" + _growth_period_label(_pnl_3y_df))
+                        st.markdown(_growth_period_header(_pnl_3y_df, "過去3年") + _growth_period_label(_pnl_3y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_3y_df), use_container_width=True, key="growth_fig_3y")
                         st.caption(
                             "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。VTは同時期に"
