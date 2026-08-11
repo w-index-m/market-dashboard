@@ -21745,29 +21745,45 @@ def _fetch_jp_fund_nav(fund_code: str) -> dict:
         soup = _BS(resp.text, "html.parser")
         text = soup.get_text("\n", strip=True)
 
+        # 実際のページは「基準価額 08/10\n27,749\n円\n+248 (+0.9%)」のように、
+        # ラベルの直後に日付（数字を含む）が挟まる。基準価額自体は千円単位以上で
+        # 必ずコンマ区切りになるため、コンマ付き数値を明示的に要求することで
+        # 日付の「08」「10」を誤って基準価額として拾わないようにしている。
         nav = None
-        m = _re.search(r"基準価額[^\d]{0,10}([\d,]+)\s*円", text)
+        change_pct = None
+        m = _re.search(
+            r"基準価額[\s\S]{0,40}?(\d{1,3}(?:,\d{3})+)\s*円\s*"
+            r"[+\-－]?\d[\d,]*\s*\(([+\-－]?\d+\.?\d*)\s*%\)",
+            text,
+        )
         if m:
             try:
                 nav = float(m.group(1).replace(",", ""))
+                change_pct = float(m.group(2).replace("－", "-"))
             except ValueError:
                 nav = None
+        if nav is None:
+            # 前日比の併記が無いページ構成向けのフォールバック（基準価額のみ取得）
+            m2 = _re.search(r"基準価額[\s\S]{0,40}?(\d{1,3}(?:,\d{3})+)\s*円", text)
+            if m2:
+                try:
+                    nav = float(m2.group(1).replace(",", ""))
+                except ValueError:
+                    nav = None
         if nav is None:
             logger.warning(f"[trading] fund {fund_code}: 基準価額パターンが見つからず（ページ構造変更の可能性）")
             return {}
 
-        change_pct = None
-        m2 = _re.search(r"前日比[^\d\-+]{0,15}([+\-－]?\d+\.?\d*)\s*%", text)
-        if m2:
-            try:
-                change_pct = float(m2.group(1).replace("－", "-"))
-            except ValueError:
-                change_pct = None
-
+        # 基準日: 「基準価額 MM/DD」（年なし、当年補完）または「YYYY/MM/DD」
         date_str = None
-        m3 = _re.search(r"(\d{4})/(\d{1,2})/(\d{1,2})", text)
+        m3 = _re.search(r"基準価額[\s\S]{0,10}?(\d{4})/(\d{1,2})/(\d{1,2})", text)
         if m3:
             date_str = f"{m3.group(1)}-{m3.group(2).zfill(2)}-{m3.group(3).zfill(2)}"
+        else:
+            m4 = _re.search(r"基準価額[\s\S]{0,10}?(\d{1,2})/(\d{1,2})(?!\d)", text)
+            if m4:
+                _yr = datetime.now().year
+                date_str = f"{_yr}-{m4.group(1).zfill(2)}-{m4.group(2).zfill(2)}"
 
         return {"nav": nav, "date": date_str, "change_pct": change_pct}
     except Exception as e:
