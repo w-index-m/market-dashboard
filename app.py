@@ -27726,9 +27726,14 @@ def render_claude_trading_project():
                         key="bulk_import_editor",
                     )
                     st.caption(f"約定日は本日（{datetime.now(JST).strftime('%Y-%m-%d')}）として一括登録されます。")
+                    _skip_existing = st.checkbox(
+                        "既に保有中の銘柄はスキップする（スクショの再アップロードで重複登録するのを防ぐ）",
+                        value=True, key="bulk_import_skip_existing",
+                    )
                     _bic1, _bic2 = st.columns([1, 4])
                     if _bic1.button("💾 一括登録", key="bulk_import_save_btn", type="primary"):
-                        _saved, _failed = 0, []
+                        _existing_positions = _get_open_positions(_usr) if _skip_existing else {}
+                        _saved, _failed, _skipped = 0, [], []
                         for _, _row in _edited_df.iterrows():
                             _raw_ticker = _strip_ticker_quote_prefix(str(_row["ティッカー/コード"] or "").strip().upper())
                             _raw_name_field = str(_row["銘柄名"] or "").strip()
@@ -27748,6 +27753,9 @@ def render_claude_trading_project():
                             if not _raw_ticker:
                                 _failed.append(f"{_raw_name_field}（ティッカー/コードが空欄）")
                                 continue
+                            if _raw_ticker in _existing_positions:
+                                _skipped.append(_raw_ticker)
+                                continue
                             _qty   = _row["数量"]
                             _price = _row["取得単価"]
                             if not _qty or not _price:
@@ -27763,10 +27771,15 @@ def render_claude_trading_project():
                                 _saved += 1
                             else:
                                 _failed.append(f"{_raw_ticker}（{_berr}）")
-                        if _saved:
+                        if _saved or _skipped:
                             st.cache_data.clear()
                             st.session_state.pop("_bulk_import_rows", None)
-                            st.success(f"✅ {_saved}件を登録しました" + (f"（失敗: {' / '.join(_failed)}）" if _failed else ""))
+                            _msg = f"✅ {_saved}件を登録しました"
+                            if _skipped:
+                                _msg += f"（既に保有中のためスキップ: {len(_skipped)}件: {' / '.join(_skipped)}）"
+                            if _failed:
+                                _msg += f"（失敗: {' / '.join(_failed)}）"
+                            st.success(_msg)
                             st.rerun()
                         else:
                             st.error("登録できた銘柄がありませんでした: " + " / ".join(_failed))
