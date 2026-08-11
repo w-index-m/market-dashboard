@@ -27523,6 +27523,25 @@ def render_claude_trading_project():
             st.session_state.setdefault("_trade_ticker", "")
             st.session_state.setdefault("_trade_name", "")
 
+            # 銘柄検索アシスト（フォームの外側に置く。st.form内のウィジェットはsubmitまで
+            # 変更が反映されないため、入力補助として即座に反映させるにはフォーム外が必要）
+            _known_options = {}
+            for _tk, _nm in _KNOWN_NAMES.items():
+                _known_options[_tk] = f"{_nm}（{_tk}）"
+            for _tk, _nm in _JP_FUND_MAP.items():
+                _known_options[_tk] = f"{_nm}（{_tk}）・投信"
+            _search_choices = [""] + sorted(_known_options.keys(), key=lambda k: _known_options[k])
+            _search_sel = st.selectbox(
+                "🔍 銘柄を検索して選ぶ（クリックして名前やコードを入力すると絞り込めます）",
+                options=_search_choices,
+                format_func=lambda k: "（未選択・下のフォームに直接入力してもOK）" if k == "" else _known_options[k],
+                key="trade_ticker_search",
+            )
+            if _search_sel and _search_sel != st.session_state.get("_trade_ticker"):
+                st.session_state["_trade_ticker"] = _search_sel
+                st.session_state["_trade_name"]   = _known_options[_search_sel].split("（")[0]
+                st.rerun()
+
             with st.form("trade_form", clear_on_submit=True):
                 ci1, ci2 = st.columns(2)
                 t_ticker = ci1.text_input("ティッカー", value=st.session_state.get("_trade_ticker", ""),
@@ -27581,6 +27600,7 @@ def render_claude_trading_project():
                                 st.cache_data.clear()
                                 st.session_state["_trade_ticker"] = ""
                                 st.session_state["_trade_name"]   = ""
+                                st.session_state["trade_ticker_search"] = ""
                                 if _ticker_exists(trade_ticker):
                                     st.session_state["_trade_status"] = "ok"
                                     st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
