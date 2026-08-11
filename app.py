@@ -27512,6 +27512,12 @@ def render_claude_trading_project():
                 ci1, ci2 = st.columns(2)
                 t_ticker = ci1.text_input("ティッカー", value=st.session_state.get("_trade_ticker", ""),
                                           placeholder="例: NVDA / 7203.T")
+                _fund_hint = "・".join(f"{v}（{k}）" for k, v in _JP_FUND_MAP.items())
+                ci1.caption(
+                    f"💡 投信は基準価額の自動取得に対応済み: {_fund_hint}。"
+                    "ティッカーにコードまたは名前どちらを入力してもOK（未対応の投信名を"
+                    "入れても記録自体は保存されますが、価格は「取得失敗」表示になります）"
+                )
                 t_name   = ci2.text_input("銘柄名", value=st.session_state.get("_trade_name", ""),
                                           placeholder="例: NVIDIA / トヨタ自動車")
                 c1, c2, c3 = st.columns(3)
