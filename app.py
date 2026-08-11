@@ -27532,11 +27532,16 @@ def render_claude_trading_project():
             for _tk, _nm in _JP_FUND_MAP.items():
                 _known_options[_tk] = f"{_nm}（{_tk}）・投信"
             _search_choices = [""] + sorted(_known_options.keys(), key=lambda k: _known_options[k])
+            # 保存成功時にこの検索欄を「リセット」したいが、一度描画したウィジェットの
+            # session_stateキーはその場で書き換えられない（StreamlitAPIException）ため、
+            # リセットのたびにキー名自体を変える（新しいキー＝まっさらな新規ウィジェットに
+            # なるので直接の書き換えを回避できる）
+            st.session_state.setdefault("_search_reset_ctr", 0)
             _search_sel = st.selectbox(
                 "🔍 銘柄を検索して選ぶ（クリックして名前やコードを入力すると絞り込めます）",
                 options=_search_choices,
                 format_func=lambda k: "（未選択・下のフォームに直接入力してもOK）" if k == "" else _known_options[k],
-                key="trade_ticker_search",
+                key=f"trade_ticker_search_{st.session_state['_search_reset_ctr']}",
             )
             if _search_sel and _search_sel != st.session_state.get("_trade_ticker"):
                 st.session_state["_trade_ticker"] = _search_sel
@@ -27601,7 +27606,7 @@ def render_claude_trading_project():
                                 st.cache_data.clear()
                                 st.session_state["_trade_ticker"] = ""
                                 st.session_state["_trade_name"]   = ""
-                                st.session_state["trade_ticker_search"] = ""
+                                st.session_state["_search_reset_ctr"] = st.session_state.get("_search_reset_ctr", 0) + 1
                                 if _ticker_exists(trade_ticker):
                                     st.session_state["_trade_status"] = "ok"
                                     st.session_state["_trade_msg"]    = f"{trade_ticker} {action} {t_qty}株 @ {t_price} を記録しました"
