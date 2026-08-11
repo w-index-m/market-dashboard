@@ -204,16 +204,50 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
 
     # 銘柄ごとに連続でyf.downloadすると1回のスクリプト実行内でYahooのレート制限に
     # かかりやすいため、銘柄間に小さく間隔を空ける（_fetch_trading_stock_data自体も
-    # 個別に3回までリトライするが、それとは別にバーストを避けるための間隔）
+    # 個別に3回までリトライするが、それとは別にバーストを避けるための間隔）。
+    # このスクリプトは1日に複数回（GitHub Actionsのcronで最大4回）実行されるため、
+    # 当日分の技術データがすでにGoogle Sheetsのstock_data_cacheに保存されていれば
+    # まずそれを使う。無ければライブ取得し、成功したら次回以降の実行のためにキャッシュへ
+    # 保存する（レート制限に当たった実行があっても、その日の別の実行で取得済みなら
+    # 使い回せる）。
+    today_str = datetime.now(JST).strftime("%Y-%m-%d")
+
+    def _has_technical(_d: dict) -> bool:
+        return bool(_d) and any(_d.get(k) is not None for k in ("rsi", "ma25", "ret_5d"))
+
     stock_data_map = {}
     for i, ticker in enumerate(positions):
+        cached = app._load_stock_data_cache(ticker, today_str)
+        if _has_technical(cached):
+            stock_data_map[ticker] = cached
+            continue
+
         if i > 0:
             time.sleep(1.0)
         try:
-            stock_data_map[ticker] = app._fetch_trading_stock_data(ticker, ticker.endswith(".T"))
+            data = app._fetch_trading_stock_data(ticker, ticker.endswith(".T"))
         except Exception as e:
             print(f"stock data fetch failed for {ticker}: {e}", file=sys.stderr)
-            stock_data_map[ticker] = {}
+            data = {}
+
+        # テクニカル指標が全部欠けている場合、レート制限の一時的な失敗の可能性が
+        # あるため少し間隔を空けて1回だけ再取得を試みる
+        if not _has_technical(data):
+            time.sleep(3.0)
+            try:
+                retry_data = app._fetch_trading_stock_data(ticker, ticker.endswith(".T"))
+                if _has_technical(retry_data):
+                    data = retry_data
+            except Exception as e:
+                print(f"stock data retry failed for {ticker}: {e}", file=sys.stderr)
+
+        if _has_technical(data):
+            try:
+                app._save_stock_data_cache(ticker, today_str, data)
+            except Exception as e:
+                print(f"stock data cache save failed for {ticker}: {e}", file=sys.stderr)
+
+        stock_data_map[ticker] = data
 
     ai_result = app._generate_full_portfolio_recommendation(
         positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,

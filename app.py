@@ -20609,14 +20609,23 @@ _KNOWN_NAMES: dict = {
     "8035.T":  "東京エレクトロン",
 }
 
+# 日本の投資信託コード（投信協会コード）→ 銘柄名。yfinanceは上場していない
+# オープンエンド投信の基準価額を取得できないため、手動確認したファンドのみ収録
+# （_JP_ADR_MAPと同じ保守的な方式）。_fetch_jp_fund_nav()と組み合わせて使う。
+_JP_FUND_MAP = {
+    "9Q311103": "結い2101",  # 鎌倉投信
+}
+
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _get_stock_display_name(ticker: str) -> str:
-    """ティッカーから銘柄表示名を取得（既知マスタ→yfinance shortName の順）。
+    """ティッカーから銘柄表示名を取得（既知マスタ→投信マスタ→yfinance shortName の順）。
     取得失敗時はティッカーをそのまま返す。TTL=24h。
     """
     if ticker in _KNOWN_NAMES:
         return _KNOWN_NAMES[ticker]
+    if ticker in _JP_FUND_MAP:
+        return _JP_FUND_MAP[ticker]
     try:
         info = yf.Ticker(ticker).info or {}
         name = (info.get("shortName") or info.get("longName") or "").strip()
@@ -20913,7 +20922,7 @@ def _generate_ai_allocation_scores(
         ma25   = data.get("ma25", "-")
         ma75   = data.get("ma75", "-")
         ret_20d= data.get("ret_20d")
-        sec    = data.get("sector") or pos.get("sector", "その他")
+        sec    = data.get("sector_detail") or data.get("sector") or pos.get("sector", "その他")
         news   = (data.get("news") or [])[:3]
         news_str = " / ".join(n[:50] for n in news if n) or "なし"
         mval   = pos.get("market_value") or 0
@@ -21685,6 +21694,75 @@ def _fetch_edinet_news(code: str, days: int = 30, max_items: int = 5) -> list:
     return results
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _fetch_jp_fund_nav(fund_code: str) -> dict:
+    """みんかぶの投資信託ページから基準価額を取得する（TTL=6h、投信の基準価額は
+    1日1回しか更新されないため長めに設定）。_JP_FUND_MAPに載っている投信専用。
+    fund_code: 投信協会コード（例: "9Q311103"）
+    Returns: {"nav": float, "date": "YYYY-MM-DD"|None, "change_pct": float|None}
+    失敗時は{}。
+    ページのクラス名等の構造が変わると取得できなくなる可能性があるため、
+    特定のクラス名に依存せず「基準価額」等のラベル文字列の近傍からテキストで
+    数値を拾う方式にして、多少の構造変更には耐えられるようにしている。
+    """
+    import re as _re
+    try:
+        from bs4 import BeautifulSoup as _BS
+    except ImportError:
+        return {}
+    try:
+        url = f"https://itf.minkabu.jp/fund/{fund_code}"
+        resp = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/17.0 Mobile/15E148 Safari/604.1"
+                ),
+                "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+                "Referer":         "https://minkabu.jp/",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[trading] fund {fund_code} → HTTP {resp.status_code}")
+            return {}
+
+        soup = _BS(resp.text, "html.parser")
+        text = soup.get_text("\n", strip=True)
+
+        nav = None
+        m = _re.search(r"基準価額[^\d]{0,10}([\d,]+)\s*円", text)
+        if m:
+            try:
+                nav = float(m.group(1).replace(",", ""))
+            except ValueError:
+                nav = None
+        if nav is None:
+            logger.warning(f"[trading] fund {fund_code}: 基準価額パターンが見つからず（ページ構造変更の可能性）")
+            return {}
+
+        change_pct = None
+        m2 = _re.search(r"前日比[^\d\-+]{0,15}([+\-－]?\d+\.?\d*)\s*%", text)
+        if m2:
+            try:
+                change_pct = float(m2.group(1).replace("－", "-"))
+            except ValueError:
+                change_pct = None
+
+        date_str = None
+        m3 = _re.search(r"(\d{4})/(\d{1,2})/(\d{1,2})", text)
+        if m3:
+            date_str = f"{m3.group(1)}-{m3.group(2).zfill(2)}-{m3.group(3).zfill(2)}"
+
+        return {"nav": nav, "date": date_str, "change_pct": change_pct}
+    except Exception as e:
+        logger.warning(f"[trading] fund nav取得失敗 {fund_code}: {e}")
+        return {}
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
     """みんかぶの銘柄ニュースページから適時開示・ニュースを取得（TTL=30分）。
@@ -21835,6 +21913,58 @@ def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
         return []
 
 
+# 個別銘柄のセクター表示を「IT・テクノロジー」より具体的にするための手動分類。
+# _fetch_ticker_sector()が使う11業種ブロード分類（SECTORS辞書ベースのRRG判定用）は
+# 変更せず、こちらはAIプロンプトに渡す表示ラベルの精度を上げるためだけに使う。
+_SUBSECTOR_MAP = {
+    # 半導体
+    "NVDA": "半導体", "AMD": "半導体", "AVGO": "半導体", "MU": "半導体",
+    "INTC": "半導体", "QCOM": "半導体", "MRVL": "半導体", "TSM": "半導体",
+    "ASML": "半導体", "ARM": "半導体", "AMAT": "半導体", "LRCX": "半導体",
+    "KLAC": "半導体", "6857.T": "半導体", "8035.T": "半導体", "4186.T": "半導体（材料）",
+    # 光通信・フォトニクス
+    "CIEN": "光通信・フォトニクス", "COHR": "光通信・フォトニクス",
+    "LITE": "光通信・フォトニクス", "VIAV": "光通信・フォトニクス",
+    "AAOI": "光通信・フォトニクス", "INFN": "光通信・フォトニクス",
+    "5803.T": "光通信・フォトニクス", "5801.T": "光通信・フォトニクス",
+    "5802.T": "光通信・フォトニクス",
+    # 電子部品・データセンター機器
+    "GLW": "電子部品・データセンター機器", "APH": "電子部品・データセンター機器",
+    "VRT": "電子部品・データセンター機器", "TEL": "電子部品・データセンター機器",
+    "CSCO": "電子部品・データセンター機器",
+    # 通信キャリア
+    "9432.T": "通信キャリア", "9984.T": "通信キャリア",
+    # ソフトウェア
+    "PLTR": "ソフトウェア", "NOW": "ソフトウェア", "CRM": "ソフトウェア",
+    "DDOG": "ソフトウェア", "SNOW": "ソフトウェア",
+    # 超大型テック(GAFA等)
+    "AAPL": "超大型テック(GAFA等)", "MSFT": "超大型テック(GAFA等)",
+    "GOOGL": "超大型テック(GAFA等)", "GOOG": "超大型テック(GAFA等)",
+    "AMZN": "超大型テック(GAFA等)", "META": "超大型テック(GAFA等)",
+}
+
+# yfinanceのindustryフィールド（英語）→日本語ラベルの簡易変換（手動マップに無い銘柄向け）
+_INDUSTRY_JA_MAP = {
+    "Semiconductors": "半導体", "Semiconductor Equipment & Materials": "半導体（装置）",
+    "Software—Infrastructure": "ソフトウェア", "Software—Application": "ソフトウェア",
+    "Consumer Electronics": "民生電子機器", "Communication Equipment": "通信機器",
+    "Internet Content & Information": "インターネットサービス",
+}
+
+
+def _classify_subsector(ticker: str, industry: str = "") -> str:
+    """個別銘柄をIT・テクノロジーより細かいテーマに分類する（AIプロンプトの
+    「セクター」表示ラベル用。ルールベースのRRGマッチングには使わない）。
+    優先順位: 手動マップ → yfinanceのindustryフィールド簡易変換 → 空文字
+    （空ならフォールバックとして呼び出し側で広いsectorを使う）。
+    """
+    if ticker in _SUBSECTOR_MAP:
+        return _SUBSECTOR_MAP[ticker]
+    if industry and industry in _INDUSTRY_JA_MAP:
+        return _INDUSTRY_JA_MAP[industry]
+    return ""
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
     """個別銘柄の分析データを取得（テクニカル + ニュース）"""
@@ -21854,6 +21984,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
             if _attempt < 2:
                 time.sleep(1.5)
         if raw.empty:
+            logger.warning(f"[trading] {ticker}: yf.download が3回とも空データ（レート制限の可能性）")
             return result
         # yfinanceが単一銘柄でもMultiIndex列を返すことがあるため、DataFrameのままなら
         # 最初の列だけ取り出してSeries化する（float()にDataFrame由来のSeriesを渡すと
@@ -21863,6 +21994,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
             close = close.iloc[:, 0]
         close = close.dropna()
         if len(close) < 5:
+            logger.warning(f"[trading] {ticker}: Close系列が{len(close)}件しかなく指標計算不可（レート制限で部分データの可能性）")
             return result
 
         price   = float(close.iloc[-1])
@@ -21878,6 +22010,14 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         loss  = (-delta.clip(upper=0)).rolling(14).mean()
         rs    = gain / loss.replace(0, float("nan"))
         rsi   = float(100 - 100 / (1 + rs.iloc[-1])) if not rs.iloc[-1] != rs.iloc[-1] else None
+
+        # 本来は十分な期間のはずなのに個別指標がNoneになった場合、レート制限等で
+        # 部分データしか返ってこなかった可能性が高いため、後から追えるようログに残す
+        if len(close) >= 25 and (ma25 is None or ret_5d is None or rsi is None):
+            logger.warning(
+                f"[trading] {ticker}: Close{len(close)}件あるのにma25/ret_5d/rsiの"
+                f"いずれかがNone（ma25={ma25} ret_5d={ret_5d} rsi={rsi}）"
+            )
 
         # 出来高（存在する場合）。Closeと同様、単一銘柄でもMultiIndex列になることがあるため
         # DataFrameのままなら最初の列だけ取り出してSeries化する
@@ -22094,6 +22234,7 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         result["rev_growth"]    = round(rev_growth * 100, 1) if rev_growth else None
         result["earn_growth"]   = round(earn_growth * 100, 1) if earn_growth else None
         result["sector"]        = info.get("sector") or info.get("industry")
+        result["sector_detail"] = _classify_subsector(ticker, info.get("industry", ""))
         _yf_name = (info.get("shortName") or info.get("longName") or "").strip()
         result["name"] = _KNOWN_NAMES.get(ticker) or _yf_name or ticker
 
@@ -24793,7 +24934,7 @@ def _generate_full_portfolio_recommendation(
         ret_1d  = data.get("ret_1d")
         ret_5d  = data.get("ret_5d")
         vol_r   = data.get("vol_ratio")
-        sec     = data.get("sector") or p.get("sector", "その他")
+        sec     = data.get("sector_detail") or data.get("sector") or p.get("sector", "その他")
         ret_str_parts = []
         if ret_1d is not None: ret_str_parts.append(f"1日:{ret_1d:+.1f}%")
         if ret_5d is not None: ret_str_parts.append(f"5日:{ret_5d:+.1f}%")
@@ -27398,7 +27539,8 @@ def render_claude_trading_project():
                     _total_prevclose_jpy = 0.0  # 前日比計算用（今日の株数×前日終値）
                     _prevclose_skipped   = 0
                     for ticker, pos in open_pos.items():
-                        is_jp_pos = ticker.endswith(".T")
+                        is_jp_fund = ticker in _JP_FUND_MAP
+                        is_jp_pos = ticker.endswith(".T") or is_jp_fund
                         cur_unit  = "円" if is_jp_pos else "USD"
 
                         def _cur_fmt(val, signed=False):
@@ -27408,29 +27550,42 @@ def render_claude_trading_project():
 
                         cur_price = None
                         prev_close = None
-                        try:
-                            info = yf.Ticker(ticker).fast_info
-                            cur_price  = float(info.get("lastPrice") or info.get("last_price") or 0) or None
-                            prev_close = float(
-                                info.get("previousClose") or info.get("previous_close")
-                                or info.get("regularMarketPreviousClose") or 0
-                            ) or None
-                        except Exception:
-                            pass
-                        if not cur_price:
+                        if is_jp_fund:
+                            # 投資信託（結い2101等）: yfinanceでは基準価額を取得できないため
+                            # みんかぶの投信ページから取得する（_JP_FUND_MAP掲載銘柄のみ対応）
                             try:
-                                cur_raw = yf.download(ticker, period="5d", auto_adjust=True, progress=False)
-                                if not cur_raw.empty:
-                                    close_col = cur_raw["Close"]
-                                    if isinstance(close_col, pd.DataFrame):
-                                        close_col = close_col.iloc[:, 0]
-                                    vals = close_col.dropna()
-                                    if len(vals) > 0:
-                                        cur_price = float(vals.iloc[-1])
-                                    if prev_close is None and len(vals) > 1:
-                                        prev_close = float(vals.iloc[-2])
+                                _fund_data = _fetch_jp_fund_nav(ticker)
+                                if _fund_data:
+                                    cur_price = _fund_data.get("nav")
+                                    _fund_chg = _fund_data.get("change_pct")
+                                    if cur_price and _fund_chg is not None and (1 + _fund_chg / 100) != 0:
+                                        prev_close = cur_price / (1 + _fund_chg / 100)
                             except Exception:
                                 pass
+                        else:
+                            try:
+                                info = yf.Ticker(ticker).fast_info
+                                cur_price  = float(info.get("lastPrice") or info.get("last_price") or 0) or None
+                                prev_close = float(
+                                    info.get("previousClose") or info.get("previous_close")
+                                    or info.get("regularMarketPreviousClose") or 0
+                                ) or None
+                            except Exception:
+                                pass
+                            if not cur_price:
+                                try:
+                                    cur_raw = yf.download(ticker, period="5d", auto_adjust=True, progress=False)
+                                    if not cur_raw.empty:
+                                        close_col = cur_raw["Close"]
+                                        if isinstance(close_col, pd.DataFrame):
+                                            close_col = close_col.iloc[:, 0]
+                                        vals = close_col.dropna()
+                                        if len(vals) > 0:
+                                            cur_price = float(vals.iloc[-1])
+                                        if prev_close is None and len(vals) > 1:
+                                            prev_close = float(vals.iloc[-2])
+                                except Exception:
+                                    pass
 
                         if cur_price:
                             _mval_jpy = cur_price * pos["qty"] * (1 if is_jp_pos else _pnl_usdjpy)
