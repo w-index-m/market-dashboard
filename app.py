@@ -681,6 +681,15 @@ MARKETS = {
     ],
 }
 
+# フジクラ(5803.T)・三菱重工(7011.T)はyfinanceの株価データが不正確なことが
+# 判明しており、MARKETS上で明示的にTiingoへ切り替え済み。他の画面（保有中
+# ポジション表等）でも同じ銘柄を扱う際はyfinanceを使わずここを参照すること。
+_TICKER_PROVIDER_OVERRIDES = {
+    _item["symbol"]: _item["provider"]
+    for _cat in MARKETS.values() for _item in _cat
+    if _item.get("provider") and _item.get("provider") != "yahoo"
+}
+
 # ===========================
 # Groq API（フォールバック第2候補）
 # ===========================
@@ -28141,6 +28150,19 @@ def render_claude_trading_project():
                                     _fund_chg = _fund_data.get("change_pct")
                                     if cur_price and _fund_chg is not None and (1 + _fund_chg / 100) != 0:
                                         prev_close = cur_price / (1 + _fund_chg / 100)
+                            except Exception:
+                                pass
+                        elif ticker in _TICKER_PROVIDER_OVERRIDES:
+                            # フジクラ・三菱重工等、yfinanceの株価が不正確と判明している
+                            # 銘柄はyfinanceを使わずMARKETSと同じTiingo経由で取得する
+                            # （fetch_daily/compute_cardと同じ既存の仕組みを再利用）
+                            try:
+                                _tg = fetch_daily(ticker, days=5, provider=_TICKER_PROVIDER_OVERRIDES[ticker])
+                                _tg_close = _tg["Close"].dropna() if not _tg.empty else pd.Series(dtype=float)
+                                if len(_tg_close) >= 1:
+                                    cur_price = float(_tg_close.iloc[-1])
+                                if len(_tg_close) >= 2:
+                                    prev_close = float(_tg_close.iloc[-2])
                             except Exception:
                                 pass
                         else:
