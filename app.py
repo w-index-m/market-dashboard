@@ -22725,17 +22725,25 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         try:
             eh = tk.earnings_history
             if eh is not None and not eh.empty:
-                recent = eh.tail(4)[["epsEstimate", "epsActual", "surprisePercent"]].copy()
+                recent = eh.tail(4)[["epsEstimate", "epsActual"]].copy()
                 recent.index = [str(i)[:7] for i in recent.index]
                 eps_rows = []
                 for quarter, row in recent.iterrows():
                     est  = row.get("epsEstimate")
                     act  = row.get("epsActual")
-                    surp = row.get("surprisePercent")
                     if pd.notna(act):
+                        # yfinanceのsurprisePercent列は実績/予想の表示値と単位が
+                        # 食い違うことがある（比率のまま返り、%表記すると1/100の値に
+                        # なる等）ため使わず、表示している実績・予想から自前で計算する
+                        # ことで数値の整合性を保証する。
+                        surp = (
+                            (act - est) / abs(est) * 100
+                            if pd.notna(est) and est
+                            else None
+                        )
                         eps_rows.append(
                             f"{quarter}: 実績 {act:.2f} / 予想 {est:.2f}"
-                            + (f" (サプライズ {surp:+.1f}%)" if pd.notna(surp) else "")
+                            + (f" (サプライズ {surp:+.1f}%)" if surp is not None else "")
                         )
                 result["eps_history"] = eps_rows
         except Exception:
