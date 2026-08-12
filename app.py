@@ -681,15 +681,6 @@ MARKETS = {
     ],
 }
 
-# フジクラ(5803.T)・三菱重工(7011.T)はyfinanceの株価データが不正確なことが
-# 判明しており、MARKETS上で明示的にTiingoへ切り替え済み。他の画面（保有中
-# ポジション表等）でも同じ銘柄を扱う際はyfinanceを使わずここを参照すること。
-_TICKER_PROVIDER_OVERRIDES = {
-    _item["symbol"]: _item["provider"]
-    for _cat in MARKETS.values() for _item in _cat
-    if _item.get("provider") and _item.get("provider") != "yahoo"
-}
-
 # ===========================
 # Groq API（フォールバック第2候補）
 # ===========================
@@ -21987,6 +21978,76 @@ def _fetch_jp_fund_nav(fund_code: str) -> dict:
         return {}
 
 
+@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+def _fetch_minkabu_stock_price(code: str) -> dict:
+    """みんかぶの個別株ページから現在値を取得する（TTL=5分。投信の基準価額と
+    違い株価はリアルタイムに近く動くため、_fetch_jp_fund_navの6hより短い）。
+    Tiingo/Stooqで取得できない日本株向けの追加フォールバック用。
+    code: .Tを除いた証券コード（例: "5803", "285A"。_fetch_minkabu_jp_newsと
+    同じコード表記）
+    Returns: {"price": float, "change_pct": float|None} 失敗時は{}
+    実際のページ構造をこの開発環境から確認できないため、_fetch_jp_fund_navと
+    同じ「ラベル文字列＋直後の金額」を正規表現で拾う方式にしてある程度の
+    構造変化に耐えるようにしているが、投信の基準価額スクレイピング同様、
+    最初は正規表現がページと合わずに取得できない可能性がある。
+    """
+    import re as _re
+    try:
+        from bs4 import BeautifulSoup as _BS
+    except ImportError:
+        return {}
+    try:
+        url = f"https://minkabu.jp/stock/{code}"
+        resp = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/17.0 Mobile/15E148 Safari/604.1"
+                ),
+                "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+                "Referer":         "https://minkabu.jp/",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[trading] minkabu stock {code} → HTTP {resp.status_code}")
+            return {}
+
+        soup = _BS(resp.text, "html.parser")
+        text = soup.get_text("\n", strip=True)
+
+        price = None
+        change_pct = None
+        m = _re.search(
+            r"現在値[\s\S]{0,40}?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*円\s*"
+            r"[+\-－]?[\d,]*\.?\d*\s*\(([+\-－]?\d+\.?\d*)\s*%\)",
+            text,
+        )
+        if m:
+            try:
+                price = float(m.group(1).replace(",", ""))
+                change_pct = float(m.group(2).replace("－", "-"))
+            except ValueError:
+                price = None
+        if price is None:
+            m2 = _re.search(r"現在値[\s\S]{0,40}?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*円", text)
+            if m2:
+                try:
+                    price = float(m2.group(1).replace(",", ""))
+                except ValueError:
+                    price = None
+        if price is None:
+            logger.warning(f"[trading] minkabu stock {code}: 現在値パターンが見つからず（ページ構造変更の可能性）")
+            return {}
+        return {"price": price, "change_pct": change_pct}
+    except Exception as e:
+        logger.warning(f"[trading] minkabu stock price取得失敗 {code}: {e}")
+        return {}
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
     """みんかぶの銘柄ニュースページから適時開示・ニュースを取得（TTL=30分）。
@@ -28152,12 +28213,14 @@ def render_claude_trading_project():
                                         prev_close = cur_price / (1 + _fund_chg / 100)
                             except Exception:
                                 pass
-                        elif ticker in _TICKER_PROVIDER_OVERRIDES:
-                            # フジクラ・三菱重工等、yfinanceの株価が不正確と判明している
-                            # 銘柄はyfinanceを使わずMARKETSと同じTiingo経由で取得する
-                            # （fetch_daily/compute_cardと同じ既存の仕組みを再利用）
+                        elif is_jp_pos:
+                            # 日本株はyfinanceを第一候補にしない（フジクラ等で判明した
+                            # 通り、yfinanceの日本株データは実際の値と大きくズレることが
+                            # あるため）。Tiingo（fetch_daily内でStooqにも自動フォール
+                            # バック）→ みんかぶ個別株ページ → 最後の手段としてyfinance
+                            # の順で試す。
                             try:
-                                _tg = fetch_daily(ticker, days=5, provider=_TICKER_PROVIDER_OVERRIDES[ticker])
+                                _tg = fetch_daily(ticker, days=5, provider="tiingo")
                                 _tg_close = _tg["Close"].dropna() if not _tg.empty else pd.Series(dtype=float)
                                 if len(_tg_close) >= 1:
                                     cur_price = float(_tg_close.iloc[-1])
@@ -28165,7 +28228,42 @@ def render_claude_trading_project():
                                     prev_close = float(_tg_close.iloc[-2])
                             except Exception:
                                 pass
+                            if not cur_price:
+                                try:
+                                    _mk = _fetch_minkabu_stock_price(ticker[:-2])  # ".T"を除去
+                                    if _mk:
+                                        cur_price = _mk.get("price")
+                                        _mk_chg = _mk.get("change_pct")
+                                        if cur_price and _mk_chg is not None and (1 + _mk_chg / 100) != 0:
+                                            prev_close = cur_price / (1 + _mk_chg / 100)
+                                except Exception:
+                                    pass
+                            if not cur_price:
+                                try:
+                                    info = yf.Ticker(ticker).fast_info
+                                    cur_price  = float(info.get("lastPrice") or info.get("last_price") or 0) or None
+                                    prev_close = float(
+                                        info.get("previousClose") or info.get("previous_close")
+                                        or info.get("regularMarketPreviousClose") or 0
+                                    ) or None
+                                except Exception:
+                                    pass
+                                if not cur_price:
+                                    try:
+                                        cur_raw = yf.download(ticker, period="5d", auto_adjust=True, progress=False)
+                                        if not cur_raw.empty:
+                                            close_col = cur_raw["Close"]
+                                            if isinstance(close_col, pd.DataFrame):
+                                                close_col = close_col.iloc[:, 0]
+                                            vals = close_col.dropna()
+                                            if len(vals) > 0:
+                                                cur_price = float(vals.iloc[-1])
+                                            if prev_close is None and len(vals) > 1:
+                                                prev_close = float(vals.iloc[-2])
+                                    except Exception:
+                                        pass
                         else:
+                            # 米国株: 従来通りyfinanceを第一候補のまま維持
                             try:
                                 info = yf.Ticker(ticker).fast_info
                                 cur_price  = float(info.get("lastPrice") or info.get("last_price") or 0) or None
