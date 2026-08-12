@@ -302,6 +302,7 @@ DEEPL_API_KEY      = get_env_var("DEEPL_API_KEY", "")
 GEMINI_API_KEY     = get_env_var("GEMINI_API_KEY", "")
 GROQ_API_KEY       = get_env_var("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = get_env_var("OPENROUTER_API_KEY", "")
+NVIDIA_API_KEY      = get_env_var("NVIDIA_API_KEY", "")
 FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
 FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
@@ -781,6 +782,58 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
 
 
 # ===========================
+# NVIDIA build.nvidia.com（NIM API、フォールバック第4候補）
+# ===========================
+def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
+    if not NVIDIA_API_KEY:
+        return "⚠️ NVIDIA_API_KEY が設定されていません", ""
+    NVIDIA_MODELS = [
+        "nvidia/nemotron-3-ultra-550b-a55b",
+    ]
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    for model_name in NVIDIA_MODELS:
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            # 推論(thinking)モデルのため、内部の思考トークン分の余裕を持たせて
+            # 呼び出し元指定のmax_tokensより大きめの値を使う（小さいと思考の
+            # 途中で打ち切られ最終回答が空になることがあるため）。
+            # chat_template_kwargs/reasoning_budgetはOpenAI SDKのextra_body
+            # 相当（このAPIはOpenAI互換）で、直接requests.postする場合は
+            # トップレベルのフィールドとして渡す。
+            "max_tokens": max(max_tokens, 8192),
+            "temperature": temperature,
+            "top_p": 0.95,
+            "chat_template_kwargs": {"enable_thinking": True},
+            "reasoning_budget": 8192,
+        }
+        try:
+            resp = requests.post(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                headers=headers, json=payload, timeout=90,
+            )
+            if resp.status_code == 429:
+                continue
+            if resp.status_code in (404, 400):
+                continue
+            if resp.status_code in (401, 403):
+                return "⚠️ NVIDIA認証エラー。NVIDIA_API_KEY を確認してください。", ""
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+            if text:
+                return text, model_name
+        except requests.exceptions.Timeout:
+            continue
+        except Exception as e:
+            logger.error(f"NVIDIA error ({model_name}): {e}")
+            continue
+    return "⚠️ NVIDIA: 全モデルで応答を取得できませんでした", ""
+
+
+# ===========================
 # AI呼び出し統合関数
 # ===========================
 def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
@@ -823,11 +876,15 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
                 result, groq_model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
                 if groq_model:
                     return result, f"Groq ({groq_model}) ※Gemini quota超過"
+            if NVIDIA_API_KEY:
+                result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+                if nv_model:
+                    return result, f"NVIDIA ({nv_model}) ※Gemini/Groq失敗"
             if OPENROUTER_API_KEY:
                 result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
                 if or_model:
-                    return result, f"OpenRouter ({or_model}) ※Gemini/Groq失敗"
-            return ("⚠️ Gemini quota超過・Groq失敗・OpenRouter未設定。", "none")
+                    return result, f"OpenRouter ({or_model}) ※Gemini/Groq/NVIDIA失敗"
+            return ("⚠️ Gemini quota超過・Groq失敗・NVIDIA失敗・OpenRouter未設定。", "none")
 
         return (f"⚠️ Gemini APIエラー。\n詳細: {last_error_msg}", "none")
 
@@ -835,6 +892,11 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
         result, groq_model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if groq_model:
             return result, f"Groq ({groq_model})"
+
+    if NVIDIA_API_KEY:
+        result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if nv_model:
+            return result, f"NVIDIA ({nv_model})"
 
     if OPENROUTER_API_KEY:
         result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
@@ -29924,6 +29986,7 @@ def main():
             "DeepL": "✅" if DEEPL_API_KEY else "❌",
             "Gemini": "✅" if GEMINI_API_KEY else "❌",
             "Groq": "✅" if GROQ_API_KEY else "❌",
+            "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
             t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
         }
@@ -29932,6 +29995,7 @@ def main():
         active_ai = []
         if GEMINI_API_KEY: active_ai.append("Gemini")
         if GROQ_API_KEY: active_ai.append("Groq")
+        if NVIDIA_API_KEY: active_ai.append("NVIDIA")
         if OPENROUTER_API_KEY: active_ai.append("OpenRouter")
         chain_str = " → ".join(active_ai) if active_ai else t("未設定", "Not configured")
         st.caption(f"🤖 AI chain: {chain_str}")
@@ -29943,6 +30007,7 @@ GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
 DEEPL_API_KEY = "your_key:fx"
 GEMINI_API_KEY = "your_key"
 GROQ_API_KEY = "gsk_..."
+NVIDIA_API_KEY = "nvapi-..."
 OPENROUTER_API_KEY = "sk-or-..."
             """, language="toml")
         st.divider()
