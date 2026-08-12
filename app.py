@@ -21715,6 +21715,53 @@ def _save_stock_data_cache(ticker: str, date: str, data: dict) -> bool:
         return False
 
 
+_AI_DIGEST_CACHE_HEADERS = ["date", "cache_key", "data_json", "cached_at"]
+
+
+def _load_ai_digest_cache(cache_key: str, date: str) -> dict | None:
+    """AI生成コンテンツ（Slack日次ダッシュボード用）の当日キャッシュを取得。
+    daily_portfolio_line.pyのcronジョブは1日に最大4回実行されるが、_generate_
+    full_portfolio_recommendation等のAI呼び出しはPythonプロセスをまたぐ
+    @st.cache_dataの恩恵を受けられず、同じ内容を4回とも生成し直してしまい
+    Gemini/GroqのAPIクォータを無駄に消費する原因になっていた。当日1回分だけ
+    生成すれば足りるコンテンツをここにキャッシュし、2回目以降の実行で再利用する。
+    """
+    import json as _json
+    try:
+        ws = _trading_ws("ai_digest_cache", _AI_DIGEST_CACHE_HEADERS)
+        if not ws:
+            return None
+        rows = ws.get_all_records()
+        for r in reversed(rows):
+            if r.get("date") == date and r.get("cache_key") == cache_key:
+                raw = r.get("data_json", "")
+                if raw:
+                    return _json.loads(raw)
+    except Exception as e:
+        logger.warning(f"[trading] ai_digest_cache読込失敗 {cache_key}: {e}")
+    return None
+
+
+def _save_ai_digest_cache(cache_key: str, date: str, data: dict) -> bool:
+    """AI生成コンテンツをGoogle Sheetsにキャッシュ保存。失敗（error付き）の
+    結果は呼び出し側で保存しないこと（クォータ超過をその日一日引きずらない
+    ように、失敗時は次回の実行で再度生成を試みられるようにするため）。
+    """
+    import json as _json
+    try:
+        ws = _trading_ws("ai_digest_cache", _AI_DIGEST_CACHE_HEADERS)
+        if not ws:
+            return False
+        data_json = _json.dumps(data, ensure_ascii=False, default=str)
+        if len(data_json) > 49000:
+            data_json = data_json[:49000]  # Sheetsセル上限50,000文字
+        ws.append_row([date, cache_key, data_json, datetime.now(JST).strftime("%Y-%m-%d %H:%M")])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] ai_digest_cache保存失敗 {cache_key}: {e}")
+        return False
+
+
 def _get_stock_cache_status(tickers: list) -> dict:
     """保有銘柄のキャッシュ状態を一括取得。
     Returns: {ticker: {"cached": bool, "updated_at": str}}

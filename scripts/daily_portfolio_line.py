@@ -249,9 +249,16 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
 
         stock_data_map[ticker] = data
 
-    ai_result = app._generate_full_portfolio_recommendation(
-        positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,
-    )
+    # 保有銘柄アクション判定も1日1回で足りるため、同じ理由でAI呼び出し自体を
+    # キャッシュする（銘柄データの取得・整形は上のループで毎回そのまま行う）
+    cache_key = f"holdings_action_{username}_{mode}"
+    ai_result = app._load_ai_digest_cache(cache_key, today_str)
+    if ai_result is None:
+        ai_result = app._generate_full_portfolio_recommendation(
+            positions, stock_data_map, market_ctx, mode=mode, model_pref=model_pref,
+        )
+        if not ai_result.get("error"):
+            app._save_ai_digest_cache(cache_key, today_str, ai_result)
     return ai_result, stock_data_map, ticker_names
 
 
@@ -291,7 +298,7 @@ def build_holdings_action_message(result: dict, today: str, ticker_names: dict |
     return f"📋 保有銘柄アクション判定（{today}）\n\n{plain}"
 
 
-def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
+def build_holdings_news_message(stock_data_map: dict, today: str, username: str = "") -> str | None:
     """
     保有銘柄ごとの直近ニュース見出し一覧＋AIによる1銘柄1文の軽い要約。
     generate_holdings_actionで既に取得済みのstock_data_map（_fetch_trading_stock_dataの
@@ -299,12 +306,17 @@ def build_holdings_news_message(stock_data_map: dict, today: str) -> str | None:
     ポジティブ/ネガティブの判定はここでは行わない（見出しの機械的な感情分析は誤判定の
     リスクがあるため）— そちらは「📋 保有銘柄アクション判定」内のAIによるIR・ニュース
     評価を参照する前提。
+    この要約も1日1回で足りるため、他のAI呼び出しと同じ理由でキャッシュする。
     """
-    try:
-        summaries = app._summarize_holdings_news(stock_data_map)
-    except Exception as e:
-        print(f"holdings news summarize failed: {e}", file=sys.stderr)
-        summaries = {}
+    cache_key = f"holdings_news_{username}"
+    summaries = app._load_ai_digest_cache(cache_key, today)
+    if summaries is None:
+        try:
+            summaries = app._summarize_holdings_news(stock_data_map)
+            app._save_ai_digest_cache(cache_key, today, summaries)
+        except Exception as e:
+            print(f"holdings news summarize failed: {e}", file=sys.stderr)
+            summaries = {}
 
     lines = [f"📰 保有銘柄 関連ニュースまとめ（{today}）", ""]
     has_content = False
@@ -564,6 +576,15 @@ def build_portfolio_message(
 
 
 def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, model_type: str) -> dict:
+    # このcronジョブは1日最大4回実行されるが、AI推奨ポートフォリオは1日1回
+    # 生成すれば足りる（同じ日に4回作り直すとGemini/Groqのクォータを浪費する
+    # だけなので、当日分がキャッシュにあればAgent A/B/Cを一切呼ばずに再利用する）
+    cache_key = "ai_portfolio"
+    cached = app._load_ai_digest_cache(cache_key, today)
+    if cached:
+        print("Using cached AI portfolio recommendation for today")
+        return cached
+
     print("Fetching candidate performance...")
     cand_perf = app._fetch_candidate_performance(today, mode)
 
@@ -584,15 +605,20 @@ def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, mod
 
     print("Running Agent B (per-stock analysis, parallel)...")
     top_args = app._get_top_candidate_args(cand_perf, mode, budget, n=15)
+    # Gemini分のクォータを使い切った瞬間から全呼び出しがGroqへ雪崩れ込み、
+    # Groqの分あたりトークン上限をバーストで超えやすいため並列数を抑える
     agent_b = app._run_stock_agents_parallel(
-        top_args, today, agent_a.get("stance", "中立"), max_workers=3,
+        top_args, today, agent_a.get("stance", "中立"), max_workers=2,
     )
 
     print("Running Agent C (portfolio assembly)...")
-    return app._generate_investment_portfolio_rec(
+    result = app._generate_investment_portfolio_rec(
         budget, model_type, "balanced", market_ctx, [], "auto",
         trading_mode=mode, candidate_perf=cand_perf, agent_a=agent_a, agent_b=agent_b,
     )
+    if not result.get("error"):
+        app._save_ai_digest_cache(cache_key, today, result)
+    return result
 
 
 def send_holdings_messages(username: str, mode: str, market_ctx: dict, today: str, post) -> None:
@@ -606,7 +632,7 @@ def send_holdings_messages(username: str, mode: str, market_ctx: dict, today: st
         holdings_msg = build_holdings_action_message(holdings_result, today, holdings_ticker_names)
         if holdings_msg:
             post(holdings_msg, f"holdings action ({username})")
-        news_msg = build_holdings_news_message(holdings_stock_data, today)
+        news_msg = build_holdings_news_message(holdings_stock_data, today, username)
         if news_msg:
             post(news_msg, f"holdings news ({username})")
         earnings_msg = build_earnings_highlight_message(holdings_stock_data, holdings_ticker_names, today)
