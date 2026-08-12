@@ -28225,6 +28225,7 @@ def render_claude_trading_project():
                     st.markdown("**保有中ポジション（現在値・含み損益）**")
                     _pnl_usdjpy = _fetch_usd_jpy()
                     pnl_rows = []
+                    _dl_categories = []  # CSV/Excelダウンロード用の分類列（日本株/米国株/投資信託）
                     _total_cost_jpy = 0.0
                     _total_pnl_jpy  = 0.0
                     _total_skipped  = 0  # 現在値取得に失敗した銘柄数（合計から除外）
@@ -28391,6 +28392,7 @@ def render_claude_trading_project():
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
                             _pnl_name = _get_stock_display_name(ticker)
+                        _dl_categories.append("投資信託" if is_jp_fund else ("日本株" if is_jp_pos else "米国株"))
                         pnl_rows.append({
                             "銘柄":    _pnl_name,
                             "コード":  ticker,
@@ -28426,8 +28428,15 @@ def render_claude_trading_project():
                     )
 
                     # ── 保有中ポジション表のダウンロード（CSV/Excel） ─────────────
+                    # 画面表示のpnl_rows自体は変えず、ダウンロード用の複製にだけ「分類」列を
+                    # 追加し、日本株→米国株→投資信託の順でグループ化して出力する
                     _dl_date = datetime.now(JST).strftime("%Y-%m-%d")
                     _dl_df = pd.DataFrame(pnl_rows)
+                    _dl_df.insert(0, "分類", _dl_categories)
+                    _dl_df["分類"] = pd.Categorical(
+                        _dl_df["分類"], categories=["日本株", "米国株", "投資信託"], ordered=True
+                    )
+                    _dl_df = _dl_df.sort_values("分類").reset_index(drop=True)
                     _dl_c1, _dl_c2 = st.columns(2)
                     if _privacy:
                         st.caption("🙈 金額非表示モード中はダウンロードできません（画面共有時に金額を漏らさないため）。")
