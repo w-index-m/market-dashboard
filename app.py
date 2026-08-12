@@ -20781,11 +20781,80 @@ _JP_FUND_MAP = {
     "03319172": "eMAXIS Slim 先進国株式インデックス",
     "0331C177": "eMAXIS Slim 新興国株式インデックス",
     "03312175": "eMAXIS Slim バランス(8資産均等型)",
+    "03317172": "eMAXIS Slim 国内株式(TOPIX)",
+    "03311182": "eMAXIS Slim 国内株式(日経平均)",
+    "03316183": "eMAXIS Slim 全世界株式(除く日本)",
+    # eMAXIS（無印）シリーズ（三菱UFJアセットマネジメント）
+    "0331209A": "eMAXIS TOPIXインデックス",
+    "0331220C": "eMAXIS S&P500インデックス",
+    # つみたてシリーズ（三菱UFJアセットマネジメント）
+    "03313178": "つみたて先進国株式",
+    "03316203": "つみたて全世界株式",
+    "03315203": "つみたて米国株式(S&P500)",
+    "03312178": "つみたて日本株式(TOPIX)",
+    "03316178": "つみたて日本株式(日経平均)",
+    # たわらノーロードシリーズ（アセットマネジメントOne）
+    "47312197": "たわらノーロード 全世界株式",
+    "4731B15C": "たわらノーロード 先進国株式",
+    "47318233": "たわらノーロード S&P500",
+    "47317173": "たわらノーロード TOPIX",
+    "47313177": "たわらノーロード バランス(8資産均等型)",
+    # iFreeシリーズ（大和アセットマネジメント。iFreeNEXTとは別系統）
+    "04318178": "iFree S&P500インデックス",
+    "0431M169": "iFree 日経225インデックス",
+    "0431N169": "iFree TOPIXインデックス",
+    "0431O169": "iFree JPX日経400インデックス",
+    "0431P169": "iFree 外国株式インデックス(為替ヘッジなし)",
+    # ニッセイアセットマネジメント
+    "29312154": "ニッセイTOPIXインデックスファンド<購入・換金手数料なし>",
+    # 三井住友DSアセットマネジメント
+    "7931211C": "三井住友・DCつみたてNISA・日本株インデックスファンド",
+    # SBIアセットマネジメント
+    "89311199": "SBI・V・S&P500インデックス・ファンド",
+    "89311216": "SBI・V・全米株式インデックス・ファンド",
+    "8931217C": "SBI・全世界株式インデックス・ファンド(雪だるま)",
+    # 楽天投信投資顧問
+    "9I312179": "楽天・全米株式インデックス・ファンド(楽天・VTI)",
+    "9I311179": "楽天・全世界株式インデックス・ファンド(楽天・VT)",
+    "9I31122C": "楽天・全世界株式(除く米国)インデックス・ファンド(楽天・VXUS)",
+    # 野村アセットマネジメント
+    "01312237": "はじめてのNISA・全世界株式インデックス(オール・カントリー)",
 }
 # 日本の投資信託の基準価額は「1万口あたり」の値で公表される慣習のため、
 # 保有口数×基準価額をそのまま金額として使うと1万倍の誤りになる。
 # 評価額・取得金額など金額換算が必要な箇所ではこの単位で割る。
 _JP_FUND_NAV_UNIT = 10000
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _load_nisa_growth_quota_fund_master() -> dict:
+    """金融庁の成長投資枠対象商品リスト（TSV、data/nisa_growth_quota_funds.tsv）を
+    読み込み、投信協会コード→ファンド名の辞書を返す。同じコードが複数回（追加・変更）
+    登場する場合は日付が新しい行（ファイル内で後に出てくる行）を優先する。
+    _JP_FUND_MAPの手動収録分より対象範囲が広いが、こちらはみんかぶでの基準価額
+    取得が未検証のファンドも含む。呼び出し側で_JP_FUND_MAPにマージして使う
+    （手動収録分の名称を優先させるため、マージ時はこちらを先に展開する）。
+    """
+    import csv as _csv
+    import unicodedata as _ud
+    path = os.path.join(os.path.dirname(__file__), "data", "nisa_growth_quota_funds.tsv")
+    result: dict = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            reader = _csv.DictReader(f, delimiter="\t")
+            for row in reader:
+                code = (row.get("fund_code") or "").strip()
+                name = (row.get("fund_name") or "").strip()
+                if code and name:
+                    result[code] = _ud.normalize("NFKC", name)
+    except Exception as e:
+        logger.warning(f"[trading] nisa_growth_quota_funds.tsv読込失敗: {e}")
+    return result
+
+
+# 金融庁の成長投資枠対象商品リスト（数千件）を先に展開し、手動収録分（_JP_FUND_MAP
+# リテラル）を後から上書きすることで、手動収録済みの表記・動作確認済みエントリを優先する。
+_JP_FUND_MAP = {**_load_nisa_growth_quota_fund_master(), **_JP_FUND_MAP}
 
 
 def _ticker_exists(ticker: str) -> bool:
