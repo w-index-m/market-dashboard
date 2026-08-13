@@ -24752,7 +24752,10 @@ def _screen_diversification_candidates_by_return(
         if (include_theme_baskets or (t not in _CLAUDE_AI_BASKET and t not in _CLAUDE_OPTICAL_BASKET))
         and t not in exclude_tickers
     })
-    price_dict = _fetch_ticker_close_prices(candidates, period="3y")
+    # 3年リターン計算には756営業日前の終値が要る。period="3y"ちょうどだと取得できる
+    # データ自体が756本前後しかなく、756本より前を参照できずret_3yが常にNoneになって
+    # しまうため、余裕を持って4年分取得する。
+    price_dict = _fetch_ticker_close_prices(candidates, period="4y")
     rows = []
     for tk, s in price_dict.items():
         s = s.dropna()
