@@ -20825,6 +20825,41 @@ _JP_FUND_MAP = {
 # 評価額・取得金額など金額換算が必要な箇所ではこの単位で割る。
 _JP_FUND_NAV_UNIT = 10000
 
+# 主要な債券ETF（米国上場）のティッカー。個別株・投信より先にこの判定を行うことで、
+# アセットクラス別集計（日本株/米国株/投資信託/債券）から債券だけを切り出す。
+_BOND_TICKERS = {
+    "AGG", "BND", "BNDX", "TLT", "IEF", "IEI", "SHY", "SHV", "BIL", "SGOV",
+    "LQD", "VCIT", "VCSH", "VCLT", "HYG", "JNK", "TIP", "SCHP", "MUB",
+    "GOVT", "SPTL", "SPTS", "SCHZ", "TMF", "TBT", "EMB", "MBB", "USFR",
+    "VGIT", "VGSH", "VGLT",
+}
+
+
+def _is_bond_ticker(ticker: str, name: str = "") -> bool:
+    """ティッカー・名称から債券ETF/債券ファンドかどうかを判定する。
+    _BOND_TICKERSは主要な米国上場債券ETFの手動収録リスト（網羅的ではない）。
+    日本の投信は名称に「債券」「公社債」等が含まれるかで判定する（_JP_FUND_MAP・
+    金融庁マスタとも和名で統一されているため、これで概ね拾える）。
+    """
+    if ticker.upper() in _BOND_TICKERS:
+        return True
+    combined = f"{ticker}{name}"
+    return any(kw in combined for kw in ("債券", "公社債", "国債ファンド", "社債"))
+
+
+def _classify_asset_category(ticker: str, is_jp_pos: bool, is_jp_fund: bool, name: str = "") -> str:
+    """保有ポジションをアセットクラス別（日本株・米国株・投資信託・債券）に分類する。
+    債券判定を投信・個別株より先に行う（債券ETF・債券ファンドを日本株/米国株/投資信託
+    側に取りこぼさないため）。ゼロ時（JST）基準の資産クラス別スナップショット
+    （_save_daily_asset_category_snapshot）と、保有中ポジション表のCSV/Excel
+    ダウンロードの「分類」列の両方から共通で使う。
+    """
+    if _is_bond_ticker(ticker, name):
+        return "債券"
+    if is_jp_fund:
+        return "投資信託"
+    return "日本株" if is_jp_pos else "米国株"
+
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _load_nisa_growth_quota_fund_master() -> dict:
@@ -24180,6 +24215,86 @@ def _save_daily_asset_snapshot(username: str, date: str) -> bool:
     except Exception as e:
         logger.warning(f"[trading] 資産スナップショット保存失敗 {username}: {e}")
         return False
+
+
+_ASSET_CATEGORY_SNAPSHOT_HEADERS = [
+    "date", "username", "日本株", "米国株", "投資信託", "債券", "total_value_jpy", "created_at",
+]
+
+
+def _save_daily_asset_category_snapshot(username: str, date: str) -> bool:
+    """日本時間0時時点のアセットクラス別（日本株・米国株・投資信託・債券）評価額合計を
+    asset_category_snapshotシートに記録する。00:00 JST起動の専用cron
+    （scripts/daily_asset_snapshot.py）から1日1回だけ呼ぶ想定（同日に複数回呼ぶと
+    重複行が増えるため、呼び出し側で1日1回に制御すること）。
+    この記録を「その日の始値」代わりに使うことで、日本株・米国株で市場が開いている
+    時間帯が異なっていても、全アセットクラス共通のゼロ時基準で前日比を計算できる。
+    """
+    try:
+        summary = _compute_portfolio_summary(username)
+        positions = summary.get("positions", {})
+        if not positions:
+            return False
+        usd_jpy = summary.get("usd_jpy", 150.0)
+
+        totals = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
+        for ticker, p in positions.items():
+            if p.get("market_value") is None:
+                continue
+            is_jp_pos  = bool(p.get("is_jp"))
+            is_jp_fund = ticker in _JP_FUND_MAP
+            cat = _classify_asset_category(ticker, is_jp_pos, is_jp_fund, p.get("name", ""))
+            rate = 1.0 if is_jp_pos else usd_jpy
+            totals[cat] += p["market_value"] * rate
+
+        total_value_jpy = sum(totals.values())
+        if total_value_jpy <= 0:
+            return False
+
+        ws = _trading_ws("asset_category_snapshot", _ASSET_CATEGORY_SNAPSHOT_HEADERS)
+        if not ws:
+            return False
+        ws.append_row([
+            date, username or "admin",
+            round(totals["日本株"], 2), round(totals["米国株"], 2),
+            round(totals["投資信託"], 2), round(totals["債券"], 2),
+            round(total_value_jpy, 2),
+            datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
+        ])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] 資産クラス別スナップショット保存失敗 {username}: {e}")
+        return False
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_asset_category_snapshot(username: str, target_date: str) -> dict | None:
+    """asset_category_snapshotシートから、指定ユーザーの「target_date当日、無ければ
+    それより前で一番新しい日付」の1行を返す（00:00 JSTのcronが何らかの理由で失敗して
+    いた場合のフォールバック）。
+    Returns: {"date", "日本株", "米国株", "投資信託", "債券", "total_value_jpy"} or None
+    """
+    try:
+        ws = _trading_ws("asset_category_snapshot", _ASSET_CATEGORY_SNAPSHOT_HEADERS)
+        if not ws:
+            return None
+        records = ws.get_all_records()
+        u = username or "admin"
+        rows = [r for r in records if str(r.get("username")) == u and str(r.get("date")) <= target_date]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: str(r.get("date")))
+        latest = rows[-1]
+        return {
+            "date":            str(latest.get("date")),
+            "日本株":           float(latest.get("日本株") or 0),
+            "米国株":           float(latest.get("米国株") or 0),
+            "投資信託":         float(latest.get("投資信託") or 0),
+            "債券":             float(latest.get("債券") or 0),
+            "total_value_jpy": float(latest.get("total_value_jpy") or 0),
+        }
+    except Exception:
+        return None
 
 
 _REC_CACHE_HEADERS = ["date", "mode", "tickers_key", "news_key", "text", "model", "created_at"]
@@ -28379,9 +28494,8 @@ def render_claude_trading_project():
                     _total_pnl_jpy  = 0.0
                     _total_skipped  = 0  # 現在値取得に失敗した銘柄数（合計から除外）
                     _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
-                    _total_today_jpy     = 0.0  # 前日比計算用（今日の株数×今日の株価）
-                    _total_prevclose_jpy = 0.0  # 前日比計算用（今日の株数×前日終値）
-                    _prevclose_skipped   = 0
+                    # ゼロ時（JST）基準の前日比用: アセットクラス別の現在評価額合計（円換算）
+                    _cat_totals_jpy = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
                     for ticker, pos in open_pos.items():
                         is_jp_fund = ticker in _JP_FUND_MAP
                         is_jp_pos = ticker.endswith(".T") or is_jp_fund
@@ -28489,11 +28603,8 @@ def render_claude_trading_project():
                             _mval_jpy = cur_price * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
                             _sec = _fetch_ticker_sector(ticker)
                             _sector_values[_sec] = _sector_values.get(_sec, 0.0) + _mval_jpy
-                            _total_today_jpy += _mval_jpy
-                            if prev_close:
-                                _total_prevclose_jpy += prev_close * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
-                            else:
-                                _prevclose_skipped += 1
+                            _cat = _classify_asset_category(ticker, is_jp_pos, is_jp_fund, pos.get("name", ""))
+                            _cat_totals_jpy[_cat] += _mval_jpy
 
                         avg_cost = pos["cost"] / pos["qty"] if pos["qty"] > 0 else 0
                         pnl      = (cur_price - avg_cost) * _money_qty if cur_price else None
@@ -28541,7 +28652,8 @@ def render_claude_trading_project():
                         _pnl_name = pos.get("name") or ticker
                         if _pnl_name == ticker:
                             _pnl_name = _get_stock_display_name(ticker)
-                        _dl_categories.append("投資信託" if is_jp_fund else ("日本株" if is_jp_pos else "米国株"))
+                        _pnl_category = _classify_asset_category(ticker, is_jp_pos, is_jp_fund, _pnl_name)
+                        _dl_categories.append(_pnl_category)
                         pnl_rows.append({
                             "銘柄":    _pnl_name,
                             "コード":  ticker,
@@ -28620,15 +28732,19 @@ def render_claude_trading_project():
                             f"（現在値取得失敗の{_total_skipped}銘柄は集計対象外）" if _total_skipped else ""
                         )
 
-                        # 前日比: 保有株数を固定し、今日の株価 vs 前日終値で計算（プレマーケット等の
-                        # タイミング差はあるため参考値）
+                        # 前日比: 日本株・米国株で市場の開いている時間帯が異なり「前営業日終値」
+                        # 基準だと更新タイミングがズレるため、日本時間0時時点のスナップショット
+                        # （asset_category_snapshot、00:00 JST起動の専用cronが記録）を基準にした
+                        # 全アセットクラス共通の差分に統一する。
                         _day_chg_html = ""
-                        if _total_prevclose_jpy > 0:
-                            _day_chg_jpy = _total_today_jpy - _total_prevclose_jpy
-                            _day_chg_pct = _day_chg_jpy / _total_prevclose_jpy * 100
+                        _cat_snapshot = _load_asset_category_snapshot(_usr, _dl_date)
+                        if _cat_snapshot:
+                            _snap_total_jpy = _cat_snapshot["total_value_jpy"]
+                            _day_chg_jpy = _mkt_val_jpy - _snap_total_jpy
+                            _day_chg_pct = _day_chg_jpy / _snap_total_jpy * 100 if _snap_total_jpy else 0.0
                             _day_color   = "#22c55e" if _day_chg_jpy >= 0 else "#ef4444"
                             _day_chg_html = (
-                                '<div><div style="font-size:11px;color:#64748b">前日比</div>'
+                                '<div><div style="font-size:11px;color:#64748b">前日比（0時基準）</div>'
                                 f'<div style="font-size:18px;font-weight:700;color:{_day_color}">'
                                 f'{_mv(f"{_day_chg_jpy:+,.0f}円")}（{_day_chg_pct:+.2f}%）</div></div>'
                             )
@@ -28654,8 +28770,25 @@ def render_claude_trading_project():
                         )
                         if _skip_note:
                             st.caption(_skip_note)
-                        if _prevclose_skipped:
-                            st.caption(f"（前日終値取得失敗の{_prevclose_skipped}銘柄は前日比の計算対象外）")
+                        if _cat_snapshot:
+                            _cat_diff_parts = []
+                            for _cat_name in ("日本株", "米国株", "投資信託", "債券"):
+                                _cur_cat = _cat_totals_jpy.get(_cat_name, 0.0)
+                                _snap_cat = _cat_snapshot.get(_cat_name, 0.0)
+                                if _cur_cat == 0 and _snap_cat == 0:
+                                    continue
+                                _diff = _cur_cat - _snap_cat
+                                _cat_diff_parts.append(f"{_cat_name} {_mv(f'{_diff:+,.0f}円')}")
+                            if _cat_diff_parts:
+                                st.caption(
+                                    f"※ 前日比（0時基準）はアセットクラス別: {' / '.join(_cat_diff_parts)}"
+                                    f"（{_cat_snapshot['date']} 0:00 JST時点との差分）"
+                                )
+                        else:
+                            st.caption(
+                                "※ 前日比（0時基準）はゼロ時スナップショットがまだ記録されていないため"
+                                "表示できません（翌日0:00 JST以降に反映されます）。"
+                            )
 
                     # ── 資産成長チャート（過去1年・過去3年）───────────────────
                     st.markdown("<br>", unsafe_allow_html=True)

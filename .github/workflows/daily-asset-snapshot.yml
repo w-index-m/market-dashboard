@@ -1,0 +1,26 @@
+name: Daily Asset Category Snapshot (JST 0:00)
+
+on:
+  schedule:
+    - cron: "0 15 * * *"   # 15:00 UTC = 00:00 JST（翌日）
+  workflow_dispatch: {}
+
+jobs:
+  save-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Save asset category snapshot
+        env:
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+        run: python scripts/daily_asset_snapshot.py
