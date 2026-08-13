@@ -29010,7 +29010,7 @@ def render_claude_trading_project():
                         st.info("配分推移を計算するデータが不足しています。")
                     else:
                         _alloc_cols  = [c for c in _alloc_hist.columns if _alloc_hist[c].sum() > 0]
-                        _alloc_names = {c: (_KNOWN_NAMES.get(c) or c) for c in _alloc_cols}
+                        _alloc_names = {c: _get_stock_display_name(c) for c in _alloc_cols}
 
                         fig_alloc = go.Figure()
                         for c in _alloc_cols:
