@@ -28089,16 +28089,22 @@ def render_claude_trading_project():
                 _known_options[_tk] = f"{_nm}（{_tk}）"
             for _tk, _nm in _JP_FUND_MAP.items():
                 _known_options[_tk] = f"{_nm}（{_tk}）・投信"
-            _search_choices = [""] + sorted(_known_options.keys(), key=lambda k: _known_options[k])
+            _search_choices = sorted(_known_options.keys(), key=lambda k: _known_options[k])
             # 保存成功時にこの検索欄を「リセット」したいが、一度描画したウィジェットの
             # session_stateキーはその場で書き換えられない（StreamlitAPIException）ため、
             # リセットのたびにキー名自体を変える（新しいキー＝まっさらな新規ウィジェットに
             # なるので直接の書き換えを回避できる）
             st.session_state.setdefault("_search_reset_ctr", 0)
+            # index=None + placeholderにすることで、クリック時に「未選択」のラベル文字列が
+            # 入力欄に実テキストとして入らないようにする（それが実テキストだと、検索キーワードを
+            # 打つ前にまずその文字列を消す操作が必要になってしまうため）。placeholderは
+            # 薄いヒント表示なので、クリックしてそのままキーワードを打ち始められる。
             _search_sel = st.selectbox(
                 "🔍 銘柄を検索して選ぶ（クリックして名前やコードを入力すると絞り込めます）",
                 options=_search_choices,
-                format_func=lambda k: "（未選択・下のフォームに直接入力してもOK）" if k == "" else _known_options[k],
+                index=None,
+                placeholder="銘柄名やコードを入力（未選択なら下のフォームに直接入力してもOK）",
+                format_func=lambda k: _known_options[k],
                 key=f"trade_ticker_search_{st.session_state['_search_reset_ctr']}",
             )
             if _search_sel and _search_sel != st.session_state.get("_trade_ticker"):
