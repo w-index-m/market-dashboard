@@ -28843,6 +28843,54 @@ def render_claude_trading_project():
                             _end   = float(_s.iloc[-1])
                             return (_end / _start - 1) * 100 if _start > 0 else None
 
+                        def _compute_risk_stats(_s):
+                            """最大ドローダウン(%)・ボラティリティ（日次リターンの標準偏差を
+                            年率換算、%）を計算する。データ不足時はNoneを返す。
+                            """
+                            if _s is None:
+                                return {"max_dd": None, "volatility": None}
+                            _s = _s.dropna()
+                            if len(_s) < 2:
+                                return {"max_dd": None, "volatility": None}
+                            _roll_max = _s.cummax()
+                            _max_dd = float(((_s - _roll_max) / _roll_max * 100).min())
+                            _daily_ret = _s.pct_change().dropna()
+                            _vol = (
+                                float(_daily_ret.std() * (252 ** 0.5) * 100)
+                                if len(_daily_ret) >= 2 else None
+                            )
+                            return {"max_dd": _max_dd, "volatility": _vol}
+
+                        def _risk_stats_html(_df, _vt_aligned_for_period):
+                            _port_stats = _compute_risk_stats(_df["portfolio_value"]) if len(_df) else {"max_dd": None, "volatility": None}
+                            _vt_stats   = _compute_risk_stats(_vt_aligned_for_period)
+
+                            def _stat_box(_label, _port_val, _vt_val):
+                                if _port_val is None and _vt_val is None:
+                                    return ""
+                                _parts = []
+                                if _port_val is not None:
+                                    _parts.append(f"ポートフォリオ {_port_val:.1f}%")
+                                if _vt_val is not None:
+                                    _parts.append(f"VT {_vt_val:.1f}%")
+                                return (
+                                    f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
+                                    f'<div style="font-size:14px;font-weight:600;color:#e2e8f0">'
+                                    f'{" / ".join(_parts)}</div></div>'
+                                )
+
+                            _boxes = (
+                                _stat_box("最大ドローダウン", _port_stats["max_dd"], _vt_stats["max_dd"])
+                                + _stat_box("ボラティリティ（年率換算）", _port_stats["volatility"], _vt_stats["volatility"])
+                            )
+                            if not _boxes:
+                                return ""
+                            return (
+                                '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
+                                'border:1px solid #334155;border-radius:8px;padding:10px 18px;margin:8px 0">'
+                                + _boxes + '</div>'
+                            )
+
                         def _build_growth_fig(_df):
                             _gain  = _df["pnl"].mean() if "pnl" in _df.columns else 0
                             _fill  = "rgba(34,197,94,0.12)" if _gain >= 0 else "rgba(239,68,68,0.10)"
@@ -28926,13 +28974,26 @@ def render_claude_trading_project():
                             _end   = _df.index.max().strftime("%Y-%m-%d")
                             return f"{_nominal_label}以内・実データ期間 {_start}〜{_end}"
 
+                        _vt_1y_aligned = _rebase_vt_series(
+                            _vt_series, _pnl_1y_df.index,
+                            float(_pnl_1y_df["portfolio_value"].iloc[0]) if len(_pnl_1y_df) else None,
+                        )
                         st.markdown(_growth_period_header(_pnl_1y_df, "過去1年") + _growth_period_label(_pnl_1y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_1y_df), use_container_width=True, key="growth_fig_1y")
+                        st.markdown(_risk_stats_html(_pnl_1y_df, _vt_1y_aligned), unsafe_allow_html=True)
+
+                        _vt_3y_aligned = _rebase_vt_series(
+                            _vt_series, _pnl_3y_df.index,
+                            float(_pnl_3y_df["portfolio_value"].iloc[0]) if len(_pnl_3y_df) else None,
+                        )
                         st.markdown(_growth_period_header(_pnl_3y_df, "過去3年") + _growth_period_label(_pnl_3y_df))
                         st.plotly_chart(_build_growth_fig(_pnl_3y_df), use_container_width=True, key="growth_fig_3y")
+                        st.markdown(_risk_stats_html(_pnl_3y_df, _vt_3y_aligned), unsafe_allow_html=True)
                         st.caption(
                             "※ USD建て・円建て銘柄が混在する場合は為替換算なしの合算値です。VTは同時期に"
                             "ポートフォリオと同額を一括投資していた場合の参考換算値です（積立timing差は考慮していません）。"
+                            "最大ドローダウンは期間中の評価額の最大下落率、ボラティリティは日次リターンの"
+                            "標準偏差を年率換算した参考値です（データ期間が短いとどちらも振れが大きく出ます）。"
                             "銘柄別配分の推移はこのページ下部の「📊 銘柄別配分の推移」セクションをご覧ください。"
                         )
 
