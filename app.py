@@ -28862,33 +28862,37 @@ def render_claude_trading_project():
                             return {"max_dd": _max_dd, "volatility": _vol}
 
                         def _risk_stats_html(_df, _vt_aligned_for_period):
+                            # 横幅の狭い画面でflexboxが折り返すと「ラベルと値が上下に分かれて
+                            # 見づらい」状態になるため、常に列が揃うtable構造にする（折り返しが
+                            # 起きても行同士がズレない）。
                             _port_stats = _compute_risk_stats(_df["portfolio_value"]) if len(_df) else {"max_dd": None, "volatility": None}
                             _vt_stats   = _compute_risk_stats(_vt_aligned_for_period)
+                            if _port_stats["max_dd"] is None and _vt_stats["max_dd"] is None:
+                                return ""
 
-                            def _stat_box(_label, _port_val, _vt_val):
-                                if _port_val is None and _vt_val is None:
-                                    return ""
-                                _parts = []
-                                if _port_val is not None:
-                                    _parts.append(f"ポートフォリオ {_port_val:.1f}%")
-                                if _vt_val is not None:
-                                    _parts.append(f"VT {_vt_val:.1f}%")
+                            def _stat_row(_label, _port_val, _vt_val):
+                                _port_str = f"{_port_val:.1f}%" if _port_val is not None else "-"
+                                _vt_str   = f"{_vt_val:.1f}%" if _vt_val is not None else "-"
                                 return (
-                                    f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
-                                    f'<div style="font-size:14px;font-weight:600;color:#e2e8f0">'
-                                    f'{" / ".join(_parts)}</div></div>'
+                                    '<tr>'
+                                    f'<td style="color:#64748b;padding:4px 12px 4px 0;white-space:nowrap">{_label}</td>'
+                                    f'<td style="padding:4px 12px;text-align:right;font-weight:600;color:#e2e8f0">{_port_str}</td>'
+                                    f'<td style="padding:4px 0;text-align:right;font-weight:600;color:#e2e8f0">{_vt_str}</td>'
+                                    '</tr>'
                                 )
 
-                            _boxes = (
-                                _stat_box("最大ドローダウン", _port_stats["max_dd"], _vt_stats["max_dd"])
-                                + _stat_box("ボラティリティ（年率換算）", _port_stats["volatility"], _vt_stats["volatility"])
-                            )
-                            if not _boxes:
-                                return ""
                             return (
-                                '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
-                                'border:1px solid #334155;border-radius:8px;padding:10px 18px;margin:8px 0">'
-                                + _boxes + '</div>'
+                                '<div style="background:#0f172a;border:1px solid #334155;'
+                                'border-radius:8px;padding:10px 18px;margin:8px 0;overflow-x:auto">'
+                                '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+                                '<tr>'
+                                '<td></td>'
+                                '<td style="color:#64748b;padding:4px 12px;text-align:right">ポートフォリオ</td>'
+                                '<td style="color:#64748b;padding:4px 0;text-align:right">VT</td>'
+                                '</tr>'
+                                + _stat_row("最大ドローダウン", _port_stats["max_dd"], _vt_stats["max_dd"])
+                                + _stat_row("ボラティリティ（年率換算）", _port_stats["volatility"], _vt_stats["volatility"])
+                                + '</table></div>'
                             )
 
                         def _build_growth_fig(_df):
