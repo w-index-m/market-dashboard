@@ -307,8 +307,8 @@ FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
 FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
 FRED_API_KEY       = get_env_var("FRED_API_KEY", "")
-RESEND_API_KEY     = get_env_var("RESEND_API_KEY", "")
-RESEND_FROM_EMAIL  = get_env_var("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+SENDGRID_API_KEY    = get_env_var("SENDGRID_API_KEY", "")
+SENDGRID_FROM_EMAIL = get_env_var("SENDGRID_FROM_EMAIL", "")
 
 # Gemini設定
 if GENAI_AVAILABLE and GEMINI_API_KEY:
@@ -25758,38 +25758,42 @@ _APP_BASE_URL = "https://windex.streamlit.app"
 
 
 def _send_verification_email(to_email: str, username: str, token: str) -> tuple[bool, str]:
-    """Resend APIでメール認証リンクを送信する。
-    RESEND_API_KEY未設定時は送信をスキップしてエラーを返す（呼び出し側で
-    アカウント自体は作成済みのまま、後で再送できるようにする想定）。
-    Resendはドメイン未認証（デフォルトのonboarding@resend.dev送信元）だと、
-    Resendアカウント登録時のメールアドレス以外には送れない制限があるため、
-    複数ユーザーに送りたい場合は独自ドメインの認証がRESEND側で必要。
+    """SendGrid APIでメール認証リンクを送信する。
+    SENDGRID_API_KEY/SENDGRID_FROM_EMAIL未設定時は送信をスキップしてエラーを返す
+    （呼び出し側でアカウント自体は作成済みのまま、後で再送できるようにする想定）。
+    SendGridは送信元アドレスを「Single Sender Verification」（そのメールアドレス
+    自体に届く確認リンクをクリックするだけ）で認証すれば、独自ドメインのDNS設定
+    無しで任意の宛先に送信できる（Resendのデフォルト送信元は自分自身にしか
+    送れない制限があったため、複数ユーザー運用のためこちらに切り替えた）。
     """
-    if not RESEND_API_KEY:
+    if not SENDGRID_API_KEY or not SENDGRID_FROM_EMAIL:
         return False, "メール認証機能が未設定です（管理者にお問い合わせください）"
     verify_url = f"{_APP_BASE_URL}/?page=trading&verify_user={username}&verify_token={token}"
     try:
         resp = requests.post(
-            "https://api.resend.com/emails",
+            "https://api.sendgrid.com/v3/mail/send",
             headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Authorization": f"Bearer {SENDGRID_API_KEY}",
                 "Content-Type": "application/json",
             },
             json={
-                "from": RESEND_FROM_EMAIL,
-                "to": [to_email],
+                "personalizations": [{"to": [{"email": to_email}]}],
+                "from": {"email": SENDGRID_FROM_EMAIL},
                 "subject": "【Market Dashboard】メールアドレスの確認",
-                "html": (
-                    f"<p>{username} 様</p>"
-                    "<p>アカウント登録ありがとうございます。以下のリンクをクリックして、"
-                    "メールアドレスの確認を完了してください。</p>"
-                    f'<p><a href="{verify_url}">{verify_url}</a></p>'
-                    "<p>このメールに心当たりが無い場合は無視してください。</p>"
-                ),
+                "content": [{
+                    "type": "text/html",
+                    "value": (
+                        f"<p>{username} 様</p>"
+                        "<p>アカウント登録ありがとうございます。以下のリンクをクリックして、"
+                        "メールアドレスの確認を完了してください。</p>"
+                        f'<p><a href="{verify_url}">{verify_url}</a></p>'
+                        "<p>このメールに心当たりが無い場合は無視してください。</p>"
+                    ),
+                }],
             },
             timeout=15,
         )
-        if resp.status_code in (200, 201):
+        if resp.status_code in (200, 201, 202):
             return True, ""
         return False, f"送信エラー（{resp.status_code}）: {resp.text[:120]}"
     except Exception as _e:
@@ -30476,7 +30480,7 @@ def main():
             "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
             t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
-            t("Resend (メール認証)", "Resend (email verification)"): "✅" if RESEND_API_KEY else "❌",
+            t("SendGrid (メール認証)", "SendGrid (email verification)"): "✅" if (SENDGRID_API_KEY and SENDGRID_FROM_EMAIL) else "❌",
         }
         for name, status in api_status.items():
             st.write(f"**{name}:** {status}")
@@ -30497,8 +30501,8 @@ GEMINI_API_KEY = "your_key"
 GROQ_API_KEY = "gsk_..."
 NVIDIA_API_KEY = "nvapi-..."
 OPENROUTER_API_KEY = "sk-or-..."
-RESEND_API_KEY = "re_..."
-RESEND_FROM_EMAIL = "onboarding@resend.dev"
+SENDGRID_API_KEY = "SG...."
+SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification済みのアドレス
             """, language="toml")
         st.divider()
         st.subheader(t("🌐 ニュース設定", "🌐 News"))
