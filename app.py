@@ -23976,12 +23976,21 @@ _SECTOR_NAME_MAP_JA = {
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_ticker_sector(ticker: str) -> str:
-    """銘柄のセクター（日本語）を取得。取得失敗時は「その他」。セクターは変動しないため24hキャッシュ。"""
-    try:
-        raw_sector = yf.Ticker(ticker).info.get("sector", "") or ""
-        return _SECTOR_NAME_MAP_JA.get(raw_sector, raw_sector or "その他")
-    except Exception:
-        return "その他"
+    """銘柄のセクター（日本語）を取得。取得失敗時は「その他」。セクターは変動しないため24hキャッシュ。
+    yfinanceの.infoは一時的なレート制限（Too Many Requests）で失敗しやすく、これを
+    リトライ無しでそのまま「その他」を返すと、その失敗結果自体が24hキャッシュされて
+    しまい、たまたま1回失敗しただけで丸1日「その他」に固定されてしまう。それを防ぐため
+    諦める前に指数バックオフで2回リトライする（保有銘柄が多いと全銘柄が同時に同じ
+    レート制限に引っかかりやすいため、特に重要）。
+    """
+    for _attempt in range(3):
+        try:
+            raw_sector = yf.Ticker(ticker).info.get("sector", "") or ""
+            return _SECTOR_NAME_MAP_JA.get(raw_sector, raw_sector or "その他")
+        except Exception:
+            if _attempt < 2:
+                time.sleep(0.8 * (_attempt + 1))
+    return "その他"
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -30232,10 +30241,13 @@ def render_claude_trading_project():
                     pos_sign  = "+" if gain_disp >= 0 else ""
                     gain_str = f'{pos_sign}{cur_label} {abs(gain_disp):,.0f} ({gp:+.2f}%)' if p["gain"] is not None else "—"
                     flag = "🇯🇵" if p["is_jp"] else "🇺🇸"
+                    _disp_name = p["name"] or ticker
+                    if _disp_name == ticker:
+                        _disp_name = _get_stock_display_name(ticker)
                     rows_tbl.append({
                         "": flag,
                         "ティッカー": ticker,
-                        "銘柄名": p["name"],
+                        "銘柄名": _disp_name,
                         "セクター": p["sector"],
                         f"評価額 ({cur_label})": f"{mkt_disp:,.0f}" if p["market_value"] else "—",
                         "含み損益": gain_str,
