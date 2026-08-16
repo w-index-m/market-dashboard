@@ -29800,9 +29800,9 @@ def render_claude_trading_project():
         else:
             st.markdown("#### 💹 ポートフォリオ サマリー")
 
-            # 通貨選択
+            # 通貨選択（デフォルトは円表示）
             currency_choice = st.radio(
-                "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"],
+                "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"], index=1,
                 horizontal=True, key="summary_currency",
             )
             use_jpy = "JPY" in currency_choice
