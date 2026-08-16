@@ -307,6 +307,8 @@ FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
 FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
 FRED_API_KEY       = get_env_var("FRED_API_KEY", "")
+RESEND_API_KEY     = get_env_var("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL  = get_env_var("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
 # Gemini設定
 if GENAI_AVAILABLE and GEMINI_API_KEY:
@@ -25752,11 +25754,55 @@ def _auth_get_sheets_sp():
     return _gs.authorize(_creds).open_by_key(st.secrets.get("GOOGLE_SHEETS_ID", ""))
 
 
+_APP_BASE_URL = "https://windex.streamlit.app"
+
+
+def _send_verification_email(to_email: str, username: str, token: str) -> tuple[bool, str]:
+    """Resend APIでメール認証リンクを送信する。
+    RESEND_API_KEY未設定時は送信をスキップしてエラーを返す（呼び出し側で
+    アカウント自体は作成済みのまま、後で再送できるようにする想定）。
+    Resendはドメイン未認証（デフォルトのonboarding@resend.dev送信元）だと、
+    Resendアカウント登録時のメールアドレス以外には送れない制限があるため、
+    複数ユーザーに送りたい場合は独自ドメインの認証がRESEND側で必要。
+    """
+    if not RESEND_API_KEY:
+        return False, "メール認証機能が未設定です（管理者にお問い合わせください）"
+    verify_url = f"{_APP_BASE_URL}/?page=trading&verify_user={username}&verify_token={token}"
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": RESEND_FROM_EMAIL,
+                "to": [to_email],
+                "subject": "【Market Dashboard】メールアドレスの確認",
+                "html": (
+                    f"<p>{username} 様</p>"
+                    "<p>アカウント登録ありがとうございます。以下のリンクをクリックして、"
+                    "メールアドレスの確認を完了してください。</p>"
+                    f'<p><a href="{verify_url}">{verify_url}</a></p>'
+                    "<p>このメールに心当たりが無い場合は無視してください。</p>"
+                ),
+            },
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            return True, ""
+        return False, f"送信エラー（{resp.status_code}）: {resp.text[:120]}"
+    except Exception as _e:
+        return False, f"送信エラー: {str(_e)[:120]}"
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _auth_get_users(_dummy: str = "") -> dict:
-    """usersタブから {username: {password_hash, display_name, slack_webhook_url}} を取得。
-    初回はタブ自動作成。slack_webhook_url列は古いシートには無いことがあるが、
-    その場合は空文字扱いになる（_auth_update_notification_settingsが初回保存時に自動追加する）。
+    """usersタブから {username: {password_hash, display_name, slack_webhook_url, email,
+    email_verified, verify_token, verify_token_created_at}} を取得。
+    初回はタブ自動作成。email/email_verified/verify_token等の列は古いシートには無い
+    ことがあるが、その場合は空文字扱いになる（emailが空＝メール認証導入前からの
+    既存アカウントとみなし、ログイン時の認証済みチェックを免除する）。
     """
     try:
         import gspread as _gs
@@ -25770,15 +25816,102 @@ def _auth_get_users(_dummy: str = "") -> dict:
             _ws.append_row(["mshibuta1", _auth_hash("mshibuta1"),  "M.Shibuta",  ""])
         return {
             r["username"]: {
-                "password_hash":     r.get("password_hash", ""),
-                "display_name":      r.get("display_name", r["username"]),
-                "slack_webhook_url": r.get("slack_webhook_url", ""),
+                "password_hash":          r.get("password_hash", ""),
+                "display_name":           r.get("display_name", r["username"]),
+                "slack_webhook_url":      r.get("slack_webhook_url", ""),
+                "email":                  r.get("email", ""),
+                "email_verified":         bool(r.get("email_verified")),
+                "verify_token":           r.get("verify_token", ""),
+                "verify_token_created_at": r.get("verify_token_created_at", ""),
             }
             for r in _ws.get_all_records() if r.get("username")
         }
     except Exception as _e:
         logger.warning(f"[auth] users取得失敗: {_e}")
         return {}
+
+
+def _auth_needs_verification(username: str) -> bool:
+    """メール認証が必須なのに未認証かどうかを判定する。
+    email列が空（メール認証導入前からの既存アカウント）は対象外＝Falseを返す。
+    """
+    _u = _auth_get_users().get(username)
+    if not _u:
+        return False
+    return bool(_u.get("email")) and not _u.get("email_verified")
+
+
+def _auth_verify_email(username: str, token: str) -> tuple[bool, str]:
+    """確認メールのリンクから呼ばれる。トークンが一致すればemail_verifiedをTRUEにする。
+    有効期限は24時間。
+    """
+    _u = _auth_get_users().get(username)
+    if not _u:
+        return False, "アカウントが見つかりません"
+    if _u.get("email_verified"):
+        return True, "既に認証済みです"
+    if not token or _u.get("verify_token") != token:
+        return False, "認証リンクが無効です"
+    try:
+        _created = datetime.strptime(_u.get("verify_token_created_at", ""), "%Y-%m-%d %H:%M:%S")
+        if (datetime.now() - _created).total_seconds() > 86400:
+            return False, "認証リンクの有効期限（24時間）が切れています。再送信してください"
+    except Exception:
+        pass  # 日時が読めない古いデータ等は期限切れ扱いにしない
+
+    try:
+        import gspread as _gs
+        _sp = _auth_get_sheets_sp()
+        _ws = _sp.worksheet("users")
+        header = _ws.row_values(1)
+        if "email_verified" not in header:
+            return False, "usersシートの設定が不完全です"
+        row_num = None
+        for i, r in enumerate(_ws.get_all_records()):
+            if r.get("username") == username:
+                row_num = i + 2
+                break
+        if row_num is None:
+            return False, "アカウントが見つかりません"
+        _ws.update_cell(row_num, header.index("email_verified") + 1, "TRUE")
+        _auth_get_users.clear()
+        return True, ""
+    except Exception as _e:
+        logger.warning(f"[auth] メール認証失敗: {_e}")
+        return False, f"認証エラー: {str(_e)[:80]}"
+
+
+def _auth_resend_verification(username: str) -> tuple[bool, str]:
+    """新しいトークンを発行してusersシートを更新し、確認メールを再送する。"""
+    _u = _auth_get_users().get(username)
+    if not _u:
+        return False, "アカウントが見つかりません"
+    if _u.get("email_verified"):
+        return False, "既に認証済みです"
+    if not _u.get("email"):
+        return False, "このアカウントにはメールアドレスが登録されていません"
+
+    token      = _uuid.uuid4().hex
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        _sp = _auth_get_sheets_sp()
+        _ws = _sp.worksheet("users")
+        header = _ws.row_values(1)
+        row_num = None
+        for i, r in enumerate(_ws.get_all_records()):
+            if r.get("username") == username:
+                row_num = i + 2
+                break
+        if row_num is None:
+            return False, "アカウントが見つかりません"
+        _ws.update_cell(row_num, header.index("verify_token") + 1, token)
+        _ws.update_cell(row_num, header.index("verify_token_created_at") + 1, created_at)
+        _auth_get_users.clear()
+    except Exception as _e:
+        logger.warning(f"[auth] 確認メール再送用トークン更新失敗: {_e}")
+        return False, f"更新エラー: {str(_e)[:80]}"
+
+    return _send_verification_email(_u["email"], username, token)
 
 
 def _auth_update_notification_settings(username: str, slack_webhook_url: str) -> tuple[bool, str]:
@@ -25909,6 +26042,23 @@ def _auth_validate(username: str, password: str) -> bool:
     return bool(_u and _u.get("password_hash") == _auth_hash(password))
 
 
+def _auth_login_flow(username: str, password: str, token_key: str) -> bool:
+    """ログインフォームの共通処理（3箇所のタブから呼ばれる）。
+    パスワード確認 → メール未認証なら拒否 → セッション作成・永続化の順で行う。
+    呼び出し側はTrue時にst.rerun()すること。
+    """
+    if not _auth_validate(username, password):
+        st.error("ユーザー名またはパスワードが違います")
+        return False
+    if _auth_needs_verification(username):
+        st.error("メールアドレスの確認が完了していません。登録時に届いた確認メールのリンクをクリックしてください。")
+        return False
+    _new_tok = _auth_create_session(username)
+    st.query_params["token"] = _new_tok
+    _persist_login_token(_new_tok, token_key)
+    return True
+
+
 def _auth_create_session(username: str) -> str:
     """UUIDトークンを生成してsessionsタブに記録し、トークン文字列を返す。"""
     _token = _uuid.uuid4().hex
@@ -25990,33 +26140,72 @@ def _clear_persisted_login_token(key: str) -> None:
         pass
 
 
-def _auth_signup(username: str, password: str, display_name: str) -> tuple[bool, str]:
+_USERS_HEADER_COLS = [
+    "username", "password_hash", "display_name", "slack_webhook_url",
+    "email", "email_verified", "verify_token", "verify_token_created_at",
+]
+
+
+def _auth_signup(username: str, password: str, display_name: str, email: str) -> tuple[bool, str]:
     """新規ユーザーをusersタブに追加する。ユーザー名重複チェックあり。
-    Returns: (成功したか, エラーメッセージ)
+    メールアドレスは必須（メール認証のため）。作成後、確認メールを送信する
+    （送信自体に失敗してもアカウント作成は成功として扱い、後で再送できるようにする）。
+    Returns: (成功したか, メッセージ。成功時に空でなければ「作成はできたが要注意」の警告文)
     """
     username = (username or "").strip()
+    email    = (email or "").strip()
     if not username:
         return False, "ユーザー名を入力してください"
     if not password or len(password) < 4:
         return False, "パスワードは4文字以上にしてください"
-    if username in _auth_get_users():
+    if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return False, "有効なメールアドレスを入力してください"
+    _existing = _auth_get_users()
+    if username in _existing:
         return False, "そのユーザー名は既に使われています"
-    if len(_auth_get_users()) >= 10:
+    if any(u.get("email") == email for u in _existing.values()):
+        return False, "そのメールアドレスは既に登録されています"
+    if len(_existing) >= 10:
         return False, "アカウント数の上限（10）に達しているため、新規登録できません"
+
+    token      = _uuid.uuid4().hex
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     try:
         import gspread as _gs
         _sp = _auth_get_sheets_sp()
         try:
             _ws = _sp.worksheet("users")
         except _gs.exceptions.WorksheetNotFound:
-            _ws = _sp.add_worksheet("users", rows=100, cols=3)
-            _ws.append_row(["username", "password_hash", "display_name"])
-        _ws.append_row([username, _auth_hash(password), (display_name or "").strip() or username])
+            _ws = _sp.add_worksheet("users", rows=100, cols=len(_USERS_HEADER_COLS))
+            _ws.append_row(_USERS_HEADER_COLS)
+
+        header = _ws.row_values(1)
+        for _col in _USERS_HEADER_COLS:
+            if _col not in header:
+                _ws.update_cell(1, len(header) + 1, _col)
+                header = header + [_col]
+
+        _row_values = {
+            "username":                username,
+            "password_hash":           _auth_hash(password),
+            "display_name":            (display_name or "").strip() or username,
+            "slack_webhook_url":       "",
+            "email":                   email,
+            "email_verified":          "",
+            "verify_token":            token,
+            "verify_token_created_at": created_at,
+        }
+        _ws.append_row([_row_values.get(_col, "") for _col in header])
         _auth_get_users.clear()
-        return True, ""
     except Exception as _e:
         logger.warning(f"[auth] 新規登録失敗: {_e}")
         return False, f"登録エラー: {str(_e)[:80]}"
+
+    _sent_ok, _sent_err = _send_verification_email(email, username, token)
+    if not _sent_ok:
+        return True, f"アカウントは作成されましたが、確認メールの送信に失敗しました（{_sent_err}）"
+    return True, ""
 
 
 def render_claude_trading_project():
@@ -26031,6 +26220,18 @@ def render_claude_trading_project():
         '</div>',
         unsafe_allow_html=True,
     )
+
+    # ── メール認証リンクの処理（確認メール内のリンクを踏んで来た場合）────────
+    _verify_user  = st.query_params.get("verify_user")
+    _verify_token = st.query_params.get("verify_token")
+    if _verify_user and _verify_token:
+        _v_ok, _v_msg = _auth_verify_email(_verify_user, _verify_token)
+        if _v_ok:
+            st.success("✅ メールアドレスの確認が完了しました。ログインしてください。")
+        else:
+            st.error(f"メール確認に失敗しました: {_v_msg}")
+        st.query_params.pop("verify_user", None)
+        st.query_params.pop("verify_token", None)
 
     # ── 投資戦略モード切替 ─────────────────────────────────────
     _cur_mode = st.session_state.get("trading_mode", "growth")
@@ -28057,28 +28258,34 @@ def render_claude_trading_project():
                 _u = st.text_input("ユーザー名", key="tl_u_trade")
                 _p = st.text_input("パスワード", type="password", key="tl_p_trade")
                 if st.button("ログイン", type="primary", key="tl_b_trade"):
-                    if _auth_validate(_u, _p):
-                        _new_tok = _auth_create_session(_u)
-                        st.query_params["token"] = _new_tok
-                        _persist_login_token(_new_tok, "trade_login")
+                    if _auth_login_flow(_u, _p, "trade_login"):
                         st.rerun()
-                    else:
-                        st.error("ユーザー名またはパスワードが違います")
                 st.markdown("</div>", unsafe_allow_html=True)
 
                 with st.expander("🆕 新しいアカウントを作成"):
+                    st.caption("登録後、入力したメールアドレス宛てに確認メールが届きます。リンクをクリックするまでログインできません。")
                     _su_u = st.text_input("ユーザー名（新規）", key="su_u_trade")
                     _su_p = st.text_input("パスワード（4文字以上）", type="password", key="su_p_trade")
+                    _su_e = st.text_input("メールアドレス", key="su_e_trade")
                     _su_n = st.text_input("表示名（任意）", key="su_n_trade")
-                    if st.button("登録してログイン", key="su_b_trade"):
-                        _su_ok, _su_err = _auth_signup(_su_u, _su_p, _su_n)
+                    if st.button("登録する", key="su_b_trade"):
+                        _su_ok, _su_msg = _auth_signup(_su_u, _su_p, _su_n, _su_e)
                         if _su_ok:
-                            _new_tok = _auth_create_session(_su_u.strip())
-                            st.query_params["token"] = _new_tok
-                            _persist_login_token(_new_tok, "trade_signup")
-                            st.rerun()
+                            if _su_msg:
+                                st.warning(_su_msg)
+                            else:
+                                st.success("✅ 確認メールを送信しました。メール内のリンクをクリックして認証を完了してからログインしてください。")
                         else:
-                            st.error(_su_err)
+                            st.error(_su_msg)
+
+                with st.expander("📧 確認メールを再送する"):
+                    _rv_u = st.text_input("ユーザー名", key="rv_u_trade")
+                    if st.button("再送する", key="rv_b_trade"):
+                        _rv_ok, _rv_msg = _auth_resend_verification(_rv_u)
+                        if _rv_ok:
+                            st.success("確認メールを再送しました。")
+                        else:
+                            st.error(_rv_msg)
         else:
             st.markdown("#### 約定後の取引記録入力")
 
@@ -28329,13 +28536,8 @@ def render_claude_trading_project():
                 _u = st.text_input("ユーザー名", key="tl_u_pnl")
                 _p = st.text_input("パスワード", type="password", key="tl_p_pnl")
                 if st.button("ログイン", type="primary", key="tl_b_pnl"):
-                    if _auth_validate(_u, _p):
-                        _new_tok = _auth_create_session(_u)
-                        st.query_params["token"] = _new_tok
-                        _persist_login_token(_new_tok, "pnl_login")
+                    if _auth_login_flow(_u, _p, "pnl_login"):
                         st.rerun()
-                    else:
-                        st.error("ユーザー名またはパスワードが違います")
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.markdown("#### ポートフォリオ損益")
@@ -29567,13 +29769,8 @@ def render_claude_trading_project():
                 _u = st.text_input("ユーザー名", key="tl_u_summary")
                 _p = st.text_input("パスワード", type="password", key="tl_p_summary")
                 if st.button("ログイン", type="primary", key="tl_b_summary"):
-                    if _auth_validate(_u, _p):
-                        _new_tok = _auth_create_session(_u)
-                        st.query_params["token"] = _new_tok
-                        _persist_login_token(_new_tok, "summary_login")
+                    if _auth_login_flow(_u, _p, "summary_login"):
                         st.rerun()
-                    else:
-                        st.error("ユーザー名またはパスワードが違います")
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.markdown("#### 💹 ポートフォリオ サマリー")
@@ -30279,6 +30476,7 @@ def main():
             "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
             t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
+            t("Resend (メール認証)", "Resend (email verification)"): "✅" if RESEND_API_KEY else "❌",
         }
         for name, status in api_status.items():
             st.write(f"**{name}:** {status}")
@@ -30299,6 +30497,8 @@ GEMINI_API_KEY = "your_key"
 GROQ_API_KEY = "gsk_..."
 NVIDIA_API_KEY = "nvapi-..."
 OPENROUTER_API_KEY = "sk-or-..."
+RESEND_API_KEY = "re_..."
+RESEND_FROM_EMAIL = "onboarding@resend.dev"
             """, language="toml")
         st.divider()
         st.subheader(t("🌐 ニュース設定", "🌐 News"))
