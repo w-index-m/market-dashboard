@@ -23974,6 +23974,64 @@ _SECTOR_NAME_MAP_JA = {
 }
 
 
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
+def _fetch_dividend_history(ticker: str) -> pd.Series:
+    """銘柄の配当履歴を返す。yfinance→Tiingo→Finnhubの順にフォールバックする
+    （現在値取得等と同様、yfinanceの配当履歴取得はレート制限で失敗しやすいため）。
+    TiingoのdivCash・Finnhubの/stock/dividendはyfinanceの.dividendsと違い日本株
+    （.T）には対応していないため、日本株はFinnhubをスキップしてyfinance→Tiingoのみ。
+    過去15ヶ月分（実績6ヶ月表示＋予想配当の前年同月参照に必要な期間）を取得する。
+    Returns: pd.Series（index=Timestamp、value=1株あたり配当額）。取得失敗時は空Series。
+    """
+    try:
+        div = yf.Ticker(ticker).dividends
+        if div is not None and len(div) > 0:
+            return div
+    except Exception:
+        pass
+
+    if TIINGO_API_KEY:
+        try:
+            start = (pd.Timestamp.now() - pd.DateOffset(months=15)).strftime("%Y-%m-%d")
+            resp = requests.get(
+                f"https://api.tiingo.com/tiingo/daily/{ticker}/prices",
+                params={"startDate": start, "token": TIINGO_API_KEY, "format": "json"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                divs = {}
+                for r in resp.json():
+                    _amt = r.get("divCash") or 0
+                    if _amt:
+                        divs[pd.Timestamp(str(r["date"])[:10], tz="UTC")] = float(_amt)
+                if divs:
+                    return pd.Series(divs).sort_index()
+        except Exception:
+            pass
+
+    if FINNHUB_API_KEY and not ticker.endswith(".T"):
+        try:
+            _from = (pd.Timestamp.now() - pd.DateOffset(months=15)).strftime("%Y-%m-%d")
+            _to   = pd.Timestamp.now().strftime("%Y-%m-%d")
+            resp = requests.get(
+                "https://finnhub.io/api/v1/stock/dividend",
+                params={"symbol": ticker, "from": _from, "to": _to, "token": FINNHUB_API_KEY},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                divs = {}
+                for r in resp.json():
+                    _amt, _d = r.get("amount") or 0, r.get("date")
+                    if _amt and _d:
+                        divs[pd.Timestamp(_d, tz="UTC")] = float(_amt)
+                if divs:
+                    return pd.Series(divs).sort_index()
+        except Exception:
+            pass
+
+    return pd.Series(dtype=float)
+
+
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_ticker_sector(ticker: str) -> str:
     """銘柄のセクター（日本語）を取得。取得失敗時は「その他」。セクターは変動しないため24hキャッシュ。
@@ -24002,7 +24060,7 @@ def _fetch_dividend_by_month_extended(ticker: str, months_back: int = 14) -> dic
     Returns: {"YYYY-MM": per_share_total}
     """
     try:
-        div_hist = yf.Ticker(ticker).dividends
+        div_hist = _fetch_dividend_history(ticker)
         if div_hist is None or len(div_hist) == 0:
             return {}
         cutoff = pd.Timestamp.now(tz="UTC") - pd.DateOffset(months=months_back)
@@ -24151,8 +24209,7 @@ def _compute_portfolio_summary(username: str = "") -> dict:
         # 配当履歴（過去6ヶ月）
         div_entry = None
         try:
-            tk_obj = yf.Ticker(ticker)
-            div_hist = tk_obj.dividends
+            div_hist = _fetch_dividend_history(ticker)
             if div_hist is not None and len(div_hist) > 0:
                 six_months_ago = pd.Timestamp.now(tz="UTC") - pd.DateOffset(months=6)
                 recent_divs = div_hist[div_hist.index >= six_months_ago]
