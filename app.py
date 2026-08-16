@@ -29979,6 +29979,31 @@ def render_claude_trading_project():
                     )
                     st.plotly_chart(fig_div, use_container_width=True)
 
+                    # 月別合計（全銘柄合算）
+                    month_totals = {m: 0.0 for m in months_6}
+                    for _mvals in ticker_month_div.values():
+                        for _m, _v in _mvals.items():
+                            month_totals[_m] += _v
+                    _month_rows_html = ""
+                    for _m in months_6:
+                        _y, _mo = _m.split("-")
+                        _label_m = f"{int(_y)}年{int(_mo)}月"
+                        _amt = month_totals[_m]
+                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
+                        _month_rows_html += (
+                            '<div style="display:flex;justify-content:space-between;padding:5px 0;'
+                            'border-bottom:1px solid #1e293b;font-size:13px">'
+                            f'<span style="color:#e2e8f0">{_label_m}</span>'
+                            f'<span style="color:#f59e0b;font-weight:700">{_mvs(_amt_str)}</span>'
+                            '</div>'
+                        )
+                    st.markdown(
+                        '<div style="margin-top:10px;margin-bottom:14px">'
+                        '<div style="font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:6px">月別合計</div>'
+                        + _month_rows_html + '</div>',
+                        unsafe_allow_html=True,
+                    )
+
                     # 明細テーブル
                     if detail_rows:
                         detail_rows_sorted = sorted(detail_rows, key=lambda r: r["権利落日"], reverse=True)
