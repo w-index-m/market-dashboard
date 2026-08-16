@@ -37,15 +37,26 @@ def main() -> None:
         all_usernames = ["admin"]
 
     saved = 0
+    failures = []
     for username in all_usernames:
         try:
-            if app._save_daily_asset_category_snapshot(username, today):
+            ok, reason = app._save_daily_asset_category_snapshot(username, today)
+            if ok:
                 print(f"Saved asset category snapshot for {username}.")
                 saved += 1
+            else:
+                print(f"asset category snapshot failed for {username}: {reason}", file=sys.stderr)
+                failures.append(f"{username}: {reason}")
         except Exception as e:
             print(f"asset category snapshot failed for {username}: {e}", file=sys.stderr)
+            failures.append(f"{username}: {e}")
 
     print(f"Done. {saved}/{len(all_usernames)} accounts saved.")
+    # 1件も保存できなかった場合はジョブ自体を失敗させ、GitHub Actionsの実行結果
+    # （conclusion）だけで異常に気付けるようにする（詳細ログを見なくても分かるように）。
+    if all_usernames and saved == 0:
+        print("All accounts failed:\n  " + "\n  ".join(failures), file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

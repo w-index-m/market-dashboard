@@ -24334,19 +24334,23 @@ _ASSET_CATEGORY_SNAPSHOT_HEADERS = [
 ]
 
 
-def _save_daily_asset_category_snapshot(username: str, date: str) -> bool:
+def _save_daily_asset_category_snapshot(username: str, date: str) -> tuple[bool, str]:
     """日本時間0時時点のアセットクラス別（日本株・米国株・投資信託・債券）評価額合計を
     asset_category_snapshotシートに記録する。00:00 JST起動の専用cron
     （scripts/daily_asset_snapshot.py）から1日1回だけ呼ぶ想定（同日に複数回呼ぶと
     重複行が増えるため、呼び出し側で1日1回に制御すること）。
     この記録を「その日の始値」代わりに使うことで、日本株・米国株で市場が開いている
     時間帯が異なっていても、全アセットクラス共通のゼロ時基準で前日比を計算できる。
+    Returns: (成功したか, 失敗理由。呼び出し元スクリプトのログで原因を特定できるように
+    _auth_signup等と同じ(bool, str)スタイルにしている)。
     """
     try:
         summary = _compute_portfolio_summary(username)
+        if summary.get("error"):
+            return False, f"取引記録読込失敗: {summary['error']}"
         positions = summary.get("positions", {})
         if not positions:
-            return False
+            return False, "保有ポジションが空"
         usd_jpy = summary.get("usd_jpy", 150.0)
 
         totals = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
@@ -24361,11 +24365,11 @@ def _save_daily_asset_category_snapshot(username: str, date: str) -> bool:
 
         total_value_jpy = sum(totals.values())
         if total_value_jpy <= 0:
-            return False
+            return False, f"評価額合計が0以下（現在値取得が全銘柄失敗した可能性）: positions={len(positions)}件"
 
         ws = _trading_ws("asset_category_snapshot", _ASSET_CATEGORY_SNAPSHOT_HEADERS)
         if not ws:
-            return False
+            return False, "asset_category_snapshotシートへの接続に失敗（_trading_wsがNoneを返した）"
         ws.append_row([
             date, username or "admin",
             round(totals["日本株"], 2), round(totals["米国株"], 2),
@@ -24373,10 +24377,10 @@ def _save_daily_asset_category_snapshot(username: str, date: str) -> bool:
             round(total_value_jpy, 2),
             datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"),
         ])
-        return True
+        return True, ""
     except Exception as e:
         logger.warning(f"[trading] 資産クラス別スナップショット保存失敗 {username}: {e}")
-        return False
+        return False, f"例外: {type(e).__name__}: {str(e)[:200]}"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
