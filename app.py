@@ -23984,6 +23984,29 @@ def _fetch_ticker_sector(ticker: str) -> str:
         return "その他"
 
 
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_dividend_by_month_extended(ticker: str, months_back: int = 14) -> dict:
+    """直近months_back ヶ月分の配当履歴から、月ごとの1株配当合計を返す（同月に複数回
+    配当があった場合は合算）。_compute_portfolio_summary側の6ヶ月固定の配当履歴とは
+    別に、翌月以降の配当予想（前年同月実績ベース）の参考値作成のためだけに使う
+    （既存の「過去6ヶ月」表示のロジック・データには影響しない独立した関数）。
+    Returns: {"YYYY-MM": per_share_total}
+    """
+    try:
+        div_hist = yf.Ticker(ticker).dividends
+        if div_hist is None or len(div_hist) == 0:
+            return {}
+        cutoff = pd.Timestamp.now(tz="UTC") - pd.DateOffset(months=months_back)
+        recent = div_hist[div_hist.index >= cutoff]
+        result: dict = {}
+        for _dt, _amount in recent.items():
+            key = _dt.strftime("%Y-%m")
+            result[key] = result.get(key, 0.0) + float(_amount)
+        return result
+    except Exception:
+        return {}
+
+
 # 日本株ティッカー → 米国ADR（米国預託証券）ティッカーの対応表。手動でWeb検索により確認
 # したもののみ収録（未確認の推測でティッカーを載せると誤った銘柄の株価を表示しかねないため、
 # 確認が取れていない銘柄は含めていない＝網羅的ではない）
@@ -30031,6 +30054,52 @@ def render_claude_trading_project():
                         )
                 else:
                     st.info("配当履歴がありません（過去6ヶ月）。")
+
+                # 来月以降の予想配当（前年同月実績ベース・あくまで参考値）
+                _proj_months = []
+                for i in range(1, 4):
+                    _pm = (now.month - 1 + i) % 12 + 1
+                    _py = now.year + ((now.month - 1 + i) // 12)
+                    _proj_months.append((_py, _pm))
+
+                _proj_month_totals = {f"{y:04d}-{m:02d}": 0.0 for y, m in _proj_months}
+                for _tk, _p in positions.items():
+                    _hist = _fetch_dividend_by_month_extended(_tk)
+                    if not _hist:
+                        continue
+                    _is_jp_tk = _p["is_jp"]
+                    for _y, _m in _proj_months:
+                        _last_year_key = f"{_y - 1:04d}-{_m:02d}"
+                        _per_share = _hist.get(_last_year_key)
+                        if _per_share:
+                            _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
+                            _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
+
+                if any(v > 0 for v in _proj_month_totals.values()):
+                    _proj_rows_html = ""
+                    for _y, _m in _proj_months:
+                        _key = f"{_y:04d}-{_m:02d}"
+                        _amt = _proj_month_totals[_key]
+                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
+                        _proj_rows_html += (
+                            '<div style="display:flex;justify-content:space-between;padding:5px 0;'
+                            'border-bottom:1px solid #1e293b;font-size:13px">'
+                            f'<span style="color:#e2e8f0">{_y}年{_m}月</span>'
+                            f'<span style="color:#a78bfa;font-weight:700">{_mvs(_amt_str)}</span>'
+                            '</div>'
+                        )
+                    st.markdown(
+                        '<div style="margin-top:14px">'
+                        '<div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:6px">'
+                        '🔮 予想配当（前年同月実績ベース・参考値）</div>'
+                        + _proj_rows_html +
+                        '<div style="font-size:11px;color:#64748b;margin-top:6px">'
+                        '※ 前年同月に実際に支払われた1株配当×現在の保有株数で計算した参考値です。'
+                        '増配・減配・配当中止や保有株数の変化により、実際の金額は変わります。'
+                        '前年同月に配当が無かった銘柄・保有していなかった銘柄は含まれません。</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
