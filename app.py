@@ -30020,14 +30020,59 @@ def render_claude_trading_project():
                             f'<span style="color:#f59e0b;font-weight:700">{_mvs(_amt_str)}</span>'
                             '</div>'
                         )
-                    st.markdown(
+
+                    # 来月以降の予想配当（前年同月実績ベース・あくまで参考値）。個別株の
+                    # 明細（下のdetail_rows）を挟まず、実績の月別合計に直接続けて表示する。
+                    _proj_months = []
+                    for i in range(1, 4):
+                        _pm = (now.month - 1 + i) % 12 + 1
+                        _py = now.year + ((now.month - 1 + i) // 12)
+                        _proj_months.append((_py, _pm))
+                    _proj_month_totals = {f"{y:04d}-{m:02d}": 0.0 for y, m in _proj_months}
+                    for _tk, _p in positions.items():
+                        _hist = _fetch_dividend_by_month_extended(_tk)
+                        if not _hist:
+                            continue
+                        _is_jp_tk = _p["is_jp"]
+                        for _y, _m in _proj_months:
+                            _last_year_key = f"{_y - 1:04d}-{_m:02d}"
+                            _per_share = _hist.get(_last_year_key)
+                            if _per_share:
+                                _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
+                                _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
+                    _proj_rows_html = ""
+                    for _y, _m in _proj_months:
+                        _key = f"{_y:04d}-{_m:02d}"
+                        _amt = _proj_month_totals[_key]
+                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
+                        _proj_rows_html += (
+                            '<div style="display:flex;justify-content:space-between;padding:5px 0;'
+                            'border-bottom:1px solid #1e293b;font-size:13px">'
+                            f'<span style="color:#e2e8f0">{_y}年{_m}月</span>'
+                            f'<span style="color:#a78bfa;font-weight:700">{_mvs(_amt_str)}</span>'
+                            '</div>'
+                        )
+
+                    _combined_div_html = (
                         '<div style="margin-top:10px;margin-bottom:14px">'
                         '<div style="font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:6px">月別合計</div>'
-                        + _month_rows_html + '</div>',
-                        unsafe_allow_html=True,
+                        + _month_rows_html
                     )
+                    if any(v > 0 for v in _proj_month_totals.values()):
+                        _combined_div_html += (
+                            '<div style="font-size:12px;font-weight:700;color:#a78bfa;margin:10px 0 6px">'
+                            '🔮 予想配当（前年同月実績ベース・参考値）</div>'
+                            + _proj_rows_html +
+                            '<div style="font-size:11px;color:#64748b;margin-top:6px">'
+                            '※ 前年同月に実際に支払われた1株配当×現在の保有株数で計算した参考値です。'
+                            '増配・減配・配当中止や保有株数の変化により、実際の金額は変わります。'
+                            '前年同月に配当が無かった銘柄・保有していなかった銘柄は含まれません。</div>'
+                        )
+                    _combined_div_html += '</div>'
+                    st.markdown(_combined_div_html, unsafe_allow_html=True)
 
-                    # 明細テーブル
+                    # 明細テーブル（個別株ごとの配当明細。上の実績＆予想の続きではなく、
+                    # ユーザーの要望によりその下に独立して表示する）
                     if detail_rows:
                         detail_rows_sorted = sorted(detail_rows, key=lambda r: r["権利落日"], reverse=True)
                         total_div = sum(
@@ -30054,52 +30099,6 @@ def render_claude_trading_project():
                         )
                 else:
                     st.info("配当履歴がありません（過去6ヶ月）。")
-
-                # 来月以降の予想配当（前年同月実績ベース・あくまで参考値）
-                _proj_months = []
-                for i in range(1, 4):
-                    _pm = (now.month - 1 + i) % 12 + 1
-                    _py = now.year + ((now.month - 1 + i) // 12)
-                    _proj_months.append((_py, _pm))
-
-                _proj_month_totals = {f"{y:04d}-{m:02d}": 0.0 for y, m in _proj_months}
-                for _tk, _p in positions.items():
-                    _hist = _fetch_dividend_by_month_extended(_tk)
-                    if not _hist:
-                        continue
-                    _is_jp_tk = _p["is_jp"]
-                    for _y, _m in _proj_months:
-                        _last_year_key = f"{_y - 1:04d}-{_m:02d}"
-                        _per_share = _hist.get(_last_year_key)
-                        if _per_share:
-                            _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
-                            _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
-
-                if any(v > 0 for v in _proj_month_totals.values()):
-                    _proj_rows_html = ""
-                    for _y, _m in _proj_months:
-                        _key = f"{_y:04d}-{_m:02d}"
-                        _amt = _proj_month_totals[_key]
-                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
-                        _proj_rows_html += (
-                            '<div style="display:flex;justify-content:space-between;padding:5px 0;'
-                            'border-bottom:1px solid #1e293b;font-size:13px">'
-                            f'<span style="color:#e2e8f0">{_y}年{_m}月</span>'
-                            f'<span style="color:#a78bfa;font-weight:700">{_mvs(_amt_str)}</span>'
-                            '</div>'
-                        )
-                    st.markdown(
-                        '<div style="margin-top:14px">'
-                        '<div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:6px">'
-                        '🔮 予想配当（前年同月実績ベース・参考値）</div>'
-                        + _proj_rows_html +
-                        '<div style="font-size:11px;color:#64748b;margin-top:6px">'
-                        '※ 前年同月に実際に支払われた1株配当×現在の保有株数で計算した参考値です。'
-                        '増配・減配・配当中止や保有株数の変化により、実際の金額は変わります。'
-                        '前年同月に配当が無かった銘柄・保有していなかった銘柄は含まれません。</div>'
-                        '</div>',
-                        unsafe_allow_html=True,
-                    )
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
