@@ -24079,10 +24079,11 @@ def _compute_portfolio_summary(username: str = "") -> dict:
     if not open_pos:
         return {"positions": {}, "dividends": {}, "usd_jpy": usd_jpy, "error": None}
 
-    positions = {}
-    dividends = {}
-
-    for ticker, pos in open_pos.items():
+    def _fetch_one_position(ticker: str, pos: dict):
+        """1銘柄分の現在値・セクター・配当履歴を取得し、position辞書と
+        （あれば）dividends辞書のエントリを返す。銘柄ごとに独立した処理なので、
+        呼び出し側でThreadPoolExecutorに渡して並行実行する。
+        """
         is_jp_fund = ticker in _JP_FUND_MAP
         is_jp = ticker.endswith(".T") or is_jp_fund
         cur_price = None
@@ -24116,6 +24117,7 @@ def _compute_portfolio_summary(username: str = "") -> dict:
         sector = _fetch_ticker_sector(ticker)
 
         # 配当履歴（過去6ヶ月）
+        div_entry = None
         try:
             tk_obj = yf.Ticker(ticker)
             div_hist = tk_obj.dividends
@@ -24135,7 +24137,7 @@ def _compute_portfolio_summary(username: str = "") -> dict:
                         "total":     _total,
                         "qty":       pos["qty"],
                     })
-                dividends[ticker] = {
+                div_entry = {
                     "is_jp":       is_jp,
                     "name":        pos["name"],
                     "divs_by_month": divs_by_month,
@@ -24155,7 +24157,7 @@ def _compute_portfolio_summary(username: str = "") -> dict:
         gain       = (mkt_val - cost_total) if mkt_val is not None else None
         gain_pct   = (gain / cost_total * 100) if (gain is not None and cost_total > 0) else None
 
-        positions[ticker] = {
+        position_entry = {
             "name":         pos["name"],
             "qty":          qty,
             "avg_cost":     avg_cost,
@@ -24167,6 +24169,25 @@ def _compute_portfolio_summary(username: str = "") -> dict:
             "is_jp":        is_jp,
             "sector":       sector,
         }
+        return ticker, position_entry, div_entry
+
+    _positions_by_ticker = {}
+    _dividends_by_ticker = {}
+    with ThreadPoolExecutor(max_workers=min(10, len(open_pos))) as _ex:
+        _futures = [_ex.submit(_fetch_one_position, tk, pos) for tk, pos in open_pos.items()]
+        for _fut in as_completed(_futures):
+            try:
+                _ticker, _position_entry, _div_entry = _fut.result()
+                _positions_by_ticker[_ticker] = _position_entry
+                if _div_entry is not None:
+                    _dividends_by_ticker[_ticker] = _div_entry
+            except Exception as _e:
+                logger.warning(f"[trading] サマリー用データ取得失敗: {_e}")
+
+    # 並行実行だと完了順が銘柄取得ごとにバラつくため、表示順が毎回変わらないよう
+    # 元のopen_pos（保有ポジション）の順序に並べ直す。
+    positions = {tk: _positions_by_ticker[tk] for tk in open_pos if tk in _positions_by_ticker}
+    dividends = {tk: _dividends_by_ticker[tk] for tk in open_pos if tk in _dividends_by_ticker}
 
     return {
         "positions": positions,
