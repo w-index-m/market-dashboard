@@ -30033,7 +30033,7 @@ def render_claude_trading_project():
                     # 来月以降の予想配当（前年同月実績ベース・あくまで参考値）。個別株の
                     # 明細（下のdetail_rows）を挟まず、実績の月別合計に直接続けて表示する。
                     _proj_months = []
-                    for i in range(1, 4):
+                    for i in range(1, 7):
                         _pm = (now.month - 1 + i) % 12 + 1
                         _py = now.year + ((now.month - 1 + i) // 12)
                         _proj_months.append((_py, _pm))
