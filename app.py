@@ -25883,14 +25883,23 @@ def _auth_delete_account(username: str, password: str) -> tuple[bool, str]:
     except Exception as _e:
         logger.warning(f"[auth] 取引記録シート削除失敗（アカウント自体の削除は成功） {username}: {_e}")
 
-    try:
-        _sws = _sp.worksheet("sessions")
-        _srows = _sws.get_all_records()
-        for i in range(len(_srows) - 1, -1, -1):
-            if _srows[i].get("username") == username:
-                _sws.delete_rows(i + 2)
-    except Exception as _e:
-        logger.warning(f"[auth] セッション削除失敗（アカウント自体の削除は成功） {username}: {_e}")
+    def _delete_rows_by_username(_tab: str) -> None:
+        """指定タブから、username列がこのユーザーの行を全て削除する（後ろから
+        逆順に削除して行番号ズレを避ける）。タブが無い/削除失敗してもアカウント
+        自体の削除は成功として扱う（ベストエフォート）。
+        """
+        try:
+            _ws = _sp.worksheet(_tab)
+            _rows = _ws.get_all_records()
+            for i in range(len(_rows) - 1, -1, -1):
+                if _rows[i].get("username") == username:
+                    _ws.delete_rows(i + 2)
+        except Exception as _e:
+            logger.warning(f"[auth] {_tab}削除失敗（アカウント自体の削除は成功） {username}: {_e}")
+
+    _delete_rows_by_username("sessions")
+    _delete_rows_by_username("asset_history")
+    _delete_rows_by_username("asset_category_snapshot")
 
     return True, ""
 
