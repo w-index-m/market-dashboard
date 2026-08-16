@@ -30099,17 +30099,29 @@ def render_claude_trading_project():
                         _py = now.year + ((now.month - 1 + i) // 12)
                         _proj_months.append((_py, _pm))
                     _proj_month_totals = {f"{y:04d}-{m:02d}": 0.0 for y, m in _proj_months}
-                    for _tk, _p in positions.items():
-                        _hist = _fetch_dividend_by_month_extended(_tk)
-                        if not _hist:
-                            continue
-                        _is_jp_tk = _p["is_jp"]
-                        for _y, _m in _proj_months:
-                            _last_year_key = f"{_y - 1:04d}-{_m:02d}"
-                            _per_share = _hist.get(_last_year_key)
-                            if _per_share:
-                                _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
-                                _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
+                    # 銘柄ごとに独立した配当履歴取得（yfinance→Tiingo→Finnhubのフォール
+                    # バックを含む）なので、逐次実行だとサマリータブ全体の表示が遅くなる。
+                    # _compute_portfolio_summary側と同様にThreadPoolExecutorで並行化する。
+                    with ThreadPoolExecutor(max_workers=min(10, len(positions))) as _proj_ex:
+                        _proj_futures = {
+                            _proj_ex.submit(_fetch_dividend_by_month_extended, _tk): (_tk, _p)
+                            for _tk, _p in positions.items()
+                        }
+                        for _fut in as_completed(_proj_futures):
+                            _tk, _p = _proj_futures[_fut]
+                            try:
+                                _hist = _fut.result()
+                            except Exception:
+                                continue
+                            if not _hist:
+                                continue
+                            _is_jp_tk = _p["is_jp"]
+                            for _y, _m in _proj_months:
+                                _last_year_key = f"{_y - 1:04d}-{_m:02d}"
+                                _per_share = _hist.get(_last_year_key)
+                                if _per_share:
+                                    _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
+                                    _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
                     _proj_rows_html = ""
                     for _y, _m in _proj_months:
                         _key = f"{_y:04d}-{_m:02d}"
