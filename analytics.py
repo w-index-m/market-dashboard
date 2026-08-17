@@ -629,16 +629,28 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
         ws.insert_row(data_row, index=2, value_input_option="USER_ENTERED")
         logger.info(f"[access_log] 書き込み成功: {row.get('country','')} {row.get('city','')}")
 
-        # realtime タブも更新（アクティブセッション追跡）
+        # realtime タブも更新（アクティブセッション追跡）。REALTIME_MIN分より古い行は
+        # 一度も削除されず溜まり続けていた（新規appendのみで、更新済み行も残ったまま）ため、
+        # ページビューのたびにこのタブが際限なく成長し、get_all_records()の走査コストが
+        # 増え続けてSheets APIのクォータを圧迫し、access_log自体の書き込み失敗（本関数の
+        # 冒頭のinsert_row）を引き起こしていた可能性がある。書き込みのたびに古い行を
+        # 削除して一定サイズに保つ。
         try:
             rt_ws = sp.worksheet("realtime")
             now_str = row.get("ts", "")
+            now_jst2 = datetime.datetime.now(JST)
+            cutoff = now_jst2 - datetime.timedelta(minutes=REALTIME_MIN)
+            recs = rt_ws.get_all_records()
             updated = False
-            for i, rec in enumerate(rt_ws.get_all_records(), start=2):
+            stale_rows = []
+            for i, rec in enumerate(recs, start=2):
                 if rec.get("session_id") == sid:
                     rt_ws.update_cell(i, 2, now_str)
                     updated = True
-                    break
+                elif not _is_recent(rec.get("last_seen", ""), cutoff):
+                    stale_rows.append(i)
+            for i in sorted(stale_rows, reverse=True):
+                rt_ws.delete_rows(i)
             if not updated:
                 rt_ws.append_row([sid, now_str])
         except Exception:
@@ -762,21 +774,25 @@ def _load_scan_df() -> pd.DataFrame:
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _load_realtime() -> int:
+    """アクティブセッション数を返す。書き込み側（_write_access_log_to_target）が
+    TARGET_SHEET_IDの「realtime」タブに書いているので、読み込み側もそこから読む
+    （以前はGOOGLE_SHEETS_ID側を読んでいて別のスプレッドシートを見ており、常に
+    空/古いデータになっていた）。
+    """
     now    = datetime.datetime.now(JST)
     cutoff = now - timedelta(minutes=REALTIME_MIN)
-    if _detect_backend() == "sheets":
-        try:
-            c = _sheets_client()
-            if c:
-                sp  = c.open_by_key(_secret("GOOGLE_SHEETS_ID"))
-                ws  = sp.worksheet("realtime")
-                cnt = sum(
-                    1 for r in ws.get_all_records()
-                    if _is_recent(r.get("last_seen", ""), cutoff)
-                )
-                return max(cnt, 1)
-        except Exception:
-            pass
+    try:
+        c = _sheets_client()
+        if c:
+            sp  = c.open_by_key(TARGET_SHEET_ID)
+            ws  = sp.worksheet("realtime")
+            cnt = sum(
+                1 for r in ws.get_all_records()
+                if _is_recent(r.get("last_seen", ""), cutoff)
+            )
+            return max(cnt, 1)
+    except Exception:
+        pass
     return 1
 
 
