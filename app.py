@@ -30302,6 +30302,55 @@ def render_claude_trading_project():
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
+                # ── カード5: RSI過熱銘柄 ─────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;margin-bottom:18px">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '⚠️ RSI過熱銘柄（14日RSI 70以上）</div>',
+                    unsafe_allow_html=True,
+                )
+                # 投信は日次株価データが無い（基準価額はみんかぶスクレイピング経由）ため対象外
+                _rsi_tickers = [tk for tk in positions if tk not in _JP_FUND_MAP]
+                _rsi_prices = _fetch_ticker_close_prices(_rsi_tickers, period="3mo") if _rsi_tickers else {}
+                _overheated = []
+                for _rtk, _rs in _rsi_prices.items():
+                    _rs = _rs.dropna()
+                    if len(_rs) < 15:
+                        continue
+                    _rsi_val = _calc_rsi(_rs, period=14)
+                    if _rsi_val >= 70:
+                        _overheated.append((_rtk, _rsi_val))
+                _overheated.sort(key=lambda x: x[1], reverse=True)
+
+                if _overheated:
+                    _rsi_rows_html = ""
+                    for _rtk, _rsi_val in _overheated:
+                        _rnm = positions[_rtk]["name"] or _rtk
+                        if _rnm == _rtk:
+                            _rnm = _get_stock_display_name(_rtk)
+                        _rsi_color = "#ef4444" if _rsi_val >= 80 else "#f59e0b"
+                        _rsi_rows_html += (
+                            '<div style="display:flex;justify-content:space-between;padding:5px 0;'
+                            'border-bottom:1px solid #1e293b;font-size:13px">'
+                            f'<span style="color:#e2e8f0">{_rtk}（{_rnm}）</span>'
+                            f'<span style="color:{_rsi_color};font-weight:700">RSI {_rsi_val:.1f}</span>'
+                            '</div>'
+                        )
+                    st.markdown(
+                        _rsi_rows_html
+                        + '<div style="font-size:11px;color:#64748b;margin-top:8px">'
+                        '※ RSI(14)が70以上は一般に「買われすぎ」の目安とされますが、'
+                        '強いトレンド中は高止まりが続くこともあり、単独での売買判断には使わないで'
+                        'ください。投資信託はティッカーの株価データが無いため対象外です。</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("RSI70以上の過熱銘柄はありません。")
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
                 # ── 個別銘柄テーブル ─────────────────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("##### 保有銘柄一覧")
