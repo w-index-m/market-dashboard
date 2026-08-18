@@ -24146,13 +24146,18 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
                     "change_pct": info.get("preMarketChangePercent"),
                     "label": "プレマーケット",
                 }
-            return {}
+            # .info呼び出し自体は成功したが時間外データが無かった場合。再試行しても
+            # 結果は変わらないため、リトライループを抜けてFinnhubフォールバックに進む
+            # （以前はここで即return {}していたため、例外時のみFinnhubを試す作りに
+            # なっており、この「成功したがデータ無し」の方が実際には多く、
+            # Finnhubが一度も試されていなかった）。
+            break
         except Exception:
             if _attempt < 2:
                 time.sleep(0.8 * (_attempt + 1))
 
-    # yfinanceが3回とも例外で失敗した場合（一時的なレート制限というより、より
-    # 持続的なブロックの可能性）、Finnhubの/quoteをフォールバックとして試す。
+    # yfinanceが失敗（3回とも例外）または時間外データ無しだった場合、Finnhubの
+    # /quoteをフォールバックとして試す。
     # Finnhubの/quoteは「時間外」「プレマーケット」を明示的に区別しないため
     # （現在値・前日終値のみ）、yfinance由来の値ほど正確に時間外価格とは限らない
     # ことをラベルで明示する（無料枠でこの現在値が本当に時間外を反映しているかは
