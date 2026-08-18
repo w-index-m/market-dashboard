@@ -28825,20 +28825,15 @@ def render_claude_trading_project():
                     _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
                     # ゼロ時（JST）基準の前日比用: アセットクラス別の現在評価額合計（円換算）
                     _cat_totals_jpy = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
-                    for ticker, pos in open_pos.items():
+                    def _fetch_one_pnl_row_data(ticker: str, pos: dict) -> tuple:
+                        """1銘柄分の現在値/前日終値/セクター/時間外・PTS/表示名を取得する。
+                        銘柄ごとに独立したネットワーク処理なので、呼び出し側で
+                        ThreadPoolExecutorに渡して並行実行する（このタブより後に
+                        描画されるサマリータブが、このタブの逐次実行の後ろに
+                        並んで待たされ、体感で遅くなっていたのを解消するため）。
+                        """
                         is_jp_fund = ticker in _JP_FUND_MAP
                         is_jp_pos = ticker.endswith(".T") or is_jp_fund
-                        cur_unit  = "円" if is_jp_pos else "USD"
-                        # 投信は基準価額が「1万口あたり」表記のため、金額計算では
-                        # 保有口数を1万で割った実効口数を使う（保有株数の表示自体は
-                        # 実際の口数のまま変えない）
-                        _money_qty = pos["qty"] / _JP_FUND_NAV_UNIT if is_jp_fund else pos["qty"]
-
-                        def _cur_fmt(val, signed=False):
-                            """円は小数無し・USDは小数2桁でcur_unit付き文字列を返す"""
-                            _spec = f"{{:{'+' if signed else ''},.0f}}" if is_jp_pos else f"{{:{'+' if signed else ''},.2f}}"
-                            return f"{_spec.format(val)} {cur_unit}"
-
                         cur_price = None
                         prev_close = None
                         if is_jp_fund:
@@ -28928,9 +28923,52 @@ def render_claude_trading_project():
                                 except Exception:
                                     pass
 
+                        sector = _fetch_ticker_sector(ticker) if cur_price else None
+                        ext = _fetch_extended_hours_price(ticker)
+                        name = pos.get("name") or ticker
+                        if name == ticker:
+                            name = _get_stock_display_name(ticker)
+
+                        return ticker, {
+                            "is_jp_fund": is_jp_fund, "is_jp_pos": is_jp_pos,
+                            "cur_price": cur_price, "prev_close": prev_close,
+                            "sector": sector, "ext": ext, "name": name,
+                        }
+
+                    _pnl_fetch_results = {}
+                    with ThreadPoolExecutor(max_workers=min(10, len(open_pos))) as _pnl_ex:
+                        _pnl_futures = [
+                            _pnl_ex.submit(_fetch_one_pnl_row_data, tk, pos)
+                            for tk, pos in open_pos.items()
+                        ]
+                        for _fut in as_completed(_pnl_futures):
+                            try:
+                                _tk, _fd = _fut.result()
+                                _pnl_fetch_results[_tk] = _fd
+                            except Exception as _e:
+                                logger.warning(f"[trading] pnl行データ取得失敗: {_e}")
+
+                    for ticker, pos in open_pos.items():
+                        _fd = _pnl_fetch_results.get(ticker, {})
+                        is_jp_fund = _fd.get("is_jp_fund", ticker in _JP_FUND_MAP)
+                        is_jp_pos  = _fd.get("is_jp_pos", ticker.endswith(".T") or is_jp_fund)
+                        cur_unit  = "円" if is_jp_pos else "USD"
+                        # 投信は基準価額が「1万口あたり」表記のため、金額計算では
+                        # 保有口数を1万で割った実効口数を使う（保有株数の表示自体は
+                        # 実際の口数のまま変えない）
+                        _money_qty = pos["qty"] / _JP_FUND_NAV_UNIT if is_jp_fund else pos["qty"]
+
+                        def _cur_fmt(val, signed=False, _is_jp_pos=is_jp_pos, _cur_unit=cur_unit):
+                            """円は小数無し・USDは小数2桁でcur_unit付き文字列を返す"""
+                            _spec = f"{{:{'+' if signed else ''},.0f}}" if _is_jp_pos else f"{{:{'+' if signed else ''},.2f}}"
+                            return f"{_spec.format(val)} {_cur_unit}"
+
+                        cur_price  = _fd.get("cur_price")
+                        prev_close = _fd.get("prev_close")
+
                         if cur_price:
                             _mval_jpy = cur_price * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
-                            _sec = _fetch_ticker_sector(ticker)
+                            _sec = _fd.get("sector") or "その他"
                             _sector_values[_sec] = _sector_values.get(_sec, 0.0) + _mval_jpy
                             _cat = _classify_asset_category(ticker, is_jp_pos, is_jp_fund, pos.get("name", ""))
                             _cat_totals_jpy[_cat] += _mval_jpy
@@ -28957,7 +28995,7 @@ def render_claude_trading_project():
                             _pnl_jpy_str = "-"
                             _total_skipped += 1
 
-                        _ext = _fetch_extended_hours_price(ticker)
+                        _ext = _fd.get("ext")
                         if _ext:
                             _ext_chg = _ext.get("change_pct")
                             _ext_str = (
@@ -28978,9 +29016,7 @@ def render_claude_trading_project():
                             _day_chg_row_str = "-"
                             _day_chg_pct_str = "-"
 
-                        _pnl_name = pos.get("name") or ticker
-                        if _pnl_name == ticker:
-                            _pnl_name = _get_stock_display_name(ticker)
+                        _pnl_name = _fd.get("name") or ticker
                         _pnl_category = _classify_asset_category(ticker, is_jp_pos, is_jp_fund, _pnl_name)
                         _dl_categories.append(_pnl_category)
                         pnl_rows.append({
