@@ -24126,25 +24126,31 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
             }
         except Exception:
             return {}
-    try:
-        info = yf.Ticker(ticker).info or {}
-        post_price = info.get("postMarketPrice")
-        if post_price:
-            return {
-                "price": float(post_price),
-                "change_pct": info.get("postMarketChangePercent"),
-                "label": "時間外",
-            }
-        pre_price = info.get("preMarketPrice")
-        if pre_price:
-            return {
-                "price": float(pre_price),
-                "change_pct": info.get("preMarketChangePercent"),
-                "label": "プレマーケット",
-            }
-        return {}
-    except Exception:
-        return {}
+    # yfinanceの.infoは一時的なレート制限で失敗しやすく、これをリトライ無しで
+    # 諦めるとその失敗（空dict）が5分キャッシュされてしまう。保有銘柄が多いと
+    # 全銘柄を並行取得するため同時にレート制限へ引っかかりやすく、特に重要。
+    for _attempt in range(3):
+        try:
+            info = yf.Ticker(ticker).info or {}
+            post_price = info.get("postMarketPrice")
+            if post_price:
+                return {
+                    "price": float(post_price),
+                    "change_pct": info.get("postMarketChangePercent"),
+                    "label": "時間外",
+                }
+            pre_price = info.get("preMarketPrice")
+            if pre_price:
+                return {
+                    "price": float(pre_price),
+                    "change_pct": info.get("preMarketChangePercent"),
+                    "label": "プレマーケット",
+                }
+            return {}
+        except Exception:
+            if _attempt < 2:
+                time.sleep(0.8 * (_attempt + 1))
+    return {}
 
 
 @st.cache_data(ttl=900, show_spinner=False)
