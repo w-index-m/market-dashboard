@@ -29085,43 +29085,57 @@ def render_claude_trading_project():
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
 
-                    # ── 急落時: 保有中ポジション表の上に気になるニュースを表示 ─────
+                    # ── 保有銘柄ベースの本日騰落率（0時基準スナップショットに依存しない）─
+                    # 「前日比（0時基準）」はcronのスナップショットが無いと表示できないため、
+                    # 常にこの表のすぐ上に、ここまでの計算だけで出せる騰落率を表示しておく
+                    # （急落を検知したらその下にニュースも追加表示する）。
                     _DECLINE_ALERT_THRESHOLD = -3.0  # ポートフォリオ全体の本日騰落率(%)がこれ以下で発動
                     _prev_total_jpy = _total_mval_jpy_for_decline - _weighted_day_chg_jpy
                     _portfolio_day_chg_pct = (
                         _weighted_day_chg_jpy / _prev_total_jpy * 100 if _prev_total_jpy > 0 else 0.0
                     )
-                    if _portfolio_day_chg_pct <= _DECLINE_ALERT_THRESHOLD and _decline_candidates:
-                        _worst = sorted(_decline_candidates, key=lambda x: x[2])[:3]
-                        with _news_alert_placeholder.container():
-                            with st.spinner("急落を検知。関連ニュースを確認中..."):
-                                _decline_news = fetch_finnhub_company_news(
-                                    symbols={tk: nm for tk, nm, _ in _worst}, days_back=2,
-                                )
-                            _news_html = (
-                                '<div style="background:#450a0a;border:1px solid #991b1b;'
-                                'border-radius:8px;padding:14px 18px;margin-bottom:14px">'
-                                f'<div style="font-size:13px;font-weight:700;color:#f87171;margin-bottom:6px">'
-                                f'⚠️ 本日ポートフォリオ急落中（{_portfolio_day_chg_pct:+.2f}%）'
-                                f' — 下落上位: {"・".join(f"{nm}（{tk}）{pct:+.1f}%" for tk, nm, pct in _worst)}</div>'
+                    with _news_alert_placeholder.container():
+                        if not _decline_candidates:
+                            st.caption("本日の騰落率: 前日終値を取得できた銘柄が無いため計算できません。")
+                        else:
+                            _chg_color = "#22c55e" if _weighted_day_chg_jpy >= 0 else "#ef4444"
+                            st.markdown(
+                                f'<div style="font-size:13px;margin-bottom:10px">'
+                                f'本日の騰落率（保有銘柄ベース）: '
+                                f'<b style="color:{_chg_color}">{_portfolio_day_chg_pct:+.2f}%'
+                                f'（{_mv(f"{_weighted_day_chg_jpy:+,.0f}円")}）</b></div>',
+                                unsafe_allow_html=True,
                             )
-                            if _decline_news:
-                                for _headline in _decline_news[:3]:
-                                    _news_html += (
-                                        f'<div style="font-size:12px;color:#fecaca;margin-top:4px">'
-                                        f'・{_headline}</div>'
+                            if _portfolio_day_chg_pct <= _DECLINE_ALERT_THRESHOLD:
+                                _worst = sorted(_decline_candidates, key=lambda x: x[2])[:3]
+                                with st.spinner("急落を検知。関連ニュースを確認中..."):
+                                    _decline_news = fetch_finnhub_company_news(
+                                        symbols={tk: nm for tk, nm, _ in _worst}, days_back=2,
                                     )
-                            else:
-                                _news_html += (
-                                    '<div style="font-size:12px;color:#fecaca;margin-top:4px">'
-                                    '関連ニュースを取得できませんでした。</div>'
+                                _news_html = (
+                                    '<div style="background:#450a0a;border:1px solid #991b1b;'
+                                    'border-radius:8px;padding:14px 18px;margin-bottom:14px">'
+                                    f'<div style="font-size:13px;font-weight:700;color:#f87171;margin-bottom:6px">'
+                                    f'⚠️ 本日ポートフォリオ急落中（{_portfolio_day_chg_pct:+.2f}%）'
+                                    f' — 下落上位: {"・".join(f"{nm}（{tk}）{pct:+.1f}%" for tk, nm, pct in _worst)}</div>'
                                 )
-                            _news_html += (
-                                '<div style="font-size:11px;color:#94a3b8;margin-top:8px">'
-                                '※ ニュースは英語見出しのまま表示（Finnhub）。AIによる解釈は加えていません。</div>'
-                                '</div>'
-                            )
-                            st.markdown(_news_html, unsafe_allow_html=True)
+                                if _decline_news:
+                                    for _headline in _decline_news[:3]:
+                                        _news_html += (
+                                            f'<div style="font-size:12px;color:#fecaca;margin-top:4px">'
+                                            f'・{_headline}</div>'
+                                        )
+                                else:
+                                    _news_html += (
+                                        '<div style="font-size:12px;color:#fecaca;margin-top:4px">'
+                                        '関連ニュースを取得できませんでした。</div>'
+                                    )
+                                _news_html += (
+                                    '<div style="font-size:11px;color:#94a3b8;margin-top:8px">'
+                                    '※ ニュースは英語見出しのまま表示（Finnhub）。AIによる解釈は加えていません。</div>'
+                                    '</div>'
+                                )
+                                st.markdown(_news_html, unsafe_allow_html=True)
 
                     st.dataframe(
                         pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True,
