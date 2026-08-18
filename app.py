@@ -24150,6 +24150,31 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
         except Exception:
             if _attempt < 2:
                 time.sleep(0.8 * (_attempt + 1))
+
+    # yfinanceが3回とも例外で失敗した場合（一時的なレート制限というより、より
+    # 持続的なブロックの可能性）、Finnhubの/quoteをフォールバックとして試す。
+    # Finnhubの/quoteは「時間外」「プレマーケット」を明示的に区別しないため
+    # （現在値・前日終値のみ）、yfinance由来の値ほど正確に時間外価格とは限らない
+    # ことをラベルで明示する（無料枠でこの現在値が本当に時間外を反映しているかは
+    # 未検証）。
+    if FINNHUB_API_KEY:
+        try:
+            resp = requests.get(
+                "https://finnhub.io/api/v1/quote",
+                params={"symbol": ticker, "token": FINNHUB_API_KEY},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                q = resp.json()
+                cur, prev = q.get("c"), q.get("pc")
+                if cur:
+                    chg = (cur / prev - 1) * 100 if prev else None
+                    return {
+                        "price": float(cur), "change_pct": chg,
+                        "label": "Finnhub（時間外区別なし・参考値）",
+                    }
+        except Exception:
+            pass
     return {}
 
 
@@ -29060,7 +29085,9 @@ def render_claude_trading_project():
                         "（週末・祝日・日本の日中など）は［M/D時点］と表示された直近の米国取引日の"
                         "データのまま止まっており、東証本体の当日の値動きはまだ反映されていません。"
                         "米国株の時間外/PTS価格は5分キャッシュのため、Yahoo Finance等のリアルタイム"
-                        "表示と最大5分程度のズレが生じることがあります。"
+                        "表示と最大5分程度のズレが生じることがあります。Yahoo Finance側が失敗した"
+                        "銘柄はFinnhubの直近値を参考表示しますが、こちらは時間外・通常取引を明確に"
+                        "区別できないため精度が落ちる場合があります。"
                     )
 
                     # ── 保有中ポジション表のダウンロード（CSV/Excel） ─────────────
