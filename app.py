@@ -28851,6 +28851,10 @@ def render_claude_trading_project():
                         """金額非表示モード用マスク。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
                         return "●●●" if _privacy else s
 
+                    # 急落時の関連ニュース表示用プレースホルダ（保有中ポジション表より上に
+                    # 出すため先に確保しておき、下の値動き計算が終わった後で埋める）
+                    _news_alert_placeholder = st.empty()
+
                     st.markdown("**保有中ポジション（現在値・含み損益）**")
                     _pnl_usdjpy = _fetch_usd_jpy()
                     pnl_rows = []
@@ -28861,6 +28865,10 @@ def render_claude_trading_project():
                     _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
                     # ゼロ時（JST）基準の前日比用: アセットクラス別の現在評価額合計（円換算）
                     _cat_totals_jpy = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
+                    # 急落時ニュース表示用: (ticker, name, 前日比%, 評価額円換算) を銘柄ごとに集める
+                    _decline_candidates = []
+                    _total_mval_jpy_for_decline = 0.0
+                    _weighted_day_chg_jpy = 0.0
                     def _fetch_one_pnl_row_data(ticker: str, pos: dict) -> tuple:
                         """1銘柄分の現在値/前日終値/セクター/時間外・PTS/表示名を取得する。
                         銘柄ごとに独立したネットワーク処理なので、呼び出し側で
@@ -29048,6 +29056,10 @@ def render_claude_trading_project():
                             _day_chg_pct_row  = (cur_price / prev_close - 1) * 100
                             _day_chg_row_str  = _mv(_cur_fmt(_day_chg_native, signed=True))
                             _day_chg_pct_str  = f"{_day_chg_pct_row:+.2f}%"
+                            # 急落時ニュース表示用の集計（評価額で加重した本日騰落率を後で計算する）
+                            _decline_candidates.append((ticker, _fd.get("name") or ticker, _day_chg_pct_row))
+                            _total_mval_jpy_for_decline += _mval_jpy
+                            _weighted_day_chg_jpy += (cur_price - prev_close) * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
                         else:
                             _day_chg_row_str = "-"
                             _day_chg_pct_str = "-"
@@ -29072,6 +29084,44 @@ def render_claude_trading_project():
                             "含み損益（円）":  _mv(_pnl_jpy_str),
                             "損益率":   f"{pnl_pct:+.2f}%" if pnl_pct is not None else "-",
                         })
+
+                    # ── 急落時: 保有中ポジション表の上に気になるニュースを表示 ─────
+                    _DECLINE_ALERT_THRESHOLD = -3.0  # ポートフォリオ全体の本日騰落率(%)がこれ以下で発動
+                    _prev_total_jpy = _total_mval_jpy_for_decline - _weighted_day_chg_jpy
+                    _portfolio_day_chg_pct = (
+                        _weighted_day_chg_jpy / _prev_total_jpy * 100 if _prev_total_jpy > 0 else 0.0
+                    )
+                    if _portfolio_day_chg_pct <= _DECLINE_ALERT_THRESHOLD and _decline_candidates:
+                        _worst = sorted(_decline_candidates, key=lambda x: x[2])[:3]
+                        with _news_alert_placeholder.container():
+                            with st.spinner("急落を検知。関連ニュースを確認中..."):
+                                _decline_news = fetch_finnhub_company_news(
+                                    symbols={tk: nm for tk, nm, _ in _worst}, days_back=2,
+                                )
+                            _news_html = (
+                                '<div style="background:#450a0a;border:1px solid #991b1b;'
+                                'border-radius:8px;padding:14px 18px;margin-bottom:14px">'
+                                f'<div style="font-size:13px;font-weight:700;color:#f87171;margin-bottom:6px">'
+                                f'⚠️ 本日ポートフォリオ急落中（{_portfolio_day_chg_pct:+.2f}%）'
+                                f' — 下落上位: {"・".join(f"{nm}（{tk}）{pct:+.1f}%" for tk, nm, pct in _worst)}</div>'
+                            )
+                            if _decline_news:
+                                for _headline in _decline_news[:3]:
+                                    _news_html += (
+                                        f'<div style="font-size:12px;color:#fecaca;margin-top:4px">'
+                                        f'・{_headline}</div>'
+                                    )
+                            else:
+                                _news_html += (
+                                    '<div style="font-size:12px;color:#fecaca;margin-top:4px">'
+                                    '関連ニュースを取得できませんでした。</div>'
+                                )
+                            _news_html += (
+                                '<div style="font-size:11px;color:#94a3b8;margin-top:8px">'
+                                '※ ニュースは英語見出しのまま表示（Finnhub）。AIによる解釈は加えていません。</div>'
+                                '</div>'
+                            )
+                            st.markdown(_news_html, unsafe_allow_html=True)
 
                     st.dataframe(
                         pd.DataFrame(pnl_rows), hide_index=True, use_container_width=True,
