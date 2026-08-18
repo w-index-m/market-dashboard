@@ -29163,9 +29163,16 @@ def render_claude_trading_project():
                                 )
                                 if _decline_news:
                                     for _headline in _decline_news[:3]:
+                                        # 形式: "[🔦銘柄名(TICKER)][センチメント][Finnhub] 見出し文"
+                                        # タグ部分は翻訳せず、見出し本文だけをDeepLで翻訳する
+                                        _prefix, _sep, _text = _headline.rpartition("] ")
+                                        _display_text = (
+                                            f"{_prefix}] {translate_text(_text)}" if _sep and _text
+                                            else _headline
+                                        )
                                         _news_html += (
                                             f'<div style="font-size:12px;color:#fecaca;margin-top:4px">'
-                                            f'・{_headline}</div>'
+                                            f'・{_display_text}</div>'
                                         )
                                 else:
                                     _news_html += (
@@ -29174,7 +29181,8 @@ def render_claude_trading_project():
                                     )
                                 _news_html += (
                                     '<div style="font-size:11px;color:#94a3b8;margin-top:8px">'
-                                    '※ ニュースは英語見出しのまま表示（Finnhub）。AIによる解釈は加えていません。</div>'
+                                    '※ 見出しはDeepLで日本語に翻訳して表示（未設定時はAI翻訳）。'
+                                    '内容の要約・解釈は加えていません。</div>'
                                     '</div>'
                                 )
                                 st.markdown(_news_html, unsafe_allow_html=True)
