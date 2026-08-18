@@ -28865,10 +28865,17 @@ def render_claude_trading_project():
                     _sector_values  = {}  # セクター別配分チャート用（円換算評価額）
                     # ゼロ時（JST）基準の前日比用: アセットクラス別の現在評価額合計（円換算）
                     _cat_totals_jpy = {"日本株": 0.0, "米国株": 0.0, "投資信託": 0.0, "債券": 0.0}
-                    # 急落時ニュース表示用: (ticker, name, 前日比%, 評価額円換算) を銘柄ごとに集める
+                    # 急落時ニュース表示用: (ticker, name, 前日比%, is_jp_pos) を銘柄ごとに集める。
+                    # 日本株と米国株は取引時間帯がズレるため、全体を単純合算すると「米国だけ
+                    # 急落しているのに日本株がまだ反応しておらず薄まって閾値に届かない」ケースを
+                    # 見逃す。そのため全体に加えて米国株のみ・日本株のみの騰落率も別々に集計する。
                     _decline_candidates = []
                     _total_mval_jpy_for_decline = 0.0
                     _weighted_day_chg_jpy = 0.0
+                    _us_prev_mval_jpy = 0.0
+                    _us_weighted_day_chg_jpy = 0.0
+                    _jp_prev_mval_jpy = 0.0
+                    _jp_weighted_day_chg_jpy = 0.0
                     def _fetch_one_pnl_row_data(ticker: str, pos: dict) -> tuple:
                         """1銘柄分の現在値/前日終値/セクター/時間外・PTS/表示名を取得する。
                         銘柄ごとに独立したネットワーク処理なので、呼び出し側で
@@ -29059,7 +29066,14 @@ def render_claude_trading_project():
                             # 急落時ニュース表示用の集計（評価額で加重した本日騰落率を後で計算する）
                             _decline_candidates.append((ticker, _fd.get("name") or ticker, _day_chg_pct_row))
                             _total_mval_jpy_for_decline += _mval_jpy
-                            _weighted_day_chg_jpy += (cur_price - prev_close) * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
+                            _day_chg_jpy_row = (cur_price - prev_close) * _money_qty * (1 if is_jp_pos else _pnl_usdjpy)
+                            _weighted_day_chg_jpy += _day_chg_jpy_row
+                            if is_jp_pos:
+                                _jp_prev_mval_jpy += (_mval_jpy - _day_chg_jpy_row)
+                                _jp_weighted_day_chg_jpy += _day_chg_jpy_row
+                            else:
+                                _us_prev_mval_jpy += (_mval_jpy - _day_chg_jpy_row)
+                                _us_weighted_day_chg_jpy += _day_chg_jpy_row
                         else:
                             _day_chg_row_str = "-"
                             _day_chg_pct_str = "-"
@@ -29089,25 +29103,53 @@ def render_claude_trading_project():
                     # 「前日比（0時基準）」はcronのスナップショットが無いと表示できないため、
                     # 常にこの表のすぐ上に、ここまでの計算だけで出せる騰落率を表示しておく
                     # （急落を検知したらその下にニュースも追加表示する）。
-                    _DECLINE_ALERT_THRESHOLD = -3.0  # ポートフォリオ全体の本日騰落率(%)がこれ以下で発動
+                    _DECLINE_ALERT_THRESHOLD = -3.0  # 全体/米国株のみ/日本株のみのいずれかがこれ以下で発動
                     _prev_total_jpy = _total_mval_jpy_for_decline - _weighted_day_chg_jpy
                     _portfolio_day_chg_pct = (
                         _weighted_day_chg_jpy / _prev_total_jpy * 100 if _prev_total_jpy > 0 else 0.0
+                    )
+                    _us_day_chg_pct = (
+                        _us_weighted_day_chg_jpy / _us_prev_mval_jpy * 100 if _us_prev_mval_jpy > 0 else None
+                    )
+                    _jp_day_chg_pct = (
+                        _jp_weighted_day_chg_jpy / _jp_prev_mval_jpy * 100 if _jp_prev_mval_jpy > 0 else None
                     )
                     with _news_alert_placeholder.container():
                         if not _decline_candidates:
                             st.caption("本日の騰落率: 前日終値を取得できた銘柄が無いため計算できません。")
                         else:
                             _chg_color = "#22c55e" if _weighted_day_chg_jpy >= 0 else "#ef4444"
+                            _breakdown_parts = []
+                            if _us_day_chg_pct is not None:
+                                _c = "#22c55e" if _us_day_chg_pct >= 0 else "#ef4444"
+                                _breakdown_parts.append(f'米国株のみ <span style="color:{_c}">{_us_day_chg_pct:+.2f}%</span>')
+                            if _jp_day_chg_pct is not None:
+                                _c = "#22c55e" if _jp_day_chg_pct >= 0 else "#ef4444"
+                                _breakdown_parts.append(f'日本株のみ <span style="color:{_c}">{_jp_day_chg_pct:+.2f}%</span>')
                             st.markdown(
                                 f'<div style="font-size:13px;margin-bottom:10px">'
                                 f'本日の騰落率（保有銘柄ベース）: '
                                 f'<b style="color:{_chg_color}">{_portfolio_day_chg_pct:+.2f}%'
-                                f'（{_mv(f"{_weighted_day_chg_jpy:+,.0f}円")}）</b></div>',
+                                f'（{_mv(f"{_weighted_day_chg_jpy:+,.0f}円")}）</b>'
+                                + (f'　<span style="color:#64748b">｜ {" ／ ".join(_breakdown_parts)}</span>' if _breakdown_parts else '')
+                                + '</div>',
                                 unsafe_allow_html=True,
                             )
-                            if _portfolio_day_chg_pct <= _DECLINE_ALERT_THRESHOLD:
-                                _worst = sorted(_decline_candidates, key=lambda x: x[2])[:3]
+                            # 日本株・米国株は取引時間帯がズレるため、全体を単純合算した%だけで
+                            # 判定すると「片方が急落してももう片方が無反応で薄まり閾値に届かない」
+                            # ケースを見逃す。全体・米国のみ・日本のみのいずれかが閾値を下回れば
+                            # 発動し、その下落を主導している方の銘柄でニュースを探す。
+                            _triggered_pct = min(
+                                [p for p in (_portfolio_day_chg_pct, _us_day_chg_pct, _jp_day_chg_pct) if p is not None]
+                            )
+                            if _triggered_pct <= _DECLINE_ALERT_THRESHOLD:
+                                if _us_day_chg_pct is not None and _us_day_chg_pct <= _DECLINE_ALERT_THRESHOLD:
+                                    _pool = [c for c in _decline_candidates if not c[0].endswith(".T")]
+                                elif _jp_day_chg_pct is not None and _jp_day_chg_pct <= _DECLINE_ALERT_THRESHOLD:
+                                    _pool = [c for c in _decline_candidates if c[0].endswith(".T")]
+                                else:
+                                    _pool = _decline_candidates
+                                _worst = sorted(_pool, key=lambda x: x[2])[:3]
                                 with st.spinner("急落を検知。関連ニュースを確認中..."):
                                     _decline_news = fetch_finnhub_company_news(
                                         symbols={tk: nm for tk, nm, _ in _worst}, days_back=2,
@@ -29116,7 +29158,7 @@ def render_claude_trading_project():
                                     '<div style="background:#450a0a;border:1px solid #991b1b;'
                                     'border-radius:8px;padding:14px 18px;margin-bottom:14px">'
                                     f'<div style="font-size:13px;font-weight:700;color:#f87171;margin-bottom:6px">'
-                                    f'⚠️ 本日ポートフォリオ急落中（{_portfolio_day_chg_pct:+.2f}%）'
+                                    f'⚠️ 本日ポートフォリオ急落中（{_triggered_pct:+.2f}%）'
                                     f' — 下落上位: {"・".join(f"{nm}（{tk}）{pct:+.1f}%" for tk, nm, pct in _worst)}</div>'
                                 )
                                 if _decline_news:
