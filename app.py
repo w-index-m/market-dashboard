@@ -29154,6 +29154,25 @@ def render_claude_trading_project():
                                     _decline_news = fetch_finnhub_company_news(
                                         symbols={tk: nm for tk, nm, _ in _worst}, days_back=2,
                                     )
+                                # fetch_finnhub_company_newsは銘柄ごとに最大3件を順に積んで返す
+                                # ため、そのまま先頭3件を取ると下落幅トップの銘柄だけで埋まって
+                                # しまう（今回LumentumのみでMarvell/Corningが出なかった原因）。
+                                # 銘柄ごとに持ち回りで選び、下落上位の全銘柄が最低1件出るようにする。
+                                _news_by_ticker = {tk: [] for tk, _nm, _pct in _worst}
+                                for _h in _decline_news:
+                                    for _tk in _news_by_ticker:
+                                        if f"({_tk})" in _h:
+                                            _news_by_ticker[_tk].append(_h)
+                                            break
+                                _selected_news = []
+                                for _i in range(3):
+                                    for _tk in _news_by_ticker:
+                                        if len(_selected_news) >= 3:
+                                            break
+                                        if _i < len(_news_by_ticker[_tk]):
+                                            _selected_news.append(_news_by_ticker[_tk][_i])
+                                    if len(_selected_news) >= 3:
+                                        break
                                 _news_html = (
                                     '<div style="background:#450a0a;border:1px solid #991b1b;'
                                     'border-radius:8px;padding:14px 18px;margin-bottom:14px">'
@@ -29161,8 +29180,8 @@ def render_claude_trading_project():
                                     f'⚠️ 本日ポートフォリオ急落中（{_triggered_pct:+.2f}%）'
                                     f' — 下落上位: {"・".join(f"{nm}（{tk}）{pct:+.1f}%" for tk, nm, pct in _worst)}</div>'
                                 )
-                                if _decline_news:
-                                    for _headline in _decline_news[:3]:
+                                if _selected_news:
+                                    for _headline in _selected_news:
                                         # 形式: "[🔦銘柄名(TICKER)][センチメント][Finnhub] 見出し文"
                                         # タグ部分は翻訳せず、見出し本文だけをDeepLで翻訳する
                                         _prefix, _sep, _text = _headline.rpartition("] ")
