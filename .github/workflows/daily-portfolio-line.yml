@@ -2,7 +2,7 @@ name: Daily AI Portfolio to LINE & Slack
 
 on:
   schedule:
-    - cron: "0 22 * * *"   # 22:00 UTC = 07:00 JST（翌日）。1日1回のみ（Slack通知回数削減のため）
+    - cron: "0 23 * * *"   # 23:00 UTC = 08:00 JST（翌日）。1日1回のみ（Slack通知回数削減のため）
   workflow_dispatch: {}
 
 jobs:
