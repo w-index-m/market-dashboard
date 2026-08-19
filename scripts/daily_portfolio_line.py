@@ -205,7 +205,7 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
     # 銘柄ごとに連続でyf.downloadすると1回のスクリプト実行内でYahooのレート制限に
     # かかりやすいため、銘柄間に小さく間隔を空ける（_fetch_trading_stock_data自体も
     # 個別に3回までリトライするが、それとは別にバーストを避けるための間隔）。
-    # このスクリプトは1日に複数回（GitHub Actionsのcronで最大4回）実行されるため、
+    # このスクリプトは手動実行（workflow_dispatch）だと1日に複数回動くことがあるため、
     # 当日分の技術データがすでにGoogle Sheetsのstock_data_cacheに保存されていれば
     # まずそれを使う。無ければライブ取得し、成功したら次回以降の実行のためにキャッシュへ
     # 保存する（レート制限に当たった実行があっても、その日の別の実行で取得済みなら
@@ -576,9 +576,10 @@ def build_portfolio_message(
 
 
 def generate_portfolio(market_ctx: dict, today: str, budget: int, mode: str, model_type: str) -> dict:
-    # このcronジョブは1日最大4回実行されるが、AI推奨ポートフォリオは1日1回
-    # 生成すれば足りる（同じ日に4回作り直すとGemini/Groqのクォータを浪費する
-    # だけなので、当日分がキャッシュにあればAgent A/B/Cを一切呼ばずに再利用する）
+    # 通常のcronは1日1回だが、手動実行（workflow_dispatch）だと同じ日に複数回
+    # 動くことがある。AI推奨ポートフォリオは1日1回生成すれば足りるため、同じ日に
+    # 何度も作り直してGemini/Groqのクォータを浪費しないよう、当日分がキャッシュに
+    # あればAgent A/B/Cを一切呼ばずに再利用する
     cache_key = "ai_portfolio"
     cached = app._load_ai_digest_cache(cache_key, today)
     if cached:
