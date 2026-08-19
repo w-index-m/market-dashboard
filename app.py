@@ -922,17 +922,34 @@ def _call_ai_for_trading(
         text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
             return text, f"Groq ({model})"
-        # Groq 失敗時は OpenRouter へ
+        # Groq 失敗時は NVIDIA → OpenRouter へ
+        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"NVIDIA ({model}) ※Groq失敗"
         text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"OpenRouter ({model}) ※Groq失敗") if model else ("⚠️ Groq/OpenRouter 失敗", "none")
+        return (text, f"OpenRouter ({model}) ※Groq/NVIDIA失敗") if model else ("⚠️ Groq/NVIDIA/OpenRouter 失敗", "none")
+
+    elif model_pref == "nvidia":
+        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"NVIDIA ({model})"
+        # NVIDIA 失敗時は Groq → OpenRouter へ
+        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"Groq ({model}) ※NVIDIA失敗"
+        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        return (text, f"OpenRouter ({model}) ※NVIDIA/Groq失敗") if model else ("⚠️ NVIDIA/Groq/OpenRouter 失敗", "none")
 
     elif model_pref == "openrouter":
         text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
             return text, f"OpenRouter ({model})"
-        # OpenRouter 失敗時は Groq へ
+        # OpenRouter 失敗時は Groq → NVIDIA へ
         text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"Groq ({model}) ※OpenRouter失敗") if model else ("⚠️ OpenRouter/Groq 失敗", "none")
+        if model:
+            return text, f"Groq ({model}) ※OpenRouter失敗"
+        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        return (text, f"NVIDIA ({model}) ※OpenRouter/Groq失敗") if model else ("⚠️ OpenRouter/Groq/NVIDIA 失敗", "none")
 
     elif model_pref == "gemini":
         # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
@@ -19447,7 +19464,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     st.caption("移動平均・RSI・52週レンジ・季節性パターンを総合し、AIがチャートを読み解きます。")
 
     _ai_model_opts = {
-        "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+        "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）": "auto",
         "🟡 Gemini": "gemini",
         "⚡ Groq（高速）": "groq",
         "🌐 OpenRouter": "openrouter",
@@ -26691,13 +26708,13 @@ def render_claude_trading_project():
                 _ai_btn_label = (
                     "🔄 AIスコアを再生成" if _ai_sc_existing else "🤖 AIスコアを統合（ニュース・ファンダも評価）"
                 )
-                _ai_model_sel = st.session_state.get("rec_model_sel", "🔄 自動（Gemini→Groq→OpenRouter）")
+                _ai_model_sel = st.session_state.get("rec_model_sel", "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）")
                 _ai_mp = {
-                    "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                    "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）": "auto",
                     "🟡 Gemini（Google）":               "gemini",
                     "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                     "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
-                }.get(_ai_mp if isinstance((_ai_mp := st.session_state.get("rec_model_sel","🔄 自動（Gemini→Groq→OpenRouter）")), str) else "", "auto")
+                }.get(_ai_mp if isinstance((_ai_mp := st.session_state.get("rec_model_sel","🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）")), str) else "", "auto")
 
                 _ai_btn_col1, _ai_btn_col2 = st.columns([2, 1])
                 _ai_blend_val = _ai_btn_col2.slider(
@@ -27038,7 +27055,7 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
             _rec_model_opts = {
-                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）": "auto",
                 "🟡 Gemini（Google）":               "gemini",
                 "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                 "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
@@ -27356,8 +27373,8 @@ def render_claude_trading_project():
                 st.session_state["_ip_budget_val"] = _ip_cur_budget_val
             st.session_state["_ip_risk_key"] = "balanced"
             _ip_model_opts = {
-                "🔄 自動": "auto", "🟡 Gemini": "gemini",
-                "⚡ Groq": "groq",  "🌐 OpenRouter": "openrouter",
+                "🔄 自動": "auto", "🟡 Gemini": "gemini", "⚡ Groq": "groq",
+                "💚 NVIDIA": "nvidia", "🌐 OpenRouter": "openrouter",
             }
             _ip_model_sel = _ip_c3.selectbox(
                 "AIモデル", list(_ip_model_opts.keys()),
@@ -27426,7 +27443,7 @@ def render_claude_trading_project():
                 if _cached_unified:
                     _ip_results["unified"] = _cached_unified
                 else:
-                    with st.spinner("🤖 Agent C: ポートフォリオを組み立て中…（Gemini→Groq→OpenRouterの順で試行）"):
+                    with st.spinner("🤖 Agent C: ポートフォリオを組み立て中…（Gemini→Groq→NVIDIA→OpenRouterの順で試行）"):
                         try:
                             _r = _generate_investment_portfolio_rec(
                                 _ip_budget_val, _ip_model_type, _ip_risk_key,
@@ -28065,7 +28082,7 @@ def render_claude_trading_project():
 
             # モデル選択
             _model_opts = {
-                "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）": "auto",
                 "🟡 Gemini（Google）":               "gemini",
                 "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                 "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
@@ -30029,7 +30046,7 @@ def render_claude_trading_project():
                         unsafe_allow_html=True,
                     )
                     _pnl_model_opts = {
-                        "🔄 自動（Gemini→Groq→OpenRouter）": "auto",
+                        "🔄 自動（Gemini→Groq→NVIDIA→OpenRouter）": "auto",
                         "🟡 Gemini（Google）":              "gemini",
                         "⚡ Groq（高速）":                  "groq",
                         "🌐 OpenRouter":                    "openrouter",
