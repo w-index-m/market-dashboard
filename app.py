@@ -21169,34 +21169,17 @@ def _fetch_jp_long_name(ticker: str) -> str | None:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
-    """英語ニュース見出しを一括で日本語に翻訳する（Groq高速モデル使用、TTL=1h）。
+    """英語ニュース見出しを日本語に翻訳する（TTL=1h）。
+    単純な翻訳タスクでAIの文章生成能力は不要なため、Groqを直接呼ぶのではなく
+    translate_text()（DeepL優先・DeepL未設定/失敗時のみAIにフォールバック）を
+    1件ずつ使う。以前はここだけGroqを直接使っており、DeepLが使えるかどうかに
+    関わらず常にAIクォータを消費していた。
     tuple型を受け取るのは st.cache_data がリストを受け付けないため。
     Returns: list[str] （入力と同じ長さ）
     """
     if not headlines_tuple:
         return []
-    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines_tuple))
-    prompt = (
-        "以下の英語ニュース見出しを自然な日本語に翻訳してください。\n"
-        "企業名・人名・製品名はカタカナまたは原文のまま。\n"
-        "番号付きリスト（1. 〜\\n2. 〜）の形式で翻訳のみ返してください。余分な説明不要。\n\n"
-        + numbered
-    )
-    try:
-        text, _ = _call_ai_for_trading(
-            prompt, model_pref="groq", max_output_tokens=500, temperature=0.1
-        )
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        result = []
-        for line in lines:
-            m = re.match(r"^\d+[\.\)]\s*(.+)$", line)
-            if m:
-                result.append(m.group(1))
-        while len(result) < len(headlines_tuple):
-            result.append(headlines_tuple[len(result)])
-        return result[:len(headlines_tuple)]
-    except Exception:
-        return list(headlines_tuple)
+    return [translate_text(h) for h in headlines_tuple]
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
