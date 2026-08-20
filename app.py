@@ -23459,11 +23459,15 @@ def _fetch_daily_changes_for_tickers(tickers_tuple: tuple) -> dict:
                 continue
             prev = float(close.iloc[-2])
             cur  = float(close.iloc[-1])
+            # 小数を丸めておく（生の浮動小数のままだと、この結果をそのままJSON化して
+            # 別のAI呼び出しのキャッシュキーに使っている箇所で、株価のごく僅かな
+            # ティック変動のたびにキーが変わってしまい、意図した「1時間キャッシュ」が
+            # 実質数分おきに再生成されAIクォータを無駄に消費する原因になっていた）
             result[ticker] = {
-                "cur_price":      cur,
-                "prev_close":     prev,
-                "day_change":     cur - prev,
-                "day_change_pct": (cur - prev) / prev * 100 if prev > 0 else 0.0,
+                "cur_price":      round(cur, 2),
+                "prev_close":     round(prev, 2),
+                "day_change":     round(cur - prev, 2),
+                "day_change_pct": round((cur - prev) / prev * 100, 1) if prev > 0 else 0.0,
             }
         except Exception:
             pass
