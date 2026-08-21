@@ -29725,7 +29725,7 @@ def render_claude_trading_project():
                                 _div_rows.append({
                                     "_sort": _r1 if _r1 is not None else -1e9,
                                     "銘柄":  _KNOWN_NAMES.get(_c["ticker"], _c["ticker"]),
-                                    "コード": _c["ticker"],
+                                    "コード": f"https://finance.yahoo.com/quote/{_c['ticker']}",
                                     "実績1年リターン": f"{_r1:+.1f}%" if _r1 is not None else "-",
                                     "実績3年リターン": f"{_r3:+.1f}%" if _r3 is not None else "-",
                                     "1年で到達": "✅" if _match_1y else "",
@@ -29743,7 +29743,12 @@ def render_claude_trading_project():
                                     "到達した分散候補銘柄は見つかりませんでした（AI/半導体テーマ特有の急騰だった"
                                     "可能性が高いです）。参考までにリターン上位を表示します。"
                                 )
-                            st.dataframe(pd.DataFrame(_div_rows[:15]), hide_index=True, use_container_width=True)
+                            st.dataframe(
+                                pd.DataFrame(_div_rows[:15]), hide_index=True, use_container_width=True,
+                                column_config={
+                                    "コード": st.column_config.LinkColumn("コード", display_text=r"quote/(.*)"),
+                                },
+                            )
                             st.caption("※ 実績リターンは配当を含まない株価ベース。過去の実績であり将来を保証するものではありません。")
 
                     # ── 銘柄別配分の推移（%）─────────────────────────────
