@@ -922,19 +922,19 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
                 result, groq_model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
                 if groq_model:
                     return result, f"Groq ({groq_model}) ※Gemini quota超過"
-            if NVIDIA_API_KEY:
-                result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-                if nv_model:
-                    return result, f"NVIDIA ({nv_model}) ※Gemini/Groq失敗"
             if DEEPSEEK_API_KEY:
                 result, ds_model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
                 if ds_model:
-                    return result, f"DeepSeek ({ds_model}) ※Gemini/Groq/NVIDIA失敗"
+                    return result, f"DeepSeek ({ds_model}) ※Gemini/Groq失敗"
+            if NVIDIA_API_KEY:
+                result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+                if nv_model:
+                    return result, f"NVIDIA ({nv_model}) ※Gemini/Groq/DeepSeek失敗"
             if OPENROUTER_API_KEY:
                 result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
                 if or_model:
-                    return result, f"OpenRouter ({or_model}) ※Gemini/Groq/NVIDIA/DeepSeek失敗"
-            return ("⚠️ Gemini quota超過・Groq失敗・NVIDIA失敗・DeepSeek失敗・OpenRouter未設定。", "none")
+                    return result, f"OpenRouter ({or_model}) ※Gemini/Groq/DeepSeek/NVIDIA失敗"
+            return ("⚠️ Gemini quota超過・Groq失敗・DeepSeek失敗・NVIDIA失敗・OpenRouter未設定。", "none")
 
         return (f"⚠️ Gemini APIエラー。\n詳細: {last_error_msg}", "none")
 
@@ -943,15 +943,15 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
         if groq_model:
             return result, f"Groq ({groq_model})"
 
-    if NVIDIA_API_KEY:
-        result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if nv_model:
-            return result, f"NVIDIA ({nv_model})"
-
     if DEEPSEEK_API_KEY:
         result, ds_model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if ds_model:
             return result, f"DeepSeek ({ds_model})"
+
+    if NVIDIA_API_KEY:
+        result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if nv_model:
+            return result, f"NVIDIA ({nv_model})"
 
     if OPENROUTER_API_KEY:
         result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
@@ -975,15 +975,15 @@ def _call_ai_for_trading(
         text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
             return text, f"Groq ({model})"
-        # Groq 失敗時は NVIDIA → DeepSeek → OpenRouter へ
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"NVIDIA ({model}) ※Groq失敗"
+        # Groq 失敗時は DeepSeek → NVIDIA → OpenRouter へ
         text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
-            return text, f"DeepSeek ({model}) ※Groq/NVIDIA失敗"
+            return text, f"DeepSeek ({model}) ※Groq失敗"
+        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if model:
+            return text, f"NVIDIA ({model}) ※Groq/DeepSeek失敗"
         text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"OpenRouter ({model}) ※Groq/NVIDIA/DeepSeek失敗") if model else ("⚠️ Groq/NVIDIA/DeepSeek/OpenRouter 失敗", "none")
+        return (text, f"OpenRouter ({model}) ※Groq/DeepSeek/NVIDIA失敗") if model else ("⚠️ Groq/DeepSeek/NVIDIA/OpenRouter 失敗", "none")
 
     elif model_pref == "nvidia":
         text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
@@ -1017,15 +1017,15 @@ def _call_ai_for_trading(
         text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
             return text, f"OpenRouter ({model})"
-        # OpenRouter 失敗時は Groq → NVIDIA → DeepSeek へ
+        # OpenRouter 失敗時は Groq → DeepSeek → NVIDIA へ
         text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
         if model:
             return text, f"Groq ({model}) ※OpenRouter失敗"
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"NVIDIA ({model}) ※OpenRouter/Groq失敗"
         text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"DeepSeek ({model}) ※OpenRouter/Groq/NVIDIA失敗") if model else ("⚠️ OpenRouter/Groq/NVIDIA/DeepSeek 失敗", "none")
+        if model:
+            return text, f"DeepSeek ({model}) ※OpenRouter/Groq失敗"
+        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+        return (text, f"NVIDIA ({model}) ※OpenRouter/Groq/DeepSeek失敗") if model else ("⚠️ OpenRouter/Groq/DeepSeek/NVIDIA 失敗", "none")
 
     elif model_pref == "gemini":
         # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
@@ -19540,7 +19540,7 @@ def render_ticker_chart_compare(key_prefix: str = "main"):
     st.caption("移動平均・RSI・52週レンジ・季節性パターンを総合し、AIがチャートを読み解きます。")
 
     _ai_model_opts = {
-        "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）": "auto",
+        "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）": "auto",
         "🟡 Gemini": "gemini",
         "⚡ Groq（高速）": "groq",
         "🌐 OpenRouter": "openrouter",
@@ -26771,13 +26771,13 @@ def render_claude_trading_project():
                 _ai_btn_label = (
                     "🔄 AIスコアを再生成" if _ai_sc_existing else "🤖 AIスコアを統合（ニュース・ファンダも評価）"
                 )
-                _ai_model_sel = st.session_state.get("rec_model_sel", "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）")
+                _ai_model_sel = st.session_state.get("rec_model_sel", "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）")
                 _ai_mp = {
-                    "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）": "auto",
+                    "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）": "auto",
                     "🟡 Gemini（Google）":               "gemini",
                     "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                     "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
-                }.get(_ai_mp if isinstance((_ai_mp := st.session_state.get("rec_model_sel","🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）")), str) else "", "auto")
+                }.get(_ai_mp if isinstance((_ai_mp := st.session_state.get("rec_model_sel","🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）")), str) else "", "auto")
 
                 _ai_btn_col1, _ai_btn_col2 = st.columns([2, 1])
                 _ai_blend_val = _ai_btn_col2.slider(
@@ -27118,7 +27118,7 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
             _rec_model_opts = {
-                "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）": "auto",
+                "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）": "auto",
                 "🟡 Gemini（Google）":               "gemini",
                 "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                 "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
@@ -27437,7 +27437,7 @@ def render_claude_trading_project():
             st.session_state["_ip_risk_key"] = "balanced"
             _ip_model_opts = {
                 "🔄 自動": "auto", "🟡 Gemini": "gemini", "⚡ Groq": "groq",
-                "💚 NVIDIA": "nvidia", "🐋 DeepSeek": "deepseek", "🌐 OpenRouter": "openrouter",
+                "🐋 DeepSeek": "deepseek", "💚 NVIDIA": "nvidia", "🌐 OpenRouter": "openrouter",
             }
             _ip_model_sel = _ip_c3.selectbox(
                 "AIモデル", list(_ip_model_opts.keys()),
@@ -28145,7 +28145,7 @@ def render_claude_trading_project():
 
             # モデル選択
             _model_opts = {
-                "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）": "auto",
+                "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）": "auto",
                 "🟡 Gemini（Google）":               "gemini",
                 "⚡ Groq（Llama-3.3 70B・高速）":    "groq",
                 "🌐 OpenRouter（DeepSeek/Qwen等）":  "openrouter",
@@ -30120,7 +30120,7 @@ def render_claude_trading_project():
                         unsafe_allow_html=True,
                     )
                     _pnl_model_opts = {
-                        "🔄 自動（Gemini→Groq→NVIDIA→DeepSeek→OpenRouter）": "auto",
+                        "🔄 自動（Gemini→Groq→DeepSeek→NVIDIA→OpenRouter）": "auto",
                         "🟡 Gemini（Google）":              "gemini",
                         "⚡ Groq（高速）":                  "groq",
                         "🌐 OpenRouter":                    "openrouter",
@@ -31023,8 +31023,8 @@ def main():
             "DeepL": "✅" if DEEPL_API_KEY else "❌",
             "Gemini": "✅" if GEMINI_API_KEY else "❌",
             "Groq": "✅" if GROQ_API_KEY else "❌",
-            "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "DeepSeek": "✅" if DEEPSEEK_API_KEY else "❌",
+            "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
             t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
             t("SendGrid (メール認証)", "SendGrid (email verification)"): "✅" if (SENDGRID_API_KEY and SENDGRID_FROM_EMAIL) else "❌",
@@ -31034,8 +31034,8 @@ def main():
         active_ai = []
         if GEMINI_API_KEY: active_ai.append("Gemini")
         if GROQ_API_KEY: active_ai.append("Groq")
-        if NVIDIA_API_KEY: active_ai.append("NVIDIA")
         if DEEPSEEK_API_KEY: active_ai.append("DeepSeek")
+        if NVIDIA_API_KEY: active_ai.append("NVIDIA")
         if OPENROUTER_API_KEY: active_ai.append("OpenRouter")
         chain_str = " → ".join(active_ai) if active_ai else t("未設定", "Not configured")
         st.caption(f"🤖 AI chain: {chain_str}")
@@ -31047,8 +31047,8 @@ GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
 DEEPL_API_KEY = "your_key:fx"
 GEMINI_API_KEY = "your_key"
 GROQ_API_KEY = "gsk_..."
-NVIDIA_API_KEY = "nvapi-..."
 DEEPSEEK_API_KEY = "sk-..."
+NVIDIA_API_KEY = "nvapi-..."
 OPENROUTER_API_KEY = "sk-or-..."
 SENDGRID_API_KEY = "SG...."
 SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification済みのアドレス
