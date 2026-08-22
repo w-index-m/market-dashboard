@@ -29314,10 +29314,13 @@ def render_claude_trading_project():
                     # 確立し切っていない/一時的に切れているタイミングと重なり「Error: not
                     # connected to a server!」になりやすかった。ボタンクリック後（＝WS接続が
                     # 確実に生きているタイミング）にだけdownload_buttonを描画するよう変更する。
+                    # _dl_dateは後段の「前日比（0時基準）」用スナップショット参照でも使うため、
+                    # ダウンロード準備ボタンの押下有無に関わらず必ず定義する
+                    # （ボタン内だけで定義すると、未クリック時にUnboundLocalErrorになっていた）
+                    _dl_date = datetime.now(JST).strftime("%Y-%m-%d")
                     if _privacy:
                         st.caption("🙈 金額非表示モード中はダウンロードできません（画面共有時に金額を漏らさないため）。")
                     elif st.button("📥 ダウンロード準備（CSV/Excel）", key="pnl_dl_prepare"):
-                        _dl_date = datetime.now(JST).strftime("%Y-%m-%d")
                         _dl_df = pd.DataFrame(pnl_rows)
                         _dl_df.insert(0, "分類", _dl_categories)
                         _dl_df["分類"] = pd.Categorical(
