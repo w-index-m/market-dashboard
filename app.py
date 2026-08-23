@@ -24054,23 +24054,94 @@ _SECTOR_NAME_MAP_JA = {
 }
 
 
+_DIVIDEND_CACHE_HEADERS = ["ticker", "data_json", "cached_at"]
+
+
+def _load_dividend_sheets_cache(ticker: str, max_age_days: int = 3) -> pd.Series | None:
+    """配当履歴のGoogle Sheetsキャッシュを読む（cached_atがmax_age_days以内なら使う）。
+    st.cache_dataはStreamlitプロセスの再起動（デプロイ・スリープ復帰）のたびに消えて
+    しまい、その直後の表示はまた毎回フルの配当履歴取得（yfinance→Tiingo→Finnhub）が
+    走って遅くなる。配当履歴は保有株数とは無関係な銘柄側のデータで、支払い頻度も
+    年数回程度なので、数日単位の鮮度判定で十分と判断し、プロセス再起動をまたいで
+    有効な永続キャッシュとしてSheetsに保存する。
+    Returns: pd.Series（index=Timestamp, value=1株あたり配当額）or None（無い/期限切れ）
+    """
+    import json as _json
+    try:
+        ws = _trading_ws("dividend_cache", _DIVIDEND_CACHE_HEADERS)
+        if not ws:
+            return None
+        for r in reversed(ws.get_all_records()):
+            if r.get("ticker") != ticker:
+                continue
+            try:
+                _cached_at = datetime.strptime(r.get("cached_at", ""), "%Y-%m-%d %H:%M")
+            except ValueError:
+                return None
+            if (datetime.now() - _cached_at).days >= max_age_days:
+                return None
+            raw = r.get("data_json", "")
+            if not raw:
+                return None
+            _data = _json.loads(raw)
+            if not _data:
+                return pd.Series(dtype=float)
+            return pd.Series({pd.Timestamp(k): v for k, v in _data.items()}).sort_index()
+    except Exception as e:
+        logger.warning(f"[trading] dividend_cache読込失敗 {ticker}: {e}")
+    return None
+
+
+def _save_dividend_sheets_cache(ticker: str, div: pd.Series) -> bool:
+    """配当履歴をGoogle Sheetsにキャッシュ保存する（同じtickerの行があれば上書き）。"""
+    import json as _json
+    try:
+        ws = _trading_ws("dividend_cache", _DIVIDEND_CACHE_HEADERS)
+        if not ws:
+            return False
+        _data = {str(idx.date()): float(v) for idx, v in div.items()}
+        data_json = _json.dumps(_data, ensure_ascii=False)
+        if len(data_json) > 49000:
+            data_json = data_json[:49000]  # Sheetsセル上限50,000文字
+        now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+        row_num = None
+        for i, r in enumerate(ws.get_all_records()):
+            if r.get("ticker") == ticker:
+                row_num = i + 2
+                break
+        if row_num:
+            ws.update([[ticker, data_json, now_str]], f"A{row_num}:C{row_num}", value_input_option="RAW")
+        else:
+            ws.append_row([ticker, data_json, now_str])
+        return True
+    except Exception as e:
+        logger.warning(f"[trading] dividend_cache保存失敗 {ticker}: {e}")
+        return False
+
+
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
 def _fetch_dividend_history(ticker: str) -> pd.Series:
-    """銘柄の配当履歴を返す。yfinance→Tiingo→Finnhubの順にフォールバックする
-    （現在値取得等と同様、yfinanceの配当履歴取得はレート制限で失敗しやすいため）。
+    """銘柄の配当履歴を返す。まずSheetsの永続キャッシュ（3日以内なら使用）を確認し、
+    無ければyfinance→Tiingo→Finnhubの順にフォールバックする（現在値取得等と同様、
+    yfinanceの配当履歴取得はレート制限で失敗しやすいため）。
     TiingoのdivCash・Finnhubの/stock/dividendはyfinanceの.dividendsと違い日本株
     （.T）には対応していないため、日本株はFinnhubをスキップしてyfinance→Tiingoのみ。
     過去15ヶ月分（実績6ヶ月表示＋予想配当の前年同月参照に必要な期間）を取得する。
     Returns: pd.Series（index=Timestamp、value=1株あたり配当額）。取得失敗時は空Series。
     """
+    _cached = _load_dividend_sheets_cache(ticker)
+    if _cached is not None:
+        return _cached
+
+    div = None
     try:
-        div = yf.Ticker(ticker).dividends
-        if div is not None and len(div) > 0:
-            return div
+        _d = yf.Ticker(ticker).dividends
+        if _d is not None and len(_d) > 0:
+            div = _d
     except Exception:
         pass
 
-    if TIINGO_API_KEY:
+    if div is None and TIINGO_API_KEY:
         try:
             start = (pd.Timestamp.now() - pd.DateOffset(months=15)).strftime("%Y-%m-%d")
             resp = requests.get(
@@ -24085,11 +24156,11 @@ def _fetch_dividend_history(ticker: str) -> pd.Series:
                     if _amt:
                         divs[pd.Timestamp(str(r["date"])[:10], tz="UTC")] = float(_amt)
                 if divs:
-                    return pd.Series(divs).sort_index()
+                    div = pd.Series(divs).sort_index()
         except Exception:
             pass
 
-    if FINNHUB_API_KEY and not ticker.endswith(".T"):
+    if div is None and FINNHUB_API_KEY and not ticker.endswith(".T"):
         try:
             _from = (pd.Timestamp.now() - pd.DateOffset(months=15)).strftime("%Y-%m-%d")
             _to   = pd.Timestamp.now().strftime("%Y-%m-%d")
@@ -24105,11 +24176,15 @@ def _fetch_dividend_history(ticker: str) -> pd.Series:
                     if _amt and _d:
                         divs[pd.Timestamp(_d, tz="UTC")] = float(_amt)
                 if divs:
-                    return pd.Series(divs).sort_index()
+                    div = pd.Series(divs).sort_index()
         except Exception:
             pass
 
-    return pd.Series(dtype=float)
+    if div is None:
+        div = pd.Series(dtype=float)
+
+    _save_dividend_sheets_cache(ticker, div)
+    return div
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
