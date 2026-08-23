@@ -24338,10 +24338,15 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
     return {}
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _compute_portfolio_summary(username: str = "") -> dict:
     """ポートフォリオサマリー計算。Yahoo Finance スタイルの4カードに必要なデータを返す。
     username: 空なら現在ログイン中ユーザー（_load_trades()のデフォルト挙動）。
+    ttlはTTL_DAILY（1h）。保有銘柄が多いと計算コストが大きいため、時間経過だけで
+    頻繁に再計算するより、実際に取引記録が変わった時（_save_trade/_update_trade_row/
+    _delete_trade_row呼び出し後）にst.cache_data.clear()で明示的に無効化する運用に
+    寄せている（サマリータブが毎回重いという体感速度の問題への対応）。今すぐ最新の
+    株価に更新したい場合はサイドバーの「🔄 キャッシュクリア&更新」を使う。
     Returns: {
         "positions": {ticker: {name, qty, avg_cost, cost, cur_price, market_value, gain, gain_pct, is_jp, sector}},
         "dividends": {ticker: {is_jp, divs_by_month: {YYYY-MM: amount_in_native_currency}}},
