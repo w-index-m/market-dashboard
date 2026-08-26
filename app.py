@@ -24271,24 +24271,28 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
             adr_close = adr_hist["Close"].dropna() if not adr_hist.empty else pd.Series(dtype=float)
             if len(adr_close) == 0:
                 return {}
-            adr_price = float(adr_close.iloc[-1])
-            adr_date  = adr_close.index[-1]
+            adr_date  = adr_close.index[-1]  # as_of表示用（fast_infoには日付情報が無い）
 
             # OTC ADR（フジクラ等）は出来高が薄く、.history()の日足に数日分の欠測が
-            # あることがある。その状態でiloc[-2]（1つ前の行）を「前日終値」として
-            # 使うと、実際には数日〜数週間前の値と比較することになり騰落率が大きく
-            # 狂う（他サイトの実際のADR騰落率と全然合わないバグの原因）。Yahoo自身が
-            # 別途維持しているfast_info.previousCloseの方が、飛び石の日足より信頼
-            # できるため、まずこちらを優先し、無ければ.history()の前日行にフォール
-            # バックする。
-            adr_prev = None
+            # あることがある。current priceを.history()のiloc[-1]、previous closeを
+            # fast_info.previousCloseのように別ソースを混在させると、それぞれが
+            # 参照している「直近営業日」がズレて騰落率が大きく狂う
+            # （Bloomberg/nikkei225jp.com等の実際のADR騰落率と合わないバグの原因）。
+            # current・previousとも同じfast_infoから揃えて取得し、内部矛盾を無くす。
+            # fast_infoが使えない場合のみ.history()の直近2行にフォールバックする。
+            adr_price, adr_prev = None, None
             try:
                 _fi = adr_tk.fast_info
+                _fi_last = _fi.get("lastPrice") or _fi.get("last_price")
                 _fi_prev = _fi.get("previousClose") or _fi.get("previous_close")
+                if _fi_last:
+                    adr_price = float(_fi_last)
                 if _fi_prev:
                     adr_prev = float(_fi_prev)
             except Exception:
                 pass
+            if adr_price is None:
+                adr_price = float(adr_close.iloc[-1])
             if adr_prev is None and len(adr_close) > 1:
                 adr_prev = float(adr_close.iloc[-2])
 
