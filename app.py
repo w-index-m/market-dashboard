@@ -24266,14 +24266,33 @@ def _fetch_extended_hours_price(ticker: str) -> dict:
         if not adr_ticker:
             return {}
         try:
-            adr_hist  = yf.Ticker(adr_ticker).history(period="5d")
+            adr_tk    = yf.Ticker(adr_ticker)
+            adr_hist  = adr_tk.history(period="5d")
             adr_close = adr_hist["Close"].dropna() if not adr_hist.empty else pd.Series(dtype=float)
             if len(adr_close) == 0:
                 return {}
             adr_price = float(adr_close.iloc[-1])
-            adr_prev  = float(adr_close.iloc[-2]) if len(adr_close) > 1 else None
-            adr_chg   = (adr_price / adr_prev - 1) * 100 if adr_prev else None
             adr_date  = adr_close.index[-1]
+
+            # OTC ADR（フジクラ等）は出来高が薄く、.history()の日足に数日分の欠測が
+            # あることがある。その状態でiloc[-2]（1つ前の行）を「前日終値」として
+            # 使うと、実際には数日〜数週間前の値と比較することになり騰落率が大きく
+            # 狂う（他サイトの実際のADR騰落率と全然合わないバグの原因）。Yahoo自身が
+            # 別途維持しているfast_info.previousCloseの方が、飛び石の日足より信頼
+            # できるため、まずこちらを優先し、無ければ.history()の前日行にフォール
+            # バックする。
+            adr_prev = None
+            try:
+                _fi = adr_tk.fast_info
+                _fi_prev = _fi.get("previousClose") or _fi.get("previous_close")
+                if _fi_prev:
+                    adr_prev = float(_fi_prev)
+            except Exception:
+                pass
+            if adr_prev is None and len(adr_close) > 1:
+                adr_prev = float(adr_close.iloc[-2])
+
+            adr_chg = (adr_price / adr_prev - 1) * 100 if adr_prev else None
             return {
                 "price": adr_price, "change_pct": adr_chg,
                 "label": "ADR", "adr_ticker": adr_ticker,
