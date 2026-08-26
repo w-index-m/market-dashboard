@@ -30503,21 +30503,16 @@ def render_claude_trading_project():
                             '</div>'
                         )
 
-                    # 来月以降の予想配当（前年同月実績ベース・あくまで参考値）。個別株の
+                    # 今月以降の予想配当（前年同月実績ベース・あくまで参考値）。個別株の
                     # 明細（下のdetail_rows）を挟まず、実績の月別合計に直接続けて表示する。
+                    # 今月分がすでに実績側（月別合計）に計上済みかどうかは区別せず、月ごとの
+                    # 合計だけシンプルに出す（銘柄別の権利落ちチェックはしない）。
                     _proj_months = []
-                    for i in range(1, 7):
+                    for i in range(0, 7):
                         _pm = (now.month - 1 + i) % 12 + 1
                         _py = now.year + ((now.month - 1 + i) // 12)
                         _proj_months.append((_py, _pm))
                     _proj_month_totals = {f"{y:04d}-{m:02d}": 0.0 for y, m in _proj_months}
-                    # 今月（進行中）に権利落ちが見込まれる銘柄一覧（前年同月実績ベース）。
-                    # 「来月以降」の予想には今月自体は含まれない（実績側で集計される想定の
-                    # ため）が、月の途中では実績側がまだ0のことが多く「今月どの銘柄が来る
-                    # 予定か」が分からない、という要望に応えるため個別に一覧化する。
-                    _this_month_key = f"{now.year:04d}-{now.month:02d}"
-                    _this_month_last_year_key = f"{now.year - 1:04d}-{now.month:02d}"
-                    _this_month_rows = []
                     # 銘柄ごとに独立した配当履歴取得（yfinance→Tiingo→Finnhubのフォール
                     # バックを含む）なので、逐次実行だとサマリータブ全体の表示が遅くなる。
                     # _compute_portfolio_summary側と同様にThreadPoolExecutorで並行化する。
@@ -30541,19 +30536,6 @@ def render_claude_trading_project():
                                 if _per_share:
                                     _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
                                     _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
-                            # 今月分はすでに実績（dividends[_tk]）に権利落ちが記録済みなら
-                            # 二重表示になるためスキップし、まだ実績が無い銘柄だけを見込みとして拾う
-                            _already_realized = bool(
-                                dividends.get(_tk, {}).get("divs_by_month", {}).get(_this_month_key)
-                            )
-                            _this_ps = _hist.get(_this_month_last_year_key)
-                            if _this_ps and not _already_realized:
-                                _name_tk = _p.get("name", _tk)
-                                _label_tk = f"{_tk}（{_name_tk}）" if _name_tk != _tk else _tk
-                                _ps_disp = _to_display(_this_ps, _is_jp_tk)
-                                _amt_tk = _to_display(_this_ps * _p["qty"], _is_jp_tk)
-                                _this_month_rows.append((_label_tk, _ps_disp, _p["qty"], _amt_tk))
-                    _this_month_rows.sort(key=lambda r: r[3], reverse=True)
                     _proj_rows_html = ""
                     for _y, _m in _proj_months:
                         _key = f"{_y:04d}-{_m:02d}"
@@ -30572,27 +30554,6 @@ def render_claude_trading_project():
                         '<div style="font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:6px">月別合計</div>'
                         + _month_rows_html
                     )
-                    if _this_month_rows:
-                        _this_month_rows_html = ""
-                        for _label_tk, _ps_disp, _qty_tk, _amt_tk in _this_month_rows:
-                            _ps_str  = f"{cur_label} {_ps_disp:,.2f}"
-                            _amt_str_tk = f"{cur_label} {_amt_tk:,.0f}" if use_jpy else f"{cur_label} {_amt_tk:,.2f}"
-                            _this_month_rows_html += (
-                                '<div style="display:flex;justify-content:space-between;gap:8px;'
-                                'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
-                                f'<span style="color:#e2e8f0;font-weight:600">{_label_tk}</span>'
-                                f'<span style="color:#64748b">{_mvs(_ps_str)} × {_qty_tk}株</span>'
-                                f'<span style="color:#34d399;font-weight:700">{_mvs(_amt_str_tk)}</span>'
-                                '</div>'
-                            )
-                        _combined_div_html += (
-                            f'<div style="font-size:12px;font-weight:700;color:#34d399;margin:10px 0 6px">'
-                            f'📅 {now.month}月に権利落ち見込みの銘柄（前年同月実績ベース）</div>'
-                            + _this_month_rows_html +
-                            '<div style="font-size:11px;color:#64748b;margin-top:6px">'
-                            '※ 前年同月に実際に配当があった銘柄のうち、今月まだ実績が記録されていない'
-                            'ものの一覧です（実際の権利落ち日・金額は変わる場合があります）。</div>'
-                        )
                     if any(v > 0 for v in _proj_month_totals.values()):
                         _combined_div_html += (
                             '<div style="font-size:12px;font-weight:700;color:#a78bfa;margin:10px 0 6px">'
