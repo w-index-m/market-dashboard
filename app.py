@@ -24086,7 +24086,15 @@ def _load_dividend_sheets_cache(ticker: str, max_age_days: int = 3) -> pd.Series
             _data = _json.loads(raw)
             if not _data:
                 return pd.Series(dtype=float)
-            return pd.Series({pd.Timestamp(k): v for k, v in _data.items()}).sort_index()
+            # tz="UTC"を明示しないとtz-naiveなDatetimeIndexになり、呼び出し側
+            # （_fetch_dividend_by_month_extended等）がtz-aware（tz="UTC"）な
+            # cutoffと比較する際にTypeErrorで例外落ち→exceptで握りつぶされて
+            # その銘柄の配当が丸ごと消える（表示のたびに銘柄が入れ替わって
+            # 見える原因になっていた）。yfinance/Tiingo/Finnhubの生取得側も
+            # 全てtz付きインデックスを返すため、キャッシュ経由でも揃える。
+            return pd.Series(
+                {pd.Timestamp(k, tz="UTC"): v for k, v in _data.items()}
+            ).sort_index()
     except Exception as e:
         logger.warning(f"[trading] dividend_cache読込失敗 {ticker}: {e}")
     return None
