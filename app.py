@@ -24057,6 +24057,29 @@ _SECTOR_NAME_MAP_JA = {
 _DIVIDEND_CACHE_HEADERS = ["ticker", "data_json", "cached_at"]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_dividend_sheets_cache_all() -> dict:
+    """dividend_cacheシート全体を一度だけ読み込み、ticker→行データのdictを返す。
+    保有銘柄が多いと_load_dividend_sheets_cache()が銘柄ごとに個別へget_all_records()
+    してしまい、Sheets APIへの往復が銘柄数分発生して表示が遅くなる（配当タブ分離後、
+    他のカードに埋もれず単体で待ち時間が体感しやすくなった）。5分キャッシュした
+    シート全体の読み込み結果を全銘柄で共有することで、往復を1回にまとめる。
+    """
+    try:
+        ws = _trading_ws("dividend_cache", _DIVIDEND_CACHE_HEADERS)
+        if not ws:
+            return {}
+        result: dict = {}
+        for r in ws.get_all_records():
+            tk = r.get("ticker")
+            if tk:
+                result[tk] = r  # 同一tickerの行が複数あれば後勝ち（_save側は上書き前提のため通常1行）
+        return result
+    except Exception as e:
+        logger.warning(f"[trading] dividend_cache全件読込失敗: {e}")
+        return {}
+
+
 def _load_dividend_sheets_cache(ticker: str, max_age_days: int = 3) -> pd.Series | None:
     """配当履歴のGoogle Sheetsキャッシュを読む（cached_atがmax_age_days以内なら使う）。
     st.cache_dataはStreamlitプロセスの再起動（デプロイ・スリープ復帰）のたびに消えて
@@ -24068,12 +24091,8 @@ def _load_dividend_sheets_cache(ticker: str, max_age_days: int = 3) -> pd.Series
     """
     import json as _json
     try:
-        ws = _trading_ws("dividend_cache", _DIVIDEND_CACHE_HEADERS)
-        if not ws:
-            return None
-        for r in reversed(ws.get_all_records()):
-            if r.get("ticker") != ticker:
-                continue
+        r = _load_dividend_sheets_cache_all().get(ticker)
+        if r:
             try:
                 _cached_at = datetime.strptime(r.get("cached_at", ""), "%Y-%m-%d %H:%M")
             except ValueError:

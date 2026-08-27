@@ -407,7 +407,15 @@ def _sheets_client():
         return None
 
 
+@st.cache_resource(show_spinner=False)
 def _sheets_ws(tab: str, headers: List[str]):
+    """指定タブのgspread Worksheetハンドルを返す。open_by_key→worksheet取得→
+    ヘッダー自己修復チェックの3〜4往復がかかるため、呼び出しのたびに毎回これを
+    やり直すと（例: 配当タブが保有銘柄ごとに1回ずつ呼ぶ等）銘柄数に比例して
+    Sheets APIへの往復が増え、表示が遅くなる（レート制限にも当たりやすくなる）。
+    Worksheetハンドル自体はスプレッドシートのgid参照でしかなく使い回して問題ない
+    ため、_sheets_client()と同様にプロセス内でst.cache_resourceして再利用する。
+    """
     try:
         client = _sheets_client()
         if not client:
