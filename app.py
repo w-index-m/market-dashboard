@@ -24630,6 +24630,24 @@ def _save_daily_asset_category_snapshot(username: str, date: str) -> tuple[bool,
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_asset_category_snapshot_all(username: str) -> list:
+    """asset_category_snapshotシートの指定ユーザー分の行を一度だけ読み込みキャッシュする。
+    前日比・先週比・前月比・前年比の表示だけで1レンダリングにつき最大4回呼ばれるため、
+    毎回get_all_records()で全件スキャンすると往復が積み重なる（配当キャッシュで
+    見つかったのと同じパターン）。5分キャッシュして共有する。
+    """
+    try:
+        ws = _trading_ws("asset_category_snapshot", _ASSET_CATEGORY_SNAPSHOT_HEADERS)
+        if not ws:
+            return []
+        u = username or "admin"
+        return [r for r in ws.get_all_records() if str(r.get("username")) == u]
+    except Exception as e:
+        logger.warning(f"[trading] asset_category_snapshot全件読込失敗: {e}")
+        return []
+
+
 def _load_asset_category_snapshot(username: str, target_date: str) -> dict | None:
     """asset_category_snapshotシートから、指定ユーザーの「target_date当日、無ければ
     それより前で一番新しい日付」の1行を返す（00:00 JSTのcronが何らかの理由で失敗して
@@ -24637,12 +24655,10 @@ def _load_asset_category_snapshot(username: str, target_date: str) -> dict | Non
     Returns: {"date", "日本株", "米国株", "投資信託", "債券", "total_value_jpy"} or None
     """
     try:
-        ws = _trading_ws("asset_category_snapshot", _ASSET_CATEGORY_SNAPSHOT_HEADERS)
-        if not ws:
-            return None
-        records = ws.get_all_records()
-        u = username or "admin"
-        rows = [r for r in records if str(r.get("username")) == u and str(r.get("date")) <= target_date]
+        rows = [
+            r for r in _load_asset_category_snapshot_all(username)
+            if str(r.get("date")) <= target_date
+        ]
         if not rows:
             return None
         rows.sort(key=lambda r: str(r.get("date")))
@@ -29556,23 +29572,39 @@ def render_claude_trading_project():
                         _vt_series = _fetch_vt_price_series()
 
                         # ── 先週比・前月比・前年比 ──────────────────────
-                        # 実際の取引履歴ベースの評価額推移（_pnl_hist_df）を使うため、
-                        # 前日比（保有株数固定＋当日株価）とは異なり、期間中の入金・買い増しの
-                        # 影響も含めた「実際の資産推移」になる
+                        # _pnl_hist_df（取引記録×yfinance日足終値の再計算）は投資信託を
+                        # 除外している（投信は日次終値をyfinanceから取得できないため）。
+                        # そのため投信を多く保有していると実際の資産増減とズレる
+                        # （MoneyForward等の総資産増減と大きく違って見える一因）。
+                        # asset_category_snapshot（00:00 JSTの専用cronが投信のNAVも含めて
+                        # 記録）に対象日時点のデータがあればそちらを優先し、無ければ
+                        # 従来通り_pnl_hist_dfにフォールバックする。
+                        _cur_val_incl_funds = _mkt_val_jpy if _total_cost_jpy > 0 else None
                         _cur_val = float(_pnl_hist_df["portfolio_value"].iloc[-1])
 
                         def _period_chg_html(_label, _target_date):
-                            _past_val = _value_as_of(_pnl_hist_df, _target_date)
-                            if _past_val is None or _past_val <= 0:
-                                return (
-                                    f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
-                                    f'<div style="font-size:14px;color:#64748b">データ不足</div></div>'
-                                )
-                            _chg = _cur_val - _past_val
+                            _snap = _load_asset_category_snapshot(_usr, _target_date.strftime("%Y-%m-%d"))
+                            if (
+                                _snap and _snap["total_value_jpy"] > 0
+                                and _cur_val_incl_funds is not None
+                                and abs((_target_date - pd.Timestamp(_snap["date"])).days) <= 10
+                            ):
+                                _past_val = _snap["total_value_jpy"]
+                                _chg = _cur_val_incl_funds - _past_val
+                                _note = ""
+                            else:
+                                _past_val = _value_as_of(_pnl_hist_df, _target_date)
+                                if _past_val is None or _past_val <= 0:
+                                    return (
+                                        f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
+                                        f'<div style="font-size:14px;color:#64748b">データ不足</div></div>'
+                                    )
+                                _chg = _cur_val - _past_val
+                                _note = "＊"  # 投信を含まない概算値であることを示す
                             _pct = _chg / _past_val * 100
                             _color = "#22c55e" if _chg >= 0 else "#ef4444"
                             return (
-                                f'<div><div style="font-size:11px;color:#64748b">{_label}</div>'
+                                f'<div><div style="font-size:11px;color:#64748b">{_label}{_note}</div>'
                                 f'<div style="font-size:16px;font-weight:700;color:{_color}">'
                                 f'{_mv(f"{_chg:+,.0f}円")}（{_pct:+.2f}%）</div></div>'
                             )
@@ -29585,6 +29617,14 @@ def render_claude_trading_project():
                             + _period_chg_html("前年比", _pnl_today - pd.DateOffset(years=1))
                             + '</div>',
                             unsafe_allow_html=True,
+                        )
+                        st.caption(
+                            "※ ＊が付いている期間は投資信託を除いた概算値（投信の日次価格が"
+                            "取得できないため）。＊が無い期間はasset_category_snapshotの記録"
+                            "（投信含む全保有資産、日本時間0時に記録）に基づく実額です。"
+                            "また、MoneyForward等の家計簿アプリの「総資産」は銀行口座・他証券口座・"
+                            "現金等も含む場合が多く、このアプリが把握できるのは取引記録に入力された"
+                            "範囲のみのため、両者は一致しません。"
                         )
 
                         def _series_return(_s):
