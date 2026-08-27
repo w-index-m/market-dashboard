@@ -26690,9 +26690,9 @@ def render_claude_trading_project():
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    tab_signal, tab_trade, tab_pnl, tab_div, tab_summary = st.tabs([
+    tab_signal, tab_trade, tab_pnl, tab_summary = st.tabs([
         "🤖 AI分析・シグナル", "✏️ 取引記録入力",
-        "💰 損益・ポートフォリオ", "💴 配当", "💹 サマリー",
+        "💰 損益・ポートフォリオ", "💴 配当サマリ",
     ])
 
     # ── タブ①: AI分析・シグナル ────────────────────────────────
@@ -30296,16 +30296,16 @@ def render_claude_trading_project():
                 else:
                     st.info("現在の保有ポジションはありません（全て決済済み）。")
 
-    # ── タブ⑤: 配当 ─────────────────────────────────────────────
-    with tab_div:
-        _auto_restore_login_token("div")
-        _div_tok = st.query_params.get("token", "")
-        _div_usr = _auth_check_session(_div_tok) if _div_tok else ""
-        if _div_usr:
-            st.session_state["_trading_user"] = _div_usr
-            _div_login_disp = _auth_get_users().get(_div_usr, {}).get("display_name") or _div_usr
-            st.caption(f"🔐 ログイン中: {_div_login_disp}（{_div_usr}）")
-        if not _div_usr:
+    # ── タブ⑤: サマリーダッシュボード（配当を含む） ─────────────────
+    with tab_summary:
+        _auto_restore_login_token("summary")
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
+        if not _usr:
             _lc, _ = st.columns([1, 2])
             with _lc:
                 st.markdown(
@@ -30315,24 +30315,24 @@ def render_claude_trading_project():
                     '🔐 ログインが必要です</div>',
                     unsafe_allow_html=True,
                 )
-                _u = st.text_input("ユーザー名", key="tl_u_div")
-                _p = st.text_input("パスワード", type="password", key="tl_p_div")
-                if st.button("ログイン", type="primary", key="tl_b_div"):
-                    if _auth_login_flow(_u, _p, "div_login"):
+                _u = st.text_input("ユーザー名", key="tl_u_summary")
+                _p = st.text_input("パスワード", type="password", key="tl_p_summary")
+                if st.button("ログイン", type="primary", key="tl_b_summary"):
+                    if _auth_login_flow(_u, _p, "summary_login"):
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.markdown("#### 💴 配当")
+            st.markdown("#### 💹 ポートフォリオ サマリー")
 
             # 通貨選択（デフォルトは円表示）
             currency_choice = st.radio(
                 "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"], index=1,
-                horizontal=True, key="div_currency",
+                horizontal=True, key="summary_currency",
             )
             use_jpy = "JPY" in currency_choice
             cur_label = "円" if use_jpy else "USD"
 
-            with st.spinner("配当データを取得中..."):
+            with st.spinner("ポートフォリオデータを取得中..."):
                 summary = _compute_portfolio_summary()
 
             if summary["error"]:
@@ -30347,11 +30347,11 @@ def render_claude_trading_project():
 
                 _privacy_s = st.checkbox(
                     "🙈 金額非表示モード（画面共有時などに金額を隠す。比率・パーセントは表示されます）",
-                    key="div_privacy_mode",
+                    key="summary_privacy_mode",
                 )
 
                 def _mvs(s: str) -> str:
-                    """金額非表示モード用マスク（配当タブ用）。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
+                    """金額非表示モード用マスク（サマリータブ用）。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
                     return "●●●" if _privacy_s else s
 
                 def _to_display(value_native, is_jp: bool) -> float:
@@ -30363,6 +30363,69 @@ def render_claude_trading_project():
                     else:
                         return float(value_native) / usd_jpy if is_jp else float(value_native)
 
+
+                # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;margin-bottom:18px">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '📊 保有株式 損益サマリー</div>',
+                    unsafe_allow_html=True,
+                )
+
+                total_cost = sum(
+                    _to_display(p["cost"], p["is_jp"]) for p in positions.values()
+                )
+                total_mkt = sum(
+                    _to_display(p["market_value"], p["is_jp"])
+                    for p in positions.values() if p["market_value"] is not None
+                )
+                total_gain  = total_mkt - total_cost
+                total_gp    = total_gain / total_cost * 100 if total_cost > 0 else 0
+                gain_color  = "#22c55e" if total_gain >= 0 else "#ef4444"
+                gain_sign   = "+" if total_gain >= 0 else ""
+
+                c_left, c_right = st.columns([3, 1])
+                with c_left:
+                    # 水平バーチャート（元本 vs 評価額）
+                    fig_gl = go.Figure()
+                    fig_gl.add_trace(go.Bar(
+                        y=["コスト", "評価額"],
+                        x=[total_cost, total_mkt],
+                        orientation="h",
+                        marker_color=["#475569", "#3b82f6"],
+                        text=(["", ""] if _privacy_s else [f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"]),
+                        textposition="outside",
+                        textfont=dict(color="#e2e8f0", size=12),
+                        hovertemplate=("%{y}<extra></extra>" if _privacy_s else "%{y}: %{x:,.0f}<extra></extra>"),
+                    ))
+                    fig_gl.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#e2e8f0"),
+                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
+                                   tickformat=",.0f", showticklabels=not _privacy_s),
+                        yaxis=dict(tickfont=dict(color="#e2e8f0")),
+                        margin=dict(l=10, r=60, t=5, b=5),
+                        height=100,
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_gl, use_container_width=True, key="cost_vs_value_fig_summary_tab")
+
+                with c_right:
+                    st.markdown(
+                        f'<div style="text-align:center;padding-top:10px">'
+                        f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
+                        f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
+                        f'{_mvs(f"{gain_sign}{cur_label} {total_gain:,.0f}")}</div>'
+                        f'<div style="font-size:14px;color:{gain_color}">'
+                        f'{gain_sign}{total_gp:.2f}%</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── カード2: 配当金 ────────────────────────────────────
                 st.markdown(
                     '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
                     'padding:18px 20px;margin-bottom:18px">'
@@ -30554,139 +30617,10 @@ def render_claude_trading_project():
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── タブ⑥: サマリーダッシュボード ─────────────────────────────
-    with tab_summary:
-        _auto_restore_login_token("summary")
-        _tok = st.query_params.get("token", "")
-        _usr = _auth_check_session(_tok) if _tok else ""
-        if _usr:
-            st.session_state["_trading_user"] = _usr
-            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
-            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
-        if not _usr:
-            _lc, _ = st.columns([1, 2])
-            with _lc:
-                st.markdown(
-                    '<div style="background:#1e293b;border:1px solid #334155;'
-                    'border-radius:10px;padding:20px 24px;">'
-                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
-                    '🔐 ログインが必要です</div>',
-                    unsafe_allow_html=True,
-                )
-                _u = st.text_input("ユーザー名", key="tl_u_summary")
-                _p = st.text_input("パスワード", type="password", key="tl_p_summary")
-                if st.button("ログイン", type="primary", key="tl_b_summary"):
-                    if _auth_login_flow(_u, _p, "summary_login"):
-                        st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("#### 💹 ポートフォリオ サマリー")
-
-            # 通貨選択（デフォルトは円表示）
-            currency_choice = st.radio(
-                "表示通貨", ["🇺🇸 USD", "🇯🇵 JPY"], index=1,
-                horizontal=True, key="summary_currency",
-            )
-            use_jpy = "JPY" in currency_choice
-            cur_label = "円" if use_jpy else "USD"
-
-            with st.spinner("ポートフォリオデータを取得中..."):
-                summary = _compute_portfolio_summary()
-
-            if summary["error"]:
-                st.error(f"⚠️ {summary['error']}")
-                st.caption("ページを再読み込みしてください。")
-            elif not summary["positions"]:
-                st.info("保有銘柄がまだありません。取引記録を入力してください。")
-            else:
-                positions = summary["positions"]
-                dividends = summary["dividends"]
-                usd_jpy   = summary["usd_jpy"]
-
-                _privacy_s = st.checkbox(
-                    "🙈 金額非表示モード（画面共有時などに金額を隠す。比率・パーセントは表示されます）",
-                    key="summary_privacy_mode",
-                )
-
-                def _mvs(s: str) -> str:
-                    """金額非表示モード用マスク（サマリータブ用）。%や比率はそのまま、金額文字列だけ●●●に置き換える。"""
-                    return "●●●" if _privacy_s else s
-
-                def _to_display(value_native, is_jp: bool) -> float:
-                    """ネイティブ通貨の値を表示通貨に変換"""
-                    if value_native is None:
-                        return 0.0
-                    if use_jpy:
-                        return float(value_native) if is_jp else float(value_native) * usd_jpy
-                    else:
-                        return float(value_native) / usd_jpy if is_jp else float(value_native)
-
-
-                # ── カード1: 含み損益（コスト vs 現在評価額）──────────────
-                st.markdown(
-                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
-                    'padding:18px 20px;margin-bottom:18px">'
-                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                    '📊 保有株式 損益サマリー</div>',
-                    unsafe_allow_html=True,
-                )
-
-                total_cost = sum(
-                    _to_display(p["cost"], p["is_jp"]) for p in positions.values()
-                )
-                total_mkt = sum(
-                    _to_display(p["market_value"], p["is_jp"])
-                    for p in positions.values() if p["market_value"] is not None
-                )
-                total_gain  = total_mkt - total_cost
-                total_gp    = total_gain / total_cost * 100 if total_cost > 0 else 0
-                gain_color  = "#22c55e" if total_gain >= 0 else "#ef4444"
-                gain_sign   = "+" if total_gain >= 0 else ""
-
-                c_left, c_right = st.columns([3, 1])
-                with c_left:
-                    # 水平バーチャート（元本 vs 評価額）
-                    fig_gl = go.Figure()
-                    fig_gl.add_trace(go.Bar(
-                        y=["コスト", "評価額"],
-                        x=[total_cost, total_mkt],
-                        orientation="h",
-                        marker_color=["#475569", "#3b82f6"],
-                        text=(["", ""] if _privacy_s else [f"{cur_label} {total_cost:,.0f}", f"{cur_label} {total_mkt:,.0f}"]),
-                        textposition="outside",
-                        textfont=dict(color="#e2e8f0", size=12),
-                        hovertemplate=("%{y}<extra></extra>" if _privacy_s else "%{y}: %{x:,.0f}<extra></extra>"),
-                    ))
-                    fig_gl.update_layout(
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        font=dict(color="#e2e8f0"),
-                        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#334155",
-                                   tickformat=",.0f", showticklabels=not _privacy_s),
-                        yaxis=dict(tickfont=dict(color="#e2e8f0")),
-                        margin=dict(l=10, r=60, t=5, b=5),
-                        height=100,
-                        showlegend=False,
-                    )
-                    st.plotly_chart(fig_gl, use_container_width=True, key="cost_vs_value_fig_summary_tab")
-
-                with c_right:
-                    st.markdown(
-                        f'<div style="text-align:center;padding-top:10px">'
-                        f'<div style="font-size:11px;color:#94a3b8">含み損益</div>'
-                        f'<div style="font-size:22px;font-weight:700;color:{gain_color}">'
-                        f'{_mvs(f"{gain_sign}{cur_label} {total_gain:,.0f}")}</div>'
-                        f'<div style="font-size:14px;color:{gain_color}">'
-                        f'{gain_sign}{total_gp:.2f}%</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                st.markdown("</div>", unsafe_allow_html=True)
-
-                # ── カード2 & 3 を横並び ─────────────────────────────
+                # ── カード3 & 4 を横並び ─────────────────────────────
                 col3, col4 = st.columns(2)
 
-                # ── カード2: アセットアロケーション ─────────────────
+                # ── カード3: アセットアロケーション ─────────────────
                 with col3:
                     st.markdown(
                         '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
@@ -30742,7 +30676,7 @@ def render_claude_trading_project():
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
-                # ── カード3: セクターアロケーション ─────────────────
+                # ── カード4: セクターアロケーション ─────────────────
                 with col4:
                     st.markdown(
                         '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
@@ -30801,7 +30735,7 @@ def render_claude_trading_project():
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
-                # ── カード4: RSI過熱銘柄 ─────────────────────────────
+                # ── カード5: RSI過熱銘柄 ─────────────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown(
                     '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
