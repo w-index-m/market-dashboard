@@ -24256,55 +24256,94 @@ def _fetch_dividend_by_month_extended(ticker: str, months_back: int = 14) -> dic
         return {}
 
 
-# 配当タブの「おすすめ高配当銘柄」用の固定バスケット（連続増配・大型・安定配当で
-# 広く知られる銘柄を手動選定。個別の投資判断・推奨ではなく参考情報として表示する）
-_JP_HIGH_DIV_BASKET = (
+# 配当タブの「おすすめ高配当銘柄」用の候補プール（連続増配・大型・安定配当で
+# 広く知られる銘柄を手動選定した母集団。ここから毎日、実際に計算した利回りの
+# 上位5銘柄を選び直して表示する＝固定リストではなく日々の株価・配当変動に応じて
+# 顔ぶれが入れ替わる）
+_JP_HIGH_DIV_CANDIDATES = (
     ("8306.T", "三菱UFJフィナンシャル・グループ"),
     ("8058.T", "三菱商事"),
-    ("9433.T", "KDDI"),
     ("8031.T", "三井物産"),
+    ("8001.T", "伊藤忠商事"),
+    ("8002.T", "丸紅"),
+    ("9433.T", "KDDI"),
+    ("9434.T", "ソフトバンク"),
+    ("9432.T", "日本電信電話(NTT)"),
     ("2914.T", "日本たばこ産業(JT)"),
+    ("5401.T", "日本製鉄"),
+    ("8316.T", "三井住友フィナンシャルグループ"),
+    ("8411.T", "みずほフィナンシャルグループ"),
+    ("1605.T", "INPEX"),
+    ("5020.T", "ENEOS"),
+    ("7261.T", "マツダ"),
 )
-_US_HIGH_DIV_BASKET = (
-    ("KO",  "Coca-Cola"),
-    ("PG",  "Procter & Gamble"),
-    ("JNJ", "Johnson & Johnson"),
-    ("XOM", "ExxonMobil"),
-    ("VZ",  "Verizon"),
+_US_HIGH_DIV_CANDIDATES = (
+    ("KO",   "Coca-Cola"),
+    ("PG",   "Procter & Gamble"),
+    ("JNJ",  "Johnson & Johnson"),
+    ("XOM",  "ExxonMobil"),
+    ("VZ",   "Verizon"),
+    ("CVX",  "Chevron"),
+    ("MO",   "Altria"),
+    ("T",    "AT&T"),
+    ("IBM",  "IBM"),
+    ("MMM",  "3M"),
+    ("PFE",  "Pfizer"),
+    ("ABBV", "AbbVie"),
+    ("O",    "Realty Income"),
+    ("MRK",  "Merck"),
+    ("PEP",  "PepsiCo"),
 )
 
 
-@st.cache_data(ttl=3600 * 6, show_spinner=False)
-def _fetch_high_dividend_basket_data(basket: tuple) -> list:
-    """固定の高配当銘柄バスケットについて、現在値・直近1年配当合計・配当利回りを返す。
-    yfinanceの.info['dividendYield']は取得が不安定な場合があるため、他の配当関連
-    ロジックと同様に_fetch_dividend_history()の生データ（直近1年分の合計）÷現在値で
-    自前計算する。
-    Returns: [{"ticker", "name", "is_jp", "price", "ttm_dividend", "yield_pct"}]
+def _fetch_one_high_dividend_stat(ticker: str, name: str) -> dict:
+    """1銘柄の現在値・直近1年配当合計・配当利回りを返す。yfinanceの
+    .info['dividendYield']は取得が不安定な場合があるため、他の配当関連ロジックと
+    同様に_fetch_dividend_history()の生データ（直近1年分の合計）÷現在値で自前計算する。
+    Returns: {"ticker", "name", "is_jp", "price", "ttm_dividend", "yield_pct"}
+    """
+    is_jp = ticker.endswith(".T")
+    price = None
+    try:
+        fi = yf.Ticker(ticker).fast_info
+        price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+    except Exception:
+        pass
+    ttm_div = 0.0
+    try:
+        div_hist = _fetch_dividend_history(ticker)
+        if div_hist is not None and len(div_hist) > 0:
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1)
+            ttm_div = float(div_hist[div_hist.index >= cutoff].sum())
+    except Exception:
+        pass
+    yield_pct = (ttm_div / price * 100) if price else None
+    return {
+        "ticker": ticker, "name": name, "is_jp": is_jp,
+        "price": price, "ttm_dividend": ttm_div, "yield_pct": yield_pct,
+    }
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _pick_top_high_dividend(candidates: tuple, top_n: int = 5) -> list:
+    """候補プール全銘柄の配当利回りを並行計算し、利回り上位N銘柄を返す。
+    固定リストを毎回そのまま出すのではなく実際の利回りで選び直すことで、
+    株価・増減配の変化に応じて表示銘柄が入れ替わるようにする（1日1回再計算）。
     """
     results = []
-    for ticker, name in basket:
-        is_jp = ticker.endswith(".T")
-        price = None
-        try:
-            fi = yf.Ticker(ticker).fast_info
-            price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
-        except Exception:
-            pass
-        ttm_div = 0.0
-        try:
-            div_hist = _fetch_dividend_history(ticker)
-            if div_hist is not None and len(div_hist) > 0:
-                cutoff = pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1)
-                ttm_div = float(div_hist[div_hist.index >= cutoff].sum())
-        except Exception:
-            pass
-        yield_pct = (ttm_div / price * 100) if price else None
-        results.append({
-            "ticker": ticker, "name": name, "is_jp": is_jp,
-            "price": price, "ttm_dividend": ttm_div, "yield_pct": yield_pct,
-        })
-    return results
+    with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as ex:
+        futures = {
+            ex.submit(_fetch_one_high_dividend_stat, tk, nm): (tk, nm)
+            for tk, nm in candidates
+        }
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except Exception:
+                continue
+    valid = [r for r in results if r["yield_pct"] is not None]
+    valid.sort(key=lambda r: r["yield_pct"], reverse=True)
+    return valid[:top_n]
 
 
 # 日本株ティッカー → 米国ADR（米国預託証券）ティッカーの対応表。手動でWeb検索により確認
@@ -30723,7 +30762,7 @@ def render_claude_trading_project():
                     '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
                     'padding:18px 20px;margin-bottom:18px">'
                     '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
-                    '🏆 おすすめ高配当銘柄（日米5銘柄ずつ・参考情報）</div>',
+                    '🏆 おすすめ高配当銘柄（日米各上位5銘柄・毎日更新）</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -30755,7 +30794,7 @@ def render_claude_trading_project():
                         unsafe_allow_html=True,
                     )
                     st.markdown(
-                        _hd_rows_html(_fetch_high_dividend_basket_data(_JP_HIGH_DIV_BASKET), "🇯🇵"),
+                        _hd_rows_html(_pick_top_high_dividend(_JP_HIGH_DIV_CANDIDATES, 5), "🇯🇵"),
                         unsafe_allow_html=True,
                     )
                 with _hd_col_us:
@@ -30765,14 +30804,16 @@ def render_claude_trading_project():
                         unsafe_allow_html=True,
                     )
                     st.markdown(
-                        _hd_rows_html(_fetch_high_dividend_basket_data(_US_HIGH_DIV_BASKET), "🇺🇸"),
+                        _hd_rows_html(_pick_top_high_dividend(_US_HIGH_DIV_CANDIDATES, 5), "🇺🇸"),
                         unsafe_allow_html=True,
                     )
 
                 st.markdown(
                     '<div style="font-size:11px;color:#64748b;margin-top:8px">'
-                    '※ 連続増配・大型・安定配当で広く知られる銘柄を手動で選定した参考情報です'
-                    '（保有銘柄とは無関係・個別の投資推奨ではありません）。利回りは直近1年の'
+                    '※ 連続増配・大型・安定配当で広く知られる銘柄の候補プール（日米各15銘柄）'
+                    'から、実際に計算した配当利回りの上位5銘柄を毎日選び直して表示しています'
+                    '（固定リストではなく、株価・増減配の変化に応じて顔ぶれが入れ替わります）。'
+                    '保有銘柄とは無関係・個別の投資推奨ではありません。利回りは直近1年の'
                     '配当合計÷現在値で算出した実績ベースの参考値で、将来の配当を保証する'
                     'ものではありません。</div>',
                     unsafe_allow_html=True,
