@@ -24256,6 +24256,57 @@ def _fetch_dividend_by_month_extended(ticker: str, months_back: int = 14) -> dic
         return {}
 
 
+# 配当タブの「おすすめ高配当銘柄」用の固定バスケット（連続増配・大型・安定配当で
+# 広く知られる銘柄を手動選定。個別の投資判断・推奨ではなく参考情報として表示する）
+_JP_HIGH_DIV_BASKET = (
+    ("8306.T", "三菱UFJフィナンシャル・グループ"),
+    ("8058.T", "三菱商事"),
+    ("9433.T", "KDDI"),
+    ("8031.T", "三井物産"),
+    ("2914.T", "日本たばこ産業(JT)"),
+)
+_US_HIGH_DIV_BASKET = (
+    ("KO",  "Coca-Cola"),
+    ("PG",  "Procter & Gamble"),
+    ("JNJ", "Johnson & Johnson"),
+    ("XOM", "ExxonMobil"),
+    ("VZ",  "Verizon"),
+)
+
+
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _fetch_high_dividend_basket_data(basket: tuple) -> list:
+    """固定の高配当銘柄バスケットについて、現在値・直近1年配当合計・配当利回りを返す。
+    yfinanceの.info['dividendYield']は取得が不安定な場合があるため、他の配当関連
+    ロジックと同様に_fetch_dividend_history()の生データ（直近1年分の合計）÷現在値で
+    自前計算する。
+    Returns: [{"ticker", "name", "is_jp", "price", "ttm_dividend", "yield_pct"}]
+    """
+    results = []
+    for ticker, name in basket:
+        is_jp = ticker.endswith(".T")
+        price = None
+        try:
+            fi = yf.Ticker(ticker).fast_info
+            price = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+        except Exception:
+            pass
+        ttm_div = 0.0
+        try:
+            div_hist = _fetch_dividend_history(ticker)
+            if div_hist is not None and len(div_hist) > 0:
+                cutoff = pd.Timestamp.now(tz="UTC") - pd.DateOffset(years=1)
+                ttm_div = float(div_hist[div_hist.index >= cutoff].sum())
+        except Exception:
+            pass
+        yield_pct = (ttm_div / price * 100) if price else None
+        results.append({
+            "ticker": ticker, "name": name, "is_jp": is_jp,
+            "price": price, "ttm_dividend": ttm_div, "yield_pct": yield_pct,
+        })
+    return results
+
+
 # 日本株ティッカー → 米国ADR（米国預託証券）ティッカーの対応表。手動でWeb検索により確認
 # したもののみ収録（未確認の推測でティッカーを載せると誤った銘柄の株価を表示しかねないため、
 # 確認が取れていない銘柄は含めていない＝網羅的ではない）
@@ -30665,6 +30716,67 @@ def render_claude_trading_project():
                 else:
                     st.info("配当履歴がありません（過去6ヶ月）。")
 
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── カード2.5: おすすめ高配当銘柄（日米5銘柄ずつ） ────────
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                    'padding:18px 20px;margin-bottom:18px">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:600">'
+                    '🏆 おすすめ高配当銘柄（日米5銘柄ずつ・参考情報）</div>',
+                    unsafe_allow_html=True,
+                )
+
+                def _hd_rows_html(_data, _flag):
+                    _html = ""
+                    for _d in _data:
+                        _price, _yld = _d["price"], _d["yield_pct"]
+                        _price_str = (
+                            (f"{_price:,.0f}円" if _d["is_jp"] else f"${_price:,.2f}")
+                            if _price else "—"
+                        )
+                        _yld_str = f"{_yld:.2f}%" if _yld is not None else "—"
+                        _html += (
+                            '<div style="display:flex;justify-content:space-between;gap:8px;'
+                            'padding:6px 0;border-bottom:1px solid #1e293b;font-size:12px">'
+                            f'<span style="color:#e2e8f0;font-weight:600">'
+                            f'{_flag} {_d["ticker"]}（{_d["name"]}）</span>'
+                            f'<span style="color:#64748b">{_price_str}</span>'
+                            f'<span style="color:#f59e0b;font-weight:700">{_yld_str}</span>'
+                            '</div>'
+                        )
+                    return _html
+
+                _hd_col_jp, _hd_col_us = st.columns(2)
+                with _hd_col_jp:
+                    st.markdown(
+                        '<div style="font-size:12px;font-weight:700;color:#60a5fa;'
+                        'margin-bottom:6px">🇯🇵 日本株</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        _hd_rows_html(_fetch_high_dividend_basket_data(_JP_HIGH_DIV_BASKET), "🇯🇵"),
+                        unsafe_allow_html=True,
+                    )
+                with _hd_col_us:
+                    st.markdown(
+                        '<div style="font-size:12px;font-weight:700;color:#60a5fa;'
+                        'margin-bottom:6px">🇺🇸 米国株</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        _hd_rows_html(_fetch_high_dividend_basket_data(_US_HIGH_DIV_BASKET), "🇺🇸"),
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown(
+                    '<div style="font-size:11px;color:#64748b;margin-top:8px">'
+                    '※ 連続増配・大型・安定配当で広く知られる銘柄を手動で選定した参考情報です'
+                    '（保有銘柄とは無関係・個別の投資推奨ではありません）。利回りは直近1年の'
+                    '配当合計÷現在値で算出した実績ベースの参考値で、将来の配当を保証する'
+                    'ものではありません。</div>',
+                    unsafe_allow_html=True,
+                )
                 st.markdown("</div>", unsafe_allow_html=True)
 
                 # ── カード3 & 4 を横並び ─────────────────────────────
