@@ -26706,6 +26706,27 @@ def render_claude_trading_project():
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
+    # st.tabs()は選択中のタブに関係なく全タブの中身を毎回のスクリプト実行で描画するため
+    # （CLAUDE.md記載の既知の仕様）、後ろのタブ（配当サマリ等）が表示されるまでの体感待ち
+    # 時間は「このページの4タブ全部の処理時間の合計」になる。個々のタブの中身を軽くしても
+    # 待ち時間の実感は消えないため、代わりに進捗（%・残り秒数の目安）を可視化する。
+    # 残り時間は簡易的に「経過時間 ÷ 完了割合 × 残り割合」で概算する（各タブの重さは
+    # 均一ではないため粗い推定だが、無表示よりは体感の助けになる）。
+    _prog_start_t = time.time()
+    _prog_bar = st.progress(0.0, text="⏳ 読み込み中... 0%")
+
+    def _prog_mark(frac: float):
+        frac = min(max(frac, 0.0), 1.0)
+        elapsed = time.time() - _prog_start_t
+        eta_txt = ""
+        if 0.02 < frac < 1.0:
+            eta = elapsed / frac * (1 - frac)
+            eta_txt = f" ｜ 残り約{eta:.0f}秒" if eta >= 1 else " ｜ まもなく完了"
+        if frac >= 1.0:
+            _prog_bar.empty()
+        else:
+            _prog_bar.progress(frac, text=f"⏳ 読み込み中... {frac * 100:.0f}%{eta_txt}")
+
     tab_signal, tab_trade, tab_pnl, tab_summary = st.tabs([
         "🤖 AI分析・シグナル", "✏️ 取引記録入力",
         "💰 損益・ポートフォリオ", "💴 配当サマリ",
@@ -28553,6 +28574,8 @@ def render_claude_trading_project():
                                     unsafe_allow_html=True,
                                 )
 
+    _prog_mark(0.15)
+
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     with tab_trade:
         _auto_restore_login_token("trade")
@@ -28893,6 +28916,8 @@ def render_claude_trading_project():
                     else:
                         st.session_state["_trade_status"] = "warn"
                         st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
+
+    _prog_mark(0.25)
 
     # ── タブ④: 損益・ポートフォリオ ────────────────────────────
     with tab_pnl:
@@ -30336,6 +30361,8 @@ def render_claude_trading_project():
                 else:
                     st.info("現在の保有ポジションはありません（全て決済済み）。")
 
+    _prog_mark(0.70)
+
     # ── タブ⑤: サマリーダッシュボード（配当を含む） ─────────────────
     with tab_summary:
         _auto_restore_login_token("summary")
@@ -30855,6 +30882,8 @@ def render_claude_trading_project():
                     )
 
                 st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
+
+    _prog_mark(1.0)
 
 
 # =====================================================
