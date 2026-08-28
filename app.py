@@ -26752,26 +26752,22 @@ def render_claude_trading_project():
 
         open_pos = _calc_positions_from_df(_trades_df) if not _trades_df.empty else {}
 
-        # Google Sheets接続失敗時の自動リトライ（最大10回、3秒間隔）
-        _SIG_RETRY_KEY = "_signal_tab_gs_retry"
-        _SIG_MAX_RETRY = 10
+        # Google Sheets接続失敗時の手動リトライ。
+        # 以前はここで最大10回・3秒間隔のsleep+st.rerun()による自動リトライをして
+        # いたが、st.rerun()はページ全体（4タブすべての中身）を毎回再実行するため、
+        # 1回あたり数秒〜十数秒かかる処理が10回繰り返され、失敗時に数分単位の待ちに
+        # なっていた。しかも_load_trades()は@st.cache_data(ttl=60)されているため、
+        # 30秒（10回×3秒）のリトライ枠内ではキャッシュされた「同じ失敗結果」を
+        # 引き当て続けるだけで、実際にSheetsへ再接続することすらできていなかった
+        # （_trading_ws側の3回リトライ＋バックオフは既に内部で行われているため、
+        # ここでの外側リトライは実質的に無意味だった）。今は失敗を即座に表示し、
+        # 手動ボタン押下時のみ_load_trades.clear()でキャッシュを破棄してから
+        # 再試行する。
         if _trades_err and _trades_df.empty:
-            _sig_retry_n = st.session_state.get(_SIG_RETRY_KEY, 0)
-            if _sig_retry_n < _SIG_MAX_RETRY:
-                st.session_state[_SIG_RETRY_KEY] = _sig_retry_n + 1
-                st.info(
-                    f"⟳ Google Sheets に接続中... 自動リトライ {_sig_retry_n + 1}/{_SIG_MAX_RETRY}"
-                )
-                time.sleep(3)
+            st.warning(f"⚠️ 取引記録の読み込みに失敗しました: {_trades_err}")
+            if st.button("🔄 再読み込み", key="btn_reload_trades_signal"):
+                _load_trades.clear()
                 st.rerun()
-            else:
-                # 10回失敗したら手動ボタンを表示
-                st.warning(f"⚠️ 取引記録の読み込みに失敗しました: {_trades_err}")
-                if st.button("🔄 再読み込み", key="btn_reload_trades_signal"):
-                    st.session_state[_SIG_RETRY_KEY] = 0
-                    st.rerun()
-        else:
-            st.session_state[_SIG_RETRY_KEY] = 0  # 成功時はリセット
 
         # 選択肢: 保有銘柄のみ
         all_options = {}
@@ -30580,7 +30576,7 @@ def render_claude_trading_project():
                         _y, _mo = _m.split("-")
                         _label_m = f"{int(_y)}年{int(_mo)}月"
                         _amt = month_totals[_m]
-                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
+                        _amt_str = f"{_amt:,.0f} {cur_label}" if use_jpy else f"{cur_label} {_amt:,.2f}"
                         _month_rows_html += (
                             '<div style="display:flex;justify-content:space-between;padding:5px 0;'
                             'border-bottom:1px solid #1e293b;font-size:13px">'
@@ -30626,7 +30622,7 @@ def render_claude_trading_project():
                     for _y, _m in _proj_months:
                         _key = f"{_y:04d}-{_m:02d}"
                         _amt = _proj_month_totals[_key]
-                        _amt_str = f"{cur_label} {_amt:,.0f}" if use_jpy else f"{cur_label} {_amt:,.2f}"
+                        _amt_str = f"{_amt:,.0f} {cur_label}" if use_jpy else f"{cur_label} {_amt:,.2f}"
                         _proj_rows_html += (
                             '<div style="display:flex;justify-content:space-between;padding:5px 0;'
                             'border-bottom:1px solid #1e293b;font-size:13px">'
