@@ -6039,20 +6039,33 @@ def compute_correlation_matrix(period_days: int = 90) -> Dict[str, Any]:
     try:
         end   = datetime.now(timezone.utc)
         start = end - timedelta(days=period_days + 30)
-        prices = {}
-        for name, sym in ASSETS.items():
+
+        def _fetch_one(name: str, sym: str):
             try:
                 df = yf.Ticker(sym).history(
                     start=start, end=end, interval="1d", auto_adjust=False)
                 if df is None or df.empty:
-                    continue
+                    return name, None
                 if df.index.tz is None:
                     df.index = df.index.tz_localize("UTC")
                 c = df.tz_convert(JST)["Close"].dropna()
                 if len(c) >= period_days // 2:
-                    prices[name] = c
+                    return name, c
             except Exception:
-                continue
+                pass
+            return name, None
+
+        # 20資産を1件ずつ逐次取得すると往復が積み重なるため並行化する。
+        prices = {}
+        with ThreadPoolExecutor(max_workers=min(10, len(ASSETS))) as _ex:
+            _futures = [_ex.submit(_fetch_one, name, sym) for name, sym in ASSETS.items()]
+            for _fut in as_completed(_futures):
+                name, c = _fut.result()
+                if c is not None:
+                    prices[name] = c
+        # 並行実行だと完了順がバラつくため、相関行列の行/列順が毎回変わらないよう
+        # 元のASSETS（定義順）に並べ直す。
+        prices = {name: prices[name] for name in ASSETS if name in prices}
 
         if len(prices) < 3:
             return {"ok": False, "reason": "データ不足"}
@@ -6698,10 +6711,12 @@ def compute_composite_sentiment() -> Dict[str, Any]:
 # ===========================
 # NAAIM Exposure Index
 # ===========================
-@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
 def fetch_naaim_data() -> pd.DataFrame:
     """
     NAAIM Exposure Index 取得。全体を30秒でハードタイムアウト。
+    NAAIMサーベイは毎週水曜更新のみなので、TTL_DAILY（1h）でスクレイピングし
+    続けるのはデータの更新頻度に対して過剰。6hに緩めて負荷を減らす。
     手法1: 公式ページHTMLからXLSXリンクを動的抽出
     手法2: HTMLテーブルをBeautifulSoupで解析
     """
@@ -8309,7 +8324,6 @@ def compute_bear_market_risk() -> Dict[str, Any]:
 
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
-@st.cache_data(ttl=3600 * 6, show_spinner=False)
 def fetch_sp500_pe_trend() -> dict:
     """S&P500 PER推移をmultpl.comから取得。Tech PERはXLKをyfinanceから補完。"""
     result = {"sp500": None, "tech": None, "error": None}
@@ -8369,8 +8383,17 @@ def fetch_sp500_pe_trend() -> dict:
     try:
         import yfinance as _yf2
         _xlk = _yf2.Ticker("XLK")
-        _xlk_info = _xlk.info
-        _tech_pe  = _xlk_info.get("trailingPE") or _xlk_info.get("forwardPE")
+        # .infoは一時的なレート制限で失敗しやすく、この関数は6hキャッシュのため
+        # リトライ無しで諦めると1回の失敗がresult["tech"]欠落のまま6時間固定される。
+        _xlk_info = {}
+        for _attempt in range(3):
+            try:
+                _xlk_info = _xlk.info
+                break
+            except Exception:
+                if _attempt < 2:
+                    time.sleep(0.8 * (_attempt + 1))
+        _tech_pe = _xlk_info.get("trailingPE") or _xlk_info.get("forwardPE")
         if _tech_pe:
             # 過去5年の時系列: 株価 / (EPS推定) — yfinanceのhistoryで近似
             _hist = _xlk.history(period="5y", interval="1mo", auto_adjust=True)
@@ -9390,44 +9413,66 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
     tickers = _json.loads(tickers_json)
     stocks: dict[str, dict] = {}
 
-    for sym, name in tickers:
-        try:
-            info = yf.Ticker(sym).info
-            price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
-            if price <= 0:
-                continue
-            t_high = info.get("targetHighPrice")
-            t_low  = info.get("targetLowPrice")
-            t_mean = info.get("targetMeanPrice")
-            rec    = info.get("recommendationMean")  # 1=Strong Buy … 5=Strong Sell
-            rec_key = info.get("recommendationKey", "")
+    def _fetch_one(sym: str, name: str):
+        # .infoは一時的なレート制限で失敗しやすく、この関数は3hキャッシュのため
+        # リトライ無しで諦めると1回の失敗が3時間分そのティッカー欠落のまま固定される。
+        info = {}
+        for _attempt in range(3):
+            try:
+                info = yf.Ticker(sym).info
+                break
+            except Exception:
+                if _attempt < 2:
+                    time.sleep(0.8 * (_attempt + 1))
+        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0) if info else 0
+        if price <= 0:
+            return sym, None
+        t_high = info.get("targetHighPrice")
+        t_low  = info.get("targetLowPrice")
+        t_mean = info.get("targetMeanPrice")
+        rec    = info.get("recommendationMean")  # 1=Strong Buy … 5=Strong Sell
+        rec_key = info.get("recommendationKey", "")
 
-            def _up(target):
-                return round((target / price - 1) * 100, 1) if target else None
+        def _up(target):
+            return round((target / price - 1) * 100, 1) if target else None
 
-            currency = "JPY" if sym.endswith(".T") else "USD"
-            stocks[sym] = {
-                "name":           name,
-                "price":          price,
-                "currency":       currency,
-                "target_high":    t_high,
-                "target_low":     t_low,
-                "target_mean":    t_mean,
-                "upside_high":    _up(t_high),
-                "upside_low":     _up(t_low),
-                "upside_mean":    _up(t_mean),
-                "trailing_eps":   info.get("trailingEps"),
-                "forward_eps":    info.get("forwardEps"),
-                "trailing_pe":    info.get("trailingPE"),
-                "forward_pe":     info.get("forwardPE"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "eps_growth":     info.get("earningsGrowth"),
-                "n_analysts":     info.get("numberOfAnalystOpinions") or 0,
-                "rec_mean":       rec,
-                "rec_key":        rec_key,
-            }
-        except Exception as e:
-            logger.debug(f"[earnings_forecast] {sym}: {e}")
+        currency = "JPY" if sym.endswith(".T") else "USD"
+        return sym, {
+            "name":           name,
+            "price":          price,
+            "currency":       currency,
+            "target_high":    t_high,
+            "target_low":     t_low,
+            "target_mean":    t_mean,
+            "upside_high":    _up(t_high),
+            "upside_low":     _up(t_low),
+            "upside_mean":    _up(t_mean),
+            "trailing_eps":   info.get("trailingEps"),
+            "forward_eps":    info.get("forwardEps"),
+            "trailing_pe":    info.get("trailingPE"),
+            "forward_pe":     info.get("forwardPE"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "eps_growth":     info.get("earningsGrowth"),
+            "n_analysts":     info.get("numberOfAnalystOpinions") or 0,
+            "rec_mean":       rec,
+            "rec_key":        rec_key,
+        }
+
+    # 銘柄ごとに独立したネットワーク処理（1銘柄ずつ逐次だと8〜10銘柄で数秒〜十数秒
+    # かかっていた）なのでThreadPoolExecutorで並行化する。
+    with ThreadPoolExecutor(max_workers=min(10, len(tickers))) as _ex:
+        _futures = [_ex.submit(_fetch_one, sym, name) for sym, name in tickers]
+        for _fut in as_completed(_futures):
+            try:
+                sym, entry = _fut.result()
+                if entry is not None:
+                    stocks[sym] = entry
+            except Exception as e:
+                logger.debug(f"[earnings_forecast] {e}")
+
+    # 並行実行だと完了順が銘柄ごとにバラつくため、表示順が毎回変わらないよう
+    # 元のtickers（引数の順序）に並べ直す。
+    stocks = {sym: stocks[sym] for sym, _name in tickers if sym in stocks}
 
     def _wavg(key: str) -> float | None:
         vals = [s[key] for s in stocks.values() if s.get(key) is not None]
@@ -15166,6 +15211,7 @@ def fetch_yahoo_finance_news(symbol: str, name: str, max_items: int = 3) -> List
     return results
 
 
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
 def fetch_finnhub_company_news(
     symbols: Dict[str, str] = None,
     days_back: int = 5,
@@ -15173,6 +15219,9 @@ def fetch_finnhub_company_news(
     """
     Finnhub APIで銘柄別ニュースを取得。
     戻り値: [テーマ][センチメント][銘柄名] タイトル 形式のリスト
+    キャッシュ無しだと「AIリサーチを実行」を何度か押しただけで21銘柄×リクエストが
+    毎回丸ごと再送されていた（Finnhubの429回避のためのtime.sleep(0.15)込みで
+    数秒かかる処理）。TTL_RSS（30分）でキャッシュし、同じ内容の再送を防ぐ。
     """
     # secrets から毎回取得（起動時キャッシュ問題を回避）
     api_key = get_env_var("FINNHUB_API_KEY", "")
@@ -16137,7 +16186,6 @@ def render_short_position_ranking(code: str, color: str):
 
 
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
-@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def _fetch_finnhub_insider_transactions(symbol: str) -> Dict:
     """
     Finnhubのインサイダー取引（/stock/insider-transactions）を取得。
@@ -16221,6 +16269,7 @@ def _fetch_put_call_ratio(ticker: str) -> Dict:
         return {"ok": False, "reason": str(e)[:120]}
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
 def fetch_us_institutional_holders(symbol: str) -> Dict:
     """
     米国株の機関保有・インサイダー・空売り詳細を取得。
@@ -17113,8 +17162,17 @@ SECTOR_COLORS = {
 @st.cache_data(ttl=60 * 60 * 3, show_spinner=False)
 def fetch_stock_details(symbol: str) -> Dict:
     try:
-        tk   = yf.Ticker(symbol)
-        info = tk.info or {}
+        tk = yf.Ticker(symbol)
+        # .infoは一時的なレート制限で失敗しやすく、この関数は3hキャッシュのため
+        # リトライ無しで諦めると1回の失敗が3時間分「取得失敗」表示のまま固定される。
+        info = {}
+        for _attempt in range(3):
+            try:
+                info = tk.info or {}
+                break
+            except Exception:
+                if _attempt < 2:
+                    time.sleep(0.8 * (_attempt + 1))
         hist = tk.history(period="3mo", interval="1d", auto_adjust=True)
         price   = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
         prev    = float(info.get("previousClose") or price)
@@ -19895,18 +19953,28 @@ def render_market_research_ai():
                     pass
                 return None
 
-            market_data = {
-                "米10年金利(%)"    : _last("^TNX"),
-                "日本10年金利(%)": _last("^JGB10Y") or _last("^TNX"),
-                "VIX"            : _last("^VIX"),
-                "ドル円"         : _last("USDJPY=X"),
-                "S&P500"         : _last("^GSPC"),
-                "日経平均"       : _last("^N225"),
-                "原油(WTI)"      : _last("CL=F"),
-                "ゴールド"       : _last("GC=F"),
-                "米国債(TLT)"    : _last("TLT"),
-                "HYG(ハイイールド)": _last("HYG"),
+            # 9〜10銘柄を1件ずつ逐次取得すると往復が積み重なるため並行化する。
+            _mkt_syms = {
+                "米10年金利(%)"      : "^TNX",
+                "日本10年金利(%)"    : "^JGB10Y",
+                "VIX"                : "^VIX",
+                "ドル円"             : "USDJPY=X",
+                "S&P500"             : "^GSPC",
+                "日経平均"           : "^N225",
+                "原油(WTI)"          : "CL=F",
+                "ゴールド"           : "GC=F",
+                "米国債(TLT)"        : "TLT",
+                "HYG(ハイイールド)"   : "HYG",
             }
+            with ThreadPoolExecutor(max_workers=len(_mkt_syms)) as _mkt_ex:
+                _mkt_futures = {_mkt_ex.submit(_last, sym): label for label, sym in _mkt_syms.items()}
+                for _fut in as_completed(_mkt_futures):
+                    market_data[_mkt_futures[_fut]] = _fut.result()
+            # 日本10年金利が取得できなければ米10年金利で代替（従来の挙動を維持）
+            if market_data.get("日本10年金利(%)") is None:
+                market_data["日本10年金利(%)"] = market_data.get("米10年金利(%)")
+            # 並行実行だと完了順がバラつくため、表示順が毎回変わらないよう元の順序に戻す
+            market_data = {label: market_data.get(label) for label in _mkt_syms}
         except Exception as e:
             logger.warning(f"[research] 市場データ取得失敗: {e}")
 
