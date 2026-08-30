@@ -14706,18 +14706,23 @@ def inject_global_css():
         st.session_state["global_css_injected"] = True
 
 def card_css(bg: str) -> str:
+    # wk-*系クラスはもともと白背景前提で作られており、文字色が黒ベースのrgba
+    # （rgba(0,0,0,0.5〜0.82)等）だった。.streamlit/config.tomlでダークテーマを
+    # 強制するようにして以降、カード自体は暗い背景のまま・文字だけほぼ黒という
+    # 組み合わせになり視認性が悪化していた。CLAUDE.md記載のダークテーマ配色
+    # （文字 #e2e8f0 主/#94a3b8 副、枠線 #334155）に合わせて明色化する。
     return f"""
     <style>
-    .wk-card {{ border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 12px 14px; background: {bg}; box-shadow: 0 2px 4px rgba(0,0,0,0.06); }}
-    .wk-card:hover {{ box-shadow: 0 4px 8px rgba(0,0,0,0.12); }}
+    .wk-card {{ border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; background: {bg}; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }}
+    .wk-card:hover {{ box-shadow: 0 4px 8px rgba(0,0,0,0.4); }}
     .wk-head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }}
-    .wk-name {{ font-weight: 900; font-size: 17px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%; }}
-    .wk-sym  {{ font-weight: 700; font-size: 11px; color: rgba(0,0,0,0.55); margin-left: 4px; }}
+    .wk-name {{ font-weight: 900; font-size: 17px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%; color: #e2e8f0; }}
+    .wk-sym  {{ font-weight: 700; font-size: 11px; color: #94a3b8; margin-left: 4px; }}
     .wk-pct  {{ font-weight: 900; font-size: 24px; line-height: 1; white-space: nowrap; }}
-    .wk-now  {{ font-size: 17px; font-weight: 700; color: rgba(0,0,0,0.82); margin-bottom: 4px; word-break: break-all; }}
-    .wk-foot {{ font-size: 11px; color: rgba(0,0,0,0.5); margin-top: 4px; word-break: break-word; }}
-    .wk-link {{ display: inline-block; margin-top: 6px; padding: 5px 10px; background: rgba(0,0,0,0.05); border-radius: 4px; text-decoration: none; font-size: 11px; color: #0066cc; min-height: 32px; line-height: 22px; }}
-    .wk-link:hover {{ background: rgba(0,0,0,0.1); }}
+    .wk-now  {{ font-size: 17px; font-weight: 700; color: #e2e8f0; margin-bottom: 4px; word-break: break-all; }}
+    .wk-foot {{ font-size: 11px; color: #94a3b8; margin-top: 4px; word-break: break-word; }}
+    .wk-link {{ display: inline-block; margin-top: 6px; padding: 5px 10px; background: rgba(255,255,255,0.08); border-radius: 4px; text-decoration: none; font-size: 11px; color: #7dd3fc; min-height: 32px; line-height: 22px; }}
+    .wk-link:hover {{ background: rgba(255,255,255,0.16); }}
     </style>
     """
 
