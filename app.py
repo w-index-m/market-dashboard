@@ -30519,21 +30519,46 @@ def render_claude_trading_project():
                             st.caption(f"（現在値取得失敗の{_total_skipped}銘柄はセクター配分の集計対象外）")
 
                     # ── ③ 保有銘柄ニュース・決算情報 ────────────────────
+                    # 以前は銘柄を1つずつ逐次取得しており、保有銘柄数が多いと
+                    # （yf.download + Finnhub/TDnet/EDINET/みんかぶニュース取得を
+                    # 銘柄ごとに直列実行）全銘柄終わるまで単一のst.spinner()の裏で
+                    # 何も表示されず、体感「ぐるぐる回ったまま」になっていた。
+                    # ThreadPoolExecutorで並行化した上で、完了した銘柄のニュース
+                    # から順にプレースホルダーへ随時追記表示し、進捗が見えるようにする。
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown("**📰 保有銘柄ニュース・決算情報**")
-                    with st.spinner("ニュース・決算情報を取得中..."):
-                        _news_all      = []
-                        _earnings_rows = []
-                        _funda_list    = []  # ④ 決算カード用（このループで取得済みのデータを再利用）
-                        for _n_ticker in open_pos.keys():
-                            _n_is_jp = _n_ticker.endswith(".T")
+                    _news_all      = []
+                    _earnings_rows = []
+                    _funda_list    = []  # ④ 決算カード用（このループで取得済みのデータを再利用）
+                    _tickers_for_news = list(open_pos.keys())
+                    _news_stream_ph = st.empty()
+                    _news_stream_parts = []
+                    _news_done = 0
+
+                    def _fetch_one_news_data(_tk: str):
+                        _is_jp = _tk.endswith(".T")
+                        try:
+                            _d = _fetch_trading_stock_data(_tk, _is_jp)
+                        except Exception:
+                            _d = {}
+                        return _tk, _is_jp, _d
+
+                    with ThreadPoolExecutor(max_workers=min(10, len(_tickers_for_news))) as _news_ex:
+                        _news_futures = {
+                            _news_ex.submit(_fetch_one_news_data, _tk): _tk for _tk in _tickers_for_news
+                        }
+                        for _fut in as_completed(_news_futures):
+                            _news_done += 1
                             try:
-                                _sdata = _fetch_trading_stock_data(_n_ticker, _n_is_jp)
+                                _n_ticker, _n_is_jp, _sdata = _fut.result()
                             except Exception:
-                                _sdata = {}
+                                _news_stream_ph.caption(
+                                    f"⏳ ニュース・決算情報を取得中... ({_news_done}/{len(_tickers_for_news)}件)"
+                                )
+                                continue
                             _n_name = _sdata.get("name") or _get_stock_display_name(_n_ticker)
                             for _ni in (_sdata.get("news_items") or [])[:3]:
-                                _news_all.append({
+                                _news_item = {
                                     "ticker":   _n_ticker,
                                     "name":     _n_name,
                                     "headline": _ni.get("headline_ja") or _ni.get("headline", ""),
@@ -30541,7 +30566,42 @@ def render_claude_trading_project():
                                     "url":      _ni.get("url", ""),
                                     "date":     _ni.get("date", ""),
                                     "source":   _ni.get("source", ""),
-                                })
+                                }
+                                _news_all.append(_news_item)
+                                # 完了した銘柄のニュースから順に随時カード表示（1件ずつ
+                                # 積み上げていく方式。日付順の最終整列は全件完了後に行う）
+                                _has_url    = bool(_news_item["url"])
+                                _link_open  = (
+                                    f'<a href="{html.escape(_news_item["url"])}" target="_blank" '
+                                    'style="color:#e2e8f0;text-decoration:none">'
+                                ) if _has_url else ""
+                                _link_close = "</a>" if _has_url else ""
+                                _summary_html = (
+                                    f'<div style="font-size:12px;color:#94a3b8;margin-top:5px;line-height:1.6">'
+                                    f'<span style="color:#a78bfa;font-size:10px">🤖 AI要約（原文の短い要約＋テクニカルデータで補足）</span><br>'
+                                    f'{html.escape(str(_news_item["summary"]))}</div>'
+                                ) if _news_item.get("summary") else ""
+                                _news_stream_parts.append(
+                                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                                    'padding:10px 14px">'
+                                    '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">'
+                                    f'<span style="font-size:11px;font-weight:700;color:#60a5fa;white-space:nowrap">'
+                                    f'{html.escape(str(_news_item["ticker"]))}</span>'
+                                    f'{_link_open}<span style="font-size:13px;color:#e2e8f0;font-weight:600">'
+                                    f'{html.escape(str(_news_item["headline"]))}</span>{_link_close}'
+                                    f'<span style="font-size:11px;color:#64748b;margin-left:auto;white-space:nowrap">'
+                                    f'{html.escape(str(_news_item["date"]))} {html.escape(str(_news_item["source"]))}</span>'
+                                    '</div>'
+                                    f'{_summary_html}'
+                                    '</div>'
+                                )
+                            _news_stream_ph.markdown(
+                                f'<div style="font-size:11px;color:#64748b;margin-bottom:6px">'
+                                f'⏳ 取得中... ({_news_done}/{len(_tickers_for_news)}件銘柄)</div>'
+                                '<div style="display:flex;flex-direction:column;gap:8px">'
+                                + "".join(_news_stream_parts) + '</div>',
+                                unsafe_allow_html=True,
+                            )
                             _n_earn = _sdata.get("next_earnings")
                             if _n_earn:
                                 # yfinanceの決算予定日は実際の決算発表後もしばらく過去日のまま
@@ -30576,6 +30636,7 @@ def render_claude_trading_project():
                                     "upside":        _sdata.get("upside"),
                                     "n_analysts":    _sdata.get("n_analysts"),
                                 })
+                    _news_stream_ph.empty()  # 完了後、下の最終表示（日付順ソート済み）に差し替える
 
                     if _earnings_rows:
                         _earnings_rows.sort(key=lambda r: r["次回決算予定日"])
