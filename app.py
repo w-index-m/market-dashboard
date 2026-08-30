@@ -333,6 +333,12 @@ TDNET_BASE = "https://www.release.tdnet.info"
 MAX_PDF_TEXT_CHARS = 12000
 DEFAULT_TIMEOUT = 20
 UA = "Mozilla/5.0 (MarketDashboard/2.6)"
+# SEC EDGAR（data.sec.gov / www.sec.gov）はFair Access Policyでブラウザ偽装UAを
+# 拒否し、"社名・連絡先を含む識別可能なUser-Agent"を明示的に要求している
+# （https://www.sec.gov/os/webmaster-faq#developers）。共通UA（ブラウザ偽装）を
+# 使うとリクエストが403で弾かれ、8-K開示が「見つからない」ように見える原因になり
+# うるため、SEC向けだけ専用のUAを使う。
+SEC_UA = "MarketDashboard/2.6 (https://github.com/w-index-m/market-dashboard)"
 
 # Geminiモデル候補（2025年現在の有効なモデル名順）
 MODEL_FALLBACKS = [
@@ -18516,7 +18522,7 @@ def _fetch_sec_ticker_cik_map() -> dict:
     try:
         _r = requests.get(
             "https://www.sec.gov/files/company_tickers.json",
-            headers={"User-Agent": UA}, timeout=15,
+            headers={"User-Agent": SEC_UA}, timeout=15,
         )
         _r.raise_for_status()
         _data = _r.json()
@@ -18540,7 +18546,7 @@ def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5) 
     try:
         _r = requests.get(
             f"https://data.sec.gov/submissions/CIK{_cik}.json",
-            headers={"User-Agent": UA}, timeout=15,
+            headers={"User-Agent": SEC_UA}, timeout=15,
         )
         _r.raise_for_status()
         _recent = _r.json().get("filings", {}).get("recent", {})
@@ -18574,7 +18580,8 @@ def _extract_text_from_disclosure_url(url: str) -> str:
     try:
         if url.lower().endswith(".pdf"):
             return extract_text_from_pdf(download_pdf_bytes(url))
-        _r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
+        _ua = SEC_UA if "sec.gov" in url.lower() else UA
+        _r = requests.get(url, headers={"User-Agent": _ua}, timeout=15)
         _r.raise_for_status()
         _soup = BeautifulSoup(_r.content, "html.parser")
         return _soup.get_text("\n", strip=True)
