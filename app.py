@@ -22908,10 +22908,21 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
         eps_fwd     = info.get("forwardEps")
         rev_growth  = info.get("revenueGrowth")   # YoY
         earn_growth = info.get("earningsGrowth")  # YoY
+        target_mean = info.get("targetMeanPrice")
+        recommend   = info.get("recommendationMean")
+        n_analysts  = info.get("numberOfAnalystOpinions")
 
         result["trailing_pe"]   = round(trailing_pe, 1) if trailing_pe else None
         result["forward_pe"]    = round(forward_pe, 1) if forward_pe else None
         result["peg"]           = round(peg, 2) if peg else None
+        result["target_mean"]   = round(target_mean, 2) if target_mean else None
+        _cur_price = result.get("price")
+        result["upside"] = (
+            round((target_mean / _cur_price - 1) * 100, 1)
+            if target_mean and _cur_price else None
+        )
+        result["recommend"]     = round(recommend, 2) if recommend else None
+        result["n_analysts"]    = int(n_analysts) if n_analysts else None
         result["pbr"]           = round(pbr, 2) if pbr else None
         result["eps_ttm"]       = round(eps_ttm, 2) if eps_ttm else None
         result["eps_fwd"]       = round(eps_fwd, 2) if eps_fwd else None
@@ -26153,10 +26164,13 @@ else ""}
 def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
     """保有銘柄全体の決算・ファンダメンタルズ状況を、銘柄ごとに個別のAI呼び出しを
     せず1回のプロンプトにまとめて呼ぶことで、銘柄数に比例したAI呼び出し回数の
-    増加（クォータ消費）を避けつつ、5行程度のメモを銘柄ごとに生成する
-    （業種・セクターの文脈も踏まえた内容にする）。
+    増加（クォータ消費）を避けつつ、銘柄ごとに短い解釈コメントを生成する。
+    EPS実績vs予想・PER・目標株価等の生データは呼び出し元（UI）側がそのまま
+    確定表示するため、ここではAIに数値の再掲・創作をさせず、「その数値を
+    どう解釈するか」という文脈コメントだけを書かせる（ハルシネーション対策）。
     funda_json: [{"ticker","name","sector","eps_ttm","eps_fwd","rev_growth",
-                   "earn_growth","next_earnings","eps_history"}, ...] のJSON文字列
+                   "earn_growth","next_earnings","eps_history","trailing_pe",
+                   "forward_pe","peg","target_mean","upside"}, ...] のJSON文字列
     Returns: (memos: dict[ticker, str], model: str)
     """
     import json as _json
@@ -26181,24 +26195,26 @@ def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
             _lines.append(f"次回決算日: {item['next_earnings']}")
         if item.get("eps_history"):
             _lines.append("直近四半期EPS実績vs予想: " + "; ".join(item["eps_history"]))
+        if item.get("trailing_pe") is not None:
+            _lines.append(f"PER: {item['trailing_pe']}")
+        if item.get("upside") is not None:
+            _lines.append(f"アナリスト目標株価までの上昇余地: {item['upside']:+.1f}%")
         blocks.append("\n".join(_lines))
 
     prompt = (
         "あなたはプロの株式アナリストです。以下は保有銘柄それぞれの決算・"
-        "ファンダメンタルズデータです。銘柄ごとに、日本語で5行以内のメモを"
-        "作成してください。以下の観点を織り込むこと:\n"
-        "1. 直近の決算実績が良かったか悪かったか（増収増益/減収減益・サプライズの有無等）\n"
-        "2. その数値がセクター・業界内の動向（AI需要、金利環境、業界再編等）に照らして"
-        "どう位置づけられるか（一般的に知られている業界動向の範囲で触れてよいが、"
-        "個別銘柄の未公表情報を断定的に創作しないこと）\n"
-        "3. 今後の見通し（次回決算日等）\n"
-        "データが無い項目には触れず、憶測で数値を作らないこと。"
+        "ファンダメンタルズデータです。銘柄ごとに、日本語で2〜3文の短いコメントを"
+        "書いてください。データの数値をそのまま書き写すのではなく、"
+        "「良い決算だったか悪い決算だったか」「セクター・業界内の動向（AI需要、"
+        "金利環境等の一般的に知られている範囲）に照らしてどう位置づけられるか」"
+        "「バリュエーション（割高/割安感）や今後の注目点」を、解釈として書くこと。"
+        "個別銘柄の未公表情報を断定的に創作しないこと。データが無い項目には触れないこと。"
         "出力は必ず次の形式のみで、銘柄ごとに区切ってください"
         "（他の説明文は付けないこと）:\n"
-        "【TICKER】\n(1行目)\n(2行目)\n(3行目)\n(4行目)\n(5行目)\n\n"
+        "【TICKER】\n(コメント本文)\n\n"
         + "\n\n".join(blocks)
     )
-    text, model = call_ai_with_fallback(prompt, max_output_tokens=2800, temperature=0.3)
+    text, model = call_ai_with_fallback(prompt, max_output_tokens=2000, temperature=0.3)
     if text.startswith("⚠️"):
         return {}, model
 
@@ -30508,7 +30524,7 @@ def render_claude_trading_project():
                     with st.spinner("ニュース・決算情報を取得中..."):
                         _news_all      = []
                         _earnings_rows = []
-                        _funda_list    = []  # ④ 決算5行メモ用（このループで取得済みのデータを再利用）
+                        _funda_list    = []  # ④ 決算カード用（このループで取得済みのデータを再利用）
                         for _n_ticker in open_pos.keys():
                             _n_is_jp = _n_ticker.endswith(".T")
                             try:
@@ -30545,12 +30561,20 @@ def render_claude_trading_project():
                                     "ticker":        _n_ticker,
                                     "name":          _n_name,
                                     "sector":        _sdata.get("sector_detail") or _sdata.get("sector") or "",
+                                    "price":         _sdata.get("price"),
+                                    "is_jp":         _n_is_jp,
                                     "eps_ttm":       _sdata.get("eps_ttm"),
                                     "eps_fwd":       _sdata.get("eps_fwd"),
                                     "rev_growth":    _sdata.get("rev_growth"),
                                     "earn_growth":   _sdata.get("earn_growth"),
                                     "next_earnings": _sdata.get("next_earnings"),
                                     "eps_history":   _sdata.get("eps_history") or [],
+                                    "trailing_pe":   _sdata.get("trailing_pe"),
+                                    "forward_pe":    _sdata.get("forward_pe"),
+                                    "peg":           _sdata.get("peg"),
+                                    "target_mean":   _sdata.get("target_mean"),
+                                    "upside":        _sdata.get("upside"),
+                                    "n_analysts":    _sdata.get("n_analysts"),
                                 })
 
                     if _earnings_rows:
@@ -30592,9 +30616,13 @@ def render_claude_trading_project():
                     else:
                         st.caption("保有銘柄の直近ニュースは見つかりませんでした。")
 
-                    # ── ④ 保有銘柄 決算5行メモ（AI・全銘柄まとめて1回で生成） ──────
+                    # ── ④ 保有銘柄 決算カード（数値はコード側で確定表示、コメントのみAI） ──
+                    # 数値（EPS実績vs予想・PER・目標株価等）はAIに書かせるとハルシネーション
+                    # リスクがあるため、確定データとしてコード側でそのまま表示する。
+                    # AIには「その数値をどう解釈するか」の短いコメントだけ担当させる
+                    # （SNS上の決算まとめ投稿のフォーマットを参考に再構成）。
                     st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("**📋 保有銘柄 決算5行メモ（AI）**")
+                    st.markdown("**📋 保有銘柄 決算カード**")
                     if not _funda_list:
                         st.caption("決算・ファンダメンタルズデータが取得できた保有銘柄がありません（投資信託は対象外）。")
                     else:
@@ -30602,27 +30630,77 @@ def render_claude_trading_project():
                         _funda_json  = _json_memo.dumps(_funda_list, ensure_ascii=False, sort_keys=True)
                         _memo_tickers_key = ",".join(sorted(d["ticker"] for d in _funda_list))
                         _memo_cache_key = f"{_memo_tickers_key}_{datetime.now(JST).strftime('%Y-%m-%d')}"
-                        with st.spinner("決算メモをAIで生成中..."):
+                        with st.spinner("決算コメントをAIで生成中..."):
                             _earn_memos, _earn_memo_model = _generate_earnings_memo_all(_memo_cache_key, _funda_json)
-                        if _earn_memos:
-                            _memo_html = []
-                            for _fd in _funda_list:
-                                _memo_text = _earn_memos.get(_fd["ticker"])
-                                if not _memo_text:
-                                    continue
-                                _memo_html.append(
-                                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
-                                    'padding:10px 14px;margin-bottom:8px">'
-                                    f'<div style="font-size:12px;font-weight:700;color:#60a5fa">'
-                                    f'{html.escape(_fd["ticker"])}（{html.escape(_fd["name"])}）</div>'
-                                    f'<div style="font-size:12px;color:#cbd5e1;line-height:1.7;margin-top:4px">'
-                                    f'{html.escape(_memo_text).replace(chr(10), "<br>")}</div>'
-                                    '</div>'
+
+                        def _eps_beat_icon(_hist_last: str) -> str:
+                            if "サプライズ +" in _hist_last:
+                                return "🟢"
+                            if "サプライズ -" in _hist_last:
+                                return "🔴"
+                            return "⚪"
+
+                        _card_html = []
+                        for _fd in _funda_list:
+                            _cur = "円" if _fd.get("is_jp") else "USD"
+                            _sec_html = f'<span style="color:#64748b">｜{html.escape(_fd["sector"])}</span>' if _fd.get("sector") else ""
+                            _card_html.append(
+                                '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                                'padding:12px 14px;margin-bottom:10px">'
+                                f'<div style="font-size:13px;font-weight:700;color:#60a5fa">'
+                                f'{html.escape(_fd["ticker"])}（{html.escape(_fd["name"])}）{_sec_html}</div>'
+                            )
+                            # 💰 今四半期業績（直近発表分・eps_historyの最後が最新四半期）
+                            if _fd.get("eps_history"):
+                                _last_eps = _fd["eps_history"][-1]
+                                _card_html.append(
+                                    '<div style="font-size:11px;color:#94a3b8;margin-top:8px">💰 今四半期業績</div>'
+                                    f'<div style="font-size:12px;color:#e2e8f0">'
+                                    f'{_eps_beat_icon(_last_eps)} {html.escape(_last_eps)}</div>'
                                 )
-                            st.markdown("".join(_memo_html), unsafe_allow_html=True)
-                            st.caption(f"🤖 via {_earn_memo_model}（保有銘柄全体を1回のAI呼び出しでまとめて生成・6hキャッシュ）")
+                            # 🔍 主要ファンダメンタルズ指標
+                            _fund_parts = []
+                            if _fd.get("trailing_pe") is not None:
+                                _fund_parts.append(f"PER {_fd['trailing_pe']}")
+                            if _fd.get("forward_pe") is not None:
+                                _fund_parts.append(f"Forward PER {_fd['forward_pe']}")
+                            if _fd.get("peg") is not None:
+                                _fund_parts.append(f"PEG {_fd['peg']}")
+                            if _fund_parts:
+                                _card_html.append(
+                                    '<div style="font-size:11px;color:#94a3b8;margin-top:8px">🔍 主要ファンダメンタルズ指標</div>'
+                                    f'<div style="font-size:12px;color:#e2e8f0">{" | ".join(_fund_parts)}</div>'
+                                )
+                            # 🎯 市場評価
+                            _mkt_parts = []
+                            if _fd.get("price") is not None:
+                                _price_s = f"{_fd['price']:,.0f}" if _fd.get("is_jp") else f"{_fd['price']:,.2f}"
+                                _mkt_parts.append(f"現在値 {_price_s}{_cur}")
+                            if _fd.get("target_mean") is not None:
+                                _tgt_s = f"{_fd['target_mean']:,.0f}" if _fd.get("is_jp") else f"{_fd['target_mean']:,.2f}"
+                                _an_s = f"（アナリスト{_fd['n_analysts']}名）" if _fd.get("n_analysts") else ""
+                                _mkt_parts.append(f"目標株価(平均) {_tgt_s}{_cur}{_an_s}")
+                            if _fd.get("upside") is not None:
+                                _mkt_parts.append(f"上昇余地 {_fd['upside']:+.1f}%")
+                            if _mkt_parts:
+                                _card_html.append(
+                                    '<div style="font-size:11px;color:#94a3b8;margin-top:8px">🎯 市場評価</div>'
+                                    f'<div style="font-size:12px;color:#e2e8f0">{" | ".join(_mkt_parts)}</div>'
+                                )
+                            # 🤖 AIコメント
+                            _memo_text = _earn_memos.get(_fd["ticker"]) if _earn_memos else None
+                            if _memo_text:
+                                _card_html.append(
+                                    '<div style="font-size:11px;color:#a78bfa;margin-top:8px">🤖 AIコメント</div>'
+                                    f'<div style="font-size:12px;color:#cbd5e1;line-height:1.7">'
+                                    f'{html.escape(_memo_text).replace(chr(10), "<br>")}</div>'
+                                )
+                            _card_html.append('</div>')
+                        st.markdown("".join(_card_html), unsafe_allow_html=True)
+                        if _earn_memos:
+                            st.caption(f"🤖 コメントは {_earn_memo_model} が保有銘柄全体を1回のAI呼び出しでまとめて生成（6hキャッシュ）。数値部分はAIを介さずそのまま表示。")
                         else:
-                            st.info("決算メモを生成できませんでした（AI応答なし）。")
+                            st.caption("🤖 AIコメントは現在生成できません（AI応答なし）。数値部分はそのまま表示しています。")
 
                     # ── ポートフォリオ全体AI分析 ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
