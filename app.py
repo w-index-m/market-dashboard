@@ -26823,6 +26823,21 @@ def render_claude_trading_project():
         st.session_state["trading_active_tab"] = _tab_sel
     _active_tab = st.session_state["trading_active_tab"]
 
+    # 損益・ポートフォリオ／配当サマリは、他のタブから切り替えて「見に行った」瞬間に
+    # 最新の株価を取りに行ってほしい、という要望への対応。時間ベースのTTLだけに任せると
+    # 最大1時間古いデータのままになりうるが、かといって毎回の再実行（ウィジェット操作の
+    # たびに走る）ごとに再取得すると同じタブに留まっているだけで無駄にAPIを叩き続けて
+    # しまう。そこで「直前に表示していたタブと違うタブに切り替わった瞬間」だけを検知して
+    # 該当タブの価格キャッシュをクリアし、以後はそのタブに留まっている間は通常通り
+    # キャッシュを使う。
+    _prev_active_tab = st.session_state.get("_prev_trading_active_tab")
+    if _prev_active_tab != _active_tab:
+        if _active_tab == _TAB_PNL:
+            fetch_daily_tiingo.clear()
+        elif _active_tab == _TAB_SUMMARY:
+            _compute_portfolio_summary.clear()
+        st.session_state["_prev_trading_active_tab"] = _active_tab
+
     # ── タブ①: AI分析・シグナル ────────────────────────────────
     if _active_tab == _TAB_SIGNAL:
         _auto_restore_login_token("signal")
