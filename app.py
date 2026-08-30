@@ -26139,6 +26139,62 @@ else ""}
     return {"portfolio": [], "metrics": {}, "model": _model_used, "error": _err}
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
+    """保有銘柄全体の決算・ファンダメンタルズ状況を、銘柄ごとに個別のAI呼び出しを
+    せず1回のプロンプトにまとめて呼ぶことで、銘柄数に比例したAI呼び出し回数の
+    増加（クォータ消費）を避けつつ、3行程度の短いメモを銘柄ごとに生成する。
+    funda_json: [{"ticker","name","eps_ttm","eps_fwd","rev_growth","earn_growth",
+                   "next_earnings","eps_history"}, ...] のJSON文字列
+    Returns: (memos: dict[ticker, str], model: str)
+    """
+    import json as _json
+    funda_list = _json.loads(funda_json)
+    if not funda_list:
+        return {}, ""
+
+    blocks = []
+    for item in funda_list:
+        _lines = [f"【{item['ticker']}】{item.get('name', item['ticker'])}"]
+        if item.get("eps_ttm") is not None:
+            _lines.append(f"EPS実績(TTM): {item['eps_ttm']}")
+        if item.get("eps_fwd") is not None:
+            _lines.append(f"EPS予想: {item['eps_fwd']}")
+        if item.get("rev_growth") is not None:
+            _lines.append(f"売上高成長率(YoY): {item['rev_growth']:+.1f}%")
+        if item.get("earn_growth") is not None:
+            _lines.append(f"純利益成長率(YoY): {item['earn_growth']:+.1f}%")
+        if item.get("next_earnings"):
+            _lines.append(f"次回決算日: {item['next_earnings']}")
+        if item.get("eps_history"):
+            _lines.append("直近四半期EPS実績vs予想: " + "; ".join(item["eps_history"]))
+        blocks.append("\n".join(_lines))
+
+    prompt = (
+        "あなたはプロの株式アナリストです。以下は保有銘柄それぞれの決算・"
+        "ファンダメンタルズデータです。銘柄ごとに、直近の決算実績が良かったか"
+        "悪かったか（増収増益/減収減益・サプライズの有無等）と今後の見通しを、"
+        "日本語で簡潔に3行以内でまとめてください。データが無い項目には触れず、"
+        "憶測で数値を作らないこと。出力は必ず次の形式のみで、銘柄ごとに区切って"
+        "ください（他の説明文は付けないこと）:\n"
+        "【TICKER】\n(1行目)\n(2行目)\n(3行目)\n\n"
+        + "\n\n".join(blocks)
+    )
+    text, model = call_ai_with_fallback(prompt, max_output_tokens=1800, temperature=0.3)
+    if text.startswith("⚠️"):
+        return {}, model
+
+    memos: dict[str, str] = {}
+    for chunk in text.split("【")[1:]:
+        if "】" not in chunk:
+            continue
+        _tk, _rest = chunk.split("】", 1)
+        _tk = _tk.strip()
+        if _tk:
+            memos[_tk] = _rest.strip()
+    return memos, model
+
+
 def _generate_full_portfolio_recommendation(
     positions: dict,
     stock_data_map: dict,
@@ -30434,6 +30490,7 @@ def render_claude_trading_project():
                     with st.spinner("ニュース・決算情報を取得中..."):
                         _news_all      = []
                         _earnings_rows = []
+                        _funda_list    = []  # ④ 決算3行メモ用（このループで取得済みのデータを再利用）
                         for _n_ticker in open_pos.keys():
                             _n_is_jp = _n_ticker.endswith(".T")
                             try:
@@ -30464,6 +30521,18 @@ def render_claude_trading_project():
                                         "銘柄": _n_name, "コード": _n_ticker,
                                         "次回決算予定日": _n_earn,
                                     })
+                            if any(_sdata.get(k) is not None for k in
+                                   ("eps_ttm", "eps_fwd", "rev_growth", "earn_growth")) or _sdata.get("eps_history"):
+                                _funda_list.append({
+                                    "ticker":        _n_ticker,
+                                    "name":          _n_name,
+                                    "eps_ttm":       _sdata.get("eps_ttm"),
+                                    "eps_fwd":       _sdata.get("eps_fwd"),
+                                    "rev_growth":    _sdata.get("rev_growth"),
+                                    "earn_growth":   _sdata.get("earn_growth"),
+                                    "next_earnings": _sdata.get("next_earnings"),
+                                    "eps_history":   _sdata.get("eps_history") or [],
+                                })
 
                     if _earnings_rows:
                         _earnings_rows.sort(key=lambda r: r["次回決算予定日"])
@@ -30503,6 +30572,38 @@ def render_claude_trading_project():
                         st.markdown("".join(_news_html), unsafe_allow_html=True)
                     else:
                         st.caption("保有銘柄の直近ニュースは見つかりませんでした。")
+
+                    # ── ④ 保有銘柄 決算3行メモ（AI・全銘柄まとめて1回で生成） ──────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("**📋 保有銘柄 決算3行メモ（AI）**")
+                    if not _funda_list:
+                        st.caption("決算・ファンダメンタルズデータが取得できた保有銘柄がありません（投資信託は対象外）。")
+                    else:
+                        import json as _json_memo
+                        _funda_json  = _json_memo.dumps(_funda_list, ensure_ascii=False, sort_keys=True)
+                        _memo_tickers_key = ",".join(sorted(d["ticker"] for d in _funda_list))
+                        _memo_cache_key = f"{_memo_tickers_key}_{datetime.now(JST).strftime('%Y-%m-%d')}"
+                        with st.spinner("決算メモをAIで生成中..."):
+                            _earn_memos, _earn_memo_model = _generate_earnings_memo_all(_memo_cache_key, _funda_json)
+                        if _earn_memos:
+                            _memo_html = []
+                            for _fd in _funda_list:
+                                _memo_text = _earn_memos.get(_fd["ticker"])
+                                if not _memo_text:
+                                    continue
+                                _memo_html.append(
+                                    '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                                    'padding:10px 14px;margin-bottom:8px">'
+                                    f'<div style="font-size:12px;font-weight:700;color:#60a5fa">'
+                                    f'{html.escape(_fd["ticker"])}（{html.escape(_fd["name"])}）</div>'
+                                    f'<div style="font-size:12px;color:#cbd5e1;line-height:1.7;margin-top:4px">'
+                                    f'{html.escape(_memo_text).replace(chr(10), "<br>")}</div>'
+                                    '</div>'
+                                )
+                            st.markdown("".join(_memo_html), unsafe_allow_html=True)
+                            st.caption(f"🤖 via {_earn_memo_model}（保有銘柄全体を1回のAI呼び出しでまとめて生成・6hキャッシュ）")
+                        else:
+                            st.info("決算メモを生成できませんでした（AI応答なし）。")
 
                     # ── ポートフォリオ全体AI分析 ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
