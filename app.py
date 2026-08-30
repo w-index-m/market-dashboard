@@ -24294,6 +24294,7 @@ _US_HIGH_DIV_CANDIDATES = (
     ("MRK",  "Merck"),
     ("PEP",  "PepsiCo"),
     ("BTI",  "British American Tobacco"),
+    ("PBR",  "Petrobras"),
 )
 
 
@@ -30811,7 +30812,7 @@ def render_claude_trading_project():
 
                 st.markdown(
                     '<div style="font-size:11px;color:#64748b;margin-top:8px">'
-                    '※ 連続増配・大型・安定配当で広く知られる銘柄の候補プール（日本15銘柄・米国16銘柄）'
+                    '※ 連続増配・大型・安定配当で広く知られる銘柄の候補プール（日本15銘柄・米国17銘柄）'
                     'から、実際に計算した配当利回りの上位5銘柄を毎日選び直して表示しています'
                     '（固定リストではなく、株価・増減配の変化に応じて顔ぶれが入れ替わります）。'
                     '保有銘柄とは無関係・個別の投資推奨ではありません。利回りは直近1年の'
