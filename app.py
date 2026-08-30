@@ -30712,13 +30712,26 @@ def render_claude_trading_project():
                                 f'{html.escape(_fd["ticker"])}（{html.escape(_fd["name"])}）{_sec_html}</div>'
                             )
                             # 💰 今四半期業績（直近発表分・eps_historyの最後が最新四半期）
-                            if _fd.get("eps_history"):
-                                _last_eps = _fd["eps_history"][-1]
-                                _card_html.append(
-                                    '<div style="font-size:11px;color:#94a3b8;margin-top:8px">💰 今四半期業績</div>'
-                                    f'<div style="font-size:12px;color:#e2e8f0">'
-                                    f'{_eps_beat_icon(_last_eps)} {html.escape(_last_eps)}</div>'
-                                )
+                            # eps_historyは一株益（EPS）実績vs予想。売上高・純利益の
+                            # 「実績vs予想」絶対額はyfinanceでは取得できないため、
+                            # 代わりに既に取得済みのYoY成長率（売上高・純利益）を併記する。
+                            if _fd.get("eps_history") or _fd.get("rev_growth") is not None or _fd.get("earn_growth") is not None:
+                                _card_html.append('<div style="font-size:11px;color:#94a3b8;margin-top:8px">💰 今四半期業績</div>')
+                                if _fd.get("eps_history"):
+                                    _last_eps = _fd["eps_history"][-1]
+                                    _card_html.append(
+                                        f'<div style="font-size:12px;color:#e2e8f0">'
+                                        f'{_eps_beat_icon(_last_eps)} EPS: {html.escape(_last_eps)}</div>'
+                                    )
+                                _growth_parts = []
+                                if _fd.get("rev_growth") is not None:
+                                    _growth_parts.append(f"売上高成長率(YoY) {_fd['rev_growth']:+.1f}%")
+                                if _fd.get("earn_growth") is not None:
+                                    _growth_parts.append(f"純利益成長率(YoY) {_fd['earn_growth']:+.1f}%")
+                                if _growth_parts:
+                                    _card_html.append(
+                                        f'<div style="font-size:12px;color:#e2e8f0">{" | ".join(_growth_parts)}</div>'
+                                    )
                             # 🔍 主要ファンダメンタルズ指標
                             _fund_parts = []
                             if _fd.get("trailing_pe") is not None:
