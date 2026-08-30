@@ -24488,24 +24488,29 @@ def _compute_portfolio_summary(username: str = "") -> dict:
     頻繁に再計算するより、実際に取引記録が変わった時（_save_trade/_update_trade_row/
     _delete_trade_row呼び出し後）にst.cache_data.clear()で明示的に無効化する運用に
     寄せている（サマリータブが毎回重いという体感速度の問題への対応）。今すぐ最新の
-    株価に更新したい場合はサイドバーの「🔄 キャッシュクリア&更新」を使う。
+    株価に更新したい場合は配当サマリタブの「🔄 最新の株価に更新」ボタンを使う
+    （このキャッシュ自体を明示的にclear()する。サイドバーの「🔄 マーケットデータ更新」
+    は市況データ専用でこの関数のキャッシュは対象外）。
     Returns: {
         "positions": {ticker: {name, qty, avg_cost, cost, cur_price, market_value, gain, gain_pct, is_jp, sector}},
         "dividends": {ticker: {is_jp, divs_by_month: {YYYY-MM: amount_in_native_currency}}},
         "usd_jpy": float,
         "error": str | None,
+        "computed_at": "YYYY-MM-DD HH:MM"（実際にこの関数の中身が実行された時刻＝
+                        キャッシュヒット時は前回計算時刻のまま。表示側の鮮度表示に使う）,
     }
     """
+    _computed_at = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
     df_trades, err = _load_trades(username)
     if err:
-        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": err}
+        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": err, "computed_at": _computed_at}
     if df_trades.empty:
-        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": None}
+        return {"positions": {}, "dividends": {}, "usd_jpy": 150.0, "error": None, "computed_at": _computed_at}
 
     usd_jpy = _fetch_usd_jpy()
     open_pos = _get_open_positions(username)
     if not open_pos:
-        return {"positions": {}, "dividends": {}, "usd_jpy": usd_jpy, "error": None}
+        return {"positions": {}, "dividends": {}, "usd_jpy": usd_jpy, "error": None, "computed_at": _computed_at}
 
     def _fetch_one_position(ticker: str, pos: dict):
         """1銘柄分の現在値・セクター・配当履歴を取得し、position辞書と
@@ -24617,10 +24622,11 @@ def _compute_portfolio_summary(username: str = "") -> dict:
     dividends = {tk: _dividends_by_ticker[tk] for tk in open_pos if tk in _dividends_by_ticker}
 
     return {
-        "positions": positions,
-        "dividends": dividends,
-        "usd_jpy":   usd_jpy,
-        "error":     None,
+        "positions":   positions,
+        "dividends":   dividends,
+        "usd_jpy":     usd_jpy,
+        "error":       None,
+        "computed_at": _computed_at,
     }
 
 
@@ -30476,6 +30482,19 @@ def render_claude_trading_project():
 
             with st.spinner("ポートフォリオデータを取得中..."):
                 summary = _compute_portfolio_summary()
+
+            # 評価額・株価は最大1時間キャッシュ（_compute_portfolio_summary側のTTL）
+            # のため、いつ時点のデータかを表示し、その場で強制更新できるボタンを
+            # 用意する。TTLを短くする（例:5分）と保有銘柄が多いユーザーほど毎回の
+            # 再計算コストとAPI呼び出しが増えて他機能にも影響しやすいため、まずは
+            # 「いつのデータか分かる＋手動で更新できる」方式のほうが影響が少ない。
+            _upd_col1, _upd_col2 = st.columns([4, 1])
+            with _upd_col1:
+                st.caption(f"🕒 データ最終更新: {summary.get('computed_at', '不明')}")
+            with _upd_col2:
+                if st.button("🔄 最新の株価に更新", key="summary_force_refresh"):
+                    _compute_portfolio_summary.clear()
+                    st.rerun()
 
             if summary["error"]:
                 st.error(f"⚠️ {summary['error']}")
