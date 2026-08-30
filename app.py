@@ -24070,10 +24070,15 @@ def _load_dividend_sheets_cache_all() -> dict:
         if not ws:
             return {}
         result: dict = {}
-        for r in ws.get_all_records():
+        for i, r in enumerate(ws.get_all_records()):
             tk = r.get("ticker")
             if tk:
-                result[tk] = r  # 同一tickerの行が複数あれば後勝ち（_save側は上書き前提のため通常1行）
+                # _row: シート上の実際の行番号（ヘッダーが1行目なのでデータはi+2行目）。
+                # _save_dividend_sheets_cache()が「既存行を上書きか、新規追加か」を
+                # 判定する際、このキャッシュ済みの行番号をそのまま使うことで、保存の
+                # たびに別途get_all_records()し直す（読み込みと同じ内容をもう一度
+                # フルスキャンする）無駄を省く。
+                result[tk] = {**r, "_row": i + 2}  # 同一tickerの行が複数あれば後勝ち
         return result
     except Exception as e:
         logger.warning(f"[trading] dividend_cache全件読込失敗: {e}")
@@ -24120,7 +24125,15 @@ def _load_dividend_sheets_cache(ticker: str, max_age_days: int = 3) -> pd.Series
 
 
 def _save_dividend_sheets_cache(ticker: str, div: pd.Series) -> bool:
-    """配当履歴をGoogle Sheetsにキャッシュ保存する（同じtickerの行があれば上書き）。"""
+    """配当履歴をGoogle Sheetsにキャッシュ保存する（同じtickerの行があれば上書き）。
+    既存行の有無・行番号は、保存のたびに別途get_all_records()し直すのではなく
+    _load_dividend_sheets_cache_all()（5分キャッシュ）の結果を再利用する。この関数は
+    通常、直前に同キャッシュを読んだ_fetch_dividend_history()がミス/期限切れと判定
+    した直後に呼ばれるため、同じ実行内ではキャッシュヒットしてSheets往復が増えない
+    （キャッシュ後に他プロセスがシートを変更していた場合のみ行番号がズレうるが、
+    その場合も既存行を新しい内容で上書きし損ねるだけで、最悪でも重複行が1つ増える
+    程度に留まる軽微な話）。
+    """
     import json as _json
     try:
         ws = _trading_ws("dividend_cache", _DIVIDEND_CACHE_HEADERS)
@@ -24131,11 +24144,8 @@ def _save_dividend_sheets_cache(ticker: str, div: pd.Series) -> bool:
         if len(data_json) > 49000:
             data_json = data_json[:49000]  # Sheetsセル上限50,000文字
         now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
-        row_num = None
-        for i, r in enumerate(ws.get_all_records()):
-            if r.get("ticker") == ticker:
-                row_num = i + 2
-                break
+        _existing = _load_dividend_sheets_cache_all().get(ticker)
+        row_num = _existing.get("_row") if _existing else None
         if row_num:
             ws.update([[ticker, data_json, now_str]], f"A{row_num}:C{row_num}", value_input_option="RAW")
         else:
