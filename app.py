@@ -1907,25 +1907,28 @@ def compute_card(symbol: str, rt_symbol: Optional[str] = None, provider: str = "
 # ===========================
 @st.cache_data(ttl=TTL_CHART, show_spinner=False)
 def make_sparkline_cached(series_values: tuple, series_index_str: tuple, base: float, mode: str) -> bytes:
+    # figsizeの高さ（元1.75）を上げて、st.image(width="stretch")でカラム幅一杯に
+    # 引き伸ばした時にチャートが縦方向にも大きく・見やすくなるようにする
+    # （幅は横並びカードの列数で決まるため変えず、縦横比だけ調整）。
     import io as _io
-    fig, ax = plt.subplots(figsize=(5.6, 1.75))
+    fig, ax = plt.subplots(figsize=(5.6, 2.5))
     if not series_values:
         ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12)
         ax.axis("off")
     else:
         x = pd.to_datetime(list(series_index_str), utc=True).tz_convert(JST)
         y = np.array(series_values)
-        ax.axhline(base, linewidth=1, alpha=0.6, color="black", linestyle="--")
-        ax.plot(x, y, linewidth=1.8, color=LINE_NEUTRAL, alpha=0.95)
-        ax.fill_between(x, y, base, where=(y >= base), alpha=0.12, color=GREEN)
-        ax.fill_between(x, y, base, where=(y < base), alpha=0.12, color=RED)
+        ax.axhline(base, linewidth=1.2, alpha=0.6, color="black", linestyle="--")
+        ax.plot(x, y, linewidth=2.4, color=LINE_NEUTRAL, alpha=0.95)
+        ax.fill_between(x, y, base, where=(y >= base), alpha=0.15, color=GREEN)
+        ax.fill_between(x, y, base, where=(y < base), alpha=0.15, color=RED)
         if mode == "INTRADAY":
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
         else:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=JST))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
-        ax.tick_params(axis="x", labelsize=9, rotation=0)
-        ax.tick_params(axis="y", labelsize=9)
+        ax.tick_params(axis="x", labelsize=11, rotation=0)
+        ax.tick_params(axis="y", labelsize=11)
         ax.margins(x=0.01)
         for spine in ax.spines.values():
             spine.set_alpha(0.2)
@@ -1940,7 +1943,7 @@ def make_sparkline_cached(series_values: tuple, series_index_str: tuple, base: f
 def make_sparkline(series: pd.Series, base: float, mode: str, up: bool):
     import io as _io
     if series is None or series.empty:
-        fig, ax = plt.subplots(figsize=(5.6, 1.75))
+        fig, ax = plt.subplots(figsize=(5.6, 2.5))
         ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12)
         ax.axis("off")
         plt.tight_layout()
