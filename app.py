@@ -1916,32 +1916,38 @@ def make_sparkline_cached(series_values: tuple, series_index_str: tuple, base: f
     # figsizeの高さ（元1.75）を上げて、st.image(width="stretch")でカラム幅一杯に
     # 引き伸ばした時にチャートが縦方向にも大きく・見やすくなるようにする
     # （幅は横並びカードの列数で決まるため変えず、縦横比だけ調整）。
+    # また、以前は白背景の図のままダークテーマのカード内に置かれ、周囲との
+    # コントラストが強すぎて悪目立ちしていたため、カードと同じ配色
+    # （背景#1e293b・文字#94a3b8・枠線#334155）にダークテーマ化する。
     import io as _io
     fig, ax = plt.subplots(figsize=(5.6, 2.5))
+    fig.patch.set_facecolor("#1e293b")
+    ax.set_facecolor("#1e293b")
     if not series_values:
-        ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12)
+        ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12, color="#94a3b8")
         ax.axis("off")
     else:
         x = pd.to_datetime(list(series_index_str), utc=True).tz_convert(JST)
         y = np.array(series_values)
-        ax.axhline(base, linewidth=1.2, alpha=0.6, color="black", linestyle="--")
-        ax.plot(x, y, linewidth=2.4, color=LINE_NEUTRAL, alpha=0.95)
-        ax.fill_between(x, y, base, where=(y >= base), alpha=0.15, color=GREEN)
-        ax.fill_between(x, y, base, where=(y < base), alpha=0.15, color=RED)
+        ax.axhline(base, linewidth=1.2, alpha=0.7, color="#94a3b8", linestyle="--")
+        ax.plot(x, y, linewidth=2.4, color="#60a5fa", alpha=0.95)
+        ax.fill_between(x, y, base, where=(y >= base), alpha=0.25, color=GREEN)
+        ax.fill_between(x, y, base, where=(y < base), alpha=0.25, color=RED)
         if mode == "INTRADAY":
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=JST))
         else:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=JST))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=3, maxticks=6))
-        ax.tick_params(axis="x", labelsize=11, rotation=0)
-        ax.tick_params(axis="y", labelsize=11)
+        ax.tick_params(axis="x", labelsize=11, rotation=0, colors="#94a3b8")
+        ax.tick_params(axis="y", labelsize=11, colors="#94a3b8")
         ax.margins(x=0.01)
         for spine in ax.spines.values():
-            spine.set_alpha(0.2)
-        ax.grid(True, axis="y", alpha=0.15)
+            spine.set_color("#334155")
+            spine.set_alpha(0.8)
+        ax.grid(True, axis="y", alpha=0.2, color="#94a3b8")
     plt.tight_layout()
     buf = _io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100)
+    fig.savefig(buf, format="png", dpi=100, facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     return buf.read()
@@ -1950,11 +1956,13 @@ def make_sparkline(series: pd.Series, base: float, mode: str, up: bool):
     import io as _io
     if series is None or series.empty:
         fig, ax = plt.subplots(figsize=(5.6, 2.5))
-        ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12)
+        fig.patch.set_facecolor("#1e293b")
+        ax.set_facecolor("#1e293b")
+        ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=12, color="#94a3b8")
         ax.axis("off")
         plt.tight_layout()
         buf = _io.BytesIO()
-        fig.savefig(buf, format="png", dpi=100)
+        fig.savefig(buf, format="png", dpi=100, facecolor=fig.get_facecolor())
         plt.close(fig)
         buf.seek(0)
         return buf.read()
