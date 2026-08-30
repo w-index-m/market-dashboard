@@ -31040,6 +31040,50 @@ def render_claude_trading_project():
 
                 st.caption(f"USD/JPY レート: {usd_jpy:.2f}  ※ 配当はyfinanceの配当履歴より。")
 
+                # ── 資産クラス別 日次推移（CSVダウンロード） ─────────────────
+                # asset_category_snapshot（00:00 JSTのcronが記録する、投信を含む
+                # 資産クラス別の日次スナップショット。前日比・先週比等でも使っている
+                # のと同じデータ）を日本株/米国株/投資信託/債券の日次推移として
+                # そのままテーブル表示・CSVダウンロードできるようにする。
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("##### 📅 資産クラス別 日次推移")
+                _hist_rows = _load_asset_category_snapshot_all(_usr)
+                if not _hist_rows:
+                    st.info(
+                        "日次スナップショットがまだ記録されていません"
+                        "（毎日00:00 JSTのcronで自動的に記録されます）。"
+                    )
+                else:
+                    _hist_df = pd.DataFrame(_hist_rows)
+                    for _col in ["日本株", "米国株", "投資信託", "債券", "total_value_jpy"]:
+                        if _col in _hist_df.columns:
+                            _hist_df[_col] = pd.to_numeric(_hist_df[_col], errors="coerce").fillna(0)
+                        else:
+                            _hist_df[_col] = 0
+                    _hist_df = (
+                        _hist_df[["date", "日本株", "米国株", "投資信託", "債券", "total_value_jpy"]]
+                        .rename(columns={"total_value_jpy": "合計"})
+                        .sort_values("date")
+                        .reset_index(drop=True)
+                    )
+                    st.dataframe(_hist_df.tail(30), use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"直近30日分を表示（記録は全{len(_hist_df)}日分）。金額はすべて円換算。"
+                        "ダウンロードボタンでは全期間分のCSVを取得できます。"
+                    )
+                    # WebSocket接続がまだ確立し切っていないタイミングでdownload_buttonが
+                    # 描画されると「not connected to a server!」になりやすいため、
+                    # 保有中ポジション表のダウンロードと同様にボタンクリック後にのみ
+                    # download_buttonを描画する。
+                    if st.button("📥 資産推移CSVを準備", key="asset_hist_csv_prepare"):
+                        st.download_button(
+                            "📥 CSVダウンロード",
+                            data=_hist_df.to_csv(index=False).encode("utf-8-sig"),
+                            file_name=f"asset_category_history_{_usr}.csv",
+                            mime="text/csv",
+                            key="asset_hist_csv_dl",
+                        )
+
 
 # =====================================================
 # 🔐 管理者用チェンジログ（パスワード保護）
