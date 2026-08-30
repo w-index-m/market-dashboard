@@ -18541,9 +18541,12 @@ def _fetch_sec_ticker_cik_map() -> dict:
 
 
 @st.cache_data(ttl=TTL_RSS, show_spinner=False)
-def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5) -> list:
+def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5, days_back: int = 14) -> list:
     """米国株の直近SEC EDGAR 8-K（重要事象の適時開示）を構造化データで取得。
     正規のSEC公式API（data.sec.gov）を利用。date_keyは当日キャッシュ用。
+    days_back以内（デフォルト直近2週間）に絞る。NVDA等は決算に無関係な
+    ルーティンな8-K（役員人事等）も随時提出しているため、日付を絞らず単に
+    「直近5件」を拾うだけだと決算8-Kが古い雑多な8-Kに埋もれて見えなくなることがある。
     Returns: [{"title","date","url","source":"EDGAR"}, ...]
     """
     if ticker.endswith(".T"):
@@ -18551,6 +18554,7 @@ def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5) 
     _cik = _fetch_sec_ticker_cik_map().get(ticker.upper())
     if not _cik:
         return []
+    _cutoff = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
     try:
         _r = requests.get(
             f"https://data.sec.gov/submissions/CIK{_cik}.json",
@@ -18565,6 +18569,8 @@ def _fetch_recent_edgar_filings(ticker: str, date_key: str, max_items: int = 5) 
         _results = []
         for _form, _date, _acc, _doc in zip(_forms, _dates, _accs, _docs):
             if _form != "8-K":
+                continue
+            if _date < _cutoff:
                 continue
             _acc_nodash = _acc.replace("-", "")
             _url = f"https://www.sec.gov/Archives/edgar/data/{int(_cik)}/{_acc_nodash}/{_doc}"
