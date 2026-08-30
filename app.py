@@ -21358,7 +21358,11 @@ def _translate_headlines_to_ja(headlines_tuple: tuple) -> list:
 @st.cache_data(ttl=3600, show_spinner=False)
 def _summarize_news_ja_with_context(ticker: str, articles_tuple: tuple, stock_ctx: str) -> list:
     """英語ニュース（見出し＋Finnhubの短い要約）を、保有銘柄の直近テクニカルデータも
-    踏まえて3〜5文程度の日本語要約に翻訳・補足する（Groq使用、TTL=1h）。
+    踏まえて3〜5文程度の日本語要約に翻訳・補足する（TTL=1h）。
+    以前はGroqだけに固定していたため、Groqが不調な時（レート制限・障害等）は
+    フォールバック先が無く即座に未翻訳の英語原文を返していた。call_ai_with_fallback()
+    経由にして、Gemini→Groq→DeepSeek→NVIDIA→OpenRouterの通常のフォールバック
+    チェーンを使うようにする。
     articles_tuple: "見出し || 元の短い要約" 形式の文字列のtuple
     Returns: list[str]（入力と同じ長さ）。失敗時は元の要約（"||"の後半）をそのまま返す。
     """
@@ -21378,9 +21382,9 @@ def _summarize_news_ja_with_context(ticker: str, articles_tuple: tuple, stock_ct
         + numbered
     )
     try:
-        text, _ = _call_ai_for_trading(
-            prompt, model_pref="groq", max_output_tokens=1200, temperature=0.3
-        )
+        text, _ = call_ai_with_fallback(prompt, max_output_tokens=1200, temperature=0.3)
+        if text.startswith("⚠️"):
+            return _fallback
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         result = []
         for line in lines:
@@ -26149,9 +26153,10 @@ else ""}
 def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
     """保有銘柄全体の決算・ファンダメンタルズ状況を、銘柄ごとに個別のAI呼び出しを
     せず1回のプロンプトにまとめて呼ぶことで、銘柄数に比例したAI呼び出し回数の
-    増加（クォータ消費）を避けつつ、3行程度の短いメモを銘柄ごとに生成する。
-    funda_json: [{"ticker","name","eps_ttm","eps_fwd","rev_growth","earn_growth",
-                   "next_earnings","eps_history"}, ...] のJSON文字列
+    増加（クォータ消費）を避けつつ、5行程度のメモを銘柄ごとに生成する
+    （業種・セクターの文脈も踏まえた内容にする）。
+    funda_json: [{"ticker","name","sector","eps_ttm","eps_fwd","rev_growth",
+                   "earn_growth","next_earnings","eps_history"}, ...] のJSON文字列
     Returns: (memos: dict[ticker, str], model: str)
     """
     import json as _json
@@ -26162,6 +26167,8 @@ def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
     blocks = []
     for item in funda_list:
         _lines = [f"【{item['ticker']}】{item.get('name', item['ticker'])}"]
+        if item.get("sector"):
+            _lines.append(f"セクター: {item['sector']}")
         if item.get("eps_ttm") is not None:
             _lines.append(f"EPS実績(TTM): {item['eps_ttm']}")
         if item.get("eps_fwd") is not None:
@@ -26178,15 +26185,20 @@ def _generate_earnings_memo_all(tickers_key: str, funda_json: str) -> tuple:
 
     prompt = (
         "あなたはプロの株式アナリストです。以下は保有銘柄それぞれの決算・"
-        "ファンダメンタルズデータです。銘柄ごとに、直近の決算実績が良かったか"
-        "悪かったか（増収増益/減収減益・サプライズの有無等）と今後の見通しを、"
-        "日本語で簡潔に3行以内でまとめてください。データが無い項目には触れず、"
-        "憶測で数値を作らないこと。出力は必ず次の形式のみで、銘柄ごとに区切って"
-        "ください（他の説明文は付けないこと）:\n"
-        "【TICKER】\n(1行目)\n(2行目)\n(3行目)\n\n"
+        "ファンダメンタルズデータです。銘柄ごとに、日本語で5行以内のメモを"
+        "作成してください。以下の観点を織り込むこと:\n"
+        "1. 直近の決算実績が良かったか悪かったか（増収増益/減収減益・サプライズの有無等）\n"
+        "2. その数値がセクター・業界内の動向（AI需要、金利環境、業界再編等）に照らして"
+        "どう位置づけられるか（一般的に知られている業界動向の範囲で触れてよいが、"
+        "個別銘柄の未公表情報を断定的に創作しないこと）\n"
+        "3. 今後の見通し（次回決算日等）\n"
+        "データが無い項目には触れず、憶測で数値を作らないこと。"
+        "出力は必ず次の形式のみで、銘柄ごとに区切ってください"
+        "（他の説明文は付けないこと）:\n"
+        "【TICKER】\n(1行目)\n(2行目)\n(3行目)\n(4行目)\n(5行目)\n\n"
         + "\n\n".join(blocks)
     )
-    text, model = call_ai_with_fallback(prompt, max_output_tokens=1800, temperature=0.3)
+    text, model = call_ai_with_fallback(prompt, max_output_tokens=2800, temperature=0.3)
     if text.startswith("⚠️"):
         return {}, model
 
@@ -30496,7 +30508,7 @@ def render_claude_trading_project():
                     with st.spinner("ニュース・決算情報を取得中..."):
                         _news_all      = []
                         _earnings_rows = []
-                        _funda_list    = []  # ④ 決算3行メモ用（このループで取得済みのデータを再利用）
+                        _funda_list    = []  # ④ 決算5行メモ用（このループで取得済みのデータを再利用）
                         for _n_ticker in open_pos.keys():
                             _n_is_jp = _n_ticker.endswith(".T")
                             try:
@@ -30532,6 +30544,7 @@ def render_claude_trading_project():
                                 _funda_list.append({
                                     "ticker":        _n_ticker,
                                     "name":          _n_name,
+                                    "sector":        _sdata.get("sector_detail") or _sdata.get("sector") or "",
                                     "eps_ttm":       _sdata.get("eps_ttm"),
                                     "eps_fwd":       _sdata.get("eps_fwd"),
                                     "rev_growth":    _sdata.get("rev_growth"),
@@ -30579,9 +30592,9 @@ def render_claude_trading_project():
                     else:
                         st.caption("保有銘柄の直近ニュースは見つかりませんでした。")
 
-                    # ── ④ 保有銘柄 決算3行メモ（AI・全銘柄まとめて1回で生成） ──────
+                    # ── ④ 保有銘柄 決算5行メモ（AI・全銘柄まとめて1回で生成） ──────
                     st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("**📋 保有銘柄 決算3行メモ（AI）**")
+                    st.markdown("**📋 保有銘柄 決算5行メモ（AI）**")
                     if not _funda_list:
                         st.caption("決算・ファンダメンタルズデータが取得できた保有銘柄がありません（投資信託は対象外）。")
                     else:
