@@ -10242,33 +10242,37 @@ def render_momentum_ranking(
         _render_cards(df_ndx)
 
         with st.expander("📅 NASDAQ100 構成銘柄 入れ替え履歴（直近）"):
-            for chg in _NDX100_CHANGES:
-                st.markdown(
-                    f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
-                    f'padding:10px 14px;margin-bottom:8px;">'
-                    f'<div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px">'
-                    f'{"🔄" if chg["type"]=="annual" else "↔️"} {chg["label"]} '
-                    f'<span style="color:#64748b">({chg["date"]})</span></div>'
-                    f'<div style="display:flex;gap:16px;">'
-                    f'<div style="flex:1">'
-                    f'<div style="font-size:11px;color:#22c55e;font-weight:600;margin-bottom:3px">▲ 新規採用</div>'
-                    + "".join(
-                        f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
-                        f'<span style="color:#22c55e;font-weight:700">{t}</span>'
-                        f' <span style="color:#94a3b8">{n}</span></div>'
-                        for t, n in chg["added"]
-                    )
-                    + f'</div><div style="flex:1">'
-                    f'<div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:3px">▼ 除外</div>'
-                    + "".join(
-                        f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
-                        f'<span style="color:#ef4444;font-weight:700">{t}</span>'
-                        f' <span style="color:#94a3b8">{n}</span></div>'
-                        for t, n in chg["removed"]
-                    )
-                    + f'</div></div></div>',
-                    unsafe_allow_html=True,
+            # 1件ずつst.markdown()を呼ぶとReact側のDOM差分適用と噛み合わず
+            # 「NotFoundError: removeChild」でクラッシュすることがある
+            # （CLAUDE.md記載の既知アンチパターン）。HTML文字列を1つにまとめて
+            # 単一のst.markdown()呼び出しにする。
+            _ndx_chg_html = [
+                f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                f'padding:10px 14px;margin-bottom:8px;">'
+                f'<div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px">'
+                f'{"🔄" if chg["type"]=="annual" else "↔️"} {chg["label"]} '
+                f'<span style="color:#64748b">({chg["date"]})</span></div>'
+                f'<div style="display:flex;gap:16px;">'
+                f'<div style="flex:1">'
+                f'<div style="font-size:11px;color:#22c55e;font-weight:600;margin-bottom:3px">▲ 新規採用</div>'
+                + "".join(
+                    f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
+                    f'<span style="color:#22c55e;font-weight:700">{t}</span>'
+                    f' <span style="color:#94a3b8">{n}</span></div>'
+                    for t, n in chg["added"]
                 )
+                + f'</div><div style="flex:1">'
+                f'<div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:3px">▼ 除外</div>'
+                + "".join(
+                    f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
+                    f'<span style="color:#ef4444;font-weight:700">{t}</span>'
+                    f' <span style="color:#94a3b8">{n}</span></div>'
+                    for t, n in chg["removed"]
+                )
+                + f'</div></div></div>'
+                for chg in _NDX100_CHANGES
+            ]
+            st.markdown("".join(_ndx_chg_html), unsafe_allow_html=True)
             st.caption("※ 出典: Nasdaq公式発表・各種報道。最新情報は nasdaq.com でご確認ください。")
 
     with tab_sp:
@@ -20658,14 +20662,18 @@ def render_congress_tracker():
 
         if politician_trades:
             st.markdown("**最近の取引（capitoltrades.com）**")
-            for t in politician_trades:
-                st.markdown(
-                    f'<div style="background:#f8f9fa;border-radius:6px;'
-                    f'padding:8px 12px;margin-bottom:6px;font-size:12px;">'
-                    f'{t["text"]}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+            # 1件ずつst.markdown()を呼ぶとReact側のDOM差分適用と噛み合わず
+            # 「NotFoundError: removeChild」でクラッシュすることがある
+            # （CLAUDE.md記載の既知アンチパターン）。HTML文字列を1つにまとめて
+            # 単一のst.markdown()呼び出しにする。
+            _politician_trades_html = [
+                f'<div style="background:#f8f9fa;border-radius:6px;'
+                f'padding:8px 12px;margin-bottom:6px;font-size:12px;">'
+                f'{t["text"]}'
+                f'</div>'
+                for t in politician_trades
+            ]
+            st.markdown("".join(_politician_trades_html), unsafe_allow_html=True)
         else:
             st.info("スクレイピングでのデータ取得ができませんでした。Capitol Tradesで直接確認してください。")
             st.markdown(
@@ -31143,18 +31151,22 @@ def render_claude_trading_project():
                             float(r["受取配当"].split()[0].replace(",", ""))
                             for r in detail_rows_sorted
                         )
-                        for dr in detail_rows_sorted:
-                            st.markdown(
-                                f'<div style="display:flex;justify-content:space-between;'
-                                f'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
-                                f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
-                                f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
-                                f'<span style="color:#64748b">{_mvs(dr["1株配当"])}</span>'
-                                f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
-                                f'<span style="color:#f59e0b;font-weight:700">{_mvs(dr["受取配当"])}</span>'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
+                        # 1件ずつst.markdown()を呼ぶとReact側のDOM差分適用と噛み合わず
+                        # 「NotFoundError: removeChild」でクラッシュすることがある
+                        # （CLAUDE.md記載の既知アンチパターン）。HTML文字列を1つに
+                        # まとめて単一のst.markdown()呼び出しにする。
+                        _detail_rows_html = [
+                            '<div style="display:flex;justify-content:space-between;'
+                            'padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px">'
+                            f'<span style="color:#94a3b8">{dr["権利落日"]}</span>'
+                            f'<span style="color:#e2e8f0;font-weight:600">{dr["銘柄"]}</span>'
+                            f'<span style="color:#64748b">{_mvs(dr["1株配当"])}</span>'
+                            f'<span style="color:#64748b">{dr["保有株数"]}株</span>'
+                            f'<span style="color:#f59e0b;font-weight:700">{_mvs(dr["受取配当"])}</span>'
+                            '</div>'
+                            for dr in detail_rows_sorted
+                        ]
+                        st.markdown("".join(_detail_rows_html), unsafe_allow_html=True)
                         _total_div_str = f"{cur_label} {total_div:,.0f}" if use_jpy else f"{cur_label} {total_div:,.2f}"
                         st.markdown(
                             f'<div style="text-align:right;font-size:12px;color:#94a3b8;margin-top:8px">'
