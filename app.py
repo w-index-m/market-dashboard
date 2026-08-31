@@ -29259,36 +29259,35 @@ def render_claude_trading_project():
                     "✏️ ボタンで編集・🗑️ ボタンで誤記録を削除できます</span>",
                     unsafe_allow_html=True,
                 )
-                # 1行=10列のst.columns()はスマホ縦画面だと自動的に縦積みになり見た目が
-                # 崩れるため、編集・削除ボタン以外の項目は1枚のHTMLカードにまとめて
-                # flex-wrapで折り返させ、ボタンだけ別カラムに置く（3カラムなら縦積みでも
-                # まだ読める）
+                # 以前はここで行ごとにunsafe_allow_html=True付きst.markdown()を
+                # 呼んでおり、CLAUDE.md記載の既知アンチパターン（1件ずつ生HTMLを
+                # 差し込むループ）に該当して「NotFoundError: removeChild」で
+                # クラッシュしていた。編集・削除ボタンが行ごとに必要なため他の
+                # セクションのように複数行を1つのHTML文字列へ結合することはできない
+                # （ボタンはネイティブのStreamlitウィジェットで、行の位置に紐づく
+                # 必要があるため）。代わりに生HTML自体をやめ、st.container(border=True)
+                # （Streamlit標準のカード枠線）＋ 色付きMarkdown記法（:green[]/:red[]、
+                # unsafe_allow_html不要）で同等の見た目を再現する。
                 _del_requested = None
                 for _seq, (_, _row) in enumerate(df_trades.iterrows()):
                     _act = str(_row.get("action", ""))
-                    _act_color = "#22c55e" if _act == "BUY" else "#ef4444"
-                    _act_label = "買い" if _act == "BUY" else "売り"
+                    _act_md = ":green[買い]" if _act == "BUY" else ":red[売り]"
                     _memo_s = str(_row.get("memo", "") or "").strip()
                     _row_is_jp = str(_row.get("ticker", "")).endswith(".T")
                     _row_price = float(_row.get("price", 0))
                     _row_price_str = f"{_row_price:,.0f}" if _row_is_jp else f"{_row_price:,.2f}"
                     _row_c1, _row_c2 = st.columns([10, 2])
                     with _row_c1:
-                        st.markdown(
-                            '<div style="background:#0f172a;border:1px solid #334155;'
-                            'border-radius:8px;padding:8px 12px;margin-bottom:0;'
-                            'display:flex;flex-wrap:wrap;gap:5px 14px;align-items:baseline">'
-                            f'<span style="font-size:11px;color:#64748b">{str(_row.get("date",""))[:10]}</span>'
-                            f'<span style="font-size:13px;font-weight:700;color:#e2e8f0">{_row.get("ticker","")}</span>'
-                            f'<span style="font-size:12px;color:#94a3b8">{_row.get("name","")}</span>'
-                            f'<span style="font-size:12px;font-weight:700;color:{_act_color}">{_act_label}</span>'
-                            f'<span style="font-size:12px;color:#e2e8f0">{int(_row.get("quantity",0)):,}株</span>'
-                            f'<span style="font-size:12px;color:#e2e8f0">@ {_row_price_str}</span>'
-                            f'<span style="font-size:11px;color:#64748b">手数料 {int(_row.get("fee",0)):,}</span>'
-                            + (f'<span style="font-size:11px;color:#64748b">📝 {_memo_s[:20]}</span>' if _memo_s else "")
-                            + '</div>',
-                            unsafe_allow_html=True,
-                        )
+                        with st.container(border=True):
+                            _line = (
+                                f"`{str(_row.get('date',''))[:10]}` "
+                                f"**{_row.get('ticker','')}** {_row.get('name','')}　"
+                                f"{_act_md}　{int(_row.get('quantity',0)):,}株　"
+                                f"@ {_row_price_str}　手数料 {int(_row.get('fee',0)):,}"
+                            )
+                            if _memo_s:
+                                _line += f"　📝 {_memo_s[:20]}"
+                            st.markdown(_line)
                     with _row_c2:
                         _btn_c1, _btn_c2 = st.columns(2)
                         with _btn_c1:
@@ -29301,7 +29300,8 @@ def render_claude_trading_project():
                         with _btn_c2:
                             if st.button("🗑️", key=f"del_tr_{_seq}", help="この記録を削除"):
                                 _del_requested = _seq + 2  # Sheetsの行番号（ヘッダー=1、データ=2〜）
-                    st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
+                    # st.container(border=True)が行間の視覚的な区切りを兼ねるため、
+                    # 別途スペーサーdivは不要（これも同じアンチパターンだったため削除）
 
                     # 編集フォーム（✏️が押された行の直下にのみ表示）
                     if st.session_state.get("_editing_trade_row") == _seq:
