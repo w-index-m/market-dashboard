@@ -24858,7 +24858,6 @@ def _save_daily_asset_category_snapshot(username: str, date: str) -> tuple[bool,
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-@st.cache_data(ttl=300, show_spinner=False)
 def _load_asset_category_snapshot_all(username: str) -> list:
     """asset_category_snapshotシートの指定ユーザー分の行を一度だけ読み込みキャッシュする。
     前日比・先週比・前月比・前年比の表示だけで1レンダリングにつき最大4回呼ばれるため、
@@ -31453,6 +31452,21 @@ def render_claude_trading_project():
                         "日次スナップショットがまだ記録されていません"
                         "（毎日00:00 JSTのcronで自動的に記録されます）。"
                     )
+                    # cronの実行自体は成功していても、アカウントごとの保存失敗
+                    # （例: その瞬間の現在値取得が全銘柄失敗）は他アカウントが
+                    # 1件でも成功していればワークフロー全体としては「success」に
+                    # なるため、ここで気づけない。手動で今すぐ試して、失敗理由を
+                    # その場で確認できるようにする。
+                    if st.button("🔄 今すぐ記録を試す", key="snapshot_retry_now"):
+                        _snap_ok, _snap_reason = _save_daily_asset_category_snapshot(
+                            _usr, datetime.now(JST).strftime("%Y-%m-%d")
+                        )
+                        if _snap_ok:
+                            _load_asset_category_snapshot_all.clear()
+                            st.success("記録できました。再読み込みします。")
+                            st.rerun()
+                        else:
+                            st.error(f"記録に失敗しました: {_snap_reason}")
                 else:
                     _hist_df = pd.DataFrame(_hist_rows)
                     for _col in ["日本株", "米国株", "投資信託", "債券", "total_value_jpy"]:
