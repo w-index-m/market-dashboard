@@ -31481,7 +31481,15 @@ def render_claude_trading_project():
                         .sort_values("date")
                         .reset_index(drop=True)
                     )
-                    st.dataframe(_hist_df.tail(30), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        _hist_df.tail(30),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            _col: st.column_config.NumberColumn(_col, format="%,.0f円")
+                            for _col in ["日本株", "米国株", "投資信託", "債券", "合計"]
+                        },
+                    )
                     st.caption(
                         f"直近30日分を表示（記録は全{len(_hist_df)}日分）。金額はすべて円換算。"
                         "ダウンロードボタンでは全期間分のCSVを取得できます。"
