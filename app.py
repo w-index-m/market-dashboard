@@ -30710,7 +30710,10 @@ def render_claude_trading_project():
 
                         _card_html = []
                         for _fd in _funda_list:
-                            _cur = "円" if _fd.get("is_jp") else "USD"
+                            # 現在値・目標株価は円/USDが銘柄ごとに混在すると比較しづらいため、
+                            # ここではUSD建て銘柄も_pnl_usdjpyで円換算し、すべて円で統一表示する。
+                            _cur = "円"
+                            _fx = 1.0 if _fd.get("is_jp") else _pnl_usdjpy
                             _sec_html = f'<span style="color:#64748b">｜{html.escape(_fd["sector"])}</span>' if _fd.get("sector") else ""
                             _card_html.append(
                                 '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
@@ -30755,12 +30758,10 @@ def render_claude_trading_project():
                             # 🎯 市場評価
                             _mkt_parts = []
                             if _fd.get("price") is not None:
-                                _price_s = f"{_fd['price']:,.0f}" if _fd.get("is_jp") else f"{_fd['price']:,.2f}"
-                                _mkt_parts.append(f"現在値 {_price_s}{_cur}")
+                                _mkt_parts.append(f"現在値 {_fd['price'] * _fx:,.0f}{_cur}")
                             if _fd.get("target_mean") is not None:
-                                _tgt_s = f"{_fd['target_mean']:,.0f}" if _fd.get("is_jp") else f"{_fd['target_mean']:,.2f}"
                                 _an_s = f"（アナリスト{_fd['n_analysts']}名）" if _fd.get("n_analysts") else ""
-                                _mkt_parts.append(f"目標株価(平均) {_tgt_s}{_cur}{_an_s}")
+                                _mkt_parts.append(f"目標株価(平均) {_fd['target_mean'] * _fx:,.0f}{_cur}{_an_s}")
                             if _fd.get("upside") is not None:
                                 _mkt_parts.append(f"上昇余地 {_fd['upside']:+.1f}%")
                             if _mkt_parts:
