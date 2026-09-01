@@ -97,8 +97,16 @@ JST = pytz.timezone("Asia/Tokyo")
 # から `import app` で読み込んだ際に、Streamlitのスクリプト実行コンテキスト外で
 # set_page_config() が実行されてしまわないようにする（streamlit run では通常通り動作する）。
 if __name__ == "__main__":
+    # ブラウザのタブ名（<title>）を、トレーディングプロジェクトページ（?page=trading）
+    # では専用の名前にする。st.set_page_config()はスクリプト内で最初に呼ぶ必要が
+    # あるため、main()内のルーティングより前のこの時点でst.query_paramsを見て
+    # タイトルを出し分ける（query_params自体はset_page_config前でも参照できる）。
+    _is_trading_page = st.query_params.get("page") == "trading"
     st.set_page_config(
-        page_title="Market Dashboard | リアルタイム株価・センチメント・Fear&Greed",
+        page_title=(
+            "Claude 個別株PJ" if _is_trading_page
+            else "Market Dashboard | リアルタイム株価・センチメント・Fear&Greed"
+        ),
         page_icon="📊",
         layout="wide",
         initial_sidebar_state="expanded",
