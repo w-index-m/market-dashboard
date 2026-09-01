@@ -8644,6 +8644,26 @@ def _fetch_fred_pce_series(series_id: str, result_key: str, result: Dict[str, An
         result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_jgb10y_history(period: str = "10y") -> pd.DataFrame:
+    """日本10年国債利回り（^JGB10Y）の推移をyfinanceから取得する。
+    日銀の金融政策正常化（マイナス金利解除・YCC撤廃）による長期金利上昇トレンドを
+    継続的に可視化するためのチャート用データ。
+    Returns: DataFrame(index=date, columns=["yield"])。取得失敗時は空DataFrame。
+    """
+    try:
+        df = yf.Ticker("^JGB10Y").history(period=period, interval="1d", auto_adjust=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        s = df["Close"].dropna()
+        if s.empty:
+            return pd.DataFrame()
+        return s.to_frame(name="yield")
+    except Exception as e:
+        logger.warning(f"[JGB10Y] 取得失敗: {e}")
+        return pd.DataFrame()
+
+
 def render_macro_indicators(macro: dict | None = None):
     """🌐 マクロ経済指標（CAPE / LEI / PCE）セクション。
     macro: 呼び出し元がThreadPoolExecutorで先にfetch_macro_indicators()をバックグラウンド
@@ -9001,6 +9021,45 @@ def render_macro_indicators(macro: dict | None = None):
             )
     elif _pe_data.get("error"):
         st.caption(f"⚠️ PERデータ取得失敗: {_pe_data['error']}")
+
+    # ── 日本10年国債利回り 推移 ──────────────────────────────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '🇯🇵 日本10年国債利回り 推移</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "日銀の金融政策正常化（マイナス金利解除・YCC撤廃）に伴う長期金利の上昇トレンドを"
+        "継続的に確認するためのチャートです。急激な金利上昇は、国債を大量保有する"
+        "地銀・生保の含み損拡大や、円キャリートレード巻き戻し（急激な円高・"
+        "グローバル株安の引き金）のリスクと関連します。"
+    )
+    _jgb_df = _fetch_jgb10y_history()
+    if not _jgb_df.empty:
+        _jgb_latest  = float(_jgb_df["yield"].iloc[-1])
+        _jgb_1y_ago  = _value_as_of(_jgb_df, pd.Timestamp.now() - pd.DateOffset(years=1), col="yield") \
+            if len(_jgb_df) > 1 else None
+        _fig_jgb = go.Figure()
+        _fig_jgb.add_trace(go.Scatter(
+            x=_jgb_df.index, y=_jgb_df["yield"],
+            mode="lines", line=dict(color="#f59e0b", width=2),
+            hovertemplate="%{x|%Y-%m-%d}<br>%{y:.3f}%<extra></extra>",
+        ))
+        _fig_jgb.update_layout(
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            height=260, margin=dict(l=10, r=10, t=10, b=20),
+            font=dict(color="#e2e8f0"),
+            xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+            yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                       title=dict(text="利回り (%)", font=dict(color="#94a3b8"))),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(_fig_jgb, use_container_width=True)
+        _jgb_chg_str = f"{_jgb_latest - _jgb_1y_ago:+.3f}pt（1年前比）" if _jgb_1y_ago is not None else ""
+        st.caption(f"最新: {_jgb_latest:.3f}% {_jgb_chg_str}　※ データ: yfinance（^JGB10Y）")
+    else:
+        st.info("日本10年国債利回りのデータを取得できませんでした。")
 
 
 def render_bear_market_checker(data: dict | None = None):
