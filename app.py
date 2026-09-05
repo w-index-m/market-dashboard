@@ -8137,6 +8137,72 @@ def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_jp_sharpe_ranking(rfr: float = 0.005) -> pd.DataFrame:
+    """日経225主要銘柄（_NK225_STOCKS）の年間リターン・リスク・シャープレシオ・
+    ベータ・アルファを一括計算する。個別銘柄ごとのダウンロードではなく1回の
+    yf.download()にまとめることで、30銘柄分でも初回ロードを高速化する
+    （w-index-m/jstock-metricsリポジトリのcompute_sharpe_all()と同じ設計）。
+    rfr: 想定無リスク金利（年率、デフォルト0.5%）。
+    ベンチマークは日経平均（^N225）。
+    Returns: DataFrame（シャープレシオ降順）。取得失敗時は空DataFrame。
+    """
+    tickers = list(_NK225_STOCKS.keys())
+    end   = datetime.now()
+    start = end - timedelta(days=400)
+    try:
+        raw = yf.download(
+            tickers + ["^N225"], start=start, end=end,
+            progress=False, auto_adjust=True, threads=True,
+        )
+    except Exception as e:
+        logger.warning(f"[jp_sharpe] yf.download失敗: {e}")
+        return pd.DataFrame()
+    if raw.empty:
+        return pd.DataFrame()
+    close_all = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+    if "^N225" not in close_all.columns:
+        return pd.DataFrame()
+    market_ret = close_all["^N225"].dropna().pct_change().dropna()
+    market_annual = float(market_ret.mean()) * 252
+
+    results = []
+    for ticker in tickers:
+        if ticker not in close_all.columns:
+            continue
+        name = _NK225_STOCKS[ticker]
+        close = close_all[ticker].dropna()
+        if len(close) < 2:
+            continue
+        ret = close.pct_change().dropna()
+        common = ret.index.intersection(market_ret.index)
+        if len(common) < 30:
+            continue
+        x = ret.loc[common].to_numpy(dtype=float)
+        y = market_ret.loc[common].to_numpy(dtype=float)
+        annual_return = x.mean() * 252
+        annual_vol    = x.std() * np.sqrt(252)
+        if annual_vol == 0:
+            continue
+        try:
+            beta = np.cov(x, y)[0][1] / np.var(y)
+        except Exception:
+            beta = 0.0
+        results.append({
+            "ティッカー":          ticker,
+            "銘柄名":              name,
+            "年間平均リターン(%)": round(annual_return * 100, 2),
+            "年間リスク(%)":       round(annual_vol * 100, 2),
+            "シャープレシオ":      round((annual_return - rfr) / annual_vol, 4),
+            "ベータ":              round(beta, 4),
+            "アルファ(%)":         round((annual_return - beta * market_annual) * 100, 2),
+        })
+    df = pd.DataFrame(results)
+    if not df.empty:
+        df = df.sort_values("シャープレシオ", ascending=False).reset_index(drop=True)
+    return df
+
+
 # =====================================================
 # 🐻 弱気相場リスク判定
 # =====================================================
