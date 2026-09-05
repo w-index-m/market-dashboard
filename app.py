@@ -30000,6 +30000,7 @@ def render_claude_trading_project():
                         st.markdown(
                             '<div style="display:flex;gap:24px;flex-wrap:wrap;background:#0f172a;'
                             'border:1px solid #334155;border-radius:8px;padding:10px 18px;margin-bottom:10px">'
+                            + _period_chg_html("前日比", _pnl_today - pd.Timedelta(days=1))
                             + _period_chg_html("先週比", _pnl_today - pd.Timedelta(days=7))
                             + _period_chg_html("前月比", _pnl_today - pd.DateOffset(months=1))
                             + _period_chg_html("前年比", _pnl_today - pd.DateOffset(years=1))
