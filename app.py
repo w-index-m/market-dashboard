@@ -1666,6 +1666,8 @@ RSS_FEEDS = {
     # ── 株式・マーケット ─────────────────────────────
     "みんかぶ":                  {"url": "https://assets.wor.jp/rss/rdf/minkabufx/stock.rdf",       "translate": False, "max_items": 20},
     "東証TDnet":                 {"url": "https://webapi.yanoshin.jp/webapi/tdnet/list/recent.rss",  "translate": False, "max_items": 20},
+    "日経マーケット":            {"url": "https://www.nikkei.com/rss/market.xml",                    "translate": False, "max_items": 20},
+    "ロイター(日本語)":          {"url": "https://feeds.reuters.com/reuters/JPBusinessNews",         "translate": False, "max_items": 20},
     # ── 一次報道・中立系（英語） ─────────────────────
     "AP News":                   {"url": "https://feeds.apnews.com/rss/apf-topnews",                 "translate": True,  "max_items": 20},
     "BBC World":                 {"url": "https://feeds.bbci.co.uk/news/world/rss.xml",              "translate": True,  "max_items": 20},
@@ -15048,7 +15050,7 @@ def render_rss_news(translate_mode: bool = True):
     CATEGORIES = {
         "🇯🇵 国内": [
             "Yahoo!ニュース（経済）", "NHKニュース（経済）",
-            "みんかぶ", "東証TDnet",
+            "みんかぶ", "東証TDnet", "日経マーケット", "ロイター(日本語)",
         ],
         "🌐 海外": [
             "AP News", "BBC World", "NPR News",
@@ -22837,6 +22839,46 @@ def _fetch_minkabu_jp_news(code: str, max_items: int = 6) -> list:
         return []
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_kabutan_jp_news(code: str, max_items: int = 6) -> list:
+    """株探(Kabutan)の銘柄ニュースページを取得（TTL=30分）。
+    code: .T を除いた銘柄コード（例: "7203"）
+    Returns: [{headline, headline_ja, url, date, source}] | []（失敗時）
+    """
+    import re as _re
+    try:
+        url = f"https://kabutan.jp/stock/news?code={code}"
+        resp = requests.get(url, headers={"User-Agent": UA}, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"[trading] kabutan {code} → HTTP {resp.status_code}")
+            return []
+
+        titles = _re.findall(r'<a href="(/news/[^"]+)"[^>]*>([^<]{5,120})</a>', resp.text)
+        dates  = _re.findall(r'<time[^>]*>([^<]+)</time>', resp.text)
+        results = []
+        seen_titles: set = set()
+        for i, (path, title) in enumerate(titles):
+            title = title.strip()
+            if len(title) < 5 or title in seen_titles or "株探" in title:
+                continue
+            seen_titles.add(title)
+            date_str = dates[i].strip() if i < len(dates) else ""
+            results.append({
+                "headline":    title,
+                "headline_ja": title,
+                "url":         f"https://kabutan.jp{path}",
+                "date":        date_str,
+                "source":      "株探",
+            })
+            if len(results) >= max_items:
+                break
+        return results
+
+    except Exception as e:
+        logger.warning(f"[trading] kabutan fetch失敗 {code}: {e}")
+        return []
+
+
 # 個別銘柄のセクター表示を「IT・テクノロジー」より具体的にするための手動分類。
 # _fetch_ticker_sector()が使う11業種ブロード分類（SECTORS辞書ベースのRRG判定用）は
 # 変更せず、こちらはAIプロンプトに渡す表示ラベルの精度を上げるためだけに使う。
@@ -23036,6 +23078,9 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
             def _get_minkabu():
                 return _fetch_minkabu_jp_news(code, max_items=6)
 
+            def _get_kabutan():
+                return _fetch_kabutan_jp_news(code, max_items=4)
+
             def _get_edinet():
                 return _fetch_edinet_news(code, days=30, max_items=4)
 
@@ -23065,18 +23110,20 @@ def _fetch_trading_stock_data(ticker: str, is_jp: bool) -> dict:
                         pass
                 return items
 
-            # 3ソースを並列取得（最大10秒待機）
-            with _cf_news.ThreadPoolExecutor(max_workers=3) as _ex_news:
+            # 4ソースを並列取得（最大10秒待機）
+            with _cf_news.ThreadPoolExecutor(max_workers=4) as _ex_news:
                 _f_mk  = _ex_news.submit(_get_minkabu)
+                _f_kb  = _ex_news.submit(_get_kabutan)
                 _f_ed  = _ex_news.submit(_get_edinet)
                 _f_td  = _ex_news.submit(_get_tdnet)
                 mk_items = _f_mk.result(timeout=12) or []
+                kb_items = _f_kb.result(timeout=12) or []
                 ed_items = _f_ed.result(timeout=12) or []
                 td_items = _f_td.result(timeout=12) or []
 
-            # マージ: みんかぶ優先（重複タイトルを除外）、次にEDINET、TDnet
+            # マージ: みんかぶ優先（重複タイトルを除外）、次に株探、EDINET、TDnet
             seen_titles: set = set()
-            for _src_list in [mk_items, ed_items, td_items]:
+            for _src_list in [mk_items, kb_items, ed_items, td_items]:
                 for _ni in _src_list:
                     _t = _ni.get("headline", "")
                     if _t and _t not in seen_titles:
