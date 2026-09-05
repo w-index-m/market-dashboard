@@ -8483,6 +8483,185 @@ def _compute_factor_spread(tickers_low: tuple, tickers_high: tuple, days: int) -
     }
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_nk225_ohlcv_batch(days: int = 260) -> dict:
+    """_NK225_STOCKS全銘柄のClose/High/Low/Volumeを1回のyf.download()で取得する
+    （🔥需給系モジュール・📊価格パターン分析の共通データソース。個別ダウンロードの
+    ループより高速。w-index-m/jstock-metricsの_batch_ohlcv()に相当）。
+    Returns: {"close","high","low","volume": DataFrame（列=ティッカー）}（失敗時は空dict）
+    """
+    tickers = list(_NK225_STOCKS.keys())
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    try:
+        raw = yf.download(tickers, start=start, end=end,
+                           progress=False, auto_adjust=True, threads=True)
+    except Exception as e:
+        logger.warning(f"[nk225_ohlcv] yf.download失敗: {e}")
+        return {}
+    if raw.empty:
+        return {}
+    if isinstance(raw.columns, pd.MultiIndex):
+        _lv0 = raw.columns.get_level_values(0)
+        return {
+            "close":  raw["Close"]  if "Close"  in _lv0 else pd.DataFrame(),
+            "high":   raw["High"]   if "High"   in _lv0 else pd.DataFrame(),
+            "low":    raw["Low"]    if "Low"    in _lv0 else pd.DataFrame(),
+            "volume": raw["Volume"] if "Volume" in _lv0 else pd.DataFrame(),
+        }
+    return {
+        "close":  raw.get("Close", pd.DataFrame()), "high": raw.get("High", pd.DataFrame()),
+        "low":    raw.get("Low", pd.DataFrame()),   "volume": raw.get("Volume", pd.DataFrame()),
+    }
+
+
+def _screen_volume_surge(ohlcv: dict, surge_ratio: float = 2.0,
+                          short_days: int = 5, base_days: int = 20) -> pd.DataFrame:
+    """直近{short_days}日平均出来高が{base_days}日平均出来高の{surge_ratio}倍以上の
+    銘柄を抽出する（出来高急増スクリーナー）。"""
+    close_all, vol_all = ohlcv.get("close"), ohlcv.get("volume")
+    if close_all is None or close_all.empty or vol_all is None or vol_all.empty:
+        return pd.DataFrame()
+    rows = []
+    for ticker in _NK225_STOCKS:
+        if ticker not in close_all.columns or ticker not in vol_all.columns:
+            continue
+        close = close_all[ticker].dropna()
+        vol   = vol_all[ticker].dropna()
+        if len(close) < base_days or len(vol) < base_days:
+            continue
+        base_avg = float(vol.iloc[-base_days:-short_days].mean())
+        if base_avg == 0:
+            continue
+        ratio = float(vol.iloc[-short_days:].mean()) / base_avg
+        if ratio < surge_ratio:
+            continue
+        price_chg = (close.iloc[-1] - close.iloc[-short_days]) / close.iloc[-short_days] * 100
+        rows.append({
+            "ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker],
+            "出来高倍率": round(ratio, 2),
+            "株価変化率(5日%)": round(float(price_chg), 2),
+            "現在値": round(float(close.iloc[-1]), 1),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("出来高倍率", ascending=False).reset_index(drop=True)
+    return df
+
+
+def _screen_vwap_deviation(ohlcv: dict, days: int = 20) -> pd.DataFrame:
+    """直近{days}日の出来高加重平均価格（VWAP）からの乖離率でランキングする
+    （プラスに大きいほど短期的な過熱、マイナスに大きいほど売られすぎの目安）。"""
+    close_all, vol_all = ohlcv.get("close"), ohlcv.get("volume")
+    if close_all is None or close_all.empty or vol_all is None or vol_all.empty:
+        return pd.DataFrame()
+    rows = []
+    for ticker in _NK225_STOCKS:
+        if ticker not in close_all.columns or ticker not in vol_all.columns:
+            continue
+        close = close_all[ticker].dropna().tail(days)
+        vol   = vol_all[ticker].dropna().tail(days)
+        idx = close.index.intersection(vol.index)
+        if len(idx) < 5 or vol.loc[idx].sum() == 0:
+            continue
+        c, v = close.loc[idx], vol.loc[idx]
+        vwap = float((c * v).sum() / v.sum())
+        cur  = float(c.iloc[-1])
+        rows.append({
+            "ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker],
+            "現在値": round(cur, 1), "VWAP": round(vwap, 1),
+            "VWAP乖離率(%)": round((cur - vwap) / vwap * 100, 2),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("VWAP乖離率(%)", ascending=False).reset_index(drop=True)
+    return df
+
+
+def _screen_52w_highlow(ohlcv: dict) -> pd.DataFrame:
+    """52週高値・安値からの乖離率を算出し、新高値・新安値更新銘柄を検出する。"""
+    close_all, high_all, low_all = ohlcv.get("close"), ohlcv.get("high"), ohlcv.get("low")
+    if close_all is None or close_all.empty:
+        return pd.DataFrame()
+    rows = []
+    for ticker in _NK225_STOCKS:
+        if ticker not in close_all.columns:
+            continue
+        close = close_all[ticker].dropna()
+        if len(close) < 50:
+            continue
+        high_52w = (float(high_all[ticker].dropna().max())
+                    if high_all is not None and not high_all.empty and ticker in high_all.columns
+                    else float(close.max()))
+        low_52w  = (float(low_all[ticker].dropna().min())
+                    if low_all is not None and not low_all.empty and ticker in low_all.columns
+                    else float(close.min()))
+        current = float(close.iloc[-1])
+        rows.append({
+            "ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker], "現在値": round(current, 1),
+            "52週高値": round(high_52w, 1), "52週安値": round(low_52w, 1),
+            "高値からの乖離(%)": round((current - high_52w) / high_52w * 100, 2),
+            "安値からの乖離(%)": round((current - low_52w) / low_52w * 100, 2),
+            "状態": "🆕新高値" if current >= high_52w * 0.995 else ("⚠️新安値" if current <= low_52w * 1.005 else ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def _screen_ma_deviation(ohlcv: dict) -> pd.DataFrame:
+    """25日/75日/200日移動平均線からの乖離率でランキングする。"""
+    close_all = ohlcv.get("close")
+    if close_all is None or close_all.empty:
+        return pd.DataFrame()
+    rows = []
+    for ticker in _NK225_STOCKS:
+        if ticker not in close_all.columns:
+            continue
+        close = close_all[ticker].dropna()
+        if len(close) < 200:
+            continue
+        cur, ma25, ma75, ma200 = (
+            float(close.iloc[-1]), float(close.rolling(25).mean().iloc[-1]),
+            float(close.rolling(75).mean().iloc[-1]), float(close.rolling(200).mean().iloc[-1]),
+        )
+        rows.append({
+            "ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker], "現在値": round(cur, 1),
+            "25日MA乖離(%)": round((cur - ma25) / ma25 * 100, 2),
+            "75日MA乖離(%)": round((cur - ma75) / ma75 * 100, 2),
+            "200日MA乖離(%)": round((cur - ma200) / ma200 * 100, 2),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("25日MA乖離(%)", ascending=False).reset_index(drop=True)
+    return df
+
+
+def _screen_cross_signals(ohlcv: dict, lookback_days: int = 10) -> pd.DataFrame:
+    """25日線と75日線の直近{lookback_days}日以内のゴールデンクロス/デッドクロスを検出する。"""
+    close_all = ohlcv.get("close")
+    if close_all is None or close_all.empty:
+        return pd.DataFrame()
+    rows = []
+    for ticker in _NK225_STOCKS:
+        if ticker not in close_all.columns:
+            continue
+        close = close_all[ticker].dropna()
+        if len(close) < 75:
+            continue
+        diff = close.rolling(25).mean() - close.rolling(75).mean()
+        for i in range(max(1, len(diff) - lookback_days), len(diff)):
+            if pd.isna(diff.iloc[i]) or pd.isna(diff.iloc[i - 1]):
+                continue
+            if diff.iloc[i - 1] < 0 and diff.iloc[i] >= 0:
+                rows.append({"ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker], "シグナル": "🟢ゴールデンクロス",
+                             "発生日": str(diff.index[i])[:10], "現在値": round(float(close.iloc[-1]), 1)})
+                break
+            if diff.iloc[i - 1] > 0 and diff.iloc[i] <= 0:
+                rows.append({"ティッカー": ticker, "銘柄名": _NK225_STOCKS[ticker], "シグナル": "🔴デッドクロス",
+                             "発生日": str(diff.index[i])[:10], "現在値": round(float(close.iloc[-1]), 1)})
+                break
+    return pd.DataFrame(rows)
+
+
 # =====================================================
 # 🐻 弱気相場リスク判定
 # =====================================================
@@ -29551,6 +29730,103 @@ def render_claude_trading_project():
                         )
                         st.plotly_chart(_fig_vc, use_container_width=True)
                     st.caption("※ 資本コストはβから逆算した簡易CAPM推定値です。投資判断は自己責任でお願いします。")
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── 需給・出来高スクリーニング / 価格パターン分析 ──────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+                'margin:4px 0 8px">── 🔥📊 需給・価格パターンスクリーニング ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+                '📊 日経225主要銘柄を対象に、出来高急増・VWAP乖離（需給）や'
+                '52週高値安値・移動平均乖離・ゴールデンクロス/デッドクロス（価格パターン）を'
+                '一括スクリーニングします。個別銘柄の信用残高分析は「個別銘柄分析」の'
+                '需給分析セクションをご利用ください。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            _sd_t1, _sd_t2 = st.tabs(["🔥 需給・出来高", "📊 価格パターン"])
+
+            if st.button("🔍 スクリーニング用データを取得", key="btn_nk225_ohlcv"):
+                with st.spinner("日経225主要銘柄の価格・出来高データ取得中..."):
+                    st.session_state["_nk225_ohlcv"] = _fetch_nk225_ohlcv_batch()
+
+            _ohlcv = st.session_state.get("_nk225_ohlcv")
+
+            with _sd_t1:
+                if _ohlcv is None:
+                    st.caption("上のボタンを押すとデータを取得します。")
+                elif not _ohlcv:
+                    st.caption("データを取得できませんでした。")
+                else:
+                    st.markdown("**📊 出来高急増スクリーナー**（直近5日平均出来高が20日平均の指定倍率以上）")
+                    _surge_ratio = st.slider("出来高急増の閾値（倍）", 1.5, 5.0, 2.0, 0.5, key="surge_ratio")
+                    _df_surge = _screen_volume_surge(_ohlcv, surge_ratio=_surge_ratio)
+                    if _df_surge.empty:
+                        st.caption("条件に合致する銘柄はありませんでした。")
+                    else:
+                        st.dataframe(_df_surge, use_container_width=True, hide_index=True)
+
+                    st.markdown("**📏 VWAP乖離率ランキング**（直近20日、割高・割安の目安）")
+                    _df_vwap = _screen_vwap_deviation(_ohlcv)
+                    if _df_vwap.empty:
+                        st.caption("データがありません。")
+                    else:
+                        _vw_c1, _vw_c2 = st.columns(2)
+                        with _vw_c1:
+                            st.caption("VWAP上方乖離（過熱気味）上位10")
+                            st.dataframe(_df_vwap.head(10), use_container_width=True, hide_index=True)
+                        with _vw_c2:
+                            st.caption("VWAP下方乖離（売られすぎ気味）上位10")
+                            st.dataframe(
+                                _df_vwap[_df_vwap["VWAP乖離率(%)"] < 0].tail(10).sort_values("VWAP乖離率(%)"),
+                                use_container_width=True, hide_index=True,
+                            )
+
+            with _sd_t2:
+                if _ohlcv is None:
+                    st.caption("上のボタンを押すとデータを取得します。")
+                elif not _ohlcv:
+                    st.caption("データを取得できませんでした。")
+                else:
+                    st.markdown("**🎯 52週高値・安値ウォッチ**")
+                    _df_hl = _screen_52w_highlow(_ohlcv)
+                    if _df_hl.empty:
+                        st.caption("データがありません。")
+                    else:
+                        _hl_c1, _hl_c2 = st.columns(2)
+                        with _hl_c1:
+                            st.caption("52週高値に接近・更新中")
+                            st.dataframe(
+                                _df_hl.sort_values("高値からの乖離(%)", ascending=False).head(10),
+                                use_container_width=True, hide_index=True,
+                            )
+                        with _hl_c2:
+                            st.caption("52週安値に接近・更新中")
+                            st.dataframe(
+                                _df_hl.sort_values("安値からの乖離(%)").head(10),
+                                use_container_width=True, hide_index=True,
+                            )
+
+                    st.markdown("**📐 移動平均線乖離率ランキング**")
+                    _df_ma = _screen_ma_deviation(_ohlcv)
+                    if not _df_ma.empty:
+                        st.dataframe(_df_ma, use_container_width=True, hide_index=True)
+
+                    st.markdown("**✨ ゴールデンクロス / デッドクロス（直近10営業日）**")
+                    _df_cross = _screen_cross_signals(_ohlcv)
+                    if _df_cross.empty:
+                        st.caption("直近10営業日以内のシグナルはありませんでした。")
+                    else:
+                        st.dataframe(_df_cross, use_container_width=True, hide_index=True)
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
