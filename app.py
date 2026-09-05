@@ -18661,6 +18661,105 @@ def _fetch_recent_tdnet_items_for_ticker(ticker: str, date_key: str, max_items: 
     return _results[:max_items]
 
 
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
+def _fetch_tdnet_disclosures_for_tickers(tickers: tuple, date_key: str, lookback_days: int = 30,
+                                          max_items_per_ticker: int = 3) -> dict:
+    """保有中の複数の日本株ティッカーについて、直近の適時開示をまとめて取得する
+    （LLM as a Judge採点の入力用）。tickers はキャッシュキーにするためtuple。
+    Returns: {ticker: [{"title","date","url","source":"TDnet"}, ...]}（開示のある銘柄のみ）
+    """
+    out = {}
+    for _t in tickers:
+        if not _t.endswith(".T"):
+            continue
+        try:
+            _items = _fetch_recent_tdnet_items_for_ticker(
+                _t, date_key, max_items=max_items_per_ticker, lookback_days=lookback_days,
+            )
+        except Exception as e:
+            logger.warning(f"[disclosure_judge] {_t}取得失敗: {e}")
+            _items = []
+        if _items:
+            out[_t] = _items
+    return out
+
+
+@st.cache_data(ttl=TTL_MARKET_NEWS, show_spinner=False)
+def _judge_disclosures_batch(disclosures_by_ticker: dict, name_map: dict) -> dict:
+    """複数銘柄分の適時開示を1回のAI呼び出しでまとめてLLM as a Judge採点する
+    （w-index-m/jstock-metricsの_judge_disclosures()を、銘柄数が増えてもAI呼び出し回数を
+    1回に抑えられるよう全銘柄一括版に拡張したもの）。
+    disclosures_by_ticker: {ticker: [{"title","date","url"}, ...]}
+    Returns: {ticker: [{...元の開示情報, "importance","impact","sentiment","urgency","themes","reason"}, ...]}
+    """
+    import json as _json
+
+    if not disclosures_by_ticker:
+        return {}
+    _lines = []
+    _idx_map = []
+    _n = 0
+    for _ticker, _items in disclosures_by_ticker.items():
+        _name = name_map.get(_ticker, _ticker)
+        for _it in _items:
+            _n += 1
+            _lines.append(f"{_n}. [{_ticker} {_name}] {_it.get('date', '')} {_it.get('title', '')}")
+            _idx_map.append((_ticker, _it))
+    if not _lines:
+        return {}
+
+    _prompt = f"""あなたは日本株の適時開示（TDnet）を評価するアナリストです。
+以下の開示リストの各項目について、重要度・株価インパクト・センチメント・緊急度・関連テーマ・
+一言理由を判定してください。
+
+【開示リスト】
+{chr(10).join(_lines)}
+
+【出力形式】
+以下のJSON配列のみを出力してください（前後の説明文・コードブロック記号は不要）。
+[
+  {{"no": 1, "importance": 3, "impact": "中", "sentiment": "ポジティブ", "urgency": "低",
+    "themes": ["業績"], "reason": "30字以内の一言理由"}},
+  ...
+]
+importance: 1〜5の整数（5が最重要）　impact/urgency: "高"/"中"/"低"　sentiment: "ポジティブ"/"ネガティブ"/"中立"
+"""
+    try:
+        _raw, _model = call_ai_with_fallback(_prompt, max_output_tokens=2500, temperature=0.2)
+    except Exception as e:
+        logger.warning(f"[disclosure_judge] AI呼び出し失敗: {e}")
+        return {}
+
+    _m = re.search(r"\[[\s\S]*\]", _raw)
+    if not _m:
+        return {}
+    try:
+        _parsed = _json.loads(_m.group(0))
+    except Exception as e:
+        logger.warning(f"[disclosure_judge] JSON解析失敗: {e}")
+        return {}
+
+    _result: dict = {}
+    for _entry in _parsed:
+        try:
+            _no = int(_entry.get("no", 0))
+        except Exception:
+            continue
+        if _no < 1 or _no > len(_idx_map):
+            continue
+        _ticker, _it = _idx_map[_no - 1]
+        _result.setdefault(_ticker, []).append({
+            **_it,
+            "importance": _entry.get("importance"),
+            "impact": _entry.get("impact"),
+            "sentiment": _entry.get("sentiment"),
+            "urgency": _entry.get("urgency"),
+            "themes": _entry.get("themes") or [],
+            "reason": _entry.get("reason", ""),
+        })
+    return _result
+
+
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_sec_ticker_cik_map() -> dict:
     """SEC EDGARのティッカー→CIK対応表を取得（日次キャッシュ）。"""
@@ -28716,6 +28815,118 @@ def render_claude_trading_project():
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
                 unsafe_allow_html=True,
             )
+
+            # ── 日本株シャープレシオ TOP10 ────────────────────────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+                'margin:4px 0 8px">── 📐 日本株シャープレシオ TOP10 ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+                '📊 日経225主要銘柄（30銘柄）の直近1年のリターン・リスクからシャープレシオ'
+                '（無リスク金利控除後リターン÷リスク）を算出し、効率よく稼げている銘柄をランキングします。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            _sharpe_df = _compute_jp_sharpe_ranking()
+            if _sharpe_df.empty:
+                st.caption("シャープレシオの計算に必要な株価データを取得できませんでした。")
+            else:
+                _sharpe_top10 = _sharpe_df.head(10).copy()
+                _sharpe_top10.insert(0, "順位", range(1, len(_sharpe_top10) + 1))
+                st.dataframe(
+                    _sharpe_top10.set_index("順位"),
+                    use_container_width=True,
+                    column_config={
+                        "シャープレシオ": st.column_config.NumberColumn(format="%.4f"),
+                        "年間平均リターン(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "年間リスク(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "アルファ(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                        "ベータ": st.column_config.NumberColumn(format="%.4f"),
+                    },
+                )
+                st.caption("※ 無リスク金利0.5%想定・ベンチマークは日経平均（^N225）。あくまで過去1年の実績値です。")
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── AI開示評価（LLM as a Judge） ──────────────────────────
+            _jp_held_tickers = tuple(sorted(t for t in open_pos if t.endswith(".T")))
+            if _jp_held_tickers:
+                st.markdown(
+                    '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+                    'margin:4px 0 8px">── 🔍 AI開示評価（LLM as a Judge） ──</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+                    'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+                    '📊 保有中の日本株について、直近のTDnet適時開示をAIが重要度・株価インパクト・'
+                    'センチメント・緊急度で採点します（全銘柄まとめて1回のAI呼び出しで評価）。'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("🔍 保有銘柄の適時開示をAI評価する", key="btn_judge_disclosures"):
+                    with st.spinner("適時開示を取得・AI評価中..."):
+                        _disc_by_ticker = _fetch_tdnet_disclosures_for_tickers(
+                            _jp_held_tickers, _today_str,
+                        )
+                        _judge_name_map = {t: open_pos[t].get("name") or t for t in _jp_held_tickers}
+                        st.session_state["_disclosure_judge_result"] = (
+                            _judge_disclosures_batch(_disc_by_ticker, _judge_name_map)
+                            if _disc_by_ticker else {}
+                        )
+                        st.session_state["_disclosure_judge_had_items"] = bool(_disc_by_ticker)
+
+                _judge_result = st.session_state.get("_disclosure_judge_result")
+                if _judge_result is not None:
+                    if not st.session_state.get("_disclosure_judge_had_items"):
+                        st.caption("直近90日以内の適時開示が見つかりませんでした。")
+                    elif not _judge_result:
+                        st.caption("AI評価の取得に失敗しました。時間をおいて再試行してください。")
+                    else:
+                        _imp_color = {"高": "#ef4444", "中": "#fbbf24", "低": "#64748b"}
+                        _sent_color = {"ポジティブ": "#4ade80", "ネガティブ": "#f87171", "中立": "#94a3b8"}
+                        _judge_cards = []
+                        _all_judged = []
+                        for _tk, _items in _judge_result.items():
+                            for _ji in _items:
+                                _all_judged.append((_tk, _ji))
+                        _all_judged.sort(key=lambda p: p[1].get("importance") or 0, reverse=True)
+                        for _tk, _ji in _all_judged:
+                            _imp_n = _ji.get("importance") or 0
+                            _impact_c = _imp_color.get(_ji.get("impact", ""), "#64748b")
+                            _sent_c = _sent_color.get(_ji.get("sentiment", ""), "#94a3b8")
+                            _themes_str = "・".join(_ji.get("themes") or [])
+                            _judge_cards.append(
+                                f'<div style="background:#0f172a;border:1px solid #1e293b;'
+                                f'border-left:3px solid {_impact_c};border-radius:0 8px 8px 0;'
+                                f'padding:9px 14px;margin-bottom:7px">'
+                                f'<div style="font-size:13px;font-weight:700;color:#e2e8f0">'
+                                f'{"⭐" * int(_imp_n)} {_tk} '
+                                f'<span style="color:#94a3b8;font-weight:400;font-size:11px">'
+                                f'{_ji.get("date", "")}</span></div>'
+                                f'<div style="font-size:12px;color:#cbd5e1;margin:2px 0">{_ji.get("title", "")}</div>'
+                                f'<div style="font-size:11px;margin-top:3px">'
+                                f'<span style="color:{_impact_c}">インパクト:{_ji.get("impact", "-")}</span>　'
+                                f'<span style="color:{_sent_c}">{_ji.get("sentiment", "-")}</span>　'
+                                f'<span style="color:#94a3b8">緊急度:{_ji.get("urgency", "-")}</span>'
+                                + (f'　<span style="color:#38bdf8">{_themes_str}</span>' if _themes_str else "")
+                                + f'</div>'
+                                + (f'<div style="font-size:11px;color:#64748b;margin-top:2px">💬 {_ji.get("reason", "")}</div>'
+                                   if _ji.get("reason") else "")
+                                + f'</div>'
+                            )
+                        st.markdown("".join(_judge_cards), unsafe_allow_html=True)
+
+                st.markdown(
+                    '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                    unsafe_allow_html=True,
+                )
 
             # ── 個別銘柄分析 ────────────────────────────────────────
             st.markdown(
