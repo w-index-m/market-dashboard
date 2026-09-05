@@ -8205,6 +8205,145 @@ def _compute_jp_sharpe_ranking(rfr: float = 0.005) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_forward_earnings_universe() -> pd.DataFrame:
+    """日経225主要銘柄（_NK225_STOCKS）についてyfinanceのforward指標
+    （予想PER/EPS・PEGレシオ・売上/利益成長率・営業利益率）を並列取得する
+    （来期想定利益スクリーニング用。個別.info呼び出しはyf.download()のような
+    バッチAPIが無いため、ThreadPoolExecutorで並列化して初回ロードを短縮する）。
+    """
+    import concurrent.futures as _cf_fwd
+
+    def _one(ticker):
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            return None
+        if not info:
+            return None
+        _rev_g = info.get("revenueGrowth")
+        _earn_g = info.get("earningsGrowth")
+        _op_m = info.get("operatingMargins")
+        return {
+            "ティッカー":      ticker,
+            "銘柄名":          _NK225_STOCKS.get(ticker, ticker),
+            "現在値":          info.get("currentPrice") or info.get("regularMarketPrice"),
+            "実績PER":         info.get("trailingPE"),
+            "予想PER":         info.get("forwardPE"),
+            "実績EPS":         info.get("trailingEps"),
+            "予想EPS":         info.get("forwardEps"),
+            "PEGレシオ":       info.get("pegRatio"),
+            "売上成長率(%)":   round(_rev_g * 100, 1) if _rev_g is not None else None,
+            "利益成長率(%)":   round(_earn_g * 100, 1) if _earn_g is not None else None,
+            "営業利益率(%)":   round(_op_m * 100, 1) if _op_m is not None else None,
+        }
+
+    rows = []
+    with _cf_fwd.ThreadPoolExecutor(max_workers=8) as _ex:
+        for _res in _ex.map(_one, list(_NK225_STOCKS.keys())):
+            if _res:
+                rows.append(_res)
+    return pd.DataFrame(rows)
+
+
+def _screen_forward_earnings(df: pd.DataFrame, fwd_per_max: float, eps_growth_min: float,
+                              peg_max: float, op_margin_min: float) -> pd.DataFrame:
+    """来期想定利益スクリーニング条件でフィルタし、PEGレシオ昇順
+    （割安な成長株ほど上位）で返す。EPS成長率は実績EPS→予想EPSの変化率を優先し、
+    実績EPSが無い/ゼロの銘柄はyfinanceのearningsGrowth（YoY）で代用する。
+    """
+    if df.empty:
+        return df
+    df = df.copy()
+    _te = pd.to_numeric(df["実績EPS"], errors="coerce")
+    _fe = pd.to_numeric(df["予想EPS"], errors="coerce")
+    _eps_growth_calc = (_fe - _te) / _te.abs() * 100
+    _has_eps_pair = _te.notna() & _fe.notna() & (_te != 0)
+    df["EPS成長率(%)"] = _eps_growth_calc.where(_has_eps_pair, df["利益成長率(%)"])
+
+    cond = pd.Series(True, index=df.index)
+    _fpe = pd.to_numeric(df["予想PER"], errors="coerce")
+    _peg = pd.to_numeric(df["PEGレシオ"], errors="coerce")
+    if fwd_per_max:
+        cond &= _fpe.notna() & (_fpe > 0) & (_fpe <= fwd_per_max)
+    if eps_growth_min:
+        cond &= df["EPS成長率(%)"].notna() & (df["EPS成長率(%)"] >= eps_growth_min)
+    if peg_max:
+        cond &= _peg.notna() & (_peg > 0) & (_peg <= peg_max)
+    if op_margin_min:
+        cond &= df["営業利益率(%)"].notna() & (df["営業利益率(%)"] >= op_margin_min)
+    return df[cond].sort_values("PEGレシオ", ascending=True, na_position="last").reset_index(drop=True)
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_jquants_fins_statements(code: str) -> dict:
+    """J-Quants /fins/statements（決算短信サマリ）から直近の実績・会社予想数値を取得する。
+    margin-interest/investor-typesは有料Standardプラン以上が必要（CLAUDE.md参照）だが、
+    財務諸表サマリ自体は別エンドポイントのため、契約プランによっては利用できる可能性がある。
+    プラン制限で403が返った場合は理由を返し、呼び出し側は黙ってスキップする想定。
+    code: 4桁または5桁（例: "5803" or "5803.T" → "58030"）
+    """
+    try:
+        code_clean = code.replace(".T", "").replace(".t", "")
+        if len(code_clean) == 4 and code_clean.isdigit():
+            code_clean = code_clean + "0"
+        jquants_key = get_env_var("JQUANTS_API_KEY", "")
+        if not jquants_key:
+            return {"ok": False, "reason": "JQUANTS_API_KEY未設定"}
+        headers = {"x-api-key": jquants_key}
+        r = requests.get(
+            "https://api.jquants.com/v2/fins/statements",
+            params={"code": code_clean},
+            headers=headers, timeout=10,
+        )
+        if r.status_code != 200:
+            _msg = r.text[:150]
+            try:
+                _msg = r.json().get("message", _msg)
+            except Exception:
+                pass
+            if r.status_code == 403 and "subscription" in _msg.lower():
+                return {"ok": False, "reason": "契約プランでは利用できません"}
+            return {"ok": False, "reason": f"HTTP {r.status_code} {_msg}"}
+        data = r.json().get("data", [])
+        if not data:
+            return {"ok": False, "reason": "データなし"}
+        latest = data[-1]
+
+        def _f(key):
+            v = latest.get(key)
+            try:
+                return float(v) if v not in (None, "") else None
+            except Exception:
+                return None
+
+        _net_sales, _op_profit, _profit = _f("NetSales"), _f("OperatingProfit"), _f("Profit")
+        _fc_sales, _fc_op, _fc_profit = (
+            _f("ForecastNetSales"), _f("ForecastOperatingProfit"), _f("ForecastProfit"),
+        )
+
+        def _growth(cur, fc):
+            return round((fc - cur) / abs(cur) * 100, 1) if cur and fc and cur != 0 else None
+
+        return {
+            "ok": True,
+            "period_end":             latest.get("CurrentPeriodEndDate", ""),
+            "disclosed_date":         latest.get("DisclosedDate", ""),
+            "net_sales":              _net_sales,
+            "operating_profit":       _op_profit,
+            "profit":                 _profit,
+            "forecast_net_sales":     _fc_sales,
+            "forecast_operating_profit": _fc_op,
+            "forecast_profit":        _fc_profit,
+            "sales_growth_fc_pct":    _growth(_net_sales, _fc_sales),
+            "op_profit_growth_fc_pct": _growth(_op_profit, _fc_op),
+            "profit_growth_fc_pct":   _growth(_profit, _fc_profit),
+        }
+    except Exception as e:
+        logger.warning(f"[jquants_fins] {code}取得失敗: {e}")
+        return {"ok": False, "reason": str(e)}
+
+
 # =====================================================
 # 🐻 弱気相場リスク判定
 # =====================================================
@@ -28895,6 +29034,76 @@ def render_claude_trading_project():
                     },
                 )
                 st.caption("※ 無リスク金利0.5%想定・ベンチマークは日経平均（^N225）。あくまで過去1年の実績値です。")
+
+            st.markdown(
+                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── 来期想定利益スクリーニング ────────────────────────────
+            st.markdown(
+                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+                'margin:4px 0 8px">── 🔮 来期想定利益スクリーニング ──</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+                '📊 yfinance（予想PER/EPS）から、来期の利益成長が見込める割安成長株を'
+                '日経225主要銘柄の中から抽出します。上位銘柄は任意でJ-Quants決算短信の'
+                '実績値と突き合わせられます。'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            _fs_c1, _fs_c2, _fs_c3, _fs_c4 = st.columns(4)
+            _fs_per_max = _fs_c1.number_input("予想PER 上限（倍）", min_value=1.0, max_value=100.0, value=20.0, step=1.0, key="fs_per_max")
+            _fs_eps_min = _fs_c2.number_input("EPS成長率 下限（%）", min_value=-50.0, max_value=200.0, value=10.0, step=1.0, key="fs_eps_min")
+            _fs_peg_max = _fs_c3.number_input("PEGレシオ 上限", min_value=0.1, max_value=10.0, value=1.5, step=0.1, key="fs_peg_max")
+            _fs_opm_min = _fs_c4.number_input("営業利益率 下限（%）", min_value=-50.0, max_value=80.0, value=5.0, step=1.0, key="fs_opm_min")
+
+            if st.button("🔍 スクリーニングを実行", key="btn_fwd_screen"):
+                with st.spinner("日経225主要銘柄のforward指標を取得中..."):
+                    st.session_state["_fwd_earnings_universe"] = _fetch_forward_earnings_universe()
+
+            _fs_universe = st.session_state.get("_fwd_earnings_universe")
+            if _fs_universe is not None:
+                if _fs_universe.empty:
+                    st.caption("forward指標を取得できませんでした。")
+                else:
+                    _fs_result = _screen_forward_earnings(
+                        _fs_universe, _fs_per_max, _fs_eps_min, _fs_peg_max, _fs_opm_min,
+                    )
+                    if _fs_result.empty:
+                        st.info("条件に合致する銘柄がありませんでした。条件を緩めて再実行してください。")
+                    else:
+                        st.dataframe(
+                            _fs_result[[
+                                "ティッカー", "銘柄名", "現在値", "実績PER", "予想PER",
+                                "PEGレシオ", "EPS成長率(%)", "営業利益率(%)",
+                            ]],
+                            use_container_width=True, hide_index=True,
+                            column_config={
+                                "予想PER": st.column_config.NumberColumn(format="%.1f倍"),
+                                "実績PER": st.column_config.NumberColumn(format="%.1f倍"),
+                                "PEGレシオ": st.column_config.NumberColumn(format="%.2f"),
+                                "EPS成長率(%)": st.column_config.NumberColumn(format="%.1f%%"),
+                                "営業利益率(%)": st.column_config.NumberColumn(format="%.1f%%"),
+                            },
+                        )
+                        with st.expander("📋 J-Quants決算短信で実績値を確認（上位5銘柄）"):
+                            for _, _fs_row in _fs_result.head(5).iterrows():
+                                _fs_code = _fs_row["ティッカー"]
+                                _fs_fin = _fetch_jquants_fins_statements(_fs_code)
+                                if not _fs_fin.get("ok"):
+                                    st.caption(f"{_fs_code} {_fs_row['銘柄名']}: {_fs_fin.get('reason', '取得失敗')}")
+                                    continue
+                                st.markdown(
+                                    f"**{_fs_code} {_fs_row['銘柄名']}**（{_fs_fin.get('period_end', '')}期）　"
+                                    f"売上高予想比 {_fs_fin.get('sales_growth_fc_pct', '-')}%　"
+                                    f"営業利益予想比 {_fs_fin.get('op_profit_growth_fc_pct', '-')}%　"
+                                    f"純利益予想比 {_fs_fin.get('profit_growth_fc_pct', '-')}%"
+                                )
+                        st.caption("※ PEGレシオが小さいほど成長性に対して割安。あくまで参考情報で投資判断は自己責任です。")
 
             st.markdown(
                 '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
