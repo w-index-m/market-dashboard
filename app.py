@@ -30888,7 +30888,10 @@ def render_claude_trading_project():
                             "前日比（額）": _day_chg_row_str,
                             "前日比（%）": _day_chg_pct_str,
                             "現在株価":   _mv(_cur_fmt(cur_price)) if cur_price else "取得失敗",
-                            "評価額":    _mv(_cur_fmt(cur_price * _money_qty)) if cur_price else "取得失敗",
+                            # 評価額は米国株/日本株が混在する一覧のため、通貨単位が行ごとに
+                            # 異なると合計や比較がしづらい。円換算済みの_mval_jpy（USD建て銘柄は
+                            # 当日の為替レートで換算）に統一して表示する。
+                            "評価額":    _mv(f"{_mval_jpy:,.0f} 円") if cur_price else "取得失敗",
                             "時間外/PTS": _mv(_ext_str),
                             "含み損益（USD）": _mv(_pnl_usd_str),
                             "含み損益（円）":  _mv(_pnl_jpy_str),
