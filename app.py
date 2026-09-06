@@ -29490,10 +29490,10 @@ def render_claude_trading_project():
                                 f'<span style="color:{_sent_c}">{_ji.get("sentiment", "-")}</span>　'
                                 f'<span style="color:#94a3b8">緊急度:{_ji.get("urgency", "-")}</span>'
                                 + (f'　<span style="color:#38bdf8">{_themes_str}</span>' if _themes_str else "")
-                                + f'</div>'
+                                + '</div>'
                                 + (f'<div style="font-size:11px;color:#64748b;margin-top:2px">💬 {_ji.get("reason", "")}</div>'
                                    if _ji.get("reason") else "")
-                                + f'</div>'
+                                + '</div>'
                             )
                         st.markdown("".join(_judge_cards), unsafe_allow_html=True)
 
