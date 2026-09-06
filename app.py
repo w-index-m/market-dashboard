@@ -19,6 +19,8 @@ import warnings
 import re
 import html
 import io
+import hashlib as _hl
+import uuid as _uuid
 import datetime as dt
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List, Tuple
@@ -45,7 +47,6 @@ import streamlit as st
 # Plotly（インタラクティブチャート）
 try:
     import plotly.graph_objects as go
-    import plotly.express as px
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
@@ -67,10 +68,6 @@ except ImportError:
         return default
     def inject_client_info_collector():
         pass
-
-# streamlit-analytics2 は削除済み（Streamlit互換性バグのため）
-ANALYTICS2_AVAILABLE = False
-
 
 
 # PDFテキスト抽出
@@ -288,7 +285,6 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message="Glyph .* missing from font")
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message="More than 20 figures")
-import matplotlib
 matplotlib.rcParams['figure.max_open_warning'] = 50
 
 # ===========================
@@ -2798,7 +2794,6 @@ def fetch_long_history(symbol: str, years: int = 4) -> pd.DataFrame:
 # ===========================
 # ★ 予測スコア履歴管理 [Fix 2]
 # ===========================
-import matplotlib.ticker as _mticker
 
 _PRED_HISTORY_KEY = "prediction_score_history"
 _PRED_HISTORY_MAXDAYS = 90   # 最大90日分保持
@@ -3648,7 +3643,7 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
             rsi_sig = -(rsi_val - 50) / 50
             add_signal(cat, "RSI14",
                        np.tanh(rsi_sig * 1.5), 1.5,
-                       f"RSI<30→+1 RSI>70→-1（逆張り）",
+                       "RSI<30→+1 RSI>70→-1（逆張り）",
                        f"RSI={rsi_val:.1f}")
 
             # MACD
@@ -4707,7 +4702,7 @@ def render_us_quant_analysis(target: str = "SP500"):
     """米国株クオンツ分析セクション（ボタン式遅延読み込み）"""
     st.markdown("---")
     st.markdown(
-        f"""<div style="background:linear-gradient(135deg,#e3f2fd,#fce4ec);
+        """<div style="background:linear-gradient(135deg,#e3f2fd,#fce4ec);
         border-left:4px solid #1976d2;border-radius:6px;padding:10px 16px;
         font-size:13px;color:#333;margin-bottom:12px;">
         <strong>🔬 米国株クオンツ分析</strong>:
@@ -5154,7 +5149,7 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
             rsi_sig  = -(rsi_val - 50) / 50
             add_signal(cat, "RSI14",
                        np.tanh(rsi_sig * 1.5), 1.5,
-                       f"RSI<30→逆張り強気 RSI>70→過熱",
+                       "RSI<30→逆張り強気 RSI>70→過熱",
                        f"RSI={rsi_val:.1f}")
 
             macd_val, macd_sig_val = _calc_macd(main_c)
@@ -6163,7 +6158,6 @@ def render_correlation_heatmap():
     n = len(corr_df)
 
     # カラーマップ（赤-白-青）
-    import matplotlib.colors as mcolors
     cmap = plt.cm.RdBu_r
 
     im = ax.imshow(corr_df.values, cmap=cmap, vmin=-1, vmax=1, aspect="auto")
@@ -6749,7 +6743,6 @@ def fetch_naaim_data() -> pd.DataFrame:
     """
     import re as _re
     from io import BytesIO
-    import signal as _signal
 
     HARD_TIMEOUT = 8   # 秒（この時間を超えたら諦める）
     _deadline = time.time() + HARD_TIMEOUT
@@ -7021,7 +7014,7 @@ def render_naaim_section():
         f'border-radius:6px;padding:14px 18px;margin:12px 0;font-size:13px;line-height:1.7;">'
         f'<strong style="color:{border_color};font-size:14px;">現在の市場環境：{level_label}</strong><br><br>'
         + level_detail.replace("\n", "<br>") +
-        f'</div>',
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -7319,7 +7312,6 @@ def render_4indicator_correlation():
         st.markdown("**変化量ベースの相関係数**（日次リターン・スコア変化量）")
 
         if PLOTLY_AVAILABLE:
-            import plotly.figure_factory as ff
 
             corr_disp = corr_ret.rename(
                 index=col_names_jp, columns=col_names_jp
@@ -7587,7 +7579,7 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
                 if df is None or df.empty: return pd.Series(dtype=float)
                 if df.index.tz is None: df.index = df.index.tz_localize("UTC")
                 return df.tz_convert(JST)["Close"].dropna()
-            except: return pd.Series(dtype=float)
+            except Exception: return pd.Series(dtype=float)
 
         _cps_keys = ["^VIX", "^VIX3M", "^GSPC", "TLT", "HYG", "LQD",
                      "USDJPY=X", "^TNX", "XLK", "XLU", "XLF", "XLP"]
@@ -7625,9 +7617,9 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
             if t is not None and s is not None:
                 S["bond_vs_eq"] = t - s   # 正=債券逃避(リスクオフ)
         if len(hyg) >= 21 and len(lqd) >= 21:
-            h = _ret(hyg, 20); l = _ret(lqd, 20)
-            if h is not None and l is not None:
-                S["credit_stress"] = l - h   # 正=信用収縮(LQD > HYG)
+            h = _ret(hyg, 20); lq = _ret(lqd, 20)
+            if h is not None and lq is not None:
+                S["credit_stress"] = lq - h   # 正=信用収縮(LQD > HYG)
         if len(usdjpy) >= 21:
             S["usdjpy_20d"] = _ret(usdjpy, 20)   # 負=円高(リスクオフ)
         if len(tnx) >= 21:
@@ -9500,7 +9492,7 @@ def render_macro_indicators(macro: dict | None = None):
             f'<span>判定: <b style="color:{_floor_note_c}">{_floor_status}</b></span>'
             + (f'<span>Tech(XLK): <b style="color:#e2e8f0">{_pe_tech["current"]:.1f}x</b></span>'
                if _pe_tech else '')
-            + f'</div>',
+            + '</div>',
             unsafe_allow_html=True,
         )
 
@@ -10240,12 +10232,12 @@ def _render_sector_upside_comparison(
     if s_me is not None and o_me is not None:
         if abs(s_me - o_me) < 1.0:
             verdict_html = (
-                f'<div style="background:#1e293b;border:1px solid #334155;'
-                f'border-radius:8px;padding:10px 16px;font-size:13px;color:#e2e8f0;text-align:center;">'
+                '<div style="background:#1e293b;border:1px solid #334155;'
+                'border-radius:8px;padding:10px 16px;font-size:13px;color:#e2e8f0;text-align:center;">'
                 + (f"⚖️ コンセンサスベースでは両セクターはほぼ拮抗（差 {s_me-o_me:+.1f}pt）" if lang == "ja"
                    else f"⚖️ Broadly equal on consensus basis (diff {s_me-o_me:+.1f}pt)")
-                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px">※ 推定値</span>'
-                f'</div>'
+                + '<span style="font-size:11px;color:#64748b;display:block;margin-top:2px">※ 推定値</span>'
+                '</div>'
             )
         elif s_me > o_me:
             verdict_html = (
@@ -10254,8 +10246,8 @@ def _render_sector_upside_comparison(
                 + (f"🔬 半導体（SOX）{verdict_more}　コンセンサス中央値: {s_me:+.1f}% vs {o_me:+.1f}%"
                    if lang == "ja" else
                    f"🔬 Semiconductors (SOX) {verdict_more}  Consensus: {s_me:+.1f}% vs {o_me:+.1f}%")
-                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
-                f'</div>'
+                + '<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
+                '</div>'
             )
         else:
             verdict_html = (
@@ -10264,8 +10256,8 @@ def _render_sector_upside_comparison(
                 + (f"📡 光通信バスケット{verdict_more}　コンセンサス中央値: {o_me:+.1f}% vs {s_me:+.1f}%"
                    if lang == "ja" else
                    f"📡 Optical Basket {verdict_more}  Consensus: {o_me:+.1f}% vs {s_me:+.1f}%")
-                + f'<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
-                f'</div>'
+                + '<span style="font-size:11px;color:#64748b;display:block;margin-top:2px;font-weight:400">※ 推定値</span>'
+                '</div>'
             )
         st.markdown(verdict_html, unsafe_allow_html=True)
 
@@ -10853,15 +10845,15 @@ def render_momentum_ranking(
                     f' <span style="color:#94a3b8">{n}</span></div>'
                     for t, n in chg["added"]
                 )
-                + f'</div><div style="flex:1">'
-                f'<div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:3px">▼ 除外</div>'
+                + '</div><div style="flex:1">'
+                '<div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:3px">▼ 除外</div>'
                 + "".join(
                     f'<div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">'
                     f'<span style="color:#ef4444;font-weight:700">{t}</span>'
                     f' <span style="color:#94a3b8">{n}</span></div>'
                     for t, n in chg["removed"]
                 )
-                + f'</div></div></div>'
+                + '</div></div></div>'
                 for chg in _NDX100_CHANGES
             ]
             st.markdown("".join(_ndx_chg_html), unsafe_allow_html=True)
@@ -12099,11 +12091,11 @@ def render_economic_events_section(preloaded: dict | None = None):
                 if is_past:
                     timing_jp = f"<span style='color:#6b7280'>✅ {abs(delta_h/24):.0f}日前</span>"
                 elif delta_h < 2:
-                    timing_jp = f"<span style='color:#ef4444;font-weight:bold'>🔴 まもなく</span>"
+                    timing_jp = "<span style='color:#ef4444;font-weight:bold'>🔴 まもなく</span>"
                 elif delta_h < 24:
-                    timing_jp = f"<span style='color:#f59e0b;font-weight:bold'>🟡 本日</span>"
+                    timing_jp = "<span style='color:#f59e0b;font-weight:bold'>🟡 本日</span>"
                 elif delta_h < 48:
-                    timing_jp = f"<span style='color:#fbbf24'>🟠 明日</span>"
+                    timing_jp = "<span style='color:#fbbf24'>🟠 明日</span>"
                 else:
                     timing_jp = f"<span style='color:#94a3b8'>⚪ {delta_h/24:.0f}日後</span>"
 
@@ -13111,7 +13103,7 @@ def render_composite_sentiment():
                     fig_r.add_trace(go.Scatter(
                         x=df_r["date"], y=df_r["score"],
                         name=region_label, line=dict(color=r_color, width=2),
-                        fill="tozeroy", fillcolor=f"rgba(59,130,246,0.08)",
+                        fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
                     ))
                     for yv, lc in [(75, "rgba(22,163,74,0.15)"), (25, "rgba(220,38,38,0.15)")]:
                         fig_r.add_hline(y=yv, line_dash="dot", line_color=lc)
@@ -13516,7 +13508,7 @@ def render_composite_sentiment():
                 fig_kw.add_trace(go.Scatter(
                     x=df_kw["date"], y=df_kw["score"],
                     name=sent_name, line=dict(color=line_c, width=2),
-                    fill="tozeroy", fillcolor=f"rgba(59,130,246,0.08)",
+                    fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
                 ))
                 for y_val, col_z in [(75, "rgba(22,163,74,0.12)"), (25, "rgba(220,38,38,0.12)")]:
                     fig_kw.add_hline(y=y_val, line_dash="dot", line_color=col_z)
@@ -14099,7 +14091,7 @@ def render_media_analysis():
                         f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">'
                         f'<span style="font-size:10px;color:#64748b;width:60px;flex-shrink:0;">{k}</span>'
                         + _score_bar_html(v) +
-                        f'</div>'
+                        '</div>'
                         for k, v in m["scores"].items()
                     ) +
                     f'<div style="margin-top:8px;font-size:10px;color:#475569;line-height:1.6;">{m["note"]}</div>'
@@ -15062,7 +15054,7 @@ def render_backtest_section():
                 f'<div style="font-size:28px;font-weight:900;color:#333;">{bt["n_samples"]}日</div></div>',
                 unsafe_allow_html=True)
 
-    st.caption(f"※ 仮想P&L: スコア>0で翌日ロング、<0でショートした場合の累積リターン（手数料なし）")
+    st.caption("※ 仮想P&L: スコア>0で翌日ロング、<0でショートした場合の累積リターン（手数料なし）")
 
     # ローリングヒット率チャート
     hit_df = bt.get("hit_df", pd.DataFrame())
@@ -15661,7 +15653,6 @@ JP_SECTOR_ETFS = {
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def fetch_leadlag_data(window: int = 120):
-    import numpy as np
     all_tickers = list(US_SECTOR_ETFS.keys()) + list(JP_SECTOR_ETFS.keys())
     try:
         raw = yf.download(
@@ -15782,7 +15773,6 @@ def fetch_yahoo_finance_news(symbol: str, name: str, max_items: int = 3) -> List
     Finnhubで取得できなかった場合のフォールバック。
     """
     import urllib.request
-    from html.parser import HTMLParser
 
     POSITIVE_KW = ["beat","surge","record","upgrade","growth","win",
                    "contract","expand","raise","rally","increase","positive"]
@@ -16530,7 +16520,6 @@ def fetch_jpx_short_positions(code: str) -> List[Dict]:
     code: 4桁（例: "5803"）
     毎営業日更新。残高割合0.5%以上のみ公表。
     """
-    import io, datetime as dt
     try:
         # irbank.net のAPIを利用（より信頼性が高い）
         code_clean = code.replace(".T", "")
@@ -16744,7 +16733,7 @@ def render_short_position_ranking(code: str, color: str):
         "nikko": "🇯🇵", "日興": "🇯🇵",
         "mizuho": "🇯🇵", "みずほ": "🇯🇵",
         "blackrock": "⬛", "vanguard": "🟠",
-        "citadel": "🏰", "millennium": "🌀",
+        "millennium": "🌀",
         "jane street": "📊", "jump trading": "🚀",
     }
 
@@ -18014,7 +18003,7 @@ def render_stock_screener():
                 + _bar_html("現物買", spot_buy,  max_spot, "#ef4444")
                 + _bar_html("現物売", spot_sell, max_spot, "#93c5fd",
                             sub_label=f"空売り {short_sell/1000:,.1f}千株含む")
-                + f'</div></div>',
+                + '</div></div>',
                 unsafe_allow_html=True,
             )
 
@@ -18044,7 +18033,7 @@ def render_stock_screener():
                    + _bar_html("制度信用", long_std, max_long, "#ef4444")
                    + _bar_html("一般信用", long_neg, max_long, "#93c5fd")
                    + '</div>' if _has_breakdown else '')
-                + f'</div>',
+                + '</div>',
                 unsafe_allow_html=True,
             )
 
@@ -18072,7 +18061,7 @@ def render_stock_screener():
                    + _bar_html("制度信用", short_std, max_short, "#3b82f6")
                    + _bar_html("一般信用", short_neg, max_short, "#6ee7b7")
                    + '</div>' if _has_breakdown else '')
-                + f'</div>',
+                + '</div>',
                 unsafe_allow_html=True,
             )
             if not _has_breakdown:
@@ -19499,7 +19488,7 @@ def _summarize_year_chart_state(y_close: pd.Series, y_up: pd.Series, y_lo: pd.Se
     _n = min(10, len(y_close))
     _rc, _ru, _rl = y_close.iloc[-_n:], y_up.iloc[-_n:], y_lo.iloc[-_n:]
     _near_upper = sum(1 for c, u in zip(_rc, _ru) if pd.notna(u) and c >= u * 0.98)
-    _near_lower = sum(1 for c, l in zip(_rc, _rl) if pd.notna(l) and c <= l * 1.02)
+    _near_lower = sum(1 for c, lo in zip(_rc, _rl) if pd.notna(lo) and c <= lo * 1.02)
     if _near_upper >= _n * 0.5:
         out["band_state"] = "上限バンドウォーク中"
     elif _near_lower >= _n * 0.5:
@@ -19508,8 +19497,8 @@ def _summarize_year_chart_state(y_close: pd.Series, y_up: pd.Series, y_lo: pd.Se
         out["band_state"] = "バンド中央付近"
 
     # バンド幅（ボラティリティ）の前半→後半の推移
-    def _avg_width(u, l, m):
-        _w = (u - l) / m.replace(0, pd.NA) * 100
+    def _avg_width(u, lo, m):
+        _w = (u - lo) / m.replace(0, pd.NA) * 100
         return float(_w.dropna().mean()) if _w.notna().any() else None
 
     _mid_idx = len(y_close) // 2
@@ -19547,7 +19536,8 @@ def _ai_year_comment(ticker: str, year: int, summary: dict, model_pref: str = "a
 
 def render_ticker_chart_compare(key_prefix: str = "main"):
     """任意銘柄の株価チャート表示 + 年別（1月起点）トレンド比較"""
-    _sk = lambda name: f"{key_prefix}_{name}"  # ウィジェットキー衝突防止（同一ページ内で複数回呼ぶ場合）
+    def _sk(name):
+        return f"{key_prefix}_{name}"  # ウィジェットキー衝突防止（同一ページ内で複数回呼ぶ場合）
     st.markdown('<a id="ticker-chart"></a>', unsafe_allow_html=True)
     st.header("📈 銘柄チャート & 年別トレンド比較")
     st.caption("任意の銘柄ティッカーを指定して株価推移を表示し、年初来の上昇トレンドが例年と似ているか比較できます。")
@@ -22084,7 +22074,7 @@ def _summarize_news_ja_with_context(ticker: str, articles_tuple: tuple, stock_ct
         text, _ = call_ai_with_fallback(prompt, max_output_tokens=1200, temperature=0.3)
         if text.startswith("⚠️"):
             return _fallback
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         result = []
         for line in lines:
             m = re.match(r"^\d+[\.\)]\s*(.+)$", line)
@@ -22153,7 +22143,8 @@ def _generate_ai_allocation_scores(
         "_model": str
     }
     """
-    import json as _json, re as _re
+    import json as _json
+    import re as _re
 
     mode_desc = {
         "growth":     "長期育成（ファンダ重視・6ヶ月〜2年）",
@@ -22357,16 +22348,16 @@ def _calc_allocation_recommendations(
         sl = sec.lower()
         for s in _sq_leading:
             if sl in s.lower() or s.lower() in sl:
-                return 2.0, f"🟢 RRG Leading"
+                return 2.0, "🟢 RRG Leading"
         for s in _sq_improving:
             if sl in s.lower() or s.lower() in sl:
-                return 1.0, f"🔵 RRG Improving"
+                return 1.0, "🔵 RRG Improving"
         for s in _sq_weakening:
             if sl in s.lower() or s.lower() in sl:
-                return -1.0, f"🟡 RRG Weakening"
+                return -1.0, "🟡 RRG Weakening"
         for s in _sq_lagging:
             if sl in s.lower() or s.lower() in sl:
-                return -2.0, f"🔴 RRG Lagging"
+                return -2.0, "🔴 RRG Lagging"
         return 0.0, ""
 
     # ── 銘柄別スコア計算 ─────────────────────────────────────────
@@ -22563,7 +22554,8 @@ def _generate_replacement_rec(
     """売却後の代替銘柄候補をAIが提案。
     Returns: {"candidates": [...], "model": str, "error": str|None}
     """
-    import json as _json, re as _re
+    import json as _json
+    import re as _re
     fg_sc    = market_ctx.get("fg_score", 50) or 50
     fg_lbl   = market_ctx.get("fg_label", "")
     leading  = market_ctx.get("sector_quad", {}).get("Leading", [])
@@ -22649,7 +22641,8 @@ def _generate_switch_recommendations(
     """ベンチマーク(NDX/N225)を下回る銘柄の乗り換え候補をAIが提案。
     Returns: (list[dict], model_used_str)
     """
-    import json as _json, re as _re
+    import json as _json
+    import re as _re
     _meta      = alloc_result.get("_meta", {})
     _qqq_sc    = _meta.get("bm_qqq_score", 0.0)
     _n225_sc   = _meta.get("bm_n225_score", 0.0)
@@ -25877,7 +25870,8 @@ RRG改善セクター: {improving_str}
   "market_comment": "市場環境を30字以内で"
 }}"""
         _text, _mdl = _call_ai_for_trading(_prompt, max_output_tokens=250, temperature=0.2)
-        import json as _j, re as _re2
+        import json as _j
+        import re as _re2
         _m = _re2.search(r'\{[\s\S]*\}', _text)
         if _m:
             _r = _j.loads(_m.group())
@@ -25955,7 +25949,8 @@ def _analyze_stock_agent(
 }}
 merits/demerits は各1〜2点のみ。JSONのみ回答。"""
         _text, _mdl = _call_ai_for_trading(_prompt, max_output_tokens=220, temperature=0.2)
-        import json as _j, re as _re2
+        import json as _j
+        import re as _re2
         _m = _re2.search(r'\{[\s\S]*\}', _text)
         if _m:
             _r = _j.loads(_m.group())
@@ -26830,7 +26825,8 @@ else ""}
   "metrics": {{"expected_return": 18.0, "risk_volatility": 22.0, "sharpe_ratio": 0.75, "max_drawdown_estimate": -28.0, "comment": "ポートフォリオの特徴と注意点を50字以内で"}}
 }}"""
 
-    import json as _json_ip, re as _re  # ローカルスコープで明示的にインポート
+    import json as _json_ip
+    import re as _re  # ローカルスコープで明示的にインポート
     _err = "生成失敗（原因不明）"
     _model_used = ""
     try:
@@ -27133,10 +27129,6 @@ Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体�
 
 
 # ── 認証ユーティリティ ─────────────────────────────────────────────
-import hashlib as _hl
-import uuid as _uuid
-from datetime import timedelta as _tdelta
-
 _SESSION_DAYS = 30  # localStorage併用の「再ログイン省略」と組み合わせるため、短すぎない期間にする
 
 
@@ -27272,7 +27264,6 @@ def _auth_verify_email(username: str, token: str) -> tuple[bool, str]:
         pass  # 日時が読めない古いデータ等は期限切れ扱いにしない
 
     try:
-        import gspread as _gs
         _sp = _auth_get_sheets_sp()
         _ws = _sp.worksheet("users")
         header = _ws.row_values(1)
@@ -27474,7 +27465,7 @@ def _auth_login_flow(username: str, password: str, token_key: str) -> bool:
 def _auth_create_session(username: str) -> str:
     """UUIDトークンを生成してsessionsタブに記録し、トークン文字列を返す。"""
     _token = _uuid.uuid4().hex
-    _expires = (datetime.now(JST) + _tdelta(days=_SESSION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    _expires = (datetime.now(JST) + timedelta(days=_SESSION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         import gspread as _gs
         _sp = _auth_get_sheets_sp()
@@ -27850,8 +27841,8 @@ def render_claude_trading_project():
                 f'<span style="font-size:12px;color:{_cache_color};font-weight:700">'
                 f'📦 キャッシュ: {_n_cached}/{_n_total}銘柄</span>'
                 + (f'<span style="font-size:11px;color:#64748b">最終更新: {_last_upd}</span>' if _last_upd else '')
-                + f'<span style="font-size:11px;color:#475569">（本日のデータをSheets保存・AI分析時に即利用）</span>'
-                f'</div>',
+                + '<span style="font-size:11px;color:#475569">（本日のデータをSheets保存・AI分析時に即利用）</span>'
+                '</div>',
                 unsafe_allow_html=True,
             )
 
@@ -28183,7 +28174,7 @@ def render_claude_trading_project():
                             f'<div style="font-size:10px;color:#e2e8f0;line-height:1.5">{_sig_str}</div>'
                             + (f'<div style="font-size:10px;color:#c4b5fd;line-height:1.5">🤖 {_aif_str}</div>'
                                if _aif_str else "")
-                            + f'</div>',
+                            + '</div>',
                             unsafe_allow_html=True,
                         )
                     else:
@@ -28221,8 +28212,8 @@ def render_claude_trading_project():
                     f'&nbsp;（vs BM列：各銘柄スコア − ベンチマークスコア）</div>'
                 )
                 st.markdown(
-                    f'<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-top:10px;'
-                    f'border:1px solid #1e293b;font-size:12px">'
+                    '<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin-top:10px;'
+                    'border:1px solid #1e293b;font-size:12px">'
                     + _bm_info
                     + (f'<div style="color:#4ade80;margin-bottom:4px">▲ 増やす推奨: {_inc_str}</div>' if _inc_str else '')
                     + (f'<div style="color:#ef4444">▼ 減らす推奨: {_dec_str}</div>' if _dec_str else '')
@@ -28574,7 +28565,7 @@ def render_claude_trading_project():
                                 f'<div style="font-size:12px;font-weight:700;color:#94a3b8;'
                                 f'margin:10px 0 4px">■ {_tk} — {_tk_disp}'
                                 + (f' <span style="font-size:10px;color:#475569">({_src_str})</span>' if _src_str else '')
-                                + f'</div>',
+                                + '</div>',
                                 unsafe_allow_html=True,
                             )
                             if _ni_list:
@@ -28773,11 +28764,11 @@ def render_claude_trading_project():
                     f'<div style="background:#1e293b;border-radius:4px;height:6px;margin-bottom:6px">'
                     f'<div style="background:{_crs_bar_c};width:{_crs_bar_w}%;height:6px;border-radius:4px"></div></div>'
                     f'<div style="font-size:10px;color:#94a3b8">検出シグナル: {_crs_sig_str}</div>'
-                    + (f'<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
-                       f'⚠️ 過去の急落前兆例: リーマン前（NAAIM90%超・VIX上昇）/'
-                       f'ITバブル前（F&G80超・高NAAIM）/コロナ前（VIX急騰・F&G急落）'
-                       f'</div>' if _crs_score >= 5 else '')
-                    + f'</div>',
+                    + ('<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
+                       '⚠️ 過去の急落前兆例: リーマン前（NAAIM90%超・VIX上昇）/'
+                       'ITバブル前（F&G80超・高NAAIM）/コロナ前（VIX急騰・F&G急落）'
+                       '</div>' if _crs_score >= 5 else '')
+                    + '</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -28924,10 +28915,10 @@ def render_claude_trading_project():
                             f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
                             + _ret_fmt(_actual_1y, "過去1年実績")
                             + _ret_fmt(_actual_3y, "過去3年実績")
-                            + f'</div>'
+                            + '</div>'
                             + (f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;border-top:1px solid #1e293b;'
                                f'padding-top:6px">💬 {_cmt}</div>' if _cmt else '')
-                            + f'</div>',
+                            + '</div>',
                             unsafe_allow_html=True,
                         )
 
@@ -29118,7 +29109,7 @@ def render_claude_trading_project():
                                             f'📍 推奨エントリー価格: {_ep_fmt} {_ep_cur}</div>'
                                             + (f'<div style="font-size:10px;color:#94a3b8">{_entry_nt}</div>'
                                                if _entry_nt else '')
-                                            + f'</div>',
+                                            + '</div>',
                                             unsafe_allow_html=True,
                                         )
                                     _col_m, _col_d = st.columns(2)
@@ -29223,7 +29214,7 @@ def render_claude_trading_project():
                             f'<div style="font-size:10px;color:#94a3b8;border-top:1px solid #1e293b;padding-top:6px">'
                             f'💡 <b style="color:#e2e8f0">余剰資金の理由:</b> {_cash_reason_str}'
                             + (f'　｜　<span style="color:#64748b">{_ai_comment}</span>' if _ai_comment else '')
-                            + f'</div></div>',
+                            + '</div></div>',
                             unsafe_allow_html=True,
                         )
 
@@ -29942,7 +29933,7 @@ def render_claude_trading_project():
                         + (f' ｜ 保有 <b style="color:#f1f5f9">{int(pos_ctx["qty"])}株</b>'
                            f' 取得単価 <b style="color:#f1f5f9">{_avg_cost_str}{cur}</b>'
                            if pos_ctx else "")
-                        + f'</div></div>',
+                        + '</div></div>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(signal["text"])
@@ -29952,7 +29943,6 @@ def render_claude_trading_project():
                     _save_signal(sel["ticker"], sel["name"], signal, data)
 
                     # ── 売却判断なら代替銘柄推奨ボタンを表示 ──────────────────
-                    import re as _re_sig
                     _sig_jdg = ""
                     for _sl in signal["text"].splitlines():
                         if "判断" in _sl and ("**" in _sl or "：" in _sl or ":" in _sl):
@@ -30057,7 +30047,7 @@ def render_claude_trading_project():
                                         f'<div style="font-size:12px;color:#38bdf8;margin:3px 0">{_rshares_str} &nbsp; {_rcost_str}</div>'
                                         f'<div style="font-size:11px;color:#fbbf24;margin-bottom:3px">{_rra}</div>'
                                         + (f'<div style="font-size:11px">{_ret_html}</div>' if _ret_html else "")
-                                        + f'</div>',
+                                        + '</div>',
                                         unsafe_allow_html=True,
                                     )
                                 st.caption(f"🤖 {_rep_result.get('model','')}")
@@ -33039,11 +33029,6 @@ def main():
         inject_client_info_collector()
         track_pageview(page=_anl_page)
 
-    # ── streamlit-analytics2 計測開始 ────────────────────────
-    if ANALYTICS2_AVAILABLE:
-        streamlit_analytics.start_tracking()
-    # (disabled)
-
     st.markdown(_build_nav_html(st.session_state.get("lang", "ja")), unsafe_allow_html=True)
 
     inject_global_css()
@@ -33953,12 +33938,6 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     if st.query_params.get("analytics") == "on":
         st.divider()
         render_analytics_dashboard()
-
-    # ── streamlit-analytics2 計測終了・結果表示 ──────────────
-    if ANALYTICS2_AVAILABLE:
-        streamlit_analytics.stop_tracking(
-            unsafe_password=None,
-        )
 
     # ── カレンダー・マクロ指標・弱気相場・モメンタムをプレースホルダーに埋め込む ──
     # 後続セクションの描画が終わった時点でスレッドの結果を回収する。
