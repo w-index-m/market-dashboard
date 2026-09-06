@@ -1517,7 +1517,7 @@ def make_gemini_model() -> Tuple[object, str]:
     genai.configure(api_key=GEMINI_API_KEY)
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
-        test_response = model.generate_content("test", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
+        model.generate_content("test", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
         return model, "gemini-1.5-flash"
     except Exception as e:
         raise RuntimeError(f"gemini-1.5-flash の初期化に失敗: {str(e)}")
@@ -3409,10 +3409,8 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
 
         # NASDAQ 前日騰落
         nq_df = _safe_hist("^IXIC", start, end)
-        nq_val = None
         if not nq_df.empty and len(nq_df) >= 2:
             nq_c   = nq_df["Close"].dropna()
-            nq_val = float(nq_c.iloc[-1])
             nq_ret1 = (nq_c.iloc[-1] / nq_c.iloc[-2] - 1) * 100
             add_signal(cat, "NASDAQ 前日騰落",
                        np.tanh(nq_ret1 / 1.5), 2.5,
@@ -3465,12 +3463,11 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
 
         nkd_df  = _safe_hist("NKD=F", start, end)   # CME 日経225先物（ドル建て）
         nk_df   = _safe_hist("^N225", start, end)    # 日経現物
-        nkd_val = gap_pct = None
+        gap_pct = None
 
         if not nkd_df.empty and not nk_df.empty:
             nkd_c = nkd_df["Close"].dropna()
             nk_c  = nk_df["Close"].dropna()
-            nkd_val = float(nkd_c.iloc[-1])
 
             # CME先物 vs 現物 乖離率（% 換算、ドル→円は省略してpct比較）
             nkd_ret1 = (nkd_c.iloc[-1] / nkd_c.iloc[-2] - 1) * 100 if len(nkd_c) >= 2 else 0
@@ -3592,10 +3589,8 @@ def compute_nikkei_prediction() -> Dict[str, Any]:
 
         # ゴールド（リスクオフ指標）
         gold_df  = _safe_hist("GC=F", start, end)
-        gold_val = None
         if not gold_df.empty and len(gold_df) >= 2:
             gold_c   = gold_df["Close"].dropna()
-            gold_val = float(gold_c.iloc[-1])
             gold_ret1 = (gold_c.iloc[-1] / gold_c.iloc[-2] - 1) * 100
             # 金↑はリスクオフ→株弱気シグナル
             add_signal(cat, "ゴールド 前日変化",
@@ -4150,7 +4145,6 @@ def run_backtest_us(symbol: str = "^GSPC", lookback_years: int = 3) -> Dict[str,
         tnx  = _g("^TNX")
         xlk  = _g("XLK")   # テック
         xlf  = _g("XLF")   # 金融
-        xle  = _g("XLE")   # エネルギー
         oil  = _g("CL=F")
         dxy  = _g("DX=F")
         spy  = _g("SPY")
@@ -4445,10 +4439,8 @@ def compute_ensemble_us(target: str = "SP500") -> Dict[str, Any]:
         tnx  = _h("^TNX")
         xlk  = _h("XLK")
         xlf  = _h("XLF")
-        xle  = _h("XLE")
         spy  = _h("SPY")
         iwm  = _h("IWM")
-        oil  = _h("CL=F")
         dxy  = _h("DX=F")
 
         if len(main) < 30:
@@ -4924,9 +4916,7 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         cat = "① マクロ・景気"
         tnx = _h("^TNX")
-        tyx = _h("^TYX")
-        fvx = _h("^FVX")
-        tnx_val = tyx_val = fvx_val = None
+        tnx_val = None
 
         if not tnx.empty and len(tnx) >= 5:
             tnx_c   = tnx["Close"].dropna()
@@ -5004,7 +4994,6 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         cat = "④ セクターローテ"
         sp_df = _h("^GSPC")
-        sector_signals = []
         for sym, name, is_growth in [
             ("XLK", "テック",     True),
             ("XLF", "金融",       True),
@@ -5321,7 +5310,6 @@ def render_us_prediction():
             cat_scores  = pred["cat_scores"]
             snapshot    = pred["snapshot"]
             details     = pred["details"]
-            details_cat = pred["details_by_cat"]
             n_signals   = pred["n_signals"]
             updated_at  = pred["updated_at"]
 
@@ -5913,7 +5901,6 @@ def render_macro_regime():
         st.error(f"取得失敗: {regime_data.get('reason')}")
         return
 
-    regime      = regime_data["regime"]
     regime_jp   = regime_data["regime_jp"]
     color       = regime_data["regime_color"]
     growth_s    = regime_data["growth_score"]
@@ -7283,7 +7270,6 @@ def render_4indicator_correlation():
         return
 
     corr_ret   = result["corr_ret"]
-    corr_level = result["corr_level"]
     df         = result["df"]
     df_ret     = result["df_ret"]
     n_days     = result["n_days"]
@@ -7328,7 +7314,6 @@ def render_4indicator_correlation():
             corr_disp = corr_ret.rename(
                 index=col_names_jp, columns=col_names_jp
             )
-            z    = corr_disp.values.tolist()
             x    = list(corr_disp.columns)
             y    = list(corr_disp.index)
             text = [[f"{v:.2f}" for v in row] for row in corr_disp.values]
@@ -11900,7 +11885,6 @@ def render_economic_events_section(preloaded: dict | None = None):
                     eco_actuals[_k] = _v
         has_fmp = bool(eco_actuals)
 
-        now_jst = datetime.now(JST)
         impact_color = {"high": "#ef4444", "medium": "#f59e0b", "low": "#6b7280"}
         impact_label = {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}
 
@@ -12678,7 +12662,6 @@ def render_market_summary():
                 has_any = True
         if has_any:
             # 直近のイベントマーカーを重ねる
-            now_jst = datetime.now(JST)
             eco_events = _get_upcoming_us_eco_events(days_back=15, days_ahead=3)
             seen_dates = set()
             for ev in eco_events:
@@ -12792,22 +12775,6 @@ def render_market_summary():
     st.caption("VIXの上がり方・セクターローテーション・為替・信用スプレッド・金利など複数指標を総合評価")
 
     current_vix = prices.get("vix", 0)
-
-    # 歴史的参照値（VIX ピーク・概要）
-    HISTORY = [
-        {"label": "コロナショック",      "year": "2020/3",  "vix": 82.7,  "sp_dd": -33.9, "days": 33,
-         "desc": "パンデミック宣言。過去最速の急落。わずか33日でS&P500が34%下落。"},
-        {"label": "リーマンショック",    "year": "2008/10", "vix": 80.9,  "sp_dd": -56.8, "days": 517,
-         "desc": "リーマン破綻で金融システム崩壊危機。18ヶ月かけてS&P500が半値以下に。"},
-        {"label": "ITバブル崩壊",        "year": "2001/9",  "vix": 43.7,  "sp_dd": -49.1, "days": 929,
-         "desc": "9.11同時多発テロが追い打ち。ハイテク株中心に3年かけて半値に。"},
-        {"label": "欧州債務危機",        "year": "2011/8",  "year2": "欧州",  "vix": 48.0,  "sp_dd": -19.4, "days": 157,
-         "desc": "ギリシャ危機が欧州全体に波及。米国も格下げされVIXが急騰。"},
-        {"label": "コロナ前高値 (平常)",  "year": "2020/1",  "vix": 12.1,  "sp_dd": 0,    "days": 0,
-         "desc": "市場が最も楽観的だった時期。VIXは歴史的低水準。"},
-        {"label": "金利上昇ショック",    "year": "2022/6",  "vix": 36.5,  "sp_dd": -24.5, "days": 282,
-         "desc": "FRBの急激な利上げでS&P500が24%下落。現代版スタグフレーション懸念。"},
-    ]
 
     # 現在VIX表示
     if current_vix < 20:
@@ -14532,8 +14499,6 @@ def run_backtest(symbol: str = "^N225", lookback_years: int = 3) -> Dict[str, An
         fx    = _get("USDJPY=X")
         tnx   = _get("^TNX")
         ewj   = _get("EWJ")
-        oil   = _get("CL=F")
-        nkd   = _get("NKD=F")
 
         if len(nk) < 100:
             return {"ok": False, "reason": "データ不足"}
@@ -16022,7 +15987,6 @@ def fetch_av_news_sentiment(
         for art in feed[:20]:
             title        = art.get("title", "").strip()
             overall_sent = float(art.get("overall_sentiment_score", 0))
-            sent_label   = art.get("overall_sentiment_label", "Neutral")
 
             # センチメント絵文字
             if overall_sent >= 0.15:
@@ -17281,15 +17245,6 @@ def calc_us_supply_demand_score(symbol: str) -> Dict:
         }
 
         # ③ 機関保有変化（前四半期比）
-        inst_df = tk.institutional_holders
-        inst_chg_pct = 0
-        if inst_df is not None and not inst_df.empty:
-            try:
-                total_inst = float(info.get("heldPercentInstitutions", 0)) * 100
-                # 前四半期と比較できないためshares変化で代替
-                inst_chg_pct = 0  # yfinanceでは直接取れない
-            except Exception:
-                pass
         # institutional_purchases_lastQtr が使えれば
         net_inst = info.get("netSharesAcquiredLastQtr") or info.get("buyPercentInsiderShares") or 0
         s3 = 50  # ベースライン（変化不明時）
@@ -21557,8 +21512,6 @@ def render_leadlag_section():
     us_ret      = result["us_ret_today"]
     expl_var    = result["explained_var"]
     latest_date = result["latest_date"]
-    jp_cols     = result["jp_cols"]
-    us_cols     = result["us_cols"]
     st.caption(
         f"📅 基準日: {pd.Timestamp(latest_date).strftime('%Y-%m-%d')} | "
         f"K={K} | L={L}日 | λ={lam:.2f} | 説明分散: {expl_var*100:.1f}%"
@@ -22454,7 +22407,6 @@ def _calc_allocation_recommendations(
         ma25    = float(data.get("ma25")    or 0)
         ma75    = float(data.get("ma75")    or 0)
         rsi     = float(data.get("rsi")     or 50)
-        ret_5d  = float(data.get("ret_5d")  or 0)
         ret_20d = float(data.get("ret_20d") or 0)
         sector  = data.get("sector") or pos.get("sector", "")
 
