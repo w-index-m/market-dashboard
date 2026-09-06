@@ -2625,10 +2625,14 @@ def draw_trend_chart(
         if PLOTLY_AVAILABLE:
             # ── Plotly インタラクティブチャート ──────────────────
             def _zone(s):
-                if s >= 75: return "Extreme Greed 🤑"
-                if s >= 55: return "Greed 😊"
-                if s >= 45: return "Neutral 😐"
-                if s >= 25: return "Fear 😟"
+                if s >= 75:
+                    return "Extreme Greed 🤑"
+                if s >= 55:
+                    return "Greed 😊"
+                if s >= 45:
+                    return "Neutral 😐"
+                if s >= 25:
+                    return "Fear 😟"
                 return "Extreme Fear 😱"
 
             df_slice = df_slice.copy()
@@ -4522,7 +4526,10 @@ def compute_ensemble_us(target: str = "SP500") -> Dict[str, Any]:
             fed["yield_curve"] = (np.tanh(spread / 1.0), 2.0)
 
         # アンサンブル合成
-        w_short = 0.40; w_mid = 0.30; w_trend = 0.20; w_fed = 0.10
+        w_short = 0.40
+        w_mid = 0.30
+        w_trend = 0.20
+        w_fed = 0.10
 
         def _ws(sigs):
             if not sigs:
@@ -4916,7 +4923,9 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
         # ① マクロ・景気：Yield Curve（10Y-2Y）
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         cat = "① マクロ・景気"
-        tnx = _h("^TNX"); tyx = _h("^TYX"); fvx = _h("^FVX")
+        tnx = _h("^TNX")
+        tyx = _h("^TYX")
+        fvx = _h("^FVX")
         tnx_val = tyx_val = fvx_val = None
 
         if not tnx.empty and len(tnx) >= 5:
@@ -5091,7 +5100,8 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
                        f"MSI={msi_v:.3f} PctRank={((msi<=msi_v).mean()*100):.0f}%")
 
         # SPY vs IWM（大型 vs 小型）
-        spy_df = _h("SPY"); iwm_df = _h("IWM")
+        spy_df = _h("SPY")
+        iwm_df = _h("IWM")
         if not spy_df.empty and not iwm_df.empty and len(spy_df) >= 6 and len(iwm_df) >= 6:
             spy_r5 = (spy_df["Close"].dropna().iloc[-1] /
                       spy_df["Close"].dropna().iloc[-6] - 1) * 100
@@ -6630,11 +6640,13 @@ def compute_composite_sentiment() -> Dict[str, Any]:
             logger.warning(f"sentiment hist error: {_hist_e}")
             try:
                 def _tz_naive_fb(ser):
-                    if ser.empty: return ser
+                    if ser.empty:
+                        return ser
                     idx = ser.index
                     if hasattr(idx, "tz") and idx.tz is not None:
                         idx = idx.tz_localize(None)
-                    s = ser.copy(); s.index = pd.to_datetime(idx).normalize()
+                    s = ser.copy()
+                    s.index = pd.to_datetime(idx).normalize()
                     return s[~s.index.duplicated(keep="last")]
                 sp_fb  = _tz_naive_fb(sp_c)  if not sp_c.empty  else pd.Series(dtype=float)
                 vix_fb = _tz_naive_fb(vix_c) if not vix_c.empty else pd.Series(dtype=float)
@@ -7576,22 +7588,31 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
         def _g(sym):
             try:
                 df = yf.Ticker(sym).history(start=start, end=end, interval="1d", auto_adjust=False)
-                if df is None or df.empty: return pd.Series(dtype=float)
-                if df.index.tz is None: df.index = df.index.tz_localize("UTC")
+                if df is None or df.empty:
+                    return pd.Series(dtype=float)
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
                 return df.tz_convert(JST)["Close"].dropna()
-            except Exception: return pd.Series(dtype=float)
+            except Exception:
+                return pd.Series(dtype=float)
 
         _cps_keys = ["^VIX", "^VIX3M", "^GSPC", "TLT", "HYG", "LQD",
                      "USDJPY=X", "^TNX", "XLK", "XLU", "XLF", "XLP"]
         with ThreadPoolExecutor(max_workers=6) as _p:
             _cf = {s: _p.submit(_g, s) for s in _cps_keys}
         _cg = {s: _cf[s].result() for s in _cps_keys}
-        vix    = _cg["^VIX"];   vix3m  = _cg["^VIX3M"]
-        sp     = _cg["^GSPC"];  tlt    = _cg["TLT"]
-        hyg    = _cg["HYG"];    lqd    = _cg["LQD"]
-        usdjpy = _cg["USDJPY=X"]; tnx  = _cg["^TNX"]
-        xlk    = _cg["XLK"];    xlu    = _cg["XLU"]
-        xlf    = _cg["XLF"];    xlp    = _cg["XLP"]
+        vix    = _cg["^VIX"]
+        vix3m  = _cg["^VIX3M"]
+        sp     = _cg["^GSPC"]
+        tlt    = _cg["TLT"]
+        hyg    = _cg["HYG"]
+        lqd    = _cg["LQD"]
+        usdjpy = _cg["USDJPY=X"]
+        tnx  = _cg["^TNX"]
+        xlk    = _cg["XLK"]
+        xlu    = _cg["XLU"]
+        xlf    = _cg["XLF"]
+        xlp    = _cg["XLP"]
 
         def _ret(s, n):
             if len(s) >= n + 1:
@@ -7613,11 +7634,13 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
             S["sp_20d"] = _ret(sp, 20)
             S["sp_5d"]  = _ret(sp, 5)
         if len(tlt) >= 21 and len(sp) >= 21:
-            t = _ret(tlt, 20); s = _ret(sp, 20)
+            t = _ret(tlt, 20)
+            s = _ret(sp, 20)
             if t is not None and s is not None:
                 S["bond_vs_eq"] = t - s   # 正=債券逃避(リスクオフ)
         if len(hyg) >= 21 and len(lqd) >= 21:
-            h = _ret(hyg, 20); lq = _ret(lqd, 20)
+            h = _ret(hyg, 20)
+            lq = _ret(lqd, 20)
             if h is not None and lq is not None:
                 S["credit_stress"] = lq - h   # 正=信用収縮(LQD > HYG)
         if len(usdjpy) >= 21:
@@ -7626,11 +7649,13 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
             S["tnx_chg"] = float(tnx.iloc[-1]) - float(tnx.iloc[-21])
             S["tnx_level"] = float(tnx.iloc[-1])
         if len(xlk) >= 21 and len(xlu) >= 21:
-            k = _ret(xlk, 20); u = _ret(xlu, 20)
+            k = _ret(xlk, 20)
+            u = _ret(xlu, 20)
             if k is not None and u is not None:
                 S["growth_vs_def"] = k - u   # 負=ディフェンシブ優位
         if len(xlf) >= 21 and len(xlp) >= 21:
-            f = _ret(xlf, 20); p = _ret(xlp, 20)
+            f = _ret(xlf, 20)
+            p = _ret(xlp, 20)
             if f is not None and p is not None:
                 S["fin_vs_stap"] = f - p   # 負=生活必需品優位(金融弱い)
 
@@ -7762,9 +7787,11 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
 
         def _match(current, expected, neutral, weight):
             """0-1のマッチスコアを計算"""
-            if current is None: return None
+            if current is None:
+                return None
             span = expected - neutral
-            if abs(span) < 0.001: return 1.0 if abs(current - expected) < 0.001 else 0.0
+            if abs(span) < 0.001:
+                return 1.0 if abs(current - expected) < 0.001 else 0.0
             score = (current - neutral) / span
             return float(np.clip(score, 0.0, 1.0)), weight
 
@@ -7777,9 +7804,11 @@ def compute_crisis_pattern_similarity() -> Dict[str, Any]:
             mismatched_factors = []
 
             for factor, (exp, neu, w) in pat["sig"].items():
-                if factor not in S or S[factor] is None: continue
+                if factor not in S or S[factor] is None:
+                    continue
                 span = exp - neu
-                if abs(span) < 0.001: continue
+                if abs(span) < 0.001:
+                    continue
                 score = float(np.clip((S[factor] - neu) / span, 0.0, 1.0))
                 weighted_sum += score * w
                 total_w += w
@@ -8107,8 +8136,10 @@ def _fetch_momentum_ranking(market: str) -> pd.DataFrame:
                     continue
 
                 score = ret_1d * 0.5
-                if ret_5d  is not None: score += ret_5d  * 0.3
-                if ret_20d is not None: score += ret_20d * 0.2
+                if ret_5d  is not None:
+                    score += ret_5d  * 0.3
+                if ret_20d is not None:
+                    score += ret_20d * 0.2
 
                 rows.append({
                     "ticker": ticker, "name": name,
@@ -12077,7 +12108,8 @@ def render_economic_events_section(preloaded: dict | None = None):
                     prv  = fmp_jp.get("previous")
                     unit = fmp_jp.get("unit", "")
                     def _fmt_jp(v, u):
-                        if v is None: return "—"
+                        if v is None:
+                            return "—"
                         return f"{v:.2f}{u}"
                     act_html = f"<span style='font-weight:700;color:#f1f5f9'>{_fmt_jp(act, unit)}</span>"
                     if prv is not None:
@@ -12374,11 +12406,16 @@ def render_market_summary():
                 lbl  = comp["label"]
                 wt   = comp.get("weight", 0)
 
-                if sc >= 68:   dc, di, dt = "#16a34a", "↑", "強気"
-                elif sc >= 55: dc, di, dt = "#22c55e", "↑", "やや強気"
-                elif sc >= 45: dc, di, dt = "#f59e0b", "→", "中立"
-                elif sc >= 32: dc, di, dt = "#ef4444", "↓", "やや弱気"
-                else:           dc, di, dt = "#dc2626", "↓", "弱気"
+                if sc >= 68:
+                    dc, di, dt = "#16a34a", "↑", "強気"
+                elif sc >= 55:
+                    dc, di, dt = "#22c55e", "↑", "やや強気"
+                elif sc >= 45:
+                    dc, di, dt = "#f59e0b", "→", "中立"
+                elif sc >= 32:
+                    dc, di, dt = "#ef4444", "↓", "やや弱気"
+                else:
+                    dc, di, dt = "#dc2626", "↓", "弱気"
 
                 intro, reason = _EXPLAIN.get(name, ("", ""))
                 bar_w = int(sc)
@@ -12556,11 +12593,16 @@ def render_market_summary():
         st.caption("VIX＝投資家の不安度。低いほど市場が落ち着いている。")
         vix = prices.get("vix")
         if vix:
-            if vix < 15:   vc, vl = "#16a34a", "低水準 → 市場落ち着き・強気"
-            elif vix < 20: vc, vl = "#22c55e", "やや低 → 概ね安定"
-            elif vix < 25: vc, vl = "#f59e0b", "中程度 → 注意が必要"
-            elif vix < 30: vc, vl = "#ef4444", "高水準 → 警戒域"
-            else:           vc, vl = "#dc2626", "極めて高い → 恐怖・パニック域"
+            if vix < 15:
+                vc, vl = "#16a34a", "低水準 → 市場落ち着き・強気"
+            elif vix < 20:
+                vc, vl = "#22c55e", "やや低 → 概ね安定"
+            elif vix < 25:
+                vc, vl = "#f59e0b", "中程度 → 注意が必要"
+            elif vix < 30:
+                vc, vl = "#ef4444", "高水準 → 警戒域"
+            else:
+                vc, vl = "#dc2626", "極めて高い → 恐怖・パニック域"
             vchg = prices.get("vix_chg1", 0)
             st.markdown(
                 f'<span style="font-size:26px;font-weight:900;color:{vc}">{vix:.1f}</span>'
@@ -12768,10 +12810,14 @@ def render_market_summary():
     ]
 
     # 現在VIX表示
-    if current_vix < 20:   vc, vs = "#16a34a", "安定域"
-    elif current_vix < 30: vc, vs = "#f59e0b", "注意域"
-    elif current_vix < 40: vc, vs = "#ef4444", "警戒域"
-    else:                   vc, vs = "#dc2626", "危機域"
+    if current_vix < 20:
+        vc, vs = "#16a34a", "安定域"
+    elif current_vix < 30:
+        vc, vs = "#f59e0b", "注意域"
+    elif current_vix < 40:
+        vc, vs = "#ef4444", "警戒域"
+    else:
+        vc, vs = "#dc2626", "危機域"
 
     st.markdown(
         f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
@@ -12919,10 +12965,14 @@ def render_composite_sentiment():
     jp_hist_df   = sent_data.get("jp_hist_df", pd.DataFrame())
 
     def _slabel(s):
-        if s > 75: return "Extreme Greed 🤑"
-        if s > 55: return "Greed 😊"
-        if s > 45: return "Neutral 😐"
-        if s > 25: return "Fear 😟"
+        if s > 75:
+            return "Extreme Greed 🤑"
+        if s > 55:
+            return "Greed 😊"
+        if s > 45:
+            return "Neutral 😐"
+        if s > 25:
+            return "Fear 😟"
         return "Extreme Fear 😱"
 
     def _scolor(s):
@@ -13143,17 +13193,25 @@ def render_composite_sentiment():
 
                 # ゾーン判定ラベル
                 def _zone(s):
-                    if s >= 75: return "Extreme Greed"
-                    if s >= 55: return "Greed"
-                    if s >= 45: return "Neutral"
-                    if s >= 25: return "Fear"
+                    if s >= 75:
+                        return "Extreme Greed"
+                    if s >= 55:
+                        return "Greed"
+                    if s >= 45:
+                        return "Neutral"
+                    if s >= 25:
+                        return "Fear"
                     return "Extreme Fear"
 
                 def _zone_color(s):
-                    if s >= 75: return "#14b8a6"
-                    if s >= 55: return "#22c55e"
-                    if s >= 45: return "#9ca3af"
-                    if s >= 25: return "#f97316"
+                    if s >= 75:
+                        return "#14b8a6"
+                    if s >= 55:
+                        return "#22c55e"
+                    if s >= 45:
+                        return "#9ca3af"
+                    if s >= 25:
+                        return "#f97316"
                     return "#ef4444"
 
                 df_p["zone"]       = df_p["score"].apply(_zone)
@@ -15783,8 +15841,10 @@ def fetch_yahoo_finance_news(symbol: str, name: str, max_items: int = 3) -> List
         t = text.lower()
         pos = sum(1 for kw in POSITIVE_KW if kw in t)
         neg = sum(1 for kw in NEGATIVE_KW if kw in t)
-        if pos > neg:   return "📈+"
-        elif neg > pos: return "📉-"
+        if pos > neg:
+            return "📈+"
+        elif neg > pos:
+            return "📉-"
         return "➡️"
 
     results = []
@@ -15848,8 +15908,10 @@ def fetch_finnhub_company_news(
         t = text.lower()
         pos = sum(1 for kw in POSITIVE_KW if kw in t)
         neg = sum(1 for kw in NEGATIVE_KW if kw in t)
-        if pos > neg:   return "📈+"
-        elif neg > pos: return "📉-"
+        if pos > neg:
+            return "📈+"
+        elif neg > pos:
+            return "📉-"
         return "➡️"
 
     end_dt   = datetime.now()
@@ -15985,11 +16047,16 @@ def fetch_av_news_sentiment(
         ticker_scores = {}
         for tk, scores in ticker_acc.items():
             avg = sum(scores) / len(scores)
-            if avg >= 0.35:   label = "Bullish"
-            elif avg >= 0.15: label = "Somewhat-Bullish"
-            elif avg >= -0.15:label = "Neutral"
-            elif avg >= -0.35:label = "Somewhat-Bearish"
-            else:             label = "Bearish"
+            if avg >= 0.35:
+                label = "Bullish"
+            elif avg >= 0.15:
+                label = "Somewhat-Bullish"
+            elif avg >= -0.15:
+                label = "Neutral"
+            elif avg >= -0.35:
+                label = "Somewhat-Bearish"
+            else:
+                label = "Bearish"
             ticker_scores[tk] = {
                 "score": round(avg, 3),
                 "label": label,
@@ -17257,9 +17324,11 @@ def calc_us_supply_demand_score(symbol: str) -> Dict:
                 txn = str(row.get("Transaction", row.get("Text", ""))).lower()
                 val = float(row.get("Value", 0)) if pd.notna(row.get("Value", 0)) else 0
                 if any(k in txn for k in ["purchase", "buy", "acquisition"]):
-                    buy_cnt += 1; buy_val += val
+                    buy_cnt += 1
+                    buy_val += val
                 elif any(k in txn for k in ["sale", "sell"]):
-                    sell_cnt += 1; sell_val += val
+                    sell_cnt += 1
+                    sell_val += val
         total_ins = buy_cnt + sell_cnt
         if total_ins > 0:
             buy_ratio = buy_cnt / total_ins
@@ -17925,8 +17994,10 @@ def render_stock_screener():
         if summary_rows:
             df_sum = pd.DataFrame(summary_rows)
             def _color_chg(val):
-                if isinstance(val, str) and val.startswith("+"): return "color:#16a34a;font-weight:700"
-                if isinstance(val, str) and val.startswith("-"): return "color:#dc2626;font-weight:700"
+                if isinstance(val, str) and val.startswith("+"):
+                    return "color:#16a34a;font-weight:700"
+                if isinstance(val, str) and val.startswith("-"):
+                    return "color:#dc2626;font-weight:700"
                 return ""
             st.dataframe(df_sum.style.map(_color_chg, subset=["前日比","目標↑"]),
                          width="stretch", hide_index=True)
@@ -20489,8 +20560,10 @@ def fetch_news_for_research(max_per_feed: int = 8) -> List[str]:
         t = text.lower()
         pos = sum(1 for kw in POSITIVE_KW if kw.lower() in t)
         neg = sum(1 for kw in NEGATIVE_KW if kw.lower() in t)
-        if pos > neg:   return "📈+"
-        elif neg > pos: return "📉-"
+        if pos > neg:
+            return "📈+"
+        elif neg > pos:
+            return "📉-"
         return "➡️"
 
     headlines_priority = []
@@ -21498,8 +21571,10 @@ def render_leadlag_section():
     }).sort_values("リターン(%)", ascending=False).reset_index(drop=True)
 
     def _color_ret(val):
-        if val > 0:   return "color: #1a7f37; font-weight:bold"
-        elif val < 0: return "color: #d1242f; font-weight:bold"
+        if val > 0:
+            return "color: #1a7f37; font-weight:bold"
+        elif val < 0:
+            return "color: #d1242f; font-weight:bold"
         return ""
 
     st.dataframe(
@@ -21523,8 +21598,10 @@ def render_leadlag_section():
 
     def _color_signal(val):
         if isinstance(val, float):
-            if val > 0.01:    return "color: #1a7f37; font-weight:bold"
-            elif val < -0.01: return "color: #d1242f; font-weight:bold"
+            if val > 0.01:
+                return "color: #1a7f37; font-weight:bold"
+            elif val < -0.01:
+                return "color: #d1242f; font-weight:bold"
         return ""
 
     st.dataframe(
@@ -22287,19 +22364,23 @@ def _score_single_rule(data: dict, market_ctx: dict) -> float:
                   -1.5 if ret_20d < -10 else -0.5 if ret_20d < -3 else 0.0)
     for s in sq_leading:
         if sector in s.lower() or s.lower() in sector:
-            score += 2.0; break
+            score += 2.0
+            break
     else:
         for s in sq_improving:
             if sector in s.lower() or s.lower() in sector:
-                score += 1.0; break
+                score += 1.0
+                break
         else:
             for s in sq_weakening:
                 if sector in s.lower() or s.lower() in sector:
-                    score -= 1.0; break
+                    score -= 1.0
+                    break
             else:
                 for s in sq_lagging:
                     if sector in s.lower() or s.lower() in sector:
-                        score -= 2.0; break
+                        score -= 2.0
+                        break
     return round(score * fg_mult, 2)
 
 
@@ -22399,26 +22480,35 @@ def _calc_allocation_recommendations(
         # 3. RSI
         if rsi:
             if rsi < 30:
-                score += 2.0; signals.append(f"💙 RSI売られ過ぎ({rsi:.0f})")
+                score += 2.0
+                signals.append(f"💙 RSI売られ過ぎ({rsi:.0f})")
             elif rsi < 45:
-                score += 1.0; signals.append(f"🟢 RSI低め({rsi:.0f})")
+                score += 1.0
+                signals.append(f"🟢 RSI低め({rsi:.0f})")
             elif rsi < 60:
-                score += 0.5; signals.append(f"🟡 RSI適正({rsi:.0f})")
+                score += 0.5
+                signals.append(f"🟡 RSI適正({rsi:.0f})")
             elif rsi < 70:
-                score += 0.0; signals.append(f"🟠 RSI高め({rsi:.0f})")
+                score += 0.0
+                signals.append(f"🟠 RSI高め({rsi:.0f})")
             else:
-                score -= 1.0; signals.append(f"🔴 RSI過熱({rsi:.0f})")
+                score -= 1.0
+                signals.append(f"🔴 RSI過熱({rsi:.0f})")
 
         # 4. 20日モメンタム
         if ret_20d:
             if ret_20d > 10:
-                score += 1.5; signals.append(f"🚀 20日強騰({ret_20d:+.1f}%)")
+                score += 1.5
+                signals.append(f"🚀 20日強騰({ret_20d:+.1f}%)")
             elif ret_20d > 3:
-                score += 0.5; signals.append(f"↗ 20日{ret_20d:+.1f}%")
+                score += 0.5
+                signals.append(f"↗ 20日{ret_20d:+.1f}%")
             elif ret_20d < -10:
-                score -= 1.5; signals.append(f"⚠️ 20日急落({ret_20d:+.1f}%)")
+                score -= 1.5
+                signals.append(f"⚠️ 20日急落({ret_20d:+.1f}%)")
             elif ret_20d < -3:
-                score -= 0.5; signals.append(f"↘ 20日{ret_20d:+.1f}%")
+                score -= 0.5
+                signals.append(f"↘ 20日{ret_20d:+.1f}%")
 
         # 5. セクターRRG
         sec_sc, sec_sig = _sector_score_and_label(sector)
@@ -24171,15 +24261,24 @@ def _generate_ai_trade_signal(
     pe_hist      = data.get("pe_history", [])
 
     funda_lines = []
-    if trailing_pe:  funda_lines.append(f"- 実績PER: {trailing_pe}倍")
-    if forward_pe:   funda_lines.append(f"- 予想PER: {forward_pe}倍")
-    if peg:          funda_lines.append(f"- PEGレシオ: {peg}")
-    if pbr:          funda_lines.append(f"- PBR: {pbr}倍")
-    if eps_ttm:      funda_lines.append(f"- EPS（直近12ヶ月）: {eps_ttm} {currency}")
-    if eps_fwd:      funda_lines.append(f"- EPS（予想）: {eps_fwd} {currency}")
-    if rev_growth is not None:   funda_lines.append(f"- 売上高成長率（YoY）: {rev_growth:+.1f}%")
-    if earn_growth is not None:  funda_lines.append(f"- 純利益成長率（YoY）: {earn_growth:+.1f}%")
-    if next_earn:    funda_lines.append(f"- 次回決算発表予定: {next_earn}")
+    if trailing_pe:
+        funda_lines.append(f"- 実績PER: {trailing_pe}倍")
+    if forward_pe:
+        funda_lines.append(f"- 予想PER: {forward_pe}倍")
+    if peg:
+        funda_lines.append(f"- PEGレシオ: {peg}")
+    if pbr:
+        funda_lines.append(f"- PBR: {pbr}倍")
+    if eps_ttm:
+        funda_lines.append(f"- EPS（直近12ヶ月）: {eps_ttm} {currency}")
+    if eps_fwd:
+        funda_lines.append(f"- EPS（予想）: {eps_fwd} {currency}")
+    if rev_growth is not None:
+        funda_lines.append(f"- 売上高成長率（YoY）: {rev_growth:+.1f}%")
+    if earn_growth is not None:
+        funda_lines.append(f"- 純利益成長率（YoY）: {earn_growth:+.1f}%")
+    if next_earn:
+        funda_lines.append(f"- 次回決算発表予定: {next_earn}")
 
     funda_section = "\n".join(funda_lines) if funda_lines else "取得できませんでした"
     eps_hist_str  = "\n".join(f"  {e}" for e in eps_hist) if eps_hist else "  データなし"
@@ -24537,36 +24636,54 @@ def _fetch_market_context_for_trading() -> dict:
         _crs = 0
 
         # F&G 絶対値
-        if _fg_score >= 80:    _crs += 2
-        elif _fg_score >= 75:  _crs += 1
+        if _fg_score >= 80:
+            _crs += 2
+        elif _fg_score >= 75:
+            _crs += 1
 
         # F&G 急騰（最重要シグナル）
         if _fg_c7 is not None:
-            if _fg_c7 >= 20:   _crs += 3
-            elif _fg_c7 >= 15: _crs += 2
-            elif _fg_c7 >= 10: _crs += 1
+            if _fg_c7 >= 20:
+                _crs += 3
+            elif _fg_c7 >= 15:
+                _crs += 2
+            elif _fg_c7 >= 10:
+                _crs += 1
         if _fg_c30 is not None:
-            if _fg_c30 >= 35:  _crs += 2
-            elif _fg_c30 >= 25: _crs += 1
+            if _fg_c30 >= 35:
+                _crs += 2
+            elif _fg_c30 >= 25:
+                _crs += 1
 
         # NAAIM（機関投資家の過剰投資）
-        if _naaim_exp >= 90:   _crs += 3
-        elif _naaim_exp >= 80: _crs += 2
-        elif _naaim_exp >= 70: _crs += 1
+        if _naaim_exp >= 90:
+            _crs += 3
+        elif _naaim_exp >= 80:
+            _crs += 2
+        elif _naaim_exp >= 70:
+            _crs += 1
 
         # VIX（恐怖指数）
-        if _vix_val >= 30:     _crs += 3
-        elif _vix_val >= 25:   _crs += 2
-        elif _vix_val >= 20:   _crs += 1
+        if _vix_val >= 30:
+            _crs += 3
+        elif _vix_val >= 25:
+            _crs += 2
+        elif _vix_val >= 20:
+            _crs += 1
 
         # 米国予測モデル（弱気シグナル）
-        if _us_comp < -0.3:    _crs += 2
-        elif _us_comp < -0.1:  _crs += 1
+        if _us_comp < -0.3:
+            _crs += 2
+        elif _us_comp < -0.1:
+            _crs += 1
 
         # 逆張り補正（極度の恐怖 = 買い場）
-        if _fg_score <= 15:    _crs -= 4
-        elif _fg_score <= 25:  _crs -= 2
-        elif _fg_score <= 35:  _crs -= 1
+        if _fg_score <= 15:
+            _crs -= 4
+        elif _fg_score <= 25:
+            _crs -= 2
+        elif _fg_score <= 35:
+            _crs -= 1
 
         _crs = max(0, min(10, _crs))
 
@@ -26419,7 +26536,9 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     )
     _lines.append(f"▲ 上昇ランキング（予算内・{_rank_label}スコア順）:")
     for i, (_tk, _sc, _d) in enumerate(_top, 1):
-        _r3 = _d.get("ret_3m"); _r6 = _d.get("ret_6m"); _r1y = _d.get("ret_1y")
+        _r3 = _d.get("ret_3m")
+        _r6 = _d.get("ret_6m")
+        _r1y = _d.get("ret_1y")
         _price = _d.get("price", 0) or 0
         _min_note = ""
         if _price > 0 and budget > 0:
@@ -26444,7 +26563,8 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     if _bottom:
         _lines.append("▼ 下落銘柄（1y -15%以下・原則除外）:")
         for _tk, _sc, _d in _bottom:
-            _r3 = _d.get("ret_3m"); _r1y = _d.get("ret_1y")
+            _r3 = _d.get("ret_3m")
+            _r1y = _d.get("ret_1y")
             _lines.append(f"  ✗ {_tk:8s} 3m:{_r3:+6.1f}%  1y:{_r1y:+7.1f}%")
     _lines.append("→ ⛔リストの銘柄は予算超過のため絶対に選定禁止。▲リストの上位から選ぶこと。")
     return "\n".join(_lines)
@@ -27013,9 +27133,12 @@ def _generate_full_portfolio_recommendation(
         vol_r   = data.get("vol_ratio")
         sec     = data.get("sector_detail") or data.get("sector") or p.get("sector", "その他")
         ret_str_parts = []
-        if ret_1d is not None: ret_str_parts.append(f"1日:{ret_1d:+.1f}%")
-        if ret_5d is not None: ret_str_parts.append(f"5日:{ret_5d:+.1f}%")
-        if vol_r  is not None: ret_str_parts.append(f"出来高比:{vol_r:.1f}倍")
+        if ret_1d is not None:
+            ret_str_parts.append(f"1日:{ret_1d:+.1f}%")
+        if ret_5d is not None:
+            ret_str_parts.append(f"5日:{ret_5d:+.1f}%")
+        if vol_r  is not None:
+            ret_str_parts.append(f"出来高比:{vol_r:.1f}倍")
         ret_str = " | ".join(ret_str_parts) or "-"
         news_lines = [f"    ・{n}" for n in (data.get("news") or [])[:4] if n]
 
@@ -27028,11 +27151,16 @@ def _generate_full_portfolio_recommendation(
         next_earn    = data.get("next_earnings")
         eps_hist     = data.get("eps_history") or []
         funda_parts = []
-        if eps_ttm is not None:      funda_parts.append(f"EPS実績(TTM) {eps_ttm}")
-        if eps_fwd is not None:      funda_parts.append(f"EPS予想 {eps_fwd}")
-        if rev_growth_v is not None: funda_parts.append(f"売上高成長率(YoY) {rev_growth_v:+.1f}%")
-        if earn_growth is not None:  funda_parts.append(f"純利益成長率(YoY) {earn_growth:+.1f}%")
-        if next_earn:                funda_parts.append(f"次回決算日 {next_earn}")
+        if eps_ttm is not None:
+            funda_parts.append(f"EPS実績(TTM) {eps_ttm}")
+        if eps_fwd is not None:
+            funda_parts.append(f"EPS予想 {eps_fwd}")
+        if rev_growth_v is not None:
+            funda_parts.append(f"売上高成長率(YoY) {rev_growth_v:+.1f}%")
+        if earn_growth is not None:
+            funda_parts.append(f"純利益成長率(YoY) {earn_growth:+.1f}%")
+        if next_earn:
+            funda_parts.append(f"次回決算日 {next_earn}")
         funda_str = " | ".join(funda_parts)
 
         _avg_cost_v = p.get('avg_cost', 0)
@@ -33096,11 +33224,16 @@ def main():
         for name, status in api_status.items():
             st.write(f"**{name}:** {status}")
         active_ai = []
-        if GEMINI_API_KEY: active_ai.append("Gemini")
-        if GROQ_API_KEY: active_ai.append("Groq")
-        if DEEPSEEK_API_KEY: active_ai.append("DeepSeek")
-        if NVIDIA_API_KEY: active_ai.append("NVIDIA")
-        if OPENROUTER_API_KEY: active_ai.append("OpenRouter")
+        if GEMINI_API_KEY:
+            active_ai.append("Gemini")
+        if GROQ_API_KEY:
+            active_ai.append("Groq")
+        if DEEPSEEK_API_KEY:
+            active_ai.append("DeepSeek")
+        if NVIDIA_API_KEY:
+            active_ai.append("NVIDIA")
+        if OPENROUTER_API_KEY:
+            active_ai.append("OpenRouter")
         chain_str = " → ".join(active_ai) if active_ai else t("未設定", "Not configured")
         st.caption(f"🤖 AI chain: {chain_str}")
         with st.expander(t("📝 設定方法", "📝 How to configure")):
