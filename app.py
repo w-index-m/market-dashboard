@@ -30534,45 +30534,17 @@ def render_claude_trading_project():
                         st.session_state["_trade_status"] = "warn"
                         st.session_state["_trade_msg"]    = "ティッカーと約定価格を入力してください"
 
-    # ── タブ④: 損益・ポートフォリオ ────────────────────────────
-    elif _active_tab == _TAB_PNL:
-        _auto_restore_login_token("pnl")
-        _tok = st.query_params.get("token", "")
-        _usr = _auth_check_session(_tok) if _tok else ""
-        if _usr:
-            st.session_state["_trading_user"] = _usr
-            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
-            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
-        if not _usr:
-            _lc, _ = st.columns([1, 2])
-            with _lc:
-                st.markdown(
-                    '<div style="background:#1e293b;border:1px solid #334155;'
-                    'border-radius:10px;padding:20px 24px;">'
-                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
-                    '🔐 ログインが必要です</div>',
-                    unsafe_allow_html=True,
-                )
-                _u = st.text_input("ユーザー名", key="tl_u_pnl")
-                _p = st.text_input("パスワード", type="password", key="tl_p_pnl")
-                if st.button("ログイン", type="primary", key="tl_b_pnl"):
-                    if _auth_login_flow(_u, _p, "pnl_login"):
-                        st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("#### ポートフォリオ損益")
-            df_trades, trades_err = _load_trades()
+            st.markdown("<br>", unsafe_allow_html=True)
 
+            # ── 取引履歴（編集・削除ボタン付き）─────────────────────
+            # 損益ビュー（損益・ポートフォリオタブ）ではなく、こちらの記録入力タブに
+            # 置く方が「記録を管理する」操作として自然なため、ここに表示する。
+            df_trades, trades_err = _load_trades(_usr)
             if trades_err:
-                _err_c1, _err_c2 = st.columns([4, 1])
-                _err_c1.error(f"⚠️ {trades_err}")
-                if _err_c2.button("🔄 再試行", key="retry_load_trades"):
-                    st.rerun()
-                st.caption("Google Sheets への接続が一時的に失敗しました。「再試行」を押すか、しばらく待ってから再読み込みしてください。")
+                st.error(f"⚠️ 取引履歴の読み込みに失敗しました: {trades_err}")
             elif df_trades.empty:
                 st.info("取引記録がまだありません。")
             else:
-                # ── 取引履歴（編集・削除ボタン付き）─────────────────────
                 st.markdown(
                     "**取引履歴**　<span style='font-size:11px;color:#64748b'>"
                     "✏️ ボタンで編集・🗑️ ボタンで誤記録を削除できます</span>",
@@ -30702,7 +30674,46 @@ def render_claude_trading_project():
                         else:
                             st.error("削除に失敗しました。再試行してください。")
 
-                st.markdown("<br>", unsafe_allow_html=True)
+    # ── タブ④: 損益・ポートフォリオ ────────────────────────────
+    elif _active_tab == _TAB_PNL:
+        _auto_restore_login_token("pnl")
+        _tok = st.query_params.get("token", "")
+        _usr = _auth_check_session(_tok) if _tok else ""
+        if _usr:
+            st.session_state["_trading_user"] = _usr
+            _login_disp = _auth_get_users().get(_usr, {}).get("display_name") or _usr
+            st.caption(f"🔐 ログイン中: {_login_disp}（{_usr}）")
+        if not _usr:
+            _lc, _ = st.columns([1, 2])
+            with _lc:
+                st.markdown(
+                    '<div style="background:#1e293b;border:1px solid #334155;'
+                    'border-radius:10px;padding:20px 24px;">'
+                    '<div style="font-size:13px;color:#94a3b8;margin-bottom:14px">'
+                    '🔐 ログインが必要です</div>',
+                    unsafe_allow_html=True,
+                )
+                _u = st.text_input("ユーザー名", key="tl_u_pnl")
+                _p = st.text_input("パスワード", type="password", key="tl_p_pnl")
+                if st.button("ログイン", type="primary", key="tl_b_pnl"):
+                    if _auth_login_flow(_u, _p, "pnl_login"):
+                        st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("#### ポートフォリオ損益")
+            df_trades, trades_err = _load_trades()
+
+            if trades_err:
+                _err_c1, _err_c2 = st.columns([4, 1])
+                _err_c1.error(f"⚠️ {trades_err}")
+                if _err_c2.button("🔄 再試行", key="retry_load_trades"):
+                    st.rerun()
+                st.caption("Google Sheets への接続が一時的に失敗しました。「再試行」を押すか、しばらく待ってから再読み込みしてください。")
+            elif df_trades.empty:
+                st.info("取引記録がまだありません。")
+            else:
+                # 取引履歴の一覧・編集・削除は「取引記録入力」タブに移動した
+                # （損益ビューではなく記録管理の操作なので、入力タブに置く方が自然なため）。
 
                 # 保有ポジションを計算（平均取得単価法：SELL時にコスト比例削減）
                 open_pos = _calc_positions_from_df(df_trades)
