@@ -8967,14 +8967,15 @@ def fetch_sp500_pe_trend() -> dict:
 
 
 def fetch_macro_indicators() -> Dict[str, Any]:
-    """CAPE / OECD CLI / インフレ指標を取得
+    """CAPE / OECD CLI を取得
     - CAPE    : multpl.com スクレイピング
     - OECD CLI: OECD SDMX API（FRED不使用）
-    - PCE代替 : BLS API — CPI / Core CPI（FRED接続不可のため代替）
-    CAPE・LEI・PCE・Core PCEは互いに独立した別ホストへのHTTPリクエストなので、
-    ThreadPoolExecutorで並行実行する（PCEがリトライで時間がかかっても他の指標の
-    表示が遅れないようにするため）。各タスクは自身のtry/exceptで完結しており、
-    書き込み先キー（cape/lei/pce/core_pce、_ok/_errorsへの追記）は互いに重複しない。
+    PCE/Core PCEは以前FRED CSVエンドポイントから取得していたが、
+    fred.stlouisfed.orgへの接続が恒常的にタイムアウトするようになり
+    実用に耐えないため取得自体を廃止した（表示もしない）。
+    CAPE・LEIは互いに独立した別ホストへのHTTPリクエストなので、
+    ThreadPoolExecutorで並行実行する。各タスクは自身のtry/exceptで完結しており、
+    書き込み先キー（cape/lei、_ok/_errorsへの追記）は互いに重複しない。
     """
     result: Dict[str, Any] = {"_errors": {}, "_ok": []}
 
@@ -8984,14 +8985,8 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     def _task_lei():
         _fetch_macro_lei(result)
 
-    def _task_pce():
-        _fetch_fred_pce_series("PCEPI", "pce", result)
-
-    def _task_core_pce():
-        _fetch_fred_pce_series("PCEPILFE", "core_pce", result)
-
-    with ThreadPoolExecutor(max_workers=4) as _ex:
-        _futures = [_ex.submit(t) for t in (_task_cape, _task_lei, _task_pce, _task_core_pce)]
+    with ThreadPoolExecutor(max_workers=2) as _ex:
+        _futures = [_ex.submit(t) for t in (_task_cape, _task_lei)]
         for _f in _futures:
             try:
                 _f.result()
@@ -9116,67 +9111,6 @@ def _fetch_macro_lei(result: Dict[str, Any]) -> None:
             result["_errors"]["OECD_CLI"] = f"OECD+YC両方失敗: {str(e)[:80]}"
 
 
-def _fetch_fred_pce_series(series_id: str, result_key: str, result: Dict[str, Any]) -> None:
-    """③ インフレ指標 — FRED CSV（APIキー不要）
-    PCEPI    = PCE Price Index（ヘッドライン）
-    PCEPILFE = PCE Excluding Food and Energy（Core PCE）
-    """
-    try:
-        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-        # FREDが一時的に応答遅延することがあるため、タイムアウト/接続エラー時は
-        # 短い間隔を空けて最大3回までリトライする
-        r = None
-        last_err = None
-        for _attempt in range(3):
-            try:
-                r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-                break
-            except requests.exceptions.RequestException as _re:
-                last_err = _re
-                r = None
-                if _attempt < 2:
-                    time.sleep(2)
-        if r is None:
-            result["_errors"][result_key] = f"{type(last_err).__name__}: {str(last_err)[:120]}"
-            return
-        if r.status_code != 200:
-            result["_errors"][result_key] = f"FRED HTTP {r.status_code}"
-            return
-        from io import StringIO as _SIO3
-        df = pd.read_csv(_SIO3(r.text))
-        df.columns = ["date", "value"]
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        df = df.dropna(subset=["value"]).sort_values("date", ascending=False).reset_index(drop=True)
-        if len(df) >= 13:
-            latest  = float(df.loc[0, "value"])
-            prev    = float(df.loc[1, "value"])
-            yr12    = float(df.loc[12, "value"])
-            mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-            yoy_pct = (latest - yr12) / abs(yr12) * 100 if yr12 else None
-            result[result_key] = {
-                "value": latest,
-                "date":  str(df.loc[0, "date"])[:7],
-                "yoy":   yoy_pct,
-                "mom":   mom_pct,
-            }
-            result["_ok"].append(result_key)
-        elif len(df) >= 2:
-            latest  = float(df.loc[0, "value"])
-            prev    = float(df.loc[1, "value"])
-            mom_pct = (latest - prev) / abs(prev) * 100 if prev else None
-            result[result_key] = {
-                "value": latest,
-                "date":  str(df.loc[0, "date"])[:7],
-                "yoy":   None,
-                "mom":   mom_pct,
-            }
-            result["_ok"].append(result_key)
-        else:
-            result["_errors"][result_key] = "データ行数不足"
-    except Exception as e:
-        result["_errors"][result_key] = f"{type(e).__name__}: {str(e)[:120]}"
-
-
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _fetch_jgb10y_history(period: str = "10y") -> pd.DataFrame:
     """日本10年国債利回り（^JGB10Y）の推移をyfinanceから取得する。
@@ -9211,7 +9145,7 @@ def render_macro_indicators(macro: dict | None = None):
         + t('🌐 マクロ経済指標 — シンクタンク視点', '🌐 Macro Indicators — Think Tank View') +
         '</div>'
         '<div style="font-size:12px;color:#94a3b8;margin-top:2px">'
-        'Shiller CAPE · Conference Board LEI · PCE Inflation</div>'
+        'Shiller CAPE · Conference Board LEI</div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -9222,30 +9156,28 @@ def render_macro_indicators(macro: dict | None = None):
 
     cape  = macro.get("cape")
     lei   = macro.get("lei")
-    pce   = macro.get("pce")
-    cpce  = macro.get("core_pce")
     errs  = macro.get("_errors", {})
     ok    = macro.get("_ok", [])
 
     # ── 診断パネル ────────────────────────────────────────────
-    missing = [x for x in ("cape", "lei", "core_pce") if x not in ok]
+    missing = [x for x in ("cape", "lei") if x not in ok]
     with st.expander("🔧 マクロ指標 取得状況", expanded=bool(missing)):
-        st.caption("FRED CSV方式（APIキー不要）・multpl.com スクレイピング")
-        all_keys = {"cape": "CAPE", "lei": "OECD CLI", "pce": "PCE", "core_pce": "Core PCE"}
+        st.caption("multpl.com スクレイピング・OECD SDMX API")
+        all_keys = {"cape": "CAPE", "lei": "OECD CLI"}
         for k, label in all_keys.items():
             if k in ok:
                 st.success(f"✅ {label}: 取得成功")
             else:
                 # 関連するエラーキーを探す
-                series_map = {"lei": "OECD_CLI", "pce": "pce", "core_pce": "core_pce", "cape": "cape"}
+                series_map = {"lei": "OECD_CLI", "cape": "cape"}
                 err_key = series_map.get(k, k)
                 err_msg = errs.get(err_key, "エラー詳細なし（サイレント失敗）")
                 st.error(f"❌ {label}: {err_msg}")
         if not errs and not ok:
             st.warning("全指標で結果なし。キャッシュクリアボタン（サイドバー）を押してください。")
 
-    # ── 3カラム：CAPE / LEI / PCE ────────────────────────────
-    col_cape, col_lei, col_pce = st.columns(3)
+    # ── 2カラム：CAPE / LEI ────────────────────────────
+    col_cape, col_lei = st.columns(2)
 
     # ① CAPE カード
     with col_cape:
@@ -9348,49 +9280,6 @@ def render_macro_indicators(macro: dict | None = None):
                 unsafe_allow_html=True,
             )
 
-    # ③ PCE カード
-    with col_pce:
-        if cpce:
-            yoy  = cpce.get("yoy")
-            mom  = cpce.get("mom")
-            display_val = yoy if yoy is not None else mom
-            if display_val is None:
-                p_color, p_label, p_icon = "#94a3b8", "データ不足", "⬜"
-            elif display_val >= 3.5:
-                p_color, p_label, p_icon = "#ef4444", "Fed目標大幅超過", "🔴"
-            elif display_val >= 2.5:
-                p_color, p_label, p_icon = "#f59e0b", "目標超過・引締め継続", "🟡"
-            elif display_val >= 1.5:
-                p_color, p_label, p_icon = "#22c55e", "目標近辺・緩和余地", "🟢"
-            else:
-                p_color, p_label, p_icon = "#14b8a6", "目標以下・緩和的", "🔵"
-            val_label = "前年比" if yoy is not None else "前月比"
-            val_str = f"{display_val:.1f}%" if display_val is not None else "—"
-            pce_hl = pce.get("yoy") if pce else None
-            sub_str = (f"Fed目標 2.0% | ヘッドライン {pce_hl:.1f}% | " if pce_hl else "Fed目標 2.0% | ")
-            st.markdown(
-                f'<div style="background:#1e293b;border:1px solid {p_color};'
-                f'border-radius:10px;padding:14px;text-align:center;">'
-                f'<div style="font-size:11px;color:#94a3b8;font-weight:700">Core CPI（{val_label}・PCE代替）</div>'
-                f'<div style="font-size:32px;font-weight:900;color:{p_color};margin:4px 0">{val_str}</div>'
-                f'<div style="font-size:11px;color:#cbd5e1">{p_icon} {p_label}</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:4px">'
-                f'{sub_str}{cpce["date"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            _pce_err = errs.get("PCEPILFE", errs.get("PCEPI", "取得失敗（詳細不明）"))
-            st.markdown(
-                '<div style="background:#1e293b;border:1px solid #475569;'
-                'border-radius:10px;padding:14px;text-align:center;">'
-                '<div style="font-size:11px;color:#94a3b8">Core CPI インフレ（PCE代替）</div>'
-                '<div style="font-size:13px;color:#ef4444;margin-top:8px">取得失敗</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:4px;word-break:break-all">{_pce_err[:80]}</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 各指標の詳細解説 ───────────────────────────────────────
@@ -9425,34 +9314,6 @@ def render_macro_indicators(macro: dict | None = None):
             "| **横ばい〜上昇** | 景気拡張継続 | — |\n\n"
             "> 2022年〜2023年: LEIが18ヶ月連続低下 → 「景気後退は来る」と言われたが実際はソフトランディング。"
             "LEIは**精度が高いが偽陽性もある**。他指標と組み合わせて判断することが重要。"
-        )
-
-        st.markdown("---")
-        st.markdown("### 🏦 Core PCE（FRBが最重視するインフレ指標）")
-        st.markdown(
-            "PCE = 個人消費支出デフレーター。CPIと異なり**代替効果（消費者が安い商品に切り替える行動）**を反映。\n\n"
-            "**CPIとの違い:**\n"
-            "| | CPI | Core PCE |\n"
-            "|---|---|---|\n"
-            "| 作成機関 | 労働統計局(BLS) | 商務省(BEA) |\n"
-            "| 住居費ウェイト | 約33% | 約15% |\n"
-            "| 特徴 | 固定ウェイト | 変動ウェイト（代替効果反映） |\n"
-            "| FRBの使用 | 参考 | **政策判断の基準** |\n\n"
-            "| Core PCE水準 | FRBの行動示唆 |\n"
-            "|---|---|\n"
-            "| **3.5%以上** | 利上げ継続または高止まり維持 |\n"
-            "| **2.5〜3.5%** | 据え置き、利下げは後退 |\n"
-            "| **2.0〜2.5%** | 利下げ検討ゾーン |\n"
-            "| **2.0%以下** | 積極的利下げ余地あり |"
-        )
-
-    # ── FRED APIキー未設定の案内 ────────────────────────────────
-    if not FRED_API_KEY:
-        st.info(
-            "💡 **LEI・PCE・CAPEをFREDから取得するには FRED API キーが必要です（無料）**\n\n"
-            "1. [fred.stlouisfed.org](https://fred.stlouisfed.org) で無料アカウント作成\n"
-            "2. My Account → API Keys でキーを発行\n"
-            "3. Streamlit Cloud Secrets に追加: `FRED_API_KEY = \"your_key_here\"`"
         )
 
     # ── S&P500 PER推移チャート ─────────────────────────────────
