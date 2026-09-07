@@ -33006,8 +33006,13 @@ def main():
     )
 
     # ── トレーディングプロジェクトへのショートカット ───────────────
+    # href は相対URL(?page=trading)ではなく絶対パス(/?page=trading)にすること。
+    # Streamlit Cloud側のルーティングでブラウザの実際の解決済みURLが
+    # https://windex.streamlit.app/~/+/ のような余計なパスを含むことがあり、
+    # 相対hrefだとそのパスを起点に解決されて /~/+/?page=trading という
+    # 壊れたリンクになってしまう（page=tradingがst.query_paramsに届かない）。
     st.markdown(
-        '<a href="?page=trading" style="'
+        '<a href="/?page=trading" style="'
         'display:inline-flex;align-items:center;gap:8px;'
         'background:linear-gradient(135deg,#1e3a5f,#1e40af);'
         'color:#93c5fd !important;text-decoration:none !important;'
@@ -33310,7 +33315,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         'AI分析シグナル・取引記録・損益管理・ポートフォリオ追跡を専用ページで提供しています。'
         'メインダッシュボードとは分離しているため、高速に開きます。'
         '</div>'
-        '<a href="?page=trading" style="display:inline-flex;align-items:center;gap:8px;'
+        '<a href="/?page=trading" style="display:inline-flex;align-items:center;gap:8px;'
         'background:linear-gradient(135deg,#1e40af,#2563eb);color:#fff !important;'
         'padding:10px 22px;border-radius:8px;text-decoration:none !important;'
         'font-size:14px;font-weight:700;box-shadow:0 3px 12px rgba(37,99,235,0.4);">'
