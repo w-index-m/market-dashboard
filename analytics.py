@@ -580,20 +580,15 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
     """
     try:
         import gspread
-        from google.oauth2.service_account import Credentials
 
-        sa_json = _secret("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not sa_json:
-            logger.warning("[access_log] GOOGLE_SERVICE_ACCOUNT_JSON 未設定")
+        # 毎ページビューごとに認証をやり直すとOAuthトークン発行が積み重なって
+        # 無駄な往復が増えるため、_sheets_client()（st.cache_resource済み）を
+        # 再利用する。開く先のスプレッドシート自体はTARGET_SHEET_ID固定
+        # （GOOGLE_SHEETS_IDとは別物）で、client自体はどちらにも使い回せる。
+        client = _sheets_client()
+        if not client:
+            logger.warning("[access_log] Sheetsクライアント初期化失敗（GOOGLE_SERVICE_ACCOUNT_JSON未設定の可能性）")
             return False
-
-        sa_info = json.loads(sa_json)
-        scopes  = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        creds  = Credentials.from_service_account_info(sa_info, scopes=scopes)
-        client = gspread.authorize(creds)
 
         sp = client.open_by_key(TARGET_SHEET_ID)
 
@@ -637,30 +632,34 @@ def _write_access_log_to_target(row: dict, sid: str) -> bool:
         ws.insert_row(data_row, index=2, value_input_option="USER_ENTERED")
         logger.info(f"[access_log] 書き込み成功: {row.get('country','')} {row.get('city','')}")
 
-        # realtime タブも更新（アクティブセッション追跡）。REALTIME_MIN分より古い行は
-        # 一度も削除されず溜まり続けていた（新規appendのみで、更新済み行も残ったまま）ため、
-        # ページビューのたびにこのタブが際限なく成長し、get_all_records()の走査コストが
-        # 増え続けてSheets APIのクォータを圧迫し、access_log自体の書き込み失敗（本関数の
-        # 冒頭のinsert_row）を引き起こしていた可能性がある。書き込みのたびに古い行を
-        # 削除して一定サイズに保つ。
+        # realtime タブも更新（アクティブセッション追跡）。
+        # 以前はここで古い行を1行ずつupdate_cell/delete_rowsしており、蓄積した行数分
+        # だけSheets APIの書き込みリクエストが発生していた。トラフィックの間隔が空く
+        # （＝ほぼ毎回いくつかの行がREALTIME_MIN分より古くなる）このアプリの使われ方では
+        # 蓄積した過去分の行を一度に捌ききれず、ページビューのたびにクォータへ張り付いた
+        # 状態が続き、同じ関数内の直前のinsert_row（access_log書き込み）まで巻き込んで
+        # 失敗させていたとみられる（2026/7/26以降access_logの記録が止まっていた原因）。
+        # 生存行数に関わらずAPI呼び出しを高々2回（読み取り1回＋書き戻し1回）に固定する。
         try:
             rt_ws = sp.worksheet("realtime")
             now_str = row.get("ts", "")
             now_jst2 = datetime.datetime.now(JST)
             cutoff = now_jst2 - datetime.timedelta(minutes=REALTIME_MIN)
             recs = rt_ws.get_all_records()
-            updated = False
-            stale_rows = []
-            for i, rec in enumerate(recs, start=2):
-                if rec.get("session_id") == sid:
-                    rt_ws.update_cell(i, 2, now_str)
-                    updated = True
-                elif not _is_recent(rec.get("last_seen", ""), cutoff):
-                    stale_rows.append(i)
-            for i in sorted(stale_rows, reverse=True):
-                rt_ws.delete_rows(i)
-            if not updated:
-                rt_ws.append_row([sid, now_str])
+            survivors = [
+                [rec.get("session_id", ""), rec.get("last_seen", "")]
+                for rec in recs
+                if rec.get("session_id") != sid and _is_recent(rec.get("last_seen", ""), cutoff)
+            ]
+            survivors.append([sid, now_str])
+            rt_ws.clear()
+            # gspread 6.x はWorksheet.updateの引数順が(values, range_name)。
+            # (range_name, values)の旧順で呼ぶと range文字列が値として書き込まれてしまう
+            # （このリポジトリのapp.py _update_trade_row()で実際に踏んだバグ、要注意）。
+            rt_ws.update(
+                [["session_id", "last_seen"]] + survivors, "A1",
+                value_input_option="USER_ENTERED",
+            )
         except Exception:
             pass  # realtime タブ未作成でも無視
 
