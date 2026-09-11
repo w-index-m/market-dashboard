@@ -27853,191 +27853,6 @@ def render_claude_trading_project():
         st.query_params.pop("verify_user", None)
         st.query_params.pop("verify_token", None)
 
-    # ── 投資戦略モード切替 ─────────────────────────────────────
-    _cur_mode = st.session_state.get("trading_mode", "growth")
-
-    _MODE_DEFS = [
-        {
-            "key":    "growth",
-            "emoji":  "🌱",
-            "label":  "長期育成モード",
-            "sub":    "ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年",
-            "detail": "PER/EPS成長/競合優位性 · 損切 -15〜20% · 目標=適正PER×予想EPS",
-            "color":  "#4ade80", "sub_color": "#86efac",
-            "border": "#22c55e", "bg": "#052e16",
-        },
-        {
-            "key":    "momentum",
-            "emoji":  "⚡",
-            "label":  "モメンタムモード",
-            "sub":    "テクニカル重視 · 保有期間 1〜4週間 · 直近で強く上がっている銘柄を追う",
-            "detail": "RSI/出来高急増/MA上抜け/ブレイクアウトで選定 · 損切 -5〜8% · 目標=直近レジスタンス突破後の次の節目",
-            "color":  "#fbbf24", "sub_color": "#fcd34d",
-            "border": "#f59e0b", "bg": "#1c1400",
-        },
-        {
-            "key":    "ai_mix",
-            "emoji":  "✨",
-            "label":  "Claude AIミックス",
-            "sub":    "AI特化 · インフラ/モデル/アプリ3層 · 高成長集中",
-            "detail": "NVDA・MSFT・PLTR等AI純粋銘柄に集中 · 高PER許容 · 損切 -15〜20%",
-            "color":  "#38bdf8", "sub_color": "#7dd3fc",
-            "border": "#0284c7", "bg": "#0c1a2e",
-        },
-        {
-            "key":    "optical_mix",
-            "emoji":  "💡",
-            "label":  "Claude 光銘柄ミックス",
-            "sub":    "光通信特化 · データセンター光需要 · AI設備投資の恩恵",
-            "detail": "CIEN・COHR・GLW・フジクラ等 · 光トランシーバ/ファイバー/NW機器",
-            "color":  "#fb923c", "sub_color": "#fdba74",
-            "border": "#ea580c", "bg": "#1a0c00",
-        },
-        {
-            "key":    "dividend_stable",
-            "emoji":  "🏦",
-            "label":  "配当安定モード",
-            "sub":    "高配当 · 株価安定 · 過去3年急落なし(-35%以内)",
-            "detail": "PG・KO・KDDI・三菱商事等 · 連続増配/高配当ETF中心 · 損切-10〜15%",
-            "color":  "#34d399", "sub_color": "#6ee7b7",
-            "border": "#059669", "bg": "#022c22",
-        },
-        {
-            "key":    "stable_growth",
-            "emoji":  "🪨",
-            "label":  "安定成長モード",
-            "sub":    "財務指標不使用 · 5年チャートが滑らかな右肩上がりの銘柄のみ",
-            "detail": "日経225・S&P500全銘柄からチャート形状だけでスクリーニング · 損切-15〜20%",
-            "color":  "#94a3b8", "sub_color": "#cbd5e1",
-            "border": "#64748b", "bg": "#161e2b",
-        },
-    ]
-
-    # 3+3 の2行レイアウトでモードボタンを表示
-    _mode_row1 = _MODE_DEFS[:3]
-    _mode_row2 = _MODE_DEFS[3:]
-    _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
-    for _row_defs, _row_cols in _mode_pairs:
-        for _md, _col in zip(_row_defs, _row_cols):
-            _is_sel = _cur_mode == _md["key"]
-            _border = _md["border"] if _is_sel else "#334155"
-            _bg     = _md["bg"]     if _is_sel else "#0f172a"
-            _check  = (f'<div style="margin-top:6px;font-size:11px;color:{_md["color"]};font-weight:600">✓ 選択中</div>'
-                       if _is_sel else "")
-            _col.markdown(
-                f'<div style="background:{_bg};border:2px solid {_border};border-radius:10px;'
-                f'padding:12px 14px">'
-                f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
-                f'{_md["emoji"]} {_md["label"]}</div>'
-                f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
-                f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
-                f'{_check}</div>',
-                unsafe_allow_html=True,
-            )
-            if _col.button(
-                f'{_md["emoji"]} {"選択中" if _is_sel else "切替"}',
-                key=f'btn_mode_{_md["key"]}',
-                type="primary" if _is_sel else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state["trading_mode"] = _md["key"]
-                st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
-                st.rerun()
-
-    # ── 全モード比較表（1年・3年） ────────────────────────────
-    # 選択中モードだけでなく6モード全部を並列計算してキャッシュしておく
-    # （選択中モードの詳細セクションはこのキャッシュを再利用するだけなので二重計算にならない）。
-    with st.spinner("全モードのバックテスト計算中..."):
-        with ThreadPoolExecutor(max_workers=len(_MODE_DEFS)) as _bt_ex:
-            _bt_futures = {
-                _md["key"]: _bt_ex.submit(_compute_mode_basket_backtest, _md["key"])
-                for _md in _MODE_DEFS
-            }
-            _bt_all = {}
-            for _k, _fut in _bt_futures.items():
-                try:
-                    _bt_all[_k] = _fut.result()
-                except Exception as _e:
-                    logger.warning(f"[mode_backtest] {_k} 計算失敗: {_e}")
-                    _bt_all[_k] = {"ok": False, "reason": "計算エラー"}
-
-    st.markdown(
-        '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
-        '📊 全モード比較（1年・3年リターン）</div>',
-        unsafe_allow_html=True,
-    )
-    _cmp_rows = []
-    for _md in _MODE_DEFS:
-        _k, _r = _md["key"], _bt_all.get(_md["key"], {})
-        _cmp_rows.append({
-            "モード": f'{_md["emoji"]} {_md["label"]}' + ("  ← 選択中" if _k == _cur_mode else ""),
-            "1年リターン":  f'{_r["ret_1y"]:+.1f}%' if _r.get("ok") and _r.get("ret_1y") is not None else "—",
-            "3年リターン":  f'{_r["ret_3y"]:+.1f}%' if _r.get("ok") and _r.get("ret_3y") is not None else "—",
-            "直近1年最大DD": f'{_r["max_dd_1y"]:+.1f}%' if _r.get("ok") and _r.get("max_dd_1y") is not None else "—",
-            "選定方法":     ("スコア選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
-                            else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
-        })
-    st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
-    st.caption(
-        "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
-        "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
-        "評価しています。AI自体の判断を過去に遡って再現しているわけではない点と、後知恵バイアスが"
-        "ある点にご注意ください（下の詳細参照）。"
-    )
-
-    # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
-    _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
-    if not _bt.get("ok"):
-        st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
-    else:
-        _bt_title = (
-            "AIが最終的に使う候補と同じ絞り込み基準（スコア選定）で選ぶ今日時点の上位銘柄"
-            if _bt.get("selection_kind") == "ranked"
-            else "このテーマバスケット"
-        )
-        st.markdown(
-            f'<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
-            f'📉 {_bt_title}のバックテスト（均等加重・{_bt["n_tickers"]}銘柄 vs S&P500）</div>',
-            unsafe_allow_html=True,
-        )
-
-        def _bt_fmt(v):
-            return f"{v:+.1f}%" if v is not None else "—"
-
-        def _bt_delta(v, b):
-            return f"{v - b:+.1f}pt vs S&P500" if v is not None and b is not None else None
-
-        _bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns(4)
-        _bt_c1.metric("1年リターン", _bt_fmt(_bt["ret_1y"]), _bt_delta(_bt["ret_1y"], _bt["bench_ret_1y"]))
-        _bt_c2.metric("3年リターン", _bt_fmt(_bt["ret_3y"]), _bt_delta(_bt["ret_3y"], _bt["bench_ret_3y"]))
-        _bt_c3.metric("S&P500（同期間1年）", _bt_fmt(_bt["bench_ret_1y"]))
-        _bt_c4.metric("直近1年 最大DD", _bt_fmt(_bt["max_dd_1y"]))
-
-        _fig_bt = go.Figure()
-        _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["cum"], name="バスケット（均等加重）", line=dict(color="#4ade80")))
-        _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["bench_cum"], name="S&P500", line=dict(color="#60a5fa", dash="dot")))
-        _fig_bt.update_layout(
-            height=280, margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-            font=dict(color="#e2e8f0"),
-            yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-            xaxis=dict(tickfont=dict(color="#e2e8f0")),
-            legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.15),
-            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-        )
-        st.plotly_chart(_fig_bt, use_container_width=True)
-        if _bt.get("selection_kind") == "ranked":
-            st.caption(
-                "⚠️ この銘柄群は直近のリターン実績（または5年チャートの滑らかさ）で今日時点でランキングした"
-                "上位銘柄です。つまり「今日時点で良い結果を出している銘柄」を過去に遡って評価しているため、"
-                "実際に1年・3年前からこの戦略で運用していた場合よりも良い数値が出る後知恵バイアスがあります。"
-                "参考値としてご利用ください。"
-            )
-        else:
-            st.caption("※ 過去の均等加重バックテストであり、実際の推奨ポートフォリオの構成比・売買タイミングとは異なります。投資判断は自己責任でお願いします。")
-
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
     # st.tabs()は選択中のタブに関係なく全タブの中身を毎回のスクリプト実行で描画してしまう
     # （どのタブをクリックしても裏では常に4タブ全部が処理される）。配当サマリ表示のために
     # 無関係なAI分析・シグナルや取引記録入力まで毎回計算されて待たされていたのはこのため。
@@ -28074,6 +27889,191 @@ def render_claude_trading_project():
 
     # ── タブ①: AI分析・シグナル ────────────────────────────────
     if _active_tab == _TAB_SIGNAL:
+        # ── 投資戦略モード切替 ─────────────────────────────────────
+        _cur_mode = st.session_state.get("trading_mode", "growth")
+
+        _MODE_DEFS = [
+            {
+                "key":    "growth",
+                "emoji":  "🌱",
+                "label":  "長期育成モード",
+                "sub":    "ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年",
+                "detail": "PER/EPS成長/競合優位性 · 損切 -15〜20% · 目標=適正PER×予想EPS",
+                "color":  "#4ade80", "sub_color": "#86efac",
+                "border": "#22c55e", "bg": "#052e16",
+            },
+            {
+                "key":    "momentum",
+                "emoji":  "⚡",
+                "label":  "モメンタムモード",
+                "sub":    "テクニカル重視 · 保有期間 1〜4週間 · 直近で強く上がっている銘柄を追う",
+                "detail": "RSI/出来高急増/MA上抜け/ブレイクアウトで選定 · 損切 -5〜8% · 目標=直近レジスタンス突破後の次の節目",
+                "color":  "#fbbf24", "sub_color": "#fcd34d",
+                "border": "#f59e0b", "bg": "#1c1400",
+            },
+            {
+                "key":    "ai_mix",
+                "emoji":  "✨",
+                "label":  "Claude AIミックス",
+                "sub":    "AI特化 · インフラ/モデル/アプリ3層 · 高成長集中",
+                "detail": "NVDA・MSFT・PLTR等AI純粋銘柄に集中 · 高PER許容 · 損切 -15〜20%",
+                "color":  "#38bdf8", "sub_color": "#7dd3fc",
+                "border": "#0284c7", "bg": "#0c1a2e",
+            },
+            {
+                "key":    "optical_mix",
+                "emoji":  "💡",
+                "label":  "Claude 光銘柄ミックス",
+                "sub":    "光通信特化 · データセンター光需要 · AI設備投資の恩恵",
+                "detail": "CIEN・COHR・GLW・フジクラ等 · 光トランシーバ/ファイバー/NW機器",
+                "color":  "#fb923c", "sub_color": "#fdba74",
+                "border": "#ea580c", "bg": "#1a0c00",
+            },
+            {
+                "key":    "dividend_stable",
+                "emoji":  "🏦",
+                "label":  "配当安定モード",
+                "sub":    "高配当 · 株価安定 · 過去3年急落なし(-35%以内)",
+                "detail": "PG・KO・KDDI・三菱商事等 · 連続増配/高配当ETF中心 · 損切-10〜15%",
+                "color":  "#34d399", "sub_color": "#6ee7b7",
+                "border": "#059669", "bg": "#022c22",
+            },
+            {
+                "key":    "stable_growth",
+                "emoji":  "🪨",
+                "label":  "安定成長モード",
+                "sub":    "財務指標不使用 · 5年チャートが滑らかな右肩上がりの銘柄のみ",
+                "detail": "日経225・S&P500全銘柄からチャート形状だけでスクリーニング · 損切-15〜20%",
+                "color":  "#94a3b8", "sub_color": "#cbd5e1",
+                "border": "#64748b", "bg": "#161e2b",
+            },
+        ]
+
+        # 3+3 の2行レイアウトでモードボタンを表示
+        _mode_row1 = _MODE_DEFS[:3]
+        _mode_row2 = _MODE_DEFS[3:]
+        _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
+        for _row_defs, _row_cols in _mode_pairs:
+            for _md, _col in zip(_row_defs, _row_cols):
+                _is_sel = _cur_mode == _md["key"]
+                _border = _md["border"] if _is_sel else "#334155"
+                _bg     = _md["bg"]     if _is_sel else "#0f172a"
+                _check  = (f'<div style="margin-top:6px;font-size:11px;color:{_md["color"]};font-weight:600">✓ 選択中</div>'
+                           if _is_sel else "")
+                _col.markdown(
+                    f'<div style="background:{_bg};border:2px solid {_border};border-radius:10px;'
+                    f'padding:12px 14px">'
+                    f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
+                    f'{_md["emoji"]} {_md["label"]}</div>'
+                    f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
+                    f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
+                    f'{_check}</div>',
+                    unsafe_allow_html=True,
+                )
+                if _col.button(
+                    f'{_md["emoji"]} {"選択中" if _is_sel else "切替"}',
+                    key=f'btn_mode_{_md["key"]}',
+                    type="primary" if _is_sel else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["trading_mode"] = _md["key"]
+                    st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
+                    st.rerun()
+
+        # ── 全モード比較表（1年・3年） ────────────────────────────
+        # 選択中モードだけでなく6モード全部を並列計算してキャッシュしておく
+        # （選択中モードの詳細セクションはこのキャッシュを再利用するだけなので二重計算にならない）。
+        with st.spinner("全モードのバックテスト計算中..."):
+            with ThreadPoolExecutor(max_workers=len(_MODE_DEFS)) as _bt_ex:
+                _bt_futures = {
+                    _md["key"]: _bt_ex.submit(_compute_mode_basket_backtest, _md["key"])
+                    for _md in _MODE_DEFS
+                }
+                _bt_all = {}
+                for _k, _fut in _bt_futures.items():
+                    try:
+                        _bt_all[_k] = _fut.result()
+                    except Exception as _e:
+                        logger.warning(f"[mode_backtest] {_k} 計算失敗: {_e}")
+                        _bt_all[_k] = {"ok": False, "reason": "計算エラー"}
+
+        st.markdown(
+            '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
+            '📊 全モード比較（1年・3年リターン）</div>',
+            unsafe_allow_html=True,
+        )
+        _cmp_rows = []
+        for _md in _MODE_DEFS:
+            _k, _r = _md["key"], _bt_all.get(_md["key"], {})
+            _cmp_rows.append({
+                "モード": f'{_md["emoji"]} {_md["label"]}' + ("  ← 選択中" if _k == _cur_mode else ""),
+                "1年リターン":  f'{_r["ret_1y"]:+.1f}%' if _r.get("ok") and _r.get("ret_1y") is not None else "—",
+                "3年リターン":  f'{_r["ret_3y"]:+.1f}%' if _r.get("ok") and _r.get("ret_3y") is not None else "—",
+                "直近1年最大DD": f'{_r["max_dd_1y"]:+.1f}%' if _r.get("ok") and _r.get("max_dd_1y") is not None else "—",
+                "選定方法":     ("スコア選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
+                                else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
+            })
+        st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
+            "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
+            "評価しています。AI自体の判断を過去に遡って再現しているわけではない点と、後知恵バイアスが"
+            "ある点にご注意ください（下の詳細参照）。"
+        )
+
+        # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
+        _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
+        if not _bt.get("ok"):
+            st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
+        else:
+            _bt_title = (
+                "AIが最終的に使う候補と同じ絞り込み基準（スコア選定）で選ぶ今日時点の上位銘柄"
+                if _bt.get("selection_kind") == "ranked"
+                else "このテーマバスケット"
+            )
+            st.markdown(
+                f'<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
+                f'📉 {_bt_title}のバックテスト（均等加重・{_bt["n_tickers"]}銘柄 vs S&P500）</div>',
+                unsafe_allow_html=True,
+            )
+
+            def _bt_fmt(v):
+                return f"{v:+.1f}%" if v is not None else "—"
+
+            def _bt_delta(v, b):
+                return f"{v - b:+.1f}pt vs S&P500" if v is not None and b is not None else None
+
+            _bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns(4)
+            _bt_c1.metric("1年リターン", _bt_fmt(_bt["ret_1y"]), _bt_delta(_bt["ret_1y"], _bt["bench_ret_1y"]))
+            _bt_c2.metric("3年リターン", _bt_fmt(_bt["ret_3y"]), _bt_delta(_bt["ret_3y"], _bt["bench_ret_3y"]))
+            _bt_c3.metric("S&P500（同期間1年）", _bt_fmt(_bt["bench_ret_1y"]))
+            _bt_c4.metric("直近1年 最大DD", _bt_fmt(_bt["max_dd_1y"]))
+
+            _fig_bt = go.Figure()
+            _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["cum"], name="バスケット（均等加重）", line=dict(color="#4ade80")))
+            _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["bench_cum"], name="S&P500", line=dict(color="#60a5fa", dash="dot")))
+            _fig_bt.update_layout(
+                height=280, margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                font=dict(color="#e2e8f0"),
+                yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                xaxis=dict(tickfont=dict(color="#e2e8f0")),
+                legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.15),
+                hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+            )
+            st.plotly_chart(_fig_bt, use_container_width=True)
+            if _bt.get("selection_kind") == "ranked":
+                st.caption(
+                    "⚠️ この銘柄群は直近のリターン実績（または5年チャートの滑らかさ）で今日時点でランキングした"
+                    "上位銘柄です。つまり「今日時点で良い結果を出している銘柄」を過去に遡って評価しているため、"
+                    "実際に1年・3年前からこの戦略で運用していた場合よりも良い数値が出る後知恵バイアスがあります。"
+                    "参考値としてご利用ください。"
+                )
+            else:
+                st.caption("※ 過去の均等加重バックテストであり、実際の推奨ポートフォリオの構成比・売買タイミングとは異なります。投資判断は自己責任でお願いします。")
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
         _auto_restore_login_token("signal")
         _sig_tok = st.query_params.get("token", "")
         _sig_usr = _auth_check_session(_sig_tok) if _sig_tok else ""
