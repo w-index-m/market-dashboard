@@ -27951,11 +27951,11 @@ def render_claude_trading_project():
             "1年リターン":  f'{_r["ret_1y"]:+.1f}%' if _r.get("ok") and _r.get("ret_1y") is not None else "—",
             "3年リターン":  f'{_r["ret_3y"]:+.1f}%' if _r.get("ok") and _r.get("ret_3y") is not None else "—",
             "直近1年最大DD": f'{_r["max_dd_1y"]:+.1f}%' if _r.get("ok") and _r.get("max_dd_1y") is not None else "—",
-            "選定方法":     ("AI選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
+            "選定方法":     ("スコア選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
                             else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
         })
     st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
-    st.caption("「AI選定」列のモードは今日時点の上位銘柄を過去に遡って評価した後知恵バイアスを含みます（下の詳細参照）。")
+    st.caption("「スコア選定」列のモードは今日時点の上位銘柄を過去に遡って評価した後知恵バイアスを含みます（下の詳細参照）。")
 
     # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
     _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
@@ -27963,7 +27963,7 @@ def render_claude_trading_project():
         st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
     else:
         _bt_title = (
-            "AIが今日時点で選ぶ上位銘柄" if _bt.get("selection_kind") == "ranked"
+            "スコア選定で今日時点の上位銘柄" if _bt.get("selection_kind") == "ranked"
             else "このテーマバスケット"
         )
         st.markdown(
