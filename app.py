@@ -9282,6 +9282,42 @@ def render_macro_indicators(macro: dict | None = None):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── Fed利上げ/利下げ確率（Fed Funds先物ベース） ─────────────
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#7dd3fc;margin:4px 0 8px">'
+        '🏦 次回FOMC 利上げ/利下げ織り込み確率（Fed Funds先物ベース）</div>',
+        unsafe_allow_html=True,
+    )
+    _fed_prob = _compute_fed_hike_probability()
+    if not _fed_prob.get("ok"):
+        st.caption(f"取得できませんでした: {_fed_prob.get('reason', '不明なエラー')}")
+    else:
+        _fp_c1, _fp_c2, _fp_c3, _fp_c4 = st.columns(4)
+        _fp_c1.metric("次回FOMC", _fed_prob["fomc_date"])
+        _fp_c2.metric("現行誘導目標（推定）", f"{_fed_prob['current_rate']:.2f}%")
+        _fp_c3.metric("織り込み変化幅", f"{_fed_prob['implied_change_bps']:+.0f}bp")
+        _fp_dom = (
+            f"🔴利上げ {_fed_prob['prob_hike']:.0f}%" if _fed_prob["prob_hike"] > _fed_prob["prob_cut"]
+            else f"🔵利下げ {_fed_prob['prob_cut']:.0f}%" if _fed_prob["prob_cut"] > 0
+            else f"⚪据え置き {_fed_prob['prob_hold']:.0f}%"
+        )
+        _fp_c4.metric("市場織り込み", _fp_dom)
+        st.markdown(
+            f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+            f'padding:10px 14px;font-size:12px;color:#cbd5e1;margin-top:4px">'
+            f'🔴 利上げ {_fed_prob["prob_hike"]:.0f}% ｜ ⚪ 据え置き {_fed_prob["prob_hold"]:.0f}% ｜ '
+            f'🔵 利下げ {_fed_prob["prob_cut"]:.0f}%'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "※ CME 30-Day Fed Funds先物（ZQ）の価格から簡易計算した参考値です。実際のCME FedWatch Toolのような"
+            "複数シナリオの確率分布ではなく、「据え置き or 25bp変更」の二択を仮定した簡易近似のため、"
+            "実勢の織り込み確率とはズレることがあります。"
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     # ── 各指標の詳細解説 ───────────────────────────────────────
     with st.expander("📖 各指標の読み方 — シンクタンクはここを見る", expanded=False):
 
@@ -11090,6 +11126,108 @@ def _eco_event_to_jst(date_str: str, time_et_str: str) -> datetime:
     y, mo, d = map(int, date_str.split("-"))
     dt_et = _ET_TZ.localize(datetime(y, mo, d, h, m))
     return dt_et.astimezone(JST)
+
+
+_CME_MONTH_CODES = {1: "F", 2: "G", 3: "H", 4: "J", 5: "K", 6: "M",
+                     7: "N", 8: "Q", 9: "U", 10: "V", 11: "X", 12: "Z"}
+
+
+def _cme_futures_symbol(root: str, year: int, month: int, suffix: str = ".CBT") -> str:
+    """CME/CBOT先物の月限ティッカーを組み立てる（例: root="ZQ", 2026年9月 → "ZQU26.CBT"）。"""
+    return f"{root}{_CME_MONTH_CODES[month]}{str(year)[-2:]}{suffix}"
+
+
+def _get_next_fomc_meeting_date() -> str | None:
+    """_US_ECO_CALENDARから次回FOMC会合日（YYYY-MM-DD）を返す。過去日は無視。"""
+    today = datetime.now(JST).date()
+    for date_str, _time_et, name, _icon, _impact, _note in _US_ECO_CALENDAR:
+        if name != "FOMC政策金利発表":
+            continue
+        try:
+            d = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d >= today:
+            return date_str
+    return None
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_fed_hike_probability() -> dict:
+    """CME 30-Day Fed Funds先物（ZQ）から、次回FOMC会合での利上げ/利下げ/据え置きの
+    市場織り込み確率を簡易計算する（CME FedWatch Toolと同じ考え方の簡易版）。
+
+    考え方: ある月の先物価格 = 100 - その月の実効FF金利の日数加重平均。会合のない月
+    なら金利は一定なので、先物価格からそのまま現在の実効レートを逆算できる。会合が
+    ある月は「会合前の日数は現行レート・会合後の日数は新レート」の加重平均になって
+    いるはずなので、直前月（会合なし）から求めた現行レートと会合月の先物価格を使って
+    会合後の想定レートを逆算できる。
+    簡略化のため、変化幅は25bp刻みの「据え置き／25bp変更」の二択のみを仮定した単純な
+    按分計算であり、実際のCME FedWatchのような複数シナリオの確率分布ではない点に注意。
+    """
+    import calendar as _calendar_mod
+
+    _fomc_date_str = _get_next_fomc_meeting_date()
+    if not _fomc_date_str:
+        return {"ok": False, "reason": "次回FOMC会合日が見つかりませんでした。"}
+    _fomc_date = datetime.strptime(_fomc_date_str, "%Y-%m-%d").date()
+
+    _prev_month_last_day = _fomc_date.replace(day=1) - timedelta(days=1)
+    if any(
+        name == "FOMC政策金利発表"
+        and datetime.strptime(ds, "%Y-%m-%d").date().year == _prev_month_last_day.year
+        and datetime.strptime(ds, "%Y-%m-%d").date().month == _prev_month_last_day.month
+        for ds, _t, name, _i, _im, _n in _US_ECO_CALENDAR
+    ):
+        return {"ok": False, "reason": "直前月にも会合があり、簡易計算の前提が崩れるため非表示にしています。"}
+
+    _prev_sym = _cme_futures_symbol("ZQ", _prev_month_last_day.year, _prev_month_last_day.month)
+    _meet_sym = _cme_futures_symbol("ZQ", _fomc_date.year, _fomc_date.month)
+
+    try:
+        _prev_hist = yf.Ticker(_prev_sym).history(period="5d")
+        _meet_hist = yf.Ticker(_meet_sym).history(period="5d")
+    except Exception as e:
+        logger.warning(f"[fed_hike_prob] Fed Funds先物取得失敗: {e}")
+        return {"ok": False, "reason": f"Fed Funds先物の取得に失敗しました: {e}"}
+
+    if _prev_hist.empty or _meet_hist.empty:
+        return {"ok": False, "reason": "Fed Funds先物データを取得できませんでした（限月ティッカーが未対応の可能性）。"}
+
+    _prev_price = float(_prev_hist["Close"].dropna().iloc[-1])
+    _meet_price = float(_meet_hist["Close"].dropna().iloc[-1])
+
+    _current_rate     = 100 - _prev_price   # 会合が無い直前月の平均実効レート ≒ 現行誘導目標
+    _meet_implied_avg = 100 - _meet_price
+
+    _n_days = _calendar_mod.monthrange(_fomc_date.year, _fomc_date.month)[1]
+    _d = _fomc_date.day
+    _days_before = _d - 1
+    _days_after  = _n_days - _d + 1
+    if _days_after <= 0:
+        return {"ok": False, "reason": "会合後の残り日数が不足しており計算できません。"}
+
+    _post_rate = (_meet_implied_avg * _n_days - _current_rate * _days_before) / _days_after
+    _implied_change_bps = (_post_rate - _current_rate) * 100  # %ポイント → bp
+
+    _step = 25.0
+    if _implied_change_bps >= 0:
+        _prob_hike = max(0.0, min(1.0, _implied_change_bps / _step)) * 100
+        _prob_cut  = 0.0
+    else:
+        _prob_cut  = max(0.0, min(1.0, -_implied_change_bps / _step)) * 100
+        _prob_hike = 0.0
+    _prob_hold = max(0.0, 100 - _prob_hike - _prob_cut)
+
+    return {
+        "ok":                 True,
+        "fomc_date":          _fomc_date_str,
+        "current_rate":       round(_current_rate, 3),
+        "implied_change_bps": round(_implied_change_bps, 1),
+        "prob_hike":          round(_prob_hike, 1),
+        "prob_cut":           round(_prob_cut, 1),
+        "prob_hold":          round(_prob_hold, 1),
+    }
 
 
 
