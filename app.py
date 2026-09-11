@@ -27978,7 +27978,12 @@ def render_claude_trading_project():
                             else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
         })
     st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
-    st.caption("「スコア選定」列のモードは今日時点の上位銘柄を過去に遡って評価した後知恵バイアスを含みます（下の詳細参照）。")
+    st.caption(
+        "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
+        "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
+        "評価しています。AI自体の判断を過去に遡って再現しているわけではない点と、後知恵バイアスが"
+        "ある点にご注意ください（下の詳細参照）。"
+    )
 
     # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
     _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
@@ -27986,7 +27991,8 @@ def render_claude_trading_project():
         st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
     else:
         _bt_title = (
-            "スコア選定で今日時点の上位銘柄" if _bt.get("selection_kind") == "ranked"
+            "AIが最終的に使う候補と同じ絞り込み基準（スコア選定）で選ぶ今日時点の上位銘柄"
+            if _bt.get("selection_kind") == "ranked"
             else "このテーマバスケット"
         )
         st.markdown(
