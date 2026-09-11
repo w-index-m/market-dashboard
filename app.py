@@ -26253,10 +26253,10 @@ _CLAUDE_DIVIDEND_BASKET = {
 }
 
 # 固定バスケットを持つ投資戦略モード → バスケット定義のマッピング。
-# 長期育成/モメンタム/安定成長モードは銘柄をAIが都度動的に選定する
-# （_TRADING_CANDIDATESという大きな候補プールから毎回スコアリングして絞り込む）ため、
-# 「このバスケットを均等保有していたら」という固定ポートフォリオのバックテストは
-# 意味を持たない。対象はテーマが固定されている3モードのみ。
+# ai_mix/optical_mix/dividend_stableはテーマで固定された銘柄群（トレンド選定ではない）。
+# それ以外（growth/momentum/stable_growth）は、実際に推奨ポートフォリオを生成する際と
+# 同じロジック（_get_top_candidate_args / _fetch_stable_growth_candidates）で、
+# 「今日時点の」上位候補を都度抽出してバックテスト対象にする。
 _MODE_FIXED_BASKETS = {
     "ai_mix":          _CLAUDE_AI_BASKET,
     "optical_mix":     _CLAUDE_OPTICAL_BASKET,
@@ -26264,19 +26264,44 @@ _MODE_FIXED_BASKETS = {
 }
 
 
+def _get_mode_backtest_tickers(mode_key: str) -> tuple[list, bool]:
+    """指定モードのバックテスト対象ティッカーリストを返す。
+    Returns: (tickers, is_ranked_selection)
+    is_ranked_selection=Trueの場合（growth/momentum/stable_growth）、選定基準そのものが
+    直近リターンベースのため、「今日時点の上位銘柄を過去に遡って評価する」後知恵バイアスを
+    含む。呼び出し側は必ずその旨を注記すること。
+    """
+    _basket = _MODE_FIXED_BASKETS.get(mode_key)
+    if _basket:
+        return sorted(_basket), False
+    _today_str = datetime.now(JST).strftime("%Y-%m-%d")
+    try:
+        _cand_perf = _fetch_candidate_performance(_today_str, mode_key)
+    except Exception as e:
+        logger.warning(f"[mode_backtest] 候補取得失敗 ({mode_key}): {e}")
+        return [], True
+    if not _cand_perf:
+        return [], True
+    _top = _get_top_candidate_args(_cand_perf, mode_key, budget=1_000_000, n=15)
+    return [t[0] for t in _top], True
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _compute_mode_basket_backtest(mode_key: str) -> dict:
-    """投資戦略モードの固定テーマバスケットを均等加重で保有し続けた場合の
-    1年・3年リターンをバックテストする（推奨ポートフォリオモード選択カードの直下に
-    表示し、「このモードを選ぶと過去どう推移したか」の参考情報を提供する）。
-    Returns: {"ok": True, "n_tickers", "ret_1y", "ret_3y", "bench_ret_1y", "bench_ret_3y",
-              "max_dd_1y", "dates", "cum", "bench_cum"} | {"ok": False, "reason": str}
+    """投資戦略モードの対象銘柄群を均等加重で保有し続けた場合の1年・3年リターンを
+    バックテストする（推奨ポートフォリオモード選択カードの直下に表示し、
+    「このモードを選ぶと過去どう推移したか」の参考情報を提供する）。
+    ai_mix/optical_mix/dividend_stableはテーマ固定バスケット、それ以外は
+    _get_mode_backtest_tickers()が今日時点のスコアリング上位銘柄を返す
+    （後知恵バイアスあり。selection_kind="ranked"としてUI側に伝える）。
+    Returns: {"ok": True, "n_tickers", "selection_kind", "ret_1y", "ret_3y",
+              "bench_ret_1y", "bench_ret_3y", "max_dd_1y", "dates", "cum", "bench_cum"}
+              | {"ok": False, "reason": str}
     """
-    basket = _MODE_FIXED_BASKETS.get(mode_key)
-    if not basket:
-        return {"ok": False, "reason": "このモードは銘柄をAIが都度動的に選定するため、固定バスケットのバックテストはありません。"}
+    tickers, is_ranked = _get_mode_backtest_tickers(mode_key)
+    if not tickers:
+        return {"ok": False, "reason": "対象銘柄を取得できませんでした。"}
 
-    tickers = sorted(basket)
     bench = "^GSPC"
     end   = datetime.now()
     start = end - timedelta(days=365 * 3 + 30)
@@ -26329,16 +26354,17 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     max_dd_1y    = float(_dd.min()) if not _dd.empty else None
 
     return {
-        "ok":           True,
-        "n_tickers":    n_ok,
-        "ret_1y":       _ret_over(cum, 252),
-        "ret_3y":       _ret_over(cum, 756),
-        "bench_ret_1y": _ret_over(bench_cum, 252),
-        "bench_ret_3y": _ret_over(bench_cum, 756),
-        "max_dd_1y":    max_dd_1y,
-        "dates":        [d.strftime("%Y-%m-%d") for d in cum.index],
-        "cum":          ((cum - 1) * 100).round(2).tolist(),
-        "bench_cum":    ((bench_cum - 1) * 100).round(2).tolist(),
+        "ok":              True,
+        "n_tickers":       n_ok,
+        "selection_kind":  "ranked" if is_ranked else "theme",
+        "ret_1y":          _ret_over(cum, 252),
+        "ret_3y":          _ret_over(cum, 756),
+        "bench_ret_1y":    _ret_over(bench_cum, 252),
+        "bench_ret_3y":    _ret_over(bench_cum, 756),
+        "max_dd_1y":       max_dd_1y,
+        "dates":           [d.strftime("%Y-%m-%d") for d in cum.index],
+        "cum":             ((cum - 1) * 100).round(2).tolist(),
+        "bench_cum":       ((bench_cum - 1) * 100).round(2).tolist(),
     }
 
 
@@ -27895,15 +27921,19 @@ def render_claude_trading_project():
                 st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
                 st.rerun()
 
-    # ── 選択中モードのテーマバスケット・バックテスト（1年・3年） ──────
+    # ── 選択中モードのバックテスト（1年・3年） ──────────────────
     with st.spinner("バックテスト計算中..."):
         _bt = _compute_mode_basket_backtest(_cur_mode)
     if not _bt.get("ok"):
         st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
     else:
+        _bt_title = (
+            "AIが今日時点で選ぶ上位銘柄" if _bt.get("selection_kind") == "ranked"
+            else "このテーマバスケット"
+        )
         st.markdown(
             f'<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
-            f'📉 このテーマバスケットのバックテスト（均等加重・{_bt["n_tickers"]}銘柄 vs S&P500）</div>',
+            f'📉 {_bt_title}のバックテスト（均等加重・{_bt["n_tickers"]}銘柄 vs S&P500）</div>',
             unsafe_allow_html=True,
         )
 
@@ -27932,7 +27962,15 @@ def render_claude_trading_project():
             hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
         )
         st.plotly_chart(_fig_bt, use_container_width=True)
-        st.caption("※ 過去の均等加重バックテストであり、実際の推奨ポートフォリオの構成比・売買タイミングとは異なります。投資判断は自己責任でお願いします。")
+        if _bt.get("selection_kind") == "ranked":
+            st.caption(
+                "⚠️ この銘柄群は直近のリターン実績（または5年チャートの滑らかさ）で今日時点でランキングした"
+                "上位銘柄です。つまり「今日時点で良い結果を出している銘柄」を過去に遡って評価しているため、"
+                "実際に1年・3年前からこの戦略で運用していた場合よりも良い数値が出る後知恵バイアスがあります。"
+                "参考値としてご利用ください。"
+            )
+        else:
+            st.caption("※ 過去の均等加重バックテストであり、実際の推奨ポートフォリオの構成比・売買タイミングとは異なります。投資判断は自己責任でお願いします。")
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
