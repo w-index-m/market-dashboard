@@ -27921,9 +27921,44 @@ def render_claude_trading_project():
                 st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
                 st.rerun()
 
-    # ── 選択中モードのバックテスト（1年・3年） ──────────────────
-    with st.spinner("バックテスト計算中..."):
-        _bt = _compute_mode_basket_backtest(_cur_mode)
+    # ── 全モード比較表（1年・3年） ────────────────────────────
+    # 選択中モードだけでなく6モード全部を並列計算してキャッシュしておく
+    # （選択中モードの詳細セクションはこのキャッシュを再利用するだけなので二重計算にならない）。
+    with st.spinner("全モードのバックテスト計算中..."):
+        with ThreadPoolExecutor(max_workers=len(_MODE_DEFS)) as _bt_ex:
+            _bt_futures = {
+                _md["key"]: _bt_ex.submit(_compute_mode_basket_backtest, _md["key"])
+                for _md in _MODE_DEFS
+            }
+            _bt_all = {}
+            for _k, _fut in _bt_futures.items():
+                try:
+                    _bt_all[_k] = _fut.result()
+                except Exception as _e:
+                    logger.warning(f"[mode_backtest] {_k} 計算失敗: {_e}")
+                    _bt_all[_k] = {"ok": False, "reason": "計算エラー"}
+
+    st.markdown(
+        '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
+        '📊 全モード比較（1年・3年リターン）</div>',
+        unsafe_allow_html=True,
+    )
+    _cmp_rows = []
+    for _md in _MODE_DEFS:
+        _k, _r = _md["key"], _bt_all.get(_md["key"], {})
+        _cmp_rows.append({
+            "モード": f'{_md["emoji"]} {_md["label"]}' + ("  ← 選択中" if _k == _cur_mode else ""),
+            "1年リターン":  f'{_r["ret_1y"]:+.1f}%' if _r.get("ok") and _r.get("ret_1y") is not None else "—",
+            "3年リターン":  f'{_r["ret_3y"]:+.1f}%' if _r.get("ok") and _r.get("ret_3y") is not None else "—",
+            "直近1年最大DD": f'{_r["max_dd_1y"]:+.1f}%' if _r.get("ok") and _r.get("max_dd_1y") is not None else "—",
+            "選定方法":     ("AI選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
+                            else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
+        })
+    st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
+    st.caption("「AI選定」列のモードは今日時点の上位銘柄を過去に遡って評価した後知恵バイアスを含みます（下の詳細参照）。")
+
+    # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
+    _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
     if not _bt.get("ok"):
         st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
     else:
