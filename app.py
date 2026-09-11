@@ -26114,6 +26114,95 @@ _CLAUDE_DIVIDEND_BASKET = {
     "4502.T",   # 武田薬品（医薬品・高配当）
 }
 
+# 固定バスケットを持つ投資戦略モード → バスケット定義のマッピング。
+# 長期育成/モメンタム/安定成長モードは銘柄をAIが都度動的に選定する
+# （_TRADING_CANDIDATESという大きな候補プールから毎回スコアリングして絞り込む）ため、
+# 「このバスケットを均等保有していたら」という固定ポートフォリオのバックテストは
+# 意味を持たない。対象はテーマが固定されている3モードのみ。
+_MODE_FIXED_BASKETS = {
+    "ai_mix":          _CLAUDE_AI_BASKET,
+    "optical_mix":     _CLAUDE_OPTICAL_BASKET,
+    "dividend_stable": _CLAUDE_DIVIDEND_BASKET,
+}
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_mode_basket_backtest(mode_key: str) -> dict:
+    """投資戦略モードの固定テーマバスケットを均等加重で保有し続けた場合の
+    1年・3年リターンをバックテストする（推奨ポートフォリオモード選択カードの直下に
+    表示し、「このモードを選ぶと過去どう推移したか」の参考情報を提供する）。
+    Returns: {"ok": True, "n_tickers", "ret_1y", "ret_3y", "bench_ret_1y", "bench_ret_3y",
+              "max_dd_1y", "dates", "cum", "bench_cum"} | {"ok": False, "reason": str}
+    """
+    basket = _MODE_FIXED_BASKETS.get(mode_key)
+    if not basket:
+        return {"ok": False, "reason": "このモードは銘柄をAIが都度動的に選定するため、固定バスケットのバックテストはありません。"}
+
+    tickers = sorted(basket)
+    bench = "^GSPC"
+    end   = datetime.now()
+    start = end - timedelta(days=365 * 3 + 30)
+    try:
+        raw = yf.download(tickers + [bench], start=start, end=end,
+                           progress=False, auto_adjust=True, threads=True)
+    except Exception as e:
+        logger.warning(f"[mode_backtest] yf.download失敗: {e}")
+        return {"ok": False, "reason": "株価データの取得に失敗しました。"}
+    if raw.empty:
+        return {"ok": False, "reason": "株価データを取得できませんでした。"}
+    close_all = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+    if bench not in close_all.columns:
+        return {"ok": False, "reason": "ベンチマークデータを取得できませんでした。"}
+
+    rets = []
+    n_ok = 0
+    for t in tickers:
+        if t not in close_all.columns:
+            continue
+        s = close_all[t].dropna()
+        if len(s) < 30:
+            continue
+        rets.append(s.pct_change().dropna())
+        n_ok += 1
+    if not rets:
+        return {"ok": False, "reason": "十分な銘柄データがありませんでした。"}
+
+    basket_ret = pd.concat(rets, axis=1).mean(axis=1)  # 日次で均等加重平均（欠損日は自動除外）
+    bench_ret  = close_all[bench].dropna().pct_change().dropna()
+
+    idx = basket_ret.index.intersection(bench_ret.index)
+    if len(idx) < 30:
+        return {"ok": False, "reason": "共通の取引日が不足しています。"}
+    basket_ret = basket_ret.loc[idx]
+    bench_ret  = bench_ret.loc[idx]
+
+    cum       = (1 + basket_ret).cumprod()
+    bench_cum = (1 + bench_ret).cumprod()
+
+    def _ret_over(series, days):
+        if len(series) <= days:
+            return None
+        return float(series.iloc[-1] / series.iloc[-days - 1] - 1) * 100
+
+    # 直近1年分の最大ドローダウン
+    _cum_1y      = cum.tail(252)
+    _running_max = _cum_1y.cummax()
+    _dd          = (_cum_1y / _running_max - 1) * 100
+    max_dd_1y    = float(_dd.min()) if not _dd.empty else None
+
+    return {
+        "ok":           True,
+        "n_tickers":    n_ok,
+        "ret_1y":       _ret_over(cum, 252),
+        "ret_3y":       _ret_over(cum, 756),
+        "bench_ret_1y": _ret_over(bench_cum, 252),
+        "bench_ret_3y": _ret_over(bench_cum, 756),
+        "max_dd_1y":    max_dd_1y,
+        "dates":        [d.strftime("%Y-%m-%d") for d in cum.index],
+        "cum":          ((cum - 1) * 100).round(2).tolist(),
+        "bench_cum":    ((bench_cum - 1) * 100).round(2).tolist(),
+    }
+
 
 @st.cache_data(ttl=3600 * 6, show_spinner=False)
 def _screen_diversification_candidates_by_return(
@@ -27667,6 +27756,45 @@ def render_claude_trading_project():
                 st.session_state["trading_mode"] = _md["key"]
                 st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
                 st.rerun()
+
+    # ── 選択中モードのテーマバスケット・バックテスト（1年・3年） ──────
+    with st.spinner("バックテスト計算中..."):
+        _bt = _compute_mode_basket_backtest(_cur_mode)
+    if not _bt.get("ok"):
+        st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
+    else:
+        st.markdown(
+            f'<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
+            f'📉 このテーマバスケットのバックテスト（均等加重・{_bt["n_tickers"]}銘柄 vs S&P500）</div>',
+            unsafe_allow_html=True,
+        )
+
+        def _bt_fmt(v):
+            return f"{v:+.1f}%" if v is not None else "—"
+
+        def _bt_delta(v, b):
+            return f"{v - b:+.1f}pt vs S&P500" if v is not None and b is not None else None
+
+        _bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns(4)
+        _bt_c1.metric("1年リターン", _bt_fmt(_bt["ret_1y"]), _bt_delta(_bt["ret_1y"], _bt["bench_ret_1y"]))
+        _bt_c2.metric("3年リターン", _bt_fmt(_bt["ret_3y"]), _bt_delta(_bt["ret_3y"], _bt["bench_ret_3y"]))
+        _bt_c3.metric("S&P500（同期間1年）", _bt_fmt(_bt["bench_ret_1y"]))
+        _bt_c4.metric("直近1年 最大DD", _bt_fmt(_bt["max_dd_1y"]))
+
+        _fig_bt = go.Figure()
+        _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["cum"], name="バスケット（均等加重）", line=dict(color="#4ade80")))
+        _fig_bt.add_trace(go.Scatter(x=_bt["dates"], y=_bt["bench_cum"], name="S&P500", line=dict(color="#60a5fa", dash="dot")))
+        _fig_bt.update_layout(
+            height=280, margin=dict(l=10, r=10, t=10, b=10),
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            font=dict(color="#e2e8f0"),
+            yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+            xaxis=dict(tickfont=dict(color="#e2e8f0")),
+            legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.15),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(_fig_bt, use_container_width=True)
+        st.caption("※ 過去の均等加重バックテストであり、実際の推奨ポートフォリオの構成比・売買タイミングとは異なります。投資判断は自己責任でお願いします。")
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
