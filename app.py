@@ -26831,12 +26831,16 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         if budget >= 3_000_000 else
         f"予算{budget_str}は米国株＋日本ETF中心が現実的"
     )
+    # merits/demeritsの例は、実際にプロンプトへ渡しているデータ（価格モメンタム・Agent Bの
+    # 定性判断）だけで書けるものにすること。ROIC/PER等の具体的な財務数値を例に含めると、
+    # AIがこの数値パターンを模倣して未提供のはずの財務指標を捏造してしまう
+    # （実際に発生していた不具合）。
     _json_example = (
         f'{{"ticker": "NVDA", "name": "NVIDIA", "flag": "🇺🇸", "allocation": 20, "amount": {int(budget*0.20)},'
-        f'"rationale": "AI半導体独占",'
-        f'"merits": [{{"point": "ROIC卓越", "detail": "ROIC 45%・WACC 10%→スプレッド35%"}}],'
-        f'"demerits": [{{"point": "高PERリスク", "detail": "PER 40倍超。成長鈍化で大幅下落リスク"}}],'
-        f'"conclusion": "AIインフラ中核。高PERだが成長継続なら正当化される。",'
+        f'"rationale": "AI半導体で圧倒的シェア・モメンタム継続",'
+        f'"merits": [{{"point": "上昇モメンタム", "detail": "1年+80%・6ヶ月も上昇継続でトレンド強い"}}],'
+        f'"demerits": [{{"point": "高値警戒", "detail": "急騰後のため短期的な調整リスクあり"}}],'
+        f'"conclusion": "AIインフラの中核銘柄。押し目があれば買い増し候補。",'
         f'"entry_price": 130.0,'
         f'"entry_note": "MA50付近の押し目。直近サポート$125-130を下回ったら撤退。"}}'
     )
@@ -26929,7 +26933,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・予算超過銘柄（最低%記載あり）はその割合以上の配分必須
 ・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}{_ab_flag_constraint}
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
-・meritsはAgent B分析を活用し、ROIC・ROE・DOE・モメンタム根拠を具体的に記載
+・meritsはAgent Bの分析（スコア・thesis・merits/demerits）と実株価モメンタムデータのみを根拠にすること。
+  ROIC・ROE・DOE・PER等の財務指標はAgent A/Bに一切渡していないため、具体的な数値を作って記載しないこと
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
 ・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_theme_constraint}
 
@@ -27000,7 +27005,8 @@ else ""}
   → 株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
   → ⛔リスト銘柄は絶対に選定禁止
 ・各銘柄に rationale(20字)・merits(2〜3点)・demerits(1〜2点)・conclusion(60字)を必ず設ける
-・meritsにROIC-WACC・ROE・DOEが優れる場合は数値とともに記載
+・meritsは上記【実株価モメンタムデータ】の価格・リターンのみを根拠にすること。
+  ROIC・ROE・DOE・PER等の財務指標データは渡していないため、具体的な数値を作って記載しないこと
 ・直近1年マイナス銘柄はmeritsに「なぜ今買うか」を必ず含めること
 ・entry_price: 推奨エントリー価格（米国株USD・日本株円。現値±10%以内）
 ・entry_note: エントリー根拠・損切ライン・目標を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）
@@ -27075,6 +27081,23 @@ else ""}
                 _al = float(_itm.get("allocation", 0))
                 if _al > 0:
                     _itm["amount"] = int(budget * _al / 100)
+            # Agent Cの出力にも、Agent Bと同じ「未提供の財務指標を具体的数値付きで捏造していないか」
+            # チェックをかける（プロンプト側で指示は外したが、AIが自発的に数値を作る可能性は残るため
+            # 最終防衛ラインとして必須）。Agent Bの_verify_stock_agent_result()と同じ正規表現を使う。
+            _fab_flagged = []
+            for _itm in parsed.get("portfolio", []):
+                _text_parts = [str(_itm.get("rationale", "")), str(_itm.get("conclusion", ""))]
+                for _m in _itm.get("merits", []) or []:
+                    _text_parts.append(f"{_m.get('point','')} {_m.get('detail','')}")
+                for _m in _itm.get("demerits", []) or []:
+                    _text_parts.append(f"{_m.get('point','')} {_m.get('detail','')}")
+                _combined = " ".join(_text_parts)
+                if _AGENT_B_FABRICATED_METRIC_RE.search(_combined):
+                    _itm["_fabrication_warning"] = True
+                    _fab_flagged.append(_itm.get("ticker", "?"))
+            if _fab_flagged:
+                parsed["_fabrication_flagged_tickers"] = _fab_flagged
+                logger.warning(f"[trading] Agent C出力に未提供財務指標の記載を検出: {_fab_flagged}")
             return parsed
     except ValueError as e:
         _err = f"JSON解析失敗: {str(e)[:120]}"
@@ -29014,6 +29037,14 @@ def render_claude_trading_project():
                         f"🔍 検証エージェント: {len(_ip_flagged)}銘柄の分析根拠が実データと矛盾していたため選定から除外 "
                         f"（{', '.join(_ip_flagged)}）"
                     )
+                # ── Agent C検証結果（渡していないはずの財務指標を捏造していないか）──
+                _ip_fab_flagged = (_ip_disp.get("unified") or {}).get("_fabrication_flagged_tickers", [])
+                if _ip_fab_flagged:
+                    st.caption(
+                        f"⚠️ {len(_ip_fab_flagged)}銘柄の投資根拠に、渡していないはずの財務指標（ROIC/ROE/PER等）の"
+                        f"具体的な数値が含まれています（{', '.join(_ip_fab_flagged)}）。数値の正確性は未検証のため、"
+                        "そのまま投資判断に使わないでください。"
+                    )
 
                 # ── クラッシュリスクメーター ──
                 _crs_ctx   = st.session_state.get("_alloc_mktctx") or {}
@@ -29342,6 +29373,13 @@ def render_claude_trading_project():
                                 _mom_badge = '<span style="background:#78350f;color:#fde68a;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚡ 下落注意</span>'
                             else:
                                 _mom_badge = ""
+                            if _item.get("_fabrication_warning"):
+                                _mom_badge += (
+                                    '<span style="background:#581c87;color:#e9d5ff;font-size:9px;padding:1px 6px;'
+                                    'border-radius:10px;font-weight:700;margin-left:4px" '
+                                    'title="未提供のはずの財務指標（ROIC/ROE/PER等）が根拠に含まれています。数値の正確性は未検証です">'
+                                    '⚠️ 数値未検証</span>'
+                                )
 
                             _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
