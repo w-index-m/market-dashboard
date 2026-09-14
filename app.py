@@ -971,6 +971,139 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
     return ("⚠️ AI APIが設定されていません。", "none")
 
 
+_AI_CONSENSUS_PROVIDERS = ["gemini", "groq", "deepseek", "nvidia", "openrouter"]
+_AI_CONSENSUS_STANCE_SCORE = {"強気": 2, "中立強気": 1, "中立": 0, "中立弱気": -1, "弱気": -2}
+
+
+def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int, temperature: float) -> tuple:
+    """指定した1プロバイダーだけにAIを呼ぶ（call_ai_with_fallback/_call_ai_for_tradingと異なり、
+    他プロバイダーへのフォールバックは一切しない）。5プロバイダー全部に同じ質問を並列で投げ、
+    回答の一致度を見る「AIマルチモデル合意度」機能専用のヘルパー。
+    Returns: (text, model_label) | (None, None)（未設定 or 失敗時）
+    """
+    try:
+        if provider == "gemini":
+            if not (GENAI_AVAILABLE and GEMINI_API_KEY):
+                return None, None
+            genai.configure(api_key=GEMINI_API_KEY)
+            _model = genai.GenerativeModel(MODEL_FALLBACKS[0])
+            _resp = _model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=max_output_tokens, temperature=temperature,
+                ),
+            )
+            if hasattr(_resp, "text") and _resp.text:
+                return _resp.text.strip(), f"Gemini ({MODEL_FALLBACKS[0]})"
+            return None, None
+        if provider == "groq" and GROQ_API_KEY:
+            _text, _model2 = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            return (_text, f"Groq ({_model2})") if _model2 else (None, None)
+        if provider == "deepseek" and DEEPSEEK_API_KEY:
+            _text, _model2 = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            return (_text, f"DeepSeek ({_model2})") if _model2 else (None, None)
+        if provider == "nvidia" and NVIDIA_API_KEY:
+            _text, _model2 = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            return (_text, f"NVIDIA ({_model2})") if _model2 else (None, None)
+        if provider == "openrouter" and OPENROUTER_API_KEY:
+            _text, _model2 = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            return (_text, f"OpenRouter ({_model2})") if _model2 else (None, None)
+    except Exception as e:
+        logger.warning(f"[ai_consensus] {provider}呼び出し失敗: {e}")
+    return None, None
+
+
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def compute_ai_consensus_stance(date_str: str) -> dict:
+    """5つのAIプロバイダー（Gemini/Groq/DeepSeek/NVIDIA/OpenRouter）に同一の市場分析プロンプトを
+    並列で投げ、各モデルが返す強気/弱気スタンスの一致度を算出する。通常のフォールバックチェーン
+    （1つ成功したら終わり）とは逆に、設定済みの全プロバイダーに独立して同じ質問をする点が異なる。
+    全モデルの意見が割れているか揃っているか自体を「AIの自信度」のシグナルとして扱う
+    （FRBのドットプロットの分散を見るのと同じ発想）。date_str単位で6hキャッシュ。
+    """
+    _ctx = _fetch_market_context_for_trading() or {}
+    _fg_sc  = float(_ctx.get("fg_score", 50) or 50)
+    _fg_lbl = str(_ctx.get("fg_label", ""))
+    _crash_sc  = int(_ctx.get("crash_risk_score", 0))
+    _crash_lbl = str(_ctx.get("crash_risk_label", "🟢 低リスク"))
+    _vix   = float(_ctx.get("vix_val", 0))
+    _naaim = float(_ctx.get("naaim_exp", 0))
+    _leading   = " / ".join((_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明"
+    _improving = " / ".join((_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明"
+    _nk_pred = str(_ctx.get("nikkei_pred_label", ""))
+    _us_pred = str(_ctx.get("us_pred_label", ""))
+
+    _prompt = f"""市場データを分析し投資スタンスをJSONのみで回答（日本語・余分なテキスト不要）。
+
+Fear&Greed: {_fg_sc:.0f} ({_fg_lbl})
+VIX: {_vix:.1f}  NAAIM: {_naaim:.0f}%
+クラッシュリスク: {_crash_sc}/10 ({_crash_lbl})
+日経225予測: {_nk_pred}  米国市場予測: {_us_pred}
+RRG先行セクター: {_leading}
+RRG改善セクター: {_improving}
+
+{{"stance": "強気/中立強気/中立/中立弱気/弱気",
+  "reason": "判断理由を20字以内で"}}"""
+
+    _results: Dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=len(_AI_CONSENSUS_PROVIDERS)) as _ex:
+        _futures = {
+            _ex.submit(_call_single_ai_provider, p, _prompt, 150, 0.3): p
+            for p in _AI_CONSENSUS_PROVIDERS
+        }
+        for _fut in as_completed(_futures):
+            _p = _futures[_fut]
+            try:
+                _text, _model_label = _fut.result()
+            except Exception:
+                _text, _model_label = None, None
+            if not _text or not _model_label:
+                _results[_p] = {"ok": False}
+                continue
+            try:
+                import json as _json_ac
+                _m = re.search(r'\{[\s\S]*\}', _text)
+                _parsed = _json_ac.loads(_m.group()) if _m else {}
+            except Exception:
+                _parsed = {}
+            _stance = _parsed.get("stance", "")
+            if _stance not in _AI_CONSENSUS_STANCE_SCORE:
+                _results[_p] = {"ok": False, "model": _model_label}
+                continue
+            _results[_p] = {
+                "ok":     True,
+                "model":  _model_label,
+                "stance": _stance,
+                "reason": str(_parsed.get("reason", ""))[:40],
+                "score":  _AI_CONSENSUS_STANCE_SCORE[_stance],
+            }
+
+    _valid = [v for v in _results.values() if v.get("ok")]
+    if not _valid:
+        return {"ok": False, "reason": "全プロバイダーで応答取得に失敗しました。", "providers": _results}
+
+    _scores = [v["score"] for v in _valid]
+    _avg = sum(_scores) / len(_scores)
+    _std = (sum((s - _avg) ** 2 for s in _scores) / len(_scores)) ** 0.5
+
+    if _std == 0:
+        _agreement = "完全一致"
+    elif _std <= 0.7:
+        _agreement = "概ね一致"
+    else:
+        _agreement = "見解が割れている"
+
+    return {
+        "ok":         True,
+        "providers":  _results,
+        "n_responded": len(_valid),
+        "n_total":    len(_AI_CONSENSUS_PROVIDERS),
+        "avg_score":  round(_avg, 2),
+        "std":        round(_std, 2),
+        "agreement":  _agreement,
+    }
+
+
 def _call_ai_for_trading(
     prompt: str,
     model_pref: str = "auto",
@@ -13946,6 +14079,79 @@ _INSTITUTION_RATINGS = {
         },
     },
 }
+
+def render_ai_consensus():
+    """🧭 AIマルチモデル合意度。同じ市場分析プロンプトを設定済みの全AIプロバイダーに並列で
+    投げ、各モデルの強気/弱気スタンスが一致しているか・割れているかを可視化する。
+    """
+    st.markdown('<a id="ai-consensus"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:20px;font-weight:800;color:#e2e8f0;margin-bottom:2px">'
+        '🧭 AIマルチモデル合意度</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">'
+        'Gemini・Groq・DeepSeek・NVIDIA・OpenRouterに同じ市場データを渡し、各モデルの判断が'
+        '一致しているかを見ます。意見が割れているときほど、市場の先行きに不確実性が高いと解釈できます。'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    _today_str = datetime.now(JST).strftime("%Y-%m-%d")
+    with st.spinner("5つのAIモデルに問い合わせ中..."):
+        _res = compute_ai_consensus_stance(_today_str)
+
+    if not _res.get("ok"):
+        st.info(f"取得できませんでした: {_res.get('reason', '不明なエラー')}")
+        return
+
+    _agreement = _res["agreement"]
+    _agree_color = {
+        "完全一致": "#4ade80", "概ね一致": "#fbbf24", "見解が割れている": "#f87171",
+    }.get(_agreement, "#94a3b8")
+    _avg = _res["avg_score"]
+    _avg_label = (
+        "強気" if _avg >= 1.5 else "中立強気" if _avg >= 0.5 else
+        "中立" if _avg > -0.5 else "中立弱気" if _avg > -1.5 else "弱気"
+    )
+
+    _m1, _m2, _m3 = st.columns(3)
+    _m1.metric("AI合意度", _agreement)
+    _m2.metric("平均スタンス", _avg_label, f"score {_avg:+.2f}")
+    _m3.metric("回答モデル数", f"{_res['n_responded']} / {_res['n_total']}")
+
+    _stance_color = {
+        "強気": "#4ade80", "中立強気": "#86efac", "中立": "#94a3b8",
+        "中立弱気": "#fca5a5", "弱気": "#f87171",
+    }
+    _provider_label = {
+        "gemini": "✨ Gemini", "groq": "⚡ Groq", "deepseek": "🌊 DeepSeek",
+        "nvidia": "🟩 NVIDIA", "openrouter": "🔀 OpenRouter",
+    }
+    _cards_html = []
+    for _p in _AI_CONSENSUS_PROVIDERS:
+        _v = _res["providers"].get(_p, {})
+        _label = _provider_label.get(_p, _p)
+        if not _v.get("ok"):
+            _cards_html.append(
+                '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                'padding:10px 14px;margin-bottom:6px;opacity:0.55">'
+                f'<span style="font-size:12px;font-weight:700;color:#94a3b8">{_label}</span>'
+                '<span style="font-size:11px;color:#64748b;margin-left:8px">未設定 または応答なし</span>'
+                '</div>'
+            )
+            continue
+        _sc = _stance_color.get(_v["stance"], "#94a3b8")
+        _cards_html.append(
+            f'<div style="background:#1e293b;border:1px solid {_sc}55;border-radius:8px;'
+            f'padding:10px 14px;margin-bottom:6px">'
+            f'<span style="font-size:12px;font-weight:700;color:#e2e8f0">{_label}</span>'
+            f'<span style="font-size:12px;font-weight:700;color:{_sc};margin-left:10px">{_v["stance"]}</span>'
+            + (f'<span style="font-size:11px;color:#94a3b8;margin-left:10px">{_v["reason"]}</span>'
+               if _v.get("reason") else "")
+            + '</div>'
+        )
+    st.markdown("".join(_cards_html), unsafe_allow_html=True)
+    st.caption("※ 各モデルへの質問内容・入力データは共通です。6時間キャッシュ。投資判断は自己責任でお願いします。")
+
 
 # 定期AI更新の最終実行日を管理するキー
 _MEDIA_RATING_CACHE_KEY = "media_institution_rating_cache"
@@ -33657,6 +33863,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
         # ── AI Sentiment Index を先に描画（重いNAAIMを待たない） ──
         render_composite_sentiment()
+        st.divider()
+
+        # ── AIマルチモデル合意度 ──────────────────────────────
+        render_ai_consensus()
         st.divider()
 
         # ── 4指標相関分析 + AIコメント ────────────────────────
