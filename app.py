@@ -10022,6 +10022,67 @@ def render_optical_vs_semi():
         st.caption("⚠️ フジクラ（5803.T）はJPY建て。パフォーマンス比較には円安・円高の影響が含まれます。")
 
 
+def render_theme_narrative():
+    """🔥 テーマ動向解説。AIミックス・光銘柄ミックスの各バスケットが本日大きく動いた場合のみ、
+    関連ニュースRSSと合わせてAIが日本語で背景を数行にまとめる。値動きが小さい日はAI呼び出し
+    自体をスキップする（無駄なクォータ消費を避けるため）。
+    """
+    st.markdown('<a id="theme-narrative"></a>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:20px;font-weight:800;color:#e2e8f0;margin-bottom:2px">'
+        '🔥 テーマ動向解説</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">'
+        f'AIミックス・光銘柄ミックスのバスケットが1日で±{_THEME_NARRATIVE_THRESHOLD:.0f}%以上動いた日だけ、'
+        '関連ニュースと合わせてAIが背景を要約します。'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    _today_str = datetime.now(JST).strftime("%Y-%m-%d")
+    _cols = st.columns(2)
+    for _col, _theme_key in zip(_cols, ["ai_mix", "optical_mix"]):
+        with _col:
+            _theme = _THEME_NARRATIVE_DEFS[_theme_key]
+            with st.spinner(f"{_theme['label']}を確認中..."):
+                _res = generate_theme_narrative(_theme_key, _today_str)
+
+            if not _res.get("ok"):
+                st.markdown(f"**{_theme['label']}**")
+                st.caption(f"取得できませんでした: {_res.get('reason', '不明なエラー')}")
+                continue
+
+            _avg = _res["avg_chg"]
+            _chg_color = "#4ade80" if _avg >= 0 else "#f87171"
+            st.markdown(
+                f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;'
+                f'padding:12px 16px;height:100%">'
+                f'<div style="font-size:14px;font-weight:700;color:#e2e8f0">{_theme["label"]}</div>'
+                f'<div style="font-size:24px;font-weight:900;color:{_chg_color};margin:4px 0">'
+                f'{_avg:+.2f}%<span style="font-size:11px;color:#64748b;font-weight:400"> （本日・均等加重）</span></div>',
+                unsafe_allow_html=True,
+            )
+            if _res.get("quiet"):
+                st.caption(f"目立った値動きはありません（±{_THEME_NARRATIVE_THRESHOLD:.0f}%未満）。")
+            else:
+                st.markdown(_res.get("narrative", ""))
+                if _res.get("model"):
+                    st.caption(f"🤖 {_res['model']}")
+            _movers = _res.get("movers", [])
+            if _movers:
+                _movers_str = " ｜ ".join(
+                    f'<span style="color:{"#4ade80" if m["chg"] >= 0 else "#f87171"}">{m["ticker"]} {m["chg"]:+.1f}%</span>'
+                    for m in _movers[:4]
+                )
+                st.markdown(
+                    f'<div style="font-size:11px;color:#94a3b8;margin-top:6px">{_movers_str}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown('</div>', unsafe_allow_html=True)
+    st.caption("※ ニュース見出しから読み取れる範囲の解説です。投資判断は自己責任でお願いします。")
+
+
 # =====================================================================
 # 決算ベース指数予測（SOX・光通信バスケット）
 # =====================================================================
@@ -26458,6 +26519,112 @@ _CLAUDE_DIVIDEND_BASKET = {
     "4502.T",   # 武田薬品（医薬品・高配当）
 }
 
+# 🔥 テーマ動向解説（値動きが大きい日だけAIが背景をまとめる）の対象テーマ定義。
+# rss は RSS_FEEDS（このファイル上部で定義）のキー名。光銘柄ミックスは専用フィード
+# （光通信(COHR)等）があるためそれを優先し、両テーマともブルームバーグ等の一般市況フィードも加える。
+_THEME_NARRATIVE_DEFS = {
+    "ai_mix": {
+        "label": "✨ AIミックス", "basket": _CLAUDE_AI_BASKET,
+        "rss": ["ブルームバーグ", "Reuters Business", "CNBC"],
+    },
+    "optical_mix": {
+        "label": "💡 光銘柄ミックス", "basket": _CLAUDE_OPTICAL_BASKET,
+        "rss": ["光通信(COHR)", "光通信(LITE)", "光通信(GLW)", "光通信(AAOI)", "ブルームバーグ"],
+    },
+}
+_THEME_NARRATIVE_THRESHOLD = 2.0  # このパーセント以上動いた日だけAIに解説させる
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_theme_basket_daily_move(basket: frozenset) -> dict:
+    """テーマバスケットの本日の等加重リターンと、値動きが大きい構成銘柄を返す。
+    Returns: {"ok": True, "avg_chg": float, "movers": [{"ticker","chg"}, ...]} | {"ok": False}
+    """
+    tickers = sorted(basket)
+    try:
+        raw = yf.download(tickers, period="5d", progress=False, auto_adjust=True, threads=True)
+    except Exception as e:
+        logger.warning(f"[theme_narrative] yf.download失敗: {e}")
+        return {"ok": False}
+    if raw.empty:
+        return {"ok": False}
+    close_all = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+
+    chgs, movers = [], []
+    for t in tickers:
+        if t not in close_all.columns:
+            continue
+        s = close_all[t].dropna()
+        if len(s) < 2:
+            continue
+        chg = float(s.iloc[-1] / s.iloc[-2] - 1) * 100
+        chgs.append(chg)
+        movers.append({"ticker": t, "chg": round(chg, 2)})
+    if not chgs:
+        return {"ok": False}
+    movers.sort(key=lambda x: abs(x["chg"]), reverse=True)
+    return {"ok": True, "avg_chg": round(sum(chgs) / len(chgs), 2), "movers": movers[:6]}
+
+
+@st.cache_data(ttl=TTL_MARKET_NEWS, show_spinner=False)
+def generate_theme_narrative(theme_key: str, date_str: str) -> dict:
+    """テーマバスケットの値動きが_THEME_NARRATIVE_THRESHOLD以上の日だけ、関連ニュースRSSと
+    合わせてAIが日本語で背景を数行にまとめる（値動きが小さい日はAI呼び出し自体をスキップし、
+    無駄にクォータを消費しないようにする）。date_str単位で4hキャッシュ。
+    """
+    _theme = _THEME_NARRATIVE_DEFS.get(theme_key)
+    if not _theme:
+        return {"ok": False, "reason": "unknown theme"}
+
+    _move = _compute_theme_basket_daily_move(frozenset(_theme["basket"]))
+    if not _move.get("ok"):
+        return {"ok": False, "reason": "価格データを取得できませんでした。"}
+
+    _avg = _move["avg_chg"]
+    if abs(_avg) < _THEME_NARRATIVE_THRESHOLD:
+        return {"ok": True, "quiet": True, "avg_chg": _avg, "movers": _move["movers"]}
+
+    _headlines, _seen = [], set()
+    for _feed_name in _theme["rss"]:
+        _feed = RSS_FEEDS.get(_feed_name)
+        if not _feed:
+            continue
+        try:
+            _articles = fetch_rss_feed(_feed["url"], max_items=6, translate=False)
+        except Exception:
+            _articles = []
+        for _a in _articles:
+            _title = (_a.get("title") or "").strip()
+            if _title and _title not in _seen:
+                _seen.add(_title)
+                _headlines.append(f"[{_feed_name}] {_title}")
+    _headlines = _headlines[:25]
+
+    _movers_str = "、".join(f"{m['ticker']}({m['chg']:+.1f}%)" for m in _move["movers"])
+    _news_str = "\n".join(_headlines) if _headlines else "（関連ニュース見出しなし）"
+
+    _prompt = f"""{_theme['label']}バスケット（{', '.join(sorted(_theme['basket']))}）が本日、
+平均{_avg:+.1f}%動きました。主な値動き: {_movers_str}
+
+関連しそうなニュース見出し:
+{_news_str}
+
+この値動きの背景を、日本語3〜4文で簡潔に説明してください。ニュース見出しから読み取れる
+範囲の情報のみを使い、見出しにない具体的な数値や事実を創作しないこと。該当するニュースが
+見当たらない場合は、その旨を正直に述べること。"""
+
+    try:
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=400, temperature=0.3)
+    except Exception as e:
+        logger.warning(f"[theme_narrative] AI呼び出し失敗: {e}")
+        return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
+
+    return {
+        "ok": True, "quiet": False, "avg_chg": _avg, "movers": _move["movers"],
+        "narrative": _text, "model": _model,
+    }
+
+
 # 固定バスケットを持つ投資戦略モード → バスケット定義のマッピング。
 # ai_mix/optical_mix/dividend_stableはテーマで固定された銘柄群（トレンド選定ではない）。
 # それ以外（growth/momentum/stable_growth）は、実際に推奨ポートフォリオを生成する際と
@@ -33791,6 +33958,12 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ★ 光通信・AIインフラ vs 半導体 パフォーマンス比較
     # ===================================================
     render_optical_vs_semi()
+    st.divider()
+
+    # ===================================================
+    # ★ テーマ動向解説（AIミックス・光銘柄ミックス）
+    # ===================================================
+    render_theme_narrative()
 
     # ===================================================
     # ★ 決算ベース指数予測（SOX・光通信バスケット）
