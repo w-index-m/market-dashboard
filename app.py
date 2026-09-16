@@ -78,7 +78,13 @@ except ImportError:
     PDFPLUMBER_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
+    # google-generativeaiは2025年11月30日でサポート終了・全機能停止したため、
+    # 後継の統一SDKであるgoogle-genaiに移行した（このアプリのGemini呼び出しが
+    # 全滅していた根本原因。旧SDKは古いモデル名(1.5/2.0系)しか知らず、Google側で
+    # それらのモデル自体も後継版に切り替わって404になっていた）。
+    # 旧SDK: genai.configure() + genai.GenerativeModel(name).generate_content(...)
+    # 新SDK: genai.Client(api_key=...).models.generate_content(model=name, ...)
+    from google import genai
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
@@ -315,21 +321,12 @@ FRED_API_KEY       = get_env_var("FRED_API_KEY", "")
 SENDGRID_API_KEY    = get_env_var("SENDGRID_API_KEY", "")
 SENDGRID_FROM_EMAIL = get_env_var("SENDGRID_FROM_EMAIL", "")
 
-# Gemini設定
-if GENAI_AVAILABLE and GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        logger.info("✅ Gemini initialized: gemini-1.5-flash")
-    except Exception as e:
-        logger.warning(f"Gemini initialization failed: {e}")
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash-8b")
-            logger.info("✅ Gemini initialized (fallback): gemini-1.5-flash-8b")
-        except Exception:
-            model = None
-else:
-    model = None
+# Gemini設定。新SDK（google-genai）はモデルごとの永続オブジェクトを持たず、呼び出しの
+# たびにClient.models.generate_content(model=名前, ...)する形式のため、ここでモデルを
+# 事前に確保しておく必要がない（旧SDKはここで実際にAPIを1回呼んで動作確認していたが、
+# それはimport時に毎回無駄なネットワーク呼び出し・クォータ消費をしていただけなので廃止）。
+# model変数はGemini利用可否のフラグとしてのみ他箇所から参照される。
+model = "gemini" if (GENAI_AVAILABLE and GEMINI_API_KEY) else None
 
 # TDnet設定
 TDNET_LIST_URL = "https://www.release.tdnet.info/inbs/I_list_001_{yyyymmdd}.html"
@@ -344,13 +341,15 @@ UA = "Mozilla/5.0 (MarketDashboard/2.6)"
 # うるため、SEC向けだけ専用のUAを使う。
 SEC_UA = "MarketDashboard/2.6 (https://github.com/w-index-m/market-dashboard)"
 
-# Geminiモデル候補（2025年現在の有効なモデル名順）
+# Geminiモデル候補（2026年9月時点の有効なモデル名順。新しい順に試し、404で次へフォールバック
+# するので多少古い候補を残しておいても安全。Googleは頻繁にモデルを入れ替える点に注意）
 MODEL_FALLBACKS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
 ]
 
 # ===========================
@@ -896,18 +895,18 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
     if GENAI_AVAILABLE and GEMINI_API_KEY:
         last_error_msg = ""
         quota_exceeded = False
+        _gclient = genai.Client(api_key=GEMINI_API_KEY)
         for model_name in MODEL_FALLBACKS:
             try:
-                genai.configure(api_key=GEMINI_API_KEY)
-                gemini_model = genai.GenerativeModel(model_name)
-                response = gemini_model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
+                response = _gclient.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
                         max_output_tokens=max_output_tokens,
                         temperature=temperature,
                     )
                 )
-                if hasattr(response, "text") and response.text:
+                if response.text:
                     return response.text.strip(), f"Gemini ({model_name})"
                 else:
                     last_error_msg = f"{model_name}: 空レスポンス"
@@ -961,15 +960,15 @@ def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int,
         if provider == "gemini":
             if not (GENAI_AVAILABLE and GEMINI_API_KEY):
                 return None, None
-            genai.configure(api_key=GEMINI_API_KEY)
-            _model = genai.GenerativeModel(MODEL_FALLBACKS[0])
-            _resp = _model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            _gclient = genai.Client(api_key=GEMINI_API_KEY)
+            _resp = _gclient.models.generate_content(
+                model=MODEL_FALLBACKS[0],
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
                     max_output_tokens=max_output_tokens, temperature=temperature,
                 ),
             )
-            if hasattr(_resp, "text") and _resp.text:
+            if _resp.text:
                 return _resp.text.strip(), f"Gemini ({MODEL_FALLBACKS[0]})"
             return None, None
         if provider == "groq" and GROQ_API_KEY:
@@ -1131,18 +1130,18 @@ def _call_ai_for_trading(
     elif model_pref == "gemini":
         # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
         if GENAI_AVAILABLE and GEMINI_API_KEY:
+            _gclient = genai.Client(api_key=GEMINI_API_KEY)
             for model_name in MODEL_FALLBACKS:
                 try:
-                    genai.configure(api_key=GEMINI_API_KEY)
-                    gm = genai.GenerativeModel(model_name)
-                    resp = gm.generate_content(
-                        prompt,
-                        generation_config=genai.types.GenerationConfig(
+                    resp = _gclient.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai.types.GenerateContentConfig(
                             max_output_tokens=max_output_tokens,
                             temperature=temperature,
                         )
                     )
-                    if hasattr(resp, "text") and resp.text:
+                    if resp.text:
                         return resp.text.strip(), f"Gemini ({model_name})"
                 except Exception as e:
                     if is_gemini_quota_error(e):
@@ -1190,13 +1189,13 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
     # 含める（原因不明のまま「読み取れませんでした」とだけ表示すると、この開発環境からは
     # 実際のGemini応答を直接確認できず、以後の切り分けができないため）
     _last_err = ""
+    _gclient = genai.Client(api_key=GEMINI_API_KEY)
     for model_name in MODEL_FALLBACKS:
         try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            gm = genai.GenerativeModel(model_name)
-            resp = gm.generate_content(
-                [prompt, {"mime_type": mime_type, "data": image_bytes}],
-                generation_config=genai.types.GenerationConfig(
+            resp = _gclient.models.generate_content(
+                model=model_name,
+                contents=[prompt, genai.types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+                config=genai.types.GenerateContentConfig(
                     max_output_tokens=2000,
                     temperature=0.1,
                     response_mime_type="application/json",
@@ -1602,17 +1601,6 @@ def render_market_news_board(translate_mode: bool = True):
 # ===========================
 # TDnet関連機能
 # ===========================
-def make_gemini_model() -> Tuple[object, str]:
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY が未設定です")
-    genai.configure(api_key=GEMINI_API_KEY)
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        model.generate_content("test", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
-        return model, "gemini-1.5-flash"
-    except Exception as e:
-        raise RuntimeError(f"gemini-1.5-flash の初期化に失敗: {str(e)}")
-
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_tdnet_list_html(yyyymmdd: str) -> str:
     url = TDNET_LIST_URL.format(yyyymmdd=yyyymmdd)
@@ -33831,8 +33819,11 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         if st.checkbox(t("利用可能なGeminiモデルを表示", "Show available Gemini models"), value=False):
             if GENAI_AVAILABLE and GEMINI_API_KEY:
                 try:
-                    genai.configure(api_key=GEMINI_API_KEY)
-                    models_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                    _gclient_dbg = genai.Client(api_key=GEMINI_API_KEY)
+                    models_list = [
+                        m.name for m in _gclient_dbg.models.list()
+                        if m.supported_actions and 'generateContent' in m.supported_actions
+                    ]
                     st.write(models_list[:10])
                 except Exception as e:
                     st.error(f"{'モデル一覧取得エラー' if st.session_state.get('lang')!='en' else 'Model list error'}: {e}")
