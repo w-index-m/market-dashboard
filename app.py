@@ -720,7 +720,7 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
         try:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers, json=payload, timeout=60,
+                headers=headers, json=payload, timeout=25,
             )
             if resp.status_code == 429:
                 # レート制限: Retry-Afterヘッダーがあれば従うが、他プロバイダーへの
@@ -757,13 +757,12 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
 def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not OPENROUTER_API_KEY:
         return "⚠️ OPENROUTER_API_KEY が設定されていません", ""
+    # 以前は7モデルを順に試していたが、1モデルのタイムアウトが45sあるため
+    # 全滅時に最大5分以上かかっていた（Agent Cが極端に遅くなる原因の一つ）。
+    # 上位3モデルに絞り、他プロバイダーへのフォールバックに委ねる。
     OPENROUTER_MODELS = [
-        "meta-llama/llama-3.2-11b-vision-instruct:free",
         "meta-llama/llama-3.3-70b-instruct:free",
         "meta-llama/llama-3.1-8b-instruct:free",
-        "google/gemma-2-9b-it:free",
-        "mistralai/mistral-7b-instruct:free",
-        "deepseek/deepseek-r1:free",
         "qwen/qwen-2.5-72b-instruct:free",
     ]
     headers = {
@@ -783,7 +782,7 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
         try:
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers, json=payload, timeout=45,
+                headers=headers, json=payload, timeout=20,
             )
             if resp.status_code == 429:
                 _last_reason = f"{model_name}: 429 {resp.text[:150]}"
@@ -841,7 +840,7 @@ def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: floa
         try:
             resp = requests.post(
                 "https://integrate.api.nvidia.com/v1/chat/completions",
-                headers=headers, json=payload, timeout=90,
+                headers=headers, json=payload, timeout=45,
             )
             if resp.status_code == 429:
                 _last_reason = f"{model_name}: 429 {resp.text[:150]}"
@@ -890,7 +889,7 @@ def summarize_with_deepseek(prompt: str, max_tokens: int = 1500, temperature: fl
         try:
             resp = requests.post(
                 "https://api.deepseek.com/chat/completions",
-                headers=headers, json=payload, timeout=60,
+                headers=headers, json=payload, timeout=25,
             )
             if resp.status_code == 429:
                 _last_reason = f"{model_name}: 429 {resp.text[:150]}"
@@ -1116,23 +1115,41 @@ _PROVIDER_LABELS = {
 
 
 def _try_providers_in_order(order: list, prompt: str, max_output_tokens: int, temperature: float) -> tuple:
-    """orderで指定した順にプロバイダーを1つずつ試し、最初に成功した結果を返す。
-    全プロバイダーが失敗した場合、以前は最後の1プロバイダーの失敗理由すら捨てて
-    「⚠️ Groq/DeepSeek/NVIDIA/OpenRouter 失敗」という一言だけを返していたため、
-    実際に何が起きたか（429レート制限か・400 Bad Requestか・タイムアウトか）を
-    確認するにはサーバーログを見るしかなかった。各プロバイダーの実際の失敗理由
-    （summarize_with_*が返す"⚠️ ..."文言）を集約して返すようにする。
+    """orderで指定した各プロバイダーを並列に呼び、最初に成功したものを返す。
+    以前は順番に1つずつ試していたが、各プロバイダーの内部リトライ＋タイムアウトが
+    積み重なると（Groq最大60s×2モデル＋DeepSeek60s＋NVIDIA90s＋OpenRouter45s×7モデルの
+    ワーストケースで8分超）、Agent Cのポートフォリオ組み立てが「1回だけの呼び出し」の
+    はずなのに直列待ちで極端に遅くなっていた（実際に報告された不具合）。単発呼び出し
+    （ループ内ではない）なので複数プロバイダーへの並列発行によるクォータの重複消費は
+    許容し、レイテンシをmax(各プロバイダーの応答時間)に抑えることを優先する。
+    全プロバイダーが失敗した場合は、各プロバイダーの実際の失敗理由
+    （summarize_with_*が返す"⚠️ ..."文言）を集約して返す。
     """
-    _fail_reasons = []
-    _tried = []
-    for _key in order:
-        _text, _model = _PROVIDER_CALLERS[_key](prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if _model:
-            _suffix = f" ※{'/'.join(_tried)}失敗" if _tried else ""
-            return _text, f"{_PROVIDER_LABELS[_key]} ({_model}){_suffix}"
-        _fail_reasons.append(f"{_PROVIDER_LABELS[_key]}: {_text}")
-        _tried.append(_PROVIDER_LABELS[_key])
-    return "⚠️ 全プロバイダー失敗:\n" + "\n".join(_fail_reasons), "none"
+    import concurrent.futures as _cf
+
+    _executor = _cf.ThreadPoolExecutor(max_workers=len(order))
+    _futures = {
+        _executor.submit(_PROVIDER_CALLERS[_key], prompt, max_tokens=max_output_tokens, temperature=temperature): _key
+        for _key in order
+    }
+    _fail_reasons = {}
+    try:
+        for _fut in _cf.as_completed(_futures):
+            _key = _futures[_fut]
+            try:
+                _text, _model = _fut.result()
+            except Exception as _e:
+                _text, _model = str(_e)[:150], ""
+            if _model:
+                return _text, f"{_PROVIDER_LABELS[_key]} ({_model})"
+            _fail_reasons[_key] = _text
+    finally:
+        _executor.shutdown(wait=False, cancel_futures=True)
+    return (
+        "⚠️ 全プロバイダー失敗:\n"
+        + "\n".join(f"{_PROVIDER_LABELS[_k]}: {_fail_reasons.get(_k, '不明なエラー')}" for _k in order),
+        "none",
+    )
 
 
 def _call_ai_for_trading(
