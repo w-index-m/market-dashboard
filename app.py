@@ -1104,6 +1104,35 @@ RRG改善セクター: {_improving}
     }
 
 
+_PROVIDER_CALLERS = {
+    "groq": summarize_with_groq, "deepseek": summarize_with_deepseek,
+    "nvidia": summarize_with_nvidia, "openrouter": summarize_with_openrouter,
+}
+_PROVIDER_LABELS = {
+    "groq": "Groq", "deepseek": "DeepSeek", "nvidia": "NVIDIA", "openrouter": "OpenRouter",
+}
+
+
+def _try_providers_in_order(order: list, prompt: str, max_output_tokens: int, temperature: float) -> tuple:
+    """orderで指定した順にプロバイダーを1つずつ試し、最初に成功した結果を返す。
+    全プロバイダーが失敗した場合、以前は最後の1プロバイダーの失敗理由すら捨てて
+    「⚠️ Groq/DeepSeek/NVIDIA/OpenRouter 失敗」という一言だけを返していたため、
+    実際に何が起きたか（429レート制限か・400 Bad Requestか・タイムアウトか）を
+    確認するにはサーバーログを見るしかなかった。各プロバイダーの実際の失敗理由
+    （summarize_with_*が返す"⚠️ ..."文言）を集約して返すようにする。
+    """
+    _fail_reasons = []
+    _tried = []
+    for _key in order:
+        _text, _model = _PROVIDER_CALLERS[_key](prompt, max_tokens=max_output_tokens, temperature=temperature)
+        if _model:
+            _suffix = f" ※{'/'.join(_tried)}失敗" if _tried else ""
+            return _text, f"{_PROVIDER_LABELS[_key]} ({_model}){_suffix}"
+        _fail_reasons.append(f"{_PROVIDER_LABELS[_key]}: {_text}")
+        _tried.append(_PROVIDER_LABELS[_key])
+    return "⚠️ 全プロバイダー失敗:\n" + "\n".join(_fail_reasons), "none"
+
+
 def _call_ai_for_trading(
     prompt: str,
     model_pref: str = "auto",
@@ -1114,61 +1143,14 @@ def _call_ai_for_trading(
     model_pref: "auto" | "gemini" | "groq" | "nvidia" | "deepseek" | "openrouter"
     Returns: (text: str, model_label: str)
     """
-    if model_pref == "groq":
-        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"Groq ({model})"
-        # Groq 失敗時は DeepSeek → NVIDIA → OpenRouter へ
-        text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"DeepSeek ({model}) ※Groq失敗"
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"NVIDIA ({model}) ※Groq/DeepSeek失敗"
-        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"OpenRouter ({model}) ※Groq/DeepSeek/NVIDIA失敗") if model else ("⚠️ Groq/DeepSeek/NVIDIA/OpenRouter 失敗", "none")
-
-    elif model_pref == "nvidia":
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"NVIDIA ({model})"
-        # NVIDIA 失敗時は Groq → DeepSeek → OpenRouter へ
-        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"Groq ({model}) ※NVIDIA失敗"
-        text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"DeepSeek ({model}) ※NVIDIA/Groq失敗"
-        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"OpenRouter ({model}) ※NVIDIA/Groq/DeepSeek失敗") if model else ("⚠️ NVIDIA/Groq/DeepSeek/OpenRouter 失敗", "none")
-
-    elif model_pref == "deepseek":
-        text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"DeepSeek ({model})"
-        # DeepSeek 失敗時は Groq → NVIDIA → OpenRouter へ
-        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"Groq ({model}) ※DeepSeek失敗"
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"NVIDIA ({model}) ※DeepSeek/Groq失敗"
-        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"OpenRouter ({model}) ※DeepSeek/Groq/NVIDIA失敗") if model else ("⚠️ DeepSeek/Groq/NVIDIA/OpenRouter 失敗", "none")
-
-    elif model_pref == "openrouter":
-        text, model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"OpenRouter ({model})"
-        # OpenRouter 失敗時は Groq → DeepSeek → NVIDIA へ
-        text, model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"Groq ({model}) ※OpenRouter失敗"
-        text, model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if model:
-            return text, f"DeepSeek ({model}) ※OpenRouter/Groq失敗"
-        text, model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        return (text, f"NVIDIA ({model}) ※OpenRouter/Groq/DeepSeek失敗") if model else ("⚠️ OpenRouter/Groq/DeepSeek/NVIDIA 失敗", "none")
+    if model_pref in ("groq", "nvidia", "deepseek", "openrouter"):
+        _orders = {
+            "groq":       ["groq", "deepseek", "nvidia", "openrouter"],
+            "nvidia":     ["nvidia", "groq", "deepseek", "openrouter"],
+            "deepseek":   ["deepseek", "groq", "nvidia", "openrouter"],
+            "openrouter": ["openrouter", "groq", "deepseek", "nvidia"],
+        }
+        return _try_providers_in_order(_orders[model_pref], prompt, max_output_tokens, temperature)
 
     elif model_pref == "gemini":
         # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
