@@ -700,9 +700,12 @@ MARKETS = {
 def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not GROQ_API_KEY:
         return "⚠️ GROQ_API_KEY が設定されていません", ""
+    # llama-3.1-8b-instant / llama-3.3-70b-versatile はGroq側で2026-08-16に
+    # decommission済み（無料/開発者ティーク向け）で全リクエストが404になっていた。
+    # 後継のgpt-oss系に切り替え。
     GROQ_MODELS = [
-        "llama-3.1-8b-instant",    # TPM 6000 — 速くて制限緩い
-        "llama-3.3-70b-versatile", # TPM 1500  — 高品質だが制限厳しい（最後）
+        "openai/gpt-oss-20b",   # 高速・軽量（旧llama-3.1-8b-instant後継）
+        "openai/gpt-oss-120b",  # 高品質（旧llama-3.3-70b-versatile後継、最後）
         # "gemma2-9b-it" はGroq側で廃止（decommission）されたため削除済み（全リクエストが400 Bad Requestになっていた）
     ]
     headers = {
@@ -948,6 +951,13 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
                     continue
                 elif any(k in err_str for k in ["401", "403", "API_KEY", "invalid api key"]):
                     return (f"⚠️ Gemini認証エラー。GEMINI_API_KEY を確認してください。\n詳細: {err_str[:200]}", "none")
+                elif any(k in err_str for k in ["503", "UNAVAILABLE", "500", "overloaded", "INTERNAL"]):
+                    # 503/500はGoogle側の一時的な過負荷であり、そのモデル固有の問題ではない
+                    # ことが多い。以前はここで即break（Gemini全体を諦めて他プロバイダーへ）
+                    # していたが、MODEL_FALLBACKSの次のモデルに切り替えるだけで復帰できる
+                    # ケースが多いため、quota超過と同様に扱わずcontinueする。
+                    last_error_msg = f"{model_name}: 一時的に利用不可（{err_str[:100]}）"
+                    continue
                 else:
                     last_error_msg = f"{model_name}: {err_str[:120]}"
                     break
