@@ -928,47 +928,23 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
                     break
 
         if quota_exceeded or last_error_msg:
-            if GROQ_API_KEY:
-                result, groq_model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-                if groq_model:
-                    return result, f"Groq ({groq_model}) ※Gemini quota超過"
-            if DEEPSEEK_API_KEY:
-                result, ds_model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-                if ds_model:
-                    return result, f"DeepSeek ({ds_model}) ※Gemini/Groq失敗"
-            if NVIDIA_API_KEY:
-                result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-                if nv_model:
-                    return result, f"NVIDIA ({nv_model}) ※Gemini/Groq/DeepSeek失敗"
-            if OPENROUTER_API_KEY:
-                result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-                if or_model:
-                    return result, f"OpenRouter ({or_model}) ※Gemini/Groq/DeepSeek/NVIDIA失敗"
-            return ("⚠️ Gemini quota超過・Groq失敗・DeepSeek失敗・NVIDIA失敗・OpenRouter未設定。", "none")
+            # Gemini失敗理由を先頭に残しつつ、Groq/DeepSeek/NVIDIA/OpenRouterの
+            # 実際の失敗理由も（未設定なのか、呼んだが失敗したのかを区別して）連結する
+            # ・以前はここで「Groq失敗・DeepSeek失敗・NVIDIA失敗・OpenRouter未設定」という
+            # 固定文言を返していたが、実際に設定済みかどうかも確認せず決め打ちしていた上、
+            # 個々の本当の失敗理由（429か400かタイムアウトか）が一切分からなかった。
+            _text, _model = _try_providers_in_order(
+                ["groq", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
+            )
+            if _model != "none":
+                return _text, f"{_model} ※Gemini: {last_error_msg}"
+            return (f"⚠️ Gemini: {last_error_msg}\n{_text}", "none")
 
         return (f"⚠️ Gemini APIエラー。\n詳細: {last_error_msg}", "none")
 
-    if GROQ_API_KEY:
-        result, groq_model = summarize_with_groq(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if groq_model:
-            return result, f"Groq ({groq_model})"
-
-    if DEEPSEEK_API_KEY:
-        result, ds_model = summarize_with_deepseek(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if ds_model:
-            return result, f"DeepSeek ({ds_model})"
-
-    if NVIDIA_API_KEY:
-        result, nv_model = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if nv_model:
-            return result, f"NVIDIA ({nv_model})"
-
-    if OPENROUTER_API_KEY:
-        result, or_model = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
-        if or_model:
-            return result, f"OpenRouter ({or_model})"
-
-    return ("⚠️ AI APIが設定されていません。", "none")
+    return _try_providers_in_order(
+        ["groq", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
+    )
 
 
 _AI_CONSENSUS_PROVIDERS = ["gemini", "groq", "deepseek", "nvidia", "openrouter"]
@@ -29449,18 +29425,15 @@ def render_claude_trading_project():
                     if True:
                         _ip_r = _ip_disp.get("unified", _ip_disp.get("etf", _ip_disp.get("individual", {})))
                         if _ip_r.get("error") or not _ip_r.get("portfolio"):
+                            # 以前は"quota"/"Groq失敗"という部分文字列だけで判定して、実際の
+                            # 失敗理由を「Gemini quota超過・Groq過負荷」という固定文言で
+                            # 上書きしていた（_try_providers_in_order側で各プロバイダーの
+                            # 実際の失敗理由を返すようにした今、ここで握りつぶすと元も子もない）。
+                            # 実際のエラー文をそのまま表示する。
                             _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
-                            if "quota" in _ip_err_msg or "Groq失敗" in _ip_err_msg:
-                                st.error("⚠️ AI APIが応答しませんでした（Gemini quota超過・Groq過負荷）")
-                                st.info(
-                                    "**対処法:**\n"
-                                    "1. 少し時間をおいて「🔄 再生成（キャッシュ無視）」で再試行\n"
-                                    "2. AIモデルを「Groq」に明示指定して試す\n"
-                                    "3. Streamlit Cloud の secrets.toml に `OPENROUTER_API_KEY` を追加すると第3候補が使えます"
-                                )
-                            else:
-                                st.error(f"⚠️ {_ip_err_msg}")
-                                st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
+                            st.error("⚠️ AIポートフォリオ生成に失敗しました")
+                            st.code(_ip_err_msg, language=None)
+                            st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
                             if _ip_r.get("model") and _ip_r["model"] != "none":
                                 st.caption(f"モデル: {_ip_r['model']}")
                             continue
