@@ -26248,7 +26248,7 @@ def _run_stock_agents_parallel(
     ticker_args: list,   # [(ticker, ret_3m, ret_6m, ret_1y, price), ...]
     date_str: str,
     macro_stance: str,
-    max_workers: int = 3,
+    max_workers: int = 8,
 ) -> dict:
     """Agent B を最大 max_workers 並列で実行。キャッシュ済みは即時返却。"""
     import concurrent.futures as _cf2
@@ -29309,7 +29309,7 @@ def render_claude_trading_project():
                     _ip_agent_b = _run_stock_agents_parallel(
                         _ip_top_args, _ip_today,
                         _ip_agent_a.get("stance", "中立"),
-                        max_workers=3,
+                        max_workers=8,
                     )
                 _ip_b_count  = len(_ip_agent_b)
                 _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
