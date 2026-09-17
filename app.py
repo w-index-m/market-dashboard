@@ -29624,9 +29624,9 @@ def render_claude_trading_project():
 
                         # ポートフォリオテーブル
                         st.markdown(
-                            '<div style="font-size:10px;color:#64748b;background:#f8fafc;'
-                            'border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px">'
-                            '📖 <b>指標の見方</b>　'
+                            '<div style="font-size:10px;color:#94a3b8;background:#1e293b;'
+                            'border:1px solid #334155;border-radius:6px;padding:6px 10px;margin-bottom:8px">'
+                            '📖 <b style="color:#e2e8f0">指標の見方</b>　'
                             '<b>3m/6m/1y</b>: 過去3ヶ月・6ヶ月・1年の株価リターン（騰落率）　'
                             '<b>ボラ</b>: 年率ボラティリティ（値動きの荒さ、低いほど安定）　'
                             '<b>SR</b>: シャープレシオ（リスク1%あたりのリターン、1.0以上が優秀）　'
@@ -29637,7 +29637,7 @@ def render_claude_trading_project():
                         )
                         _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
                         for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "投資テーマ（▼で根拠詳細）"]):
-                            _h.markdown(f'<div style="font-size:11px;color:#1e3a5f;font-weight:700">{_lbl}</div>',
+                            _h.markdown(f'<div style="font-size:11px;color:#94a3b8;font-weight:700">{_lbl}</div>',
                                         unsafe_allow_html=True)
 
                         _ip_total_actual = 0  # 合計実際投資額の集計用
@@ -29653,7 +29653,7 @@ def render_claude_trading_project():
                             _amt    = int(_ip_bv * _alloc / 100)
                             _rat    = _item.get("rationale", "")
                             _bar_w  = min(int(_alloc), 100)
-                            _a_c    = ("#1d4ed8" if _alloc >= 20 else "#4f46e5" if _alloc >= 10 else "#1e3a5f")
+                            _a_c    = ("#60a5fa" if _alloc >= 20 else "#a78bfa" if _alloc >= 10 else "#94a3b8")
                             _is_jp  = _tk.endswith(".T")
                             _tdat   = _px.get(_tk) or {}
                             _price  = _tdat.get("price") if isinstance(_tdat, dict) else None
@@ -29767,24 +29767,24 @@ def render_claude_trading_project():
                             _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
                                              unsafe_allow_html=True)
                             _row[1].markdown(
-                                f'<div style="font-size:12px;font-weight:700;color:#0f172a">{_tk}{_mom_badge}</div>'
-                                f'<div style="font-size:10px;color:#334155">{_nm}</div>',
+                                f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}{_mom_badge}</div>'
+                                f'<div style="font-size:10px;color:#94a3b8">{_nm}</div>',
                                 unsafe_allow_html=True,
                             )
                             _row[2].markdown(
                                 f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
-                                f'<div style="background:#cbd5e1;border-radius:3px;height:4px;margin-top:3px">'
+                                f'<div style="background:#334155;border-radius:3px;height:4px;margin-top:3px">'
                                 f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
                                 unsafe_allow_html=True,
                             )
                             _row[3].markdown(
-                                f'<div style="font-size:12px;color:#0f172a;font-weight:700">{_shares_str}</div>'
-                                f'<div style="font-size:10px;color:#334155">{_price_str}</div>'
-                                f'<div style="font-size:10px;color:#1e3a5f;font-weight:600">≒¥{_actual_cost:,}</div>',
+                                f'<div style="font-size:12px;color:#e2e8f0;font-weight:700">{_shares_str}</div>'
+                                f'<div style="font-size:10px;color:#94a3b8">{_price_str}</div>'
+                                f'<div style="font-size:10px;color:#93c5fd;font-weight:600">≒¥{_actual_cost:,}</div>',
                                 unsafe_allow_html=True,
                             )
                             _row[4].markdown(
-                                f'<div style="font-size:11px;color:#1e3a5f;font-weight:600">{_rat}</div>'
+                                f'<div style="font-size:11px;color:#e2e8f0;font-weight:600">{_rat}</div>'
                                 + _stats_html,
                                 unsafe_allow_html=True,
                             )
@@ -29815,31 +29815,31 @@ def render_claude_trading_project():
                                     _col_m, _col_d = st.columns(2)
                                     if _merits:
                                         _col_m.markdown(
-                                            '<div style="font-size:11px;font-weight:700;color:#16a34a;margin-bottom:4px">✅ メリット</div>'
+                                            '<div style="font-size:11px;font-weight:700;color:#4ade80;margin-bottom:4px">✅ メリット</div>'
                                             + "".join(
-                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #f0fdf4">'
-                                                f'<span style="color:#15803d;font-weight:700">{_m.get("point","")}</span>'
-                                                f'<br><span style="color:#374151">{_m.get("detail","")}</span></div>'
+                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
+                                                f'<span style="color:#86efac;font-weight:700">{_m.get("point","")}</span>'
+                                                f'<br><span style="color:#94a3b8">{_m.get("detail","")}</span></div>'
                                                 for _m in _merits
                                             ),
                                             unsafe_allow_html=True,
                                         )
                                     if _demerits:
                                         _col_d.markdown(
-                                            '<div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:4px">⚠️ デメリット</div>'
+                                            '<div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:4px">⚠️ デメリット</div>'
                                             + "".join(
-                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #fef2f2">'
-                                                f'<span style="color:#b91c1c;font-weight:700">{_d.get("point","")}</span>'
-                                                f'<br><span style="color:#374151">{_d.get("detail","")}</span></div>'
+                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
+                                                f'<span style="color:#fca5a5;font-weight:700">{_d.get("point","")}</span>'
+                                                f'<br><span style="color:#94a3b8">{_d.get("detail","")}</span></div>'
                                                 for _d in _demerits
                                             ),
                                             unsafe_allow_html=True,
                                         )
                                     if _conc:
                                         st.markdown(
-                                            f'<div style="font-size:11px;background:#f0f9ff;border-left:3px solid #0284c7;'
-                                            f'padding:8px 10px;margin-top:8px;border-radius:4px;color:#0c4a6e">'
-                                            f'💡 <b>結論:</b> {_conc}</div>',
+                                            f'<div style="font-size:11px;background:#0f2027;border-left:3px solid #0284c7;'
+                                            f'padding:8px 10px;margin-top:8px;border-radius:4px;color:#e2e8f0">'
+                                            f'💡 <b style="color:#38bdf8">結論:</b> {_conc}</div>',
                                             unsafe_allow_html=True,
                                         )
 
@@ -29864,9 +29864,9 @@ def render_claude_trading_project():
                                 _fe_cost = int(_fe_units * _fe_px)
                                 _ip_total_actual += _fe_cost
                                 st.markdown(
-                                    f'<div style="background:#f0fdf4;border:1px dashed #86efac;'
+                                    f'<div style="background:#0f2418;border:1px dashed #4ade80;'
                                     f'border-radius:6px;padding:6px 10px;margin:4px 0;'
-                                    f'font-size:11px;color:#166534">'
+                                    f'font-size:11px;color:#86efac">'
                                     f'🔧 <b>余剰充填枠（自動）</b>　{_fe_fl} {_fe_tk} {_fe_nm}　'
                                     f'{_fe_units:,}口　¥{_fe_px:,.0f}/口　≒¥{_fe_cost:,}'
                                     f'<span style="color:#4ade80;margin-left:8px">残余剰: ¥{_fill_gap - _fe_cost:,}</span>'
