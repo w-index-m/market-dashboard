@@ -29474,7 +29474,7 @@ def render_claude_trading_project():
                             # 実際のエラー文をそのまま表示する。
                             _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
                             st.error("⚠️ AIポートフォリオ生成に失敗しました")
-                            st.code(_ip_err_msg, language=None)
+                            st.code(_ip_err_msg, language=None, wrap_lines=True)
                             st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
                             if _ip_r.get("model") and _ip_r["model"] != "none":
                                 st.caption(f"モデル: {_ip_r['model']}")
