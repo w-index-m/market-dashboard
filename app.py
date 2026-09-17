@@ -717,8 +717,14 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
+            # gpt-oss系は推論(reasoning)モデルで、デフォルトのreasoning_effort="medium"だと
+            # 思考トークンだけでmax_tokens予算を食い尽くし、finish_reason="length"のまま
+            # message.contentが空で返ってくることがある（実際に発生: 空レスポンス）。
+            # reasoning_effort="low"で思考トークン消費を抑え、かつmax_tokensにも
+            # 余裕を持たせることで最終回答が確実に入るようにする。
+            "max_tokens": max(max_tokens, 4096) if "gpt-oss" in model_name else max_tokens,
             "temperature": temperature,
+            **({"reasoning_effort": "low"} if "gpt-oss" in model_name else {}),
         }
         try:
             resp = requests.post(
