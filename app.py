@@ -28510,7 +28510,8 @@ def render_claude_trading_project():
         if not all_options:
             if not _trades_err:
                 st.info("保有銘柄がありません。「取引記録入力」タブから取引を登録してください。")
-        else:
+
+        if all_options:
             # ── 銘柄データキャッシュ状態バー ────────────────────────────────
             _today_str  = datetime.now(JST).strftime("%Y-%m-%d")
             _cache_stat = _get_stock_cache_status(list(open_pos.keys()))
@@ -28594,6 +28595,8 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
+
+        if all_options:
             # ── アロケーション試算 ───────────────────────────────────────
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
@@ -28985,6 +28988,8 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
+
+        if all_options:
             # ── 総合AI推奨分析（Market Dashboard + 全銘柄IR）─────────────────
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#a78bfa;'
@@ -29286,839 +29291,844 @@ def render_claude_trading_project():
                 unsafe_allow_html=True,
             )
 
-            # ── 新規投資推奨ポートフォリオ ──────────────────────────
-            st.markdown(
-                '<div style="font-size:13px;font-weight:600;color:#34d399;'
-                'margin:4px 0 8px">── 💼 新規投資推奨ポートフォリオ（AI） ──</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="background:#0a1f18;border:1px solid #065f46;border-radius:8px;'
-                'padding:8px 14px;margin-bottom:10px;font-size:12px;color:#6ee7b7">'
-                '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を1ポートフォリオで提案します。'
-                'Agent A（マクロ分析）→ Agent B（銘柄分析）→ Agent C（組み立て）の3段階で生成。'
-                '</div>',
-                unsafe_allow_html=True,
-            )
 
-            # コントロール行（リスクプロファイル選択は廃止 — 長期育成/モメンタム/AIミックス/
-            # 光銘柄ミックス/配当安定/安定成長の6モードで既にリスク志向が分かれているため常に「balanced」評価で統一）
-            _ip_c1, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.2, 1.2, 1.2])
-            _ip_budget = _ip_c1.radio(
-                "投資予算", ["100万円", "500万円"],
-                key="ip_budget", horizontal=True,
-            )
-            _ip_etf_ok = _ip_c5.checkbox("ETF可（日本ETF含む）", value=True, key="ip_etf_ok")
+        # ── 新規投資推奨ポートフォリオ ──────────────────────────
+        st.markdown(
+            '<div style="font-size:13px;font-weight:600;color:#34d399;'
+            'margin:4px 0 8px">── 💼 新規投資推奨ポートフォリオ（AI） ──</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:#0a1f18;border:1px solid #065f46;border-radius:8px;'
+            'padding:8px 14px;margin-bottom:10px;font-size:12px;color:#6ee7b7">'
+            '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を1ポートフォリオで提案します。'
+            'Agent A（マクロ分析）→ Agent B（銘柄分析）→ Agent C（組み立て）の3段階で生成。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-            # 予算が変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
-            _ip_cur_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
-            if (st.session_state.get("_ip_budget_val") is not None and
-                    st.session_state.get("_ip_budget_val") != _ip_cur_budget_val):
-                st.session_state.pop("_ip_results", None)
-                st.session_state["_ip_budget_val"] = _ip_cur_budget_val
-            st.session_state["_ip_risk_key"] = "balanced"
-            _ip_model_opts = {
-                "🔄 自動": "auto", "🟡 Gemini": "gemini", "⚡ Groq": "groq",
-                "🐋 DeepSeek": "deepseek", "💚 NVIDIA": "nvidia", "🌐 OpenRouter": "openrouter",
-            }
-            _ip_model_sel = _ip_c3.selectbox(
-                "AIモデル", list(_ip_model_opts.keys()),
-                key="ip_model_sel", label_visibility="visible",
-            )
-            _ip_force = _ip_c4.checkbox(
-                "🔄 再生成（キャッシュ無視）", key="ip_force_regen",
-            )
+        # コントロール行（リスクプロファイル選択は廃止 — 長期育成/モメンタム/AIミックス/
+        # 光銘柄ミックス/配当安定/安定成長の6モードで既にリスク志向が分かれているため常に「balanced」評価で統一）
+        _ip_c1, _ip_c3, _ip_c4, _ip_c5 = st.columns([1.4, 1.2, 1.2, 1.2])
+        _ip_budget = _ip_c1.radio(
+            "投資予算", ["100万円", "500万円"],
+            key="ip_budget", horizontal=True,
+        )
+        _ip_etf_ok = _ip_c5.checkbox("ETF可（日本ETF含む）", value=True, key="ip_etf_ok")
 
-            if st.button("💼 推奨ポートフォリオを生成", type="primary", key="btn_invest_portfolio"):
-                _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
-                _ip_risk_key    = "balanced"
-                _ip_model_pref  = _ip_model_opts[_ip_model_sel]
-                _ip_today       = datetime.now(JST).strftime("%Y-%m-%d")
-                _ip_holdings    = list(open_pos.keys()) if open_pos else []
-                _ip_mktctx      = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
-                _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
-                _ip_model_type  = "etf" if st.session_state.get("ip_etf_ok", True) else "individual"
-                # 候補銘柄の実株価モメンタムデータを当日キャッシュで取得
-                _ip_cand_perf   = _fetch_candidate_performance(_ip_today, _ip_trade_mode)
-                # キャッシュキーにモード・ETF可否を含める
-                _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}_{_ip_model_type}"
+        # 予算が変わったら古い結果をクリア（古いキャッシュが表示されるのを防ぐ）
+        _ip_cur_budget_val = 1_000_000 if "100" in _ip_budget else 5_000_000
+        if (st.session_state.get("_ip_budget_val") is not None and
+                st.session_state.get("_ip_budget_val") != _ip_cur_budget_val):
+            st.session_state.pop("_ip_results", None)
+            st.session_state["_ip_budget_val"] = _ip_cur_budget_val
+        st.session_state["_ip_risk_key"] = "balanced"
+        _ip_model_opts = {
+            "🔄 自動": "auto", "🟡 Gemini": "gemini", "⚡ Groq": "groq",
+            "🐋 DeepSeek": "deepseek", "💚 NVIDIA": "nvidia", "🌐 OpenRouter": "openrouter",
+        }
+        _ip_model_sel = _ip_c3.selectbox(
+            "AIモデル", list(_ip_model_opts.keys()),
+            key="ip_model_sel", label_visibility="visible",
+        )
+        _ip_force = _ip_c4.checkbox(
+            "🔄 再生成（キャッシュ無視）", key="ip_force_regen",
+        )
 
-                _ip_results = {}
-                # ── Agent A: マクロ分析（6hキャッシュ）──────────────────────
-                # 進捗はst.spinnerで表示（プレースホルダーのポーリング更新はDOM競合エラーの
-                # 原因になるため使わない。バックグラウンドスレッドも不要になるので撤去）
-                with st.spinner("🧠 Agent A: マクロ市場環境を分析中…"):
-                    _ip_a_ctx = _ip_mktctx or {}
-                    _ip_agent_a = _analyze_macro_agent(
-                        _ip_today,
-                        float(_ip_a_ctx.get("fg_score", 50) or 50),
-                        str(_ip_a_ctx.get("fg_label", "")),
-                        int(_ip_a_ctx.get("crash_risk_score", 0)),
-                        str(_ip_a_ctx.get("crash_risk_label", "🟢 低リスク")),
-                        float(_ip_a_ctx.get("vix_val", 0)),
-                        float(_ip_a_ctx.get("naaim_exp", 0)),
-                        " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明",
-                        " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明",
-                        str(_ip_a_ctx.get("nikkei_pred_label", "")),
-                        str(_ip_a_ctx.get("us_pred_label", "")),
-                    )
+        if st.button("💼 推奨ポートフォリオを生成", type="primary", key="btn_invest_portfolio"):
+            _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
+            _ip_risk_key    = "balanced"
+            _ip_model_pref  = _ip_model_opts[_ip_model_sel]
+            _ip_today       = datetime.now(JST).strftime("%Y-%m-%d")
+            _ip_holdings    = list(open_pos.keys()) if open_pos else []
+            _ip_mktctx      = st.session_state.get("_alloc_mktctx") or _fetch_market_context_for_trading()
+            _ip_trade_mode  = st.session_state.get("trading_mode", "growth")
+            _ip_model_type  = "etf" if st.session_state.get("ip_etf_ok", True) else "individual"
+            # 候補銘柄の実株価モメンタムデータを当日キャッシュで取得
+            _ip_cand_perf   = _fetch_candidate_performance(_ip_today, _ip_trade_mode)
+            # キャッシュキーにモード・ETF可否を含める
+            _ip_cache_risk  = f"{_ip_risk_key}_{_ip_trade_mode}_{_ip_model_type}"
 
-                # ── Agent B: 上位候補銘柄を並列分析（12hキャッシュ）──────────
-                _ip_top_args = _get_top_candidate_args(_ip_cand_perf, _ip_trade_mode, _ip_budget_val, n=15)
-                with st.spinner(f"🔬 Agent B: {len(_ip_top_args)}銘柄を並列分析中…（キャッシュ済みは即時）"):
-                    _ip_agent_b = _run_stock_agents_parallel(
-                        _ip_top_args, _ip_today,
-                        _ip_agent_a.get("stance", "中立"),
-                        max_workers=8,
-                    )
-                _ip_b_count  = len(_ip_agent_b)
-                _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
-                _ip_b_flagged = [v.get("ticker", "") for v in _ip_agent_b.values() if not v.get("_verified", True)]
-                logger.info(f"[trading] Agent B完了: {_ip_b_count}銘柄 via {_ip_b_model}")
-                if _ip_b_flagged:
-                    logger.info(f"[trading] 検証NGで選定除外: {_ip_b_flagged}")
-                    st.session_state["_ip_last_flagged"] = _ip_b_flagged
-                else:
-                    st.session_state["_ip_last_flagged"] = []
-
-                # ── Agent C: ポートフォリオ組み立て（1回のみ）────────────
-                _cached_unified = None
-                if not _ip_force:
-                    _cached_unified = _load_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk)
-                if _cached_unified:
-                    _ip_results["unified"] = _cached_unified
-                else:
-                    with st.spinner("🤖 Agent C: ポートフォリオを組み立て中…（Gemini→Groq→NVIDIA→OpenRouterの順で試行）"):
-                        try:
-                            _r = _generate_investment_portfolio_rec(
-                                _ip_budget_val, _ip_model_type, _ip_risk_key,
-                                _ip_mktctx, _ip_holdings, _ip_model_pref,
-                                trading_mode=_ip_trade_mode,
-                                candidate_perf=_ip_cand_perf,
-                                agent_a=_ip_agent_a,
-                                agent_b=_ip_agent_b,
-                            )
-                        except Exception as _wex:
-                            logger.error(f"[trading] portfolio生成失敗: {_wex}", exc_info=True)
-                            _r = {"error": f"内部エラー: {str(_wex)[:200]}", "portfolio": None, "model": ""}
-                    if not _r.get("error") and _r.get("portfolio"):
-                        _save_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk,
-                                               _r, _r.get("model", ""))
-                    _ip_results["unified"] = _r
-
-                st.session_state["_ip_results"]     = _ip_results
-                st.session_state["_ip_budget_val"]  = _ip_budget_val
-                st.session_state["_ip_risk_key"]    = _ip_risk_key
-
-            # 結果表示
-            _ip_disp = st.session_state.get("_ip_results", {})
-            if _ip_disp:
-                _ip_bv  = st.session_state.get("_ip_budget_val", 1_000_000)
-
-                # ── Agent B検証結果（実データと矛盾する分析根拠を除外できているか）──
-                _ip_flagged = st.session_state.get("_ip_last_flagged", [])
-                if _ip_flagged:
-                    st.caption(
-                        f"🔍 検証エージェント: {len(_ip_flagged)}銘柄の分析根拠が実データと矛盾していたため選定から除外 "
-                        f"（{', '.join(_ip_flagged)}）"
-                    )
-                # ── Agent C検証結果（渡していないはずの財務指標を捏造していないか）──
-                _ip_fab_flagged = (_ip_disp.get("unified") or {}).get("_fabrication_flagged_tickers", [])
-                if _ip_fab_flagged:
-                    st.caption(
-                        f"⚠️ {len(_ip_fab_flagged)}銘柄の投資根拠に、渡していないはずの財務指標（ROIC/ROE/PER等）の"
-                        f"具体的な数値が含まれています（{', '.join(_ip_fab_flagged)}）。数値の正確性は未検証のため、"
-                        "そのまま投資判断に使わないでください。"
-                    )
-
-                # ── クラッシュリスクメーター ──
-                _crs_ctx   = st.session_state.get("_alloc_mktctx") or {}
-                _crs_score = _crs_ctx.get("crash_risk_score", 0)
-                _crs_label = _crs_ctx.get("crash_risk_label", "🟢 低リスク")
-                _crs_sigs  = _crs_ctx.get("crash_signals", [])
-                _crs_cash  = _crs_ctx.get("cash_reserve_pct", 0)
-                _crs_vix   = _crs_ctx.get("vix_val", 0)
-                _crs_naaim = _crs_ctx.get("naaim_exp", 0)
-                _crs_bar_w = int(_crs_score / 10 * 100)
-                _crs_bar_c = ("#16a34a" if _crs_score <= 2 else
-                              "#ca8a04" if _crs_score <= 4 else
-                              "#ea580c" if _crs_score <= 6 else
-                              "#dc2626" if _crs_score <= 8 else "#7f1d1d")
-                _crs_bg    = ("#0f172a" if _crs_score <= 4 else
-                              "#1c0d00" if _crs_score <= 6 else "#1a0000")
-                _crs_sig_str = "　".join(_crs_sigs) if _crs_sigs else "シグナルなし"
-                st.markdown(
-                    f'<div style="background:{_crs_bg};border:1px solid {_crs_bar_c};'
-                    f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
-                    f'<div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">'
-                    f'<div style="font-size:13px;font-weight:700;color:{_crs_bar_c}">'
-                    f'📊 クラッシュリスク: {_crs_label}　スコア {_crs_score}/10</div>'
-                    f'<div style="font-size:11px;color:#94a3b8">'
-                    f'VIX: {_crs_vix:.1f}　NAAIM: {_crs_naaim:.0f}%　'
-                    f'推奨キャッシュ: <b style="color:{_crs_bar_c}">{_crs_cash}%</b></div>'
-                    f'</div>'
-                    f'<div style="background:#1e293b;border-radius:4px;height:6px;margin-bottom:6px">'
-                    f'<div style="background:{_crs_bar_c};width:{_crs_bar_w}%;height:6px;border-radius:4px"></div></div>'
-                    f'<div style="font-size:10px;color:#94a3b8">検出シグナル: {_crs_sig_str}</div>'
-                    + ('<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
-                       '⚠️ 過去の急落前兆例: リーマン前（NAAIM90%超・VIX上昇）/'
-                       'ITバブル前（F&G80超・高NAAIM）/コロナ前（VIX急騰・F&G急落）'
-                       '</div>' if _crs_score >= 5 else '')
-                    + '</div>',
-                    unsafe_allow_html=True,
+            _ip_results = {}
+            # ── Agent A: マクロ分析（6hキャッシュ）──────────────────────
+            # 進捗はst.spinnerで表示（プレースホルダーのポーリング更新はDOM競合エラーの
+            # 原因になるため使わない。バックグラウンドスレッドも不要になるので撤去）
+            with st.spinner("🧠 Agent A: マクロ市場環境を分析中…"):
+                _ip_a_ctx = _ip_mktctx or {}
+                _ip_agent_a = _analyze_macro_agent(
+                    _ip_today,
+                    float(_ip_a_ctx.get("fg_score", 50) or 50),
+                    str(_ip_a_ctx.get("fg_label", "")),
+                    int(_ip_a_ctx.get("crash_risk_score", 0)),
+                    str(_ip_a_ctx.get("crash_risk_label", "🟢 低リスク")),
+                    float(_ip_a_ctx.get("vix_val", 0)),
+                    float(_ip_a_ctx.get("naaim_exp", 0)),
+                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Leading", [])[:4]) or "不明",
+                    " / ".join((_ip_a_ctx.get("sector_quad") or {}).get("Improving", [])[:3]) or "不明",
+                    str(_ip_a_ctx.get("nikkei_pred_label", "")),
+                    str(_ip_a_ctx.get("us_pred_label", "")),
                 )
 
-                for _ in [None]:  # 旧タブ統合 — unified キーで1ポートフォリオ表示（continue早期脱出のため1回ループ）
-                    _tab_obj = st  # st に直接描画
-                    if True:
-                        _ip_r = _ip_disp.get("unified", _ip_disp.get("etf", _ip_disp.get("individual", {})))
-                        if _ip_r.get("error") or not _ip_r.get("portfolio"):
-                            # 以前は"quota"/"Groq失敗"という部分文字列だけで判定して、実際の
-                            # 失敗理由を「Gemini quota超過・Groq過負荷」という固定文言で
-                            # 上書きしていた（_try_providers_in_order側で各プロバイダーの
-                            # 実際の失敗理由を返すようにした今、ここで握りつぶすと元も子もない）。
-                            # 実際のエラー文をそのまま表示する。
-                            _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
-                            st.error("⚠️ AIポートフォリオ生成に失敗しました")
-                            st.code(_ip_err_msg, language=None, wrap_lines=True)
-                            st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
-                            if _ip_r.get("model") and _ip_r["model"] != "none":
-                                st.caption(f"モデル: {_ip_r['model']}")
+            # ── Agent B: 上位候補銘柄を並列分析（12hキャッシュ）──────────
+            _ip_top_args = _get_top_candidate_args(_ip_cand_perf, _ip_trade_mode, _ip_budget_val, n=15)
+            with st.spinner(f"🔬 Agent B: {len(_ip_top_args)}銘柄を並列分析中…（キャッシュ済みは即時）"):
+                _ip_agent_b = _run_stock_agents_parallel(
+                    _ip_top_args, _ip_today,
+                    _ip_agent_a.get("stance", "中立"),
+                    max_workers=8,
+                )
+            _ip_b_count  = len(_ip_agent_b)
+            _ip_b_model  = next((v.get("_model", "") for v in _ip_agent_b.values() if v.get("_model") and v.get("_model") != "none"), "キャッシュ")
+            _ip_b_flagged = [v.get("ticker", "") for v in _ip_agent_b.values() if not v.get("_verified", True)]
+            logger.info(f"[trading] Agent B完了: {_ip_b_count}銘柄 via {_ip_b_model}")
+            if _ip_b_flagged:
+                logger.info(f"[trading] 検証NGで選定除外: {_ip_b_flagged}")
+                st.session_state["_ip_last_flagged"] = _ip_b_flagged
+            else:
+                st.session_state["_ip_last_flagged"] = []
+
+            # ── Agent C: ポートフォリオ組み立て（1回のみ）────────────
+            _cached_unified = None
+            if not _ip_force:
+                _cached_unified = _load_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk)
+            if _cached_unified:
+                _ip_results["unified"] = _cached_unified
+            else:
+                with st.spinner("🤖 Agent C: ポートフォリオを組み立て中…（Gemini→Groq→NVIDIA→OpenRouterの順で試行）"):
+                    try:
+                        _r = _generate_investment_portfolio_rec(
+                            _ip_budget_val, _ip_model_type, _ip_risk_key,
+                            _ip_mktctx, _ip_holdings, _ip_model_pref,
+                            trading_mode=_ip_trade_mode,
+                            candidate_perf=_ip_cand_perf,
+                            agent_a=_ip_agent_a,
+                            agent_b=_ip_agent_b,
+                        )
+                    except Exception as _wex:
+                        logger.error(f"[trading] portfolio生成失敗: {_wex}", exc_info=True)
+                        _r = {"error": f"内部エラー: {str(_wex)[:200]}", "portfolio": None, "model": ""}
+                if not _r.get("error") and _r.get("portfolio"):
+                    _save_invest_rec_cache(_ip_today, _ip_budget_val, "unified", _ip_cache_risk,
+                                           _r, _r.get("model", ""))
+                _ip_results["unified"] = _r
+
+            st.session_state["_ip_results"]     = _ip_results
+            st.session_state["_ip_budget_val"]  = _ip_budget_val
+            st.session_state["_ip_risk_key"]    = _ip_risk_key
+
+        # 結果表示
+        _ip_disp = st.session_state.get("_ip_results", {})
+        if _ip_disp:
+            _ip_bv  = st.session_state.get("_ip_budget_val", 1_000_000)
+
+            # ── Agent B検証結果（実データと矛盾する分析根拠を除外できているか）──
+            _ip_flagged = st.session_state.get("_ip_last_flagged", [])
+            if _ip_flagged:
+                st.caption(
+                    f"🔍 検証エージェント: {len(_ip_flagged)}銘柄の分析根拠が実データと矛盾していたため選定から除外 "
+                    f"（{', '.join(_ip_flagged)}）"
+                )
+            # ── Agent C検証結果（渡していないはずの財務指標を捏造していないか）──
+            _ip_fab_flagged = (_ip_disp.get("unified") or {}).get("_fabrication_flagged_tickers", [])
+            if _ip_fab_flagged:
+                st.caption(
+                    f"⚠️ {len(_ip_fab_flagged)}銘柄の投資根拠に、渡していないはずの財務指標（ROIC/ROE/PER等）の"
+                    f"具体的な数値が含まれています（{', '.join(_ip_fab_flagged)}）。数値の正確性は未検証のため、"
+                    "そのまま投資判断に使わないでください。"
+                )
+
+            # ── クラッシュリスクメーター ──
+            _crs_ctx   = st.session_state.get("_alloc_mktctx") or {}
+            _crs_score = _crs_ctx.get("crash_risk_score", 0)
+            _crs_label = _crs_ctx.get("crash_risk_label", "🟢 低リスク")
+            _crs_sigs  = _crs_ctx.get("crash_signals", [])
+            _crs_cash  = _crs_ctx.get("cash_reserve_pct", 0)
+            _crs_vix   = _crs_ctx.get("vix_val", 0)
+            _crs_naaim = _crs_ctx.get("naaim_exp", 0)
+            _crs_bar_w = int(_crs_score / 10 * 100)
+            _crs_bar_c = ("#16a34a" if _crs_score <= 2 else
+                          "#ca8a04" if _crs_score <= 4 else
+                          "#ea580c" if _crs_score <= 6 else
+                          "#dc2626" if _crs_score <= 8 else "#7f1d1d")
+            _crs_bg    = ("#0f172a" if _crs_score <= 4 else
+                          "#1c0d00" if _crs_score <= 6 else "#1a0000")
+            _crs_sig_str = "　".join(_crs_sigs) if _crs_sigs else "シグナルなし"
+            st.markdown(
+                f'<div style="background:{_crs_bg};border:1px solid {_crs_bar_c};'
+                f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
+                f'<div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">'
+                f'<div style="font-size:13px;font-weight:700;color:{_crs_bar_c}">'
+                f'📊 クラッシュリスク: {_crs_label}　スコア {_crs_score}/10</div>'
+                f'<div style="font-size:11px;color:#94a3b8">'
+                f'VIX: {_crs_vix:.1f}　NAAIM: {_crs_naaim:.0f}%　'
+                f'推奨キャッシュ: <b style="color:{_crs_bar_c}">{_crs_cash}%</b></div>'
+                f'</div>'
+                f'<div style="background:#1e293b;border-radius:4px;height:6px;margin-bottom:6px">'
+                f'<div style="background:{_crs_bar_c};width:{_crs_bar_w}%;height:6px;border-radius:4px"></div></div>'
+                f'<div style="font-size:10px;color:#94a3b8">検出シグナル: {_crs_sig_str}</div>'
+                + ('<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
+                   '⚠️ 過去の急落前兆例: リーマン前（NAAIM90%超・VIX上昇）/'
+                   'ITバブル前（F&G80超・高NAAIM）/コロナ前（VIX急騰・F&G急落）'
+                   '</div>' if _crs_score >= 5 else '')
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+            for _ in [None]:  # 旧タブ統合 — unified キーで1ポートフォリオ表示（continue早期脱出のため1回ループ）
+                _tab_obj = st  # st に直接描画
+                if True:
+                    _ip_r = _ip_disp.get("unified", _ip_disp.get("etf", _ip_disp.get("individual", {})))
+                    if _ip_r.get("error") or not _ip_r.get("portfolio"):
+                        # 以前は"quota"/"Groq失敗"という部分文字列だけで判定して、実際の
+                        # 失敗理由を「Gemini quota超過・Groq過負荷」という固定文言で
+                        # 上書きしていた（_try_providers_in_order側で各プロバイダーの
+                        # 実際の失敗理由を返すようにした今、ここで握りつぶすと元も子もない）。
+                        # 実際のエラー文をそのまま表示する。
+                        _ip_err_msg = _ip_r.get("error", "生成失敗（原因不明）")
+                        st.error("⚠️ AIポートフォリオ生成に失敗しました")
+                        st.code(_ip_err_msg, language=None, wrap_lines=True)
+                        st.info("「🔄 再生成（キャッシュ無視）」にチェックして再度ボタンを押してください。")
+                        if _ip_r.get("model") and _ip_r["model"] != "none":
+                            st.caption(f"モデル: {_ip_r['model']}")
+                        continue
+
+                    # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
+                    _ip_pf  = sorted(_ip_r.get("portfolio", []),
+                                      key=lambda _it: float(_it.get("allocation", 0) or 0), reverse=True)
+                    _ip_met = _ip_r.get("metrics", {})
+                    _ai_mdl = _ip_r.get("model", "")
+
+                    # F&G急騰警告バナー（急落リスクがある場合に表示）
+                    _disp_mctx   = st.session_state.get("_alloc_mktctx") or {}
+                    _disp_spike  = _disp_mctx.get("fg_spike_warn", "")
+                    _disp_fg     = _disp_mctx.get("fg_score", 0)
+                    _disp_fg_c7  = _disp_mctx.get("fg_change_7d")
+                    _disp_fg_c30 = _disp_mctx.get("fg_change_30d")
+                    if _disp_spike:
+                        _warn_color = "#7f1d1d" if _disp_fg >= 75 else "#78350f"
+                        _warn_bd    = "#ef4444" if _disp_fg >= 75 else "#f59e0b"
+                        _c7_str  = f" / 7日:{_disp_fg_c7:+.0f}pt"  if _disp_fg_c7  is not None else ""
+                        _c30_str = f" / 30日:{_disp_fg_c30:+.0f}pt" if _disp_fg_c30 is not None else ""
+                        st.markdown(
+                            f'<div style="background:{_warn_color};border:1px solid {_warn_bd};'
+                            f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
+                            f'<div style="font-size:12px;font-weight:700;color:{_warn_bd};margin-bottom:4px">'
+                            f'📉 市場センチメント急騰シグナル検出　F&G: {_disp_fg:.0f}{_c7_str}{_c30_str}</div>'
+                            f'<div style="font-size:11px;color:#fde68a">{_disp_spike}</div>'
+                            f'<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
+                            f'参考: 2022年1月(-23%) / 2021年11月(-10%) / 2018年2月VIXショック(-10%) / '
+                            f'2020年2月コロナ(-34%)の直前にF&G急騰が観測されました。</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                    # リスク指標カード
+                    _er   = float(_ip_met.get("expected_return", 0) or 0)
+                    _rv   = float(_ip_met.get("risk_volatility", 0) or 0)
+                    _sr   = float(_ip_met.get("sharpe_ratio", 0) or 0)
+                    _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
+                    _cmt  = _ip_met.get("comment", "")
+                    _met_label = "AI推定"
+
+                    # 実績リターン（候補銘柄データから加重平均）
+                    _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
+                    _disp_cperf = _fetch_candidate_performance(
+                        _today_disp, st.session_state.get("trading_mode", "growth")
+                    )
+                    _w1y_num = _w3y_num = _w_den = 0.0
+                    for _pit in _ip_pf:
+                        _pa = float(_pit.get("allocation", 0))
+                        if _pa <= 0:
                             continue
+                        _pd = _disp_cperf.get(_pit.get("ticker", "")) or {}
+                        if _pd.get("ret_1y") is not None:
+                            _w1y_num += _pa * _pd["ret_1y"]
+                            _w_den   += _pa
+                        if _pd.get("ret_3y") is not None:
+                            _w3y_num += _pa * _pd["ret_3y"]
+                    _actual_1y = round(_w1y_num / _w_den, 1) if _w_den > 0 else None
+                    _actual_3y = round(_w3y_num / _w_den, 1) if _w_den > 0 else None
 
-                        # 配分比率（AIの確信度が高いほど比率も高くなる想定）の降順に並べ替えて表示
-                        _ip_pf  = sorted(_ip_r.get("portfolio", []),
-                                          key=lambda _it: float(_it.get("allocation", 0) or 0), reverse=True)
-                        _ip_met = _ip_r.get("metrics", {})
-                        _ai_mdl = _ip_r.get("model", "")
+                    # AIメトリクスが0/未設定のとき実績データから計算
+                    if (_er == 0 or _rv == 0) and _disp_cperf:
+                        _wvol = _wdd = _wden2 = 0.0
+                        for _pit2 in _ip_pf:
+                            _pa2 = float(_pit2.get("allocation", 0))
+                            if _pa2 <= 0:
+                                continue
+                            _pd2 = _disp_cperf.get(_pit2.get("ticker", "")) or {}
+                            if _pd2.get("volatility"):
+                                _wvol  += _pa2 * _pd2["volatility"]
+                                _wden2 += _pa2
+                            if _pd2.get("max_dd"):
+                                _wdd   += _pa2 * abs(_pd2["max_dd"])
+                        _calc_vol = round(_wvol / _wden2, 1) if _wden2 > 0 else 0
+                        _calc_mdd = round(-_wdd / _wden2, 1) if _wden2 > 0 else 0
+                        if _er == 0 and _actual_1y is not None:
+                            _er = _actual_1y
+                        if _rv == 0 and _calc_vol > 0:
+                            _rv = _calc_vol
+                        if _sr == 0 and _rv > 0 and _er != 0:
+                            _sr = round((_er - 1.5) / _rv, 2)
+                        if _mdd == 0 and _calc_mdd != 0:
+                            _mdd = _calc_mdd
+                        _met_label = "実績から計算"
 
-                        # F&G急騰警告バナー（急落リスクがある場合に表示）
-                        _disp_mctx   = st.session_state.get("_alloc_mktctx") or {}
-                        _disp_spike  = _disp_mctx.get("fg_spike_warn", "")
-                        _disp_fg     = _disp_mctx.get("fg_score", 0)
-                        _disp_fg_c7  = _disp_mctx.get("fg_change_7d")
-                        _disp_fg_c30 = _disp_mctx.get("fg_change_30d")
-                        if _disp_spike:
-                            _warn_color = "#7f1d1d" if _disp_fg >= 75 else "#78350f"
-                            _warn_bd    = "#ef4444" if _disp_fg >= 75 else "#f59e0b"
-                            _c7_str  = f" / 7日:{_disp_fg_c7:+.0f}pt"  if _disp_fg_c7  is not None else ""
-                            _c30_str = f" / 30日:{_disp_fg_c30:+.0f}pt" if _disp_fg_c30 is not None else ""
+                    _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
+                    _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
+
+                    def _ret_color(v):
+                        return "#4ade80" if (v or 0) > 0 else "#ef4444"
+                    def _ret_fmt(v, label):
+                        if v is None:
+                            return ""
+                        _c = _ret_color(v)
+                        return (
+                            f'<div style="text-align:center;border-left:1px solid #334155;padding-left:12px">'
+                            f'<div style="font-size:11px;color:#64748b">{label}</div>'
+                            f'<div style="font-size:20px;font-weight:800;color:{_c}">{v:+.1f}%</div>'
+                            f'<div style="font-size:9px;color:#475569">実績(加重平均)</div></div>'
+                        )
+
+                    st.markdown(
+                        f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
+                        f'padding:12px 16px;margin-bottom:10px">'
+                        f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
+                        f'予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
+                        f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">'
+                        f'<div style="text-align:center">'
+                        f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
+                        f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div>'
+                        f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
+                        f'<div style="text-align:center">'
+                        f'<div style="font-size:11px;color:#64748b">ボラティリティ</div>'
+                        f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div>'
+                        f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
+                        f'<div style="text-align:center">'
+                        f'<div style="font-size:11px;color:#64748b">シャープレシオ</div>'
+                        f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div>'
+                        f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
+                        f'<div style="text-align:center">'
+                        f'<div style="font-size:11px;color:#64748b">最大DD推定</div>'
+                        f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div>'
+                        f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
+                        + _ret_fmt(_actual_1y, "過去1年実績")
+                        + _ret_fmt(_actual_3y, "過去3年実績")
+                        + '</div>'
+                        + (f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;border-top:1px solid #1e293b;'
+                           f'padding-top:6px">💬 {_cmt}</div>' if _cmt else '')
+                        + '</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    # 株価取得（リアルタイム価格ベース計算用）
+                    _pf_tickers = tuple(
+                        _it.get("ticker", "") for _it in _ip_pf if _it.get("ticker")
+                    )
+                    _px = _fetch_portfolio_prices(_pf_tickers) if _pf_tickers else {}
+                    _usdjpy = _px.get("_usdjpy", 150.0)
+
+                    # ポートフォリオテーブル
+                    st.markdown(
+                        '<div style="font-size:10px;color:#94a3b8;background:#1e293b;'
+                        'border:1px solid #334155;border-radius:6px;padding:6px 10px;margin-bottom:8px">'
+                        '📖 <b style="color:#e2e8f0">指標の見方</b>　'
+                        '<b>3m/6m/1y</b>: 過去3ヶ月・6ヶ月・1年の株価リターン（騰落率）　'
+                        '<b>ボラ</b>: 年率ボラティリティ（値動きの荒さ、低いほど安定）　'
+                        '<b>SR</b>: シャープレシオ（リスク1%あたりのリターン、1.0以上が優秀）　'
+                        '<b>DD</b>: 最大ドローダウン（直近1年の最大下落幅、マイナスが大きいほどリスク高）　'
+                        '<b>配当利回り</b>: 過去12ヶ月の実配当合計÷現在値（日米共通）'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
+                    for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "投資テーマ（▼で根拠詳細）"]):
+                        _h.markdown(f'<div style="font-size:11px;color:#94a3b8;font-weight:700">{_lbl}</div>',
+                                    unsafe_allow_html=True)
+
+                    _ip_total_actual = 0  # 合計実際投資額の集計用
+                    for _item in _ip_pf:
+                        _flag   = _item.get("flag", "🌐")
+                        _tk     = _item.get("ticker", "")
+                        # _KNOWN_NAMESを優先してAIの誤名を上書き
+                        _nm     = _KNOWN_NAMES.get(_tk) or _item.get("name", _tk) or _tk
+                        _alloc  = float(_item.get("allocation", 0))
+                        if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
+                            continue
+                        # 予算×比率で投資金額を確定（AIの計算ミスを無効化）
+                        _amt    = int(_ip_bv * _alloc / 100)
+                        _rat    = _item.get("rationale", "")
+                        _bar_w  = min(int(_alloc), 100)
+                        _a_c    = ("#60a5fa" if _alloc >= 20 else "#a78bfa" if _alloc >= 10 else "#94a3b8")
+                        _is_jp  = _tk.endswith(".T")
+                        _tdat   = _px.get(_tk) or {}
+                        _price  = _tdat.get("price") if isinstance(_tdat, dict) else None
+
+                        # 株数・必要金額を株価ベースで計算
+                        if _price and _price > 0:
+                            if _is_jp:
+                                _is_jp_etf = _tk in _JP_ETF_TICKERS
+                                if _is_jp_etf:
+                                    # ETFは1口単位
+                                    _units    = int(_amt / _price)
+                                    if _units == 0:
+                                        _shares_str  = f"⚠️ 予算外（1口¥{_price:,.0f}）"
+                                        _price_str   = f"¥{_price:,.0f}/口"
+                                        _actual_cost = 0
+                                    else:
+                                        _actual_cost = int(_units * _price)
+                                        _shares_str  = f"{_units:,}口"
+                                        _price_str   = f"¥{_price:,.0f}/口"
+                                else:
+                                    _lot_cost = _price * 100
+                                    _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
+                                    if _lots == 0:
+                                        # 1単元が配分予算を超える場合は予算外表示
+                                        _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
+                                        _price_str   = f"¥{_price:,.0f}/株"
+                                        _actual_cost = 0
+                                    else:
+                                        _shares      = _lots * 100
+                                        _actual_cost = int(_lots * _lot_cost)
+                                        _shares_str  = f"{_shares:,}株 ({_lots}単元)"
+                                        _price_str   = f"¥{_price:,.0f}/株"
+                            else:
+                                _price_jpy = _price * _usdjpy
+                                _shares    = int(_amt / _price_jpy)  # max(1)なし
+                                if _shares == 0:
+                                    _shares_str  = f"⚠️ 予算外（1株¥{_price_jpy:,.0f}）"
+                                    _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                                    _actual_cost = 0
+                                else:
+                                    _actual_cost = int(_shares * _price_jpy)
+                                    _shares_str  = f"{_shares}株"
+                                    _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
+                        else:
+                            _shares_str  = "—"
+                            _price_str   = "価格取得中"
+                            _actual_cost = _amt
+                        _ip_total_actual += _actual_cost
+
+                        # パフォーマンス指標
+                        _tdat   = _px.get(_tk) or {}
+                        _ret1y  = _tdat.get("ret_1y")  if isinstance(_tdat, dict) else None
+                        _ret6m  = _tdat.get("ret_6m")  if isinstance(_tdat, dict) else None
+                        _ret3m  = _tdat.get("ret_3m")  if isinstance(_tdat, dict) else None
+                        _pvol   = _tdat.get("volatility") if isinstance(_tdat, dict) else None
+                        _psr    = _tdat.get("sharpe")   if isinstance(_tdat, dict) else None
+                        _pmdd   = _tdat.get("max_dd")   if isinstance(_tdat, dict) else None
+                        _pdiv   = _tdat.get("div_yield") if isinstance(_tdat, dict) else None
+
+                        def _rc(v):
+                            return "#16a34a" if (v or 0) >= 0 else "#dc2626"
+                        def _rv(v):
+                            return f"{v:+.1f}%" if v is not None else "—"
+
+                        _div_html = (
+                            f'&nbsp;&nbsp;<span style="color:#475569">配当利回り:</span>'
+                            f'<span style="color:#0891b2;font-weight:700"> {_pdiv:.2f}%</span>'
+                            if _pdiv is not None else ""
+                        )
+
+                        if any(v is not None for v in [_ret1y, _ret6m, _ret3m]):
+                            _sr_c2 = "#16a34a" if (_psr or 0) >= 1.0 else "#ca8a04" if (_psr or 0) >= 0.5 else "#dc2626"
+                            _stats_html = (
+                                f'<div style="font-size:10px;margin-top:4px;line-height:1.6">'
+                                f'<span style="color:#475569">3m:</span>'
+                                f'<span style="color:{_rc(_ret3m)};font-weight:700"> {_rv(_ret3m)}</span>'
+                                f'&nbsp;&nbsp;'
+                                f'<span style="color:#475569">6m:</span>'
+                                f'<span style="color:{_rc(_ret6m)};font-weight:700"> {_rv(_ret6m)}</span>'
+                                f'&nbsp;&nbsp;'
+                                f'<span style="color:#475569">1y:</span>'
+                                f'<span style="color:{_rc(_ret1y)};font-weight:700"> {_rv(_ret1y)}</span>'
+                                f'<br>'
+                                f'<span style="color:#475569">ボラ:{_pvol:.1f}%</span>'
+                                f'&nbsp;'
+                                f'<span style="color:{_sr_c2}">SR:{_psr:.2f}</span>'
+                                f'&nbsp;'
+                                f'<span style="color:#b45309">DD:{_pmdd:.1f}%</span>'
+                                f'{_div_html}'
+                                f'</div>'
+                            )
+                        else:
+                            _stats_html = ""
+
+                        # 下落警告バッジ
+                        if _ret1y is not None and _ret1y <= -30:
+                            _mom_badge = '<span style="background:#7f1d1d;color:#fca5a5;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚠️ 強下落継続</span>'
+                        elif _ret1y is not None and _ret1y <= -15:
+                            _mom_badge = '<span style="background:#78350f;color:#fde68a;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚡ 下落注意</span>'
+                        else:
+                            _mom_badge = ""
+                        if _item.get("_fabrication_warning"):
+                            _mom_badge += (
+                                '<span style="background:#581c87;color:#e9d5ff;font-size:9px;padding:1px 6px;'
+                                'border-radius:10px;font-weight:700;margin-left:4px" '
+                                'title="未提供のはずの財務指標（ROIC/ROE/PER等）が根拠に含まれています。数値の正確性は未検証です">'
+                                '⚠️ 数値未検証</span>'
+                            )
+
+                        _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
+                        _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
+                                         unsafe_allow_html=True)
+                        _row[1].markdown(
+                            f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}{_mom_badge}</div>'
+                            f'<div style="font-size:10px;color:#94a3b8">{_nm}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _row[2].markdown(
+                            f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
+                            f'<div style="background:#334155;border-radius:3px;height:4px;margin-top:3px">'
+                            f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
+                            unsafe_allow_html=True,
+                        )
+                        _row[3].markdown(
+                            f'<div style="font-size:12px;color:#e2e8f0;font-weight:700">{_shares_str}</div>'
+                            f'<div style="font-size:10px;color:#94a3b8">{_price_str}</div>'
+                            f'<div style="font-size:10px;color:#93c5fd;font-weight:600">≒¥{_actual_cost:,}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _row[4].markdown(
+                            f'<div style="font-size:11px;color:#e2e8f0;font-weight:600">{_rat}</div>'
+                            + _stats_html,
+                            unsafe_allow_html=True,
+                        )
+
+                        # メリット・デメリット expander
+                        _merits    = _item.get("merits", [])
+                        _demerits  = _item.get("demerits", [])
+                        _conc      = _item.get("conclusion", "") or _item.get("thesis", "")
+                        _entry_px  = _item.get("entry_price")
+                        _entry_nt  = _item.get("entry_note", "")
+                        if _merits or _demerits or _conc or _entry_px:
+                            with st.expander(f"📊 {_tk} 投資根拠 — {_rat}", expanded=False):
+                                # エントリー価格バナー
+                                if _entry_px:
+                                    _is_jp_entry = _tk.endswith(".T")
+                                    _ep_cur = "円" if _is_jp_entry else "USD"
+                                    _ep_fmt = f"¥{_entry_px:,.0f}" if _is_jp_entry else f"${_entry_px:.2f}"
+                                    st.markdown(
+                                        f'<div style="background:#0f2027;border:1px solid #0284c7;'
+                                        f'border-radius:6px;padding:8px 12px;margin-bottom:8px">'
+                                        f'<div style="font-size:11px;font-weight:700;color:#38bdf8;margin-bottom:3px">'
+                                        f'📍 推奨エントリー価格: {_ep_fmt} {_ep_cur}</div>'
+                                        + (f'<div style="font-size:10px;color:#94a3b8">{_entry_nt}</div>'
+                                           if _entry_nt else '')
+                                        + '</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                _col_m, _col_d = st.columns(2)
+                                if _merits:
+                                    _col_m.markdown(
+                                        '<div style="font-size:11px;font-weight:700;color:#4ade80;margin-bottom:4px">✅ メリット</div>'
+                                        + "".join(
+                                            f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
+                                            f'<span style="color:#86efac;font-weight:700">{_m.get("point","")}</span>'
+                                            f'<br><span style="color:#94a3b8">{_m.get("detail","")}</span></div>'
+                                            for _m in _merits
+                                        ),
+                                        unsafe_allow_html=True,
+                                    )
+                                if _demerits:
+                                    _col_d.markdown(
+                                        '<div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:4px">⚠️ デメリット</div>'
+                                        + "".join(
+                                            f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
+                                            f'<span style="color:#fca5a5;font-weight:700">{_d.get("point","")}</span>'
+                                            f'<br><span style="color:#94a3b8">{_d.get("detail","")}</span></div>'
+                                            for _d in _demerits
+                                        ),
+                                        unsafe_allow_html=True,
+                                    )
+                                if _conc:
+                                    st.markdown(
+                                        f'<div style="font-size:11px;background:#0f2027;border-left:3px solid #0284c7;'
+                                        f'padding:8px 10px;margin-top:8px;border-radius:4px;color:#e2e8f0">'
+                                        f'💡 <b style="color:#38bdf8">結論:</b> {_conc}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+
+                    # 余剰資金をETFで自動充填（ロット丸め後の残金を吸収）
+                    _fill_cash_pct = _ip_r.get("cash_reserve_pct", 0)
+                    _fill_target = int(_ip_bv * (100 - _fill_cash_pct) / 100)
+                    _fill_gap    = _fill_target - _ip_total_actual
+                    _FILL_ETFS = [
+                        ("2244.T", "iFreeETF NASDAQ100", "🇯🇵"),
+                        ("2558.T", "MAXIS S&P500(H無)", "🇯🇵"),
+                        ("1321.T", "野村日経225ETF",     "🇯🇵"),
+                    ]
+                    if _fill_gap >= 3000:
+                        for _fe_tk, _fe_nm, _fe_fl in _FILL_ETFS:
+                            _fe_pd = _disp_cperf.get(_fe_tk) or {}
+                            _fe_px = _fe_pd.get("price")
+                            if not (_fe_px and _fe_px > 0):
+                                continue
+                            _fe_units = int(_fill_gap / _fe_px)
+                            if _fe_units <= 0:
+                                continue
+                            _fe_cost = int(_fe_units * _fe_px)
+                            _ip_total_actual += _fe_cost
                             st.markdown(
-                                f'<div style="background:{_warn_color};border:1px solid {_warn_bd};'
-                                f'border-radius:8px;padding:10px 14px;margin-bottom:10px">'
-                                f'<div style="font-size:12px;font-weight:700;color:{_warn_bd};margin-bottom:4px">'
-                                f'📉 市場センチメント急騰シグナル検出　F&G: {_disp_fg:.0f}{_c7_str}{_c30_str}</div>'
-                                f'<div style="font-size:11px;color:#fde68a">{_disp_spike}</div>'
-                                f'<div style="font-size:10px;color:#fca5a5;margin-top:4px">'
-                                f'参考: 2022年1月(-23%) / 2021年11月(-10%) / 2018年2月VIXショック(-10%) / '
-                                f'2020年2月コロナ(-34%)の直前にF&G急騰が観測されました。</div>'
+                                f'<div style="background:#0f2418;border:1px dashed #4ade80;'
+                                f'border-radius:6px;padding:6px 10px;margin:4px 0;'
+                                f'font-size:11px;color:#86efac">'
+                                f'🔧 <b>余剰充填枠（自動）</b>　{_fe_fl} {_fe_tk} {_fe_nm}　'
+                                f'{_fe_units:,}口　¥{_fe_px:,.0f}/口　≒¥{_fe_cost:,}'
+                                f'<span style="color:#4ade80;margin-left:8px">残余剰: ¥{_fill_gap - _fe_cost:,}</span>'
                                 f'</div>',
                                 unsafe_allow_html=True,
                             )
+                            break
 
-                        # リスク指標カード
-                        _er   = float(_ip_met.get("expected_return", 0) or 0)
-                        _rv   = float(_ip_met.get("risk_volatility", 0) or 0)
-                        _sr   = float(_ip_met.get("sharpe_ratio", 0) or 0)
-                        _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
-                        _cmt  = _ip_met.get("comment", "")
-                        _met_label = "AI推定"
-
-                        # 実績リターン（候補銘柄データから加重平均）
-                        _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
-                        _disp_cperf = _fetch_candidate_performance(
-                            _today_disp, st.session_state.get("trading_mode", "growth")
+                    # 合計・余剰資金フッター
+                    _ip_cash = max(0, _ip_bv - _ip_total_actual)
+                    _inv_pct = int(_ip_total_actual / _ip_bv * 100) if _ip_bv else 0
+                    # 余剰理由を動的に生成（クラッシュリスク優先）
+                    _cash_reasons = []
+                    _r_cash_pct = _ip_r.get("cash_reserve_pct", 0)
+                    _r_crs_lbl  = _ip_r.get("crash_risk_label", "")
+                    _r_crs_sc   = _ip_r.get("crash_risk_score", 0)
+                    _mctx_sigs  = (st.session_state.get("_alloc_mktctx") or {}).get("crash_signals", [])
+                    if _r_cash_pct > 0:
+                        _sig_s = "・".join(_mctx_sigs[:3]) if _mctx_sigs else "複合リスクシグナル"
+                        _cash_reasons.append(
+                            f"クラッシュ前兆シグナル({_r_crs_lbl} score:{_r_crs_sc})"
+                            f" → {_r_cash_pct}%キャッシュ留保指示（{_sig_s}）"
                         )
-                        _w1y_num = _w3y_num = _w_den = 0.0
-                        for _pit in _ip_pf:
-                            _pa = float(_pit.get("allocation", 0))
-                            if _pa <= 0:
-                                continue
-                            _pd = _disp_cperf.get(_pit.get("ticker", "")) or {}
-                            if _pd.get("ret_1y") is not None:
-                                _w1y_num += _pa * _pd["ret_1y"]
-                                _w_den   += _pa
-                            if _pd.get("ret_3y") is not None:
-                                _w3y_num += _pa * _pd["ret_3y"]
-                        _actual_1y = round(_w1y_num / _w_den, 1) if _w_den > 0 else None
-                        _actual_3y = round(_w3y_num / _w_den, 1) if _w_den > 0 else None
-
-                        # AIメトリクスが0/未設定のとき実績データから計算
-                        if (_er == 0 or _rv == 0) and _disp_cperf:
-                            _wvol = _wdd = _wden2 = 0.0
-                            for _pit2 in _ip_pf:
-                                _pa2 = float(_pit2.get("allocation", 0))
-                                if _pa2 <= 0:
-                                    continue
-                                _pd2 = _disp_cperf.get(_pit2.get("ticker", "")) or {}
-                                if _pd2.get("volatility"):
-                                    _wvol  += _pa2 * _pd2["volatility"]
-                                    _wden2 += _pa2
-                                if _pd2.get("max_dd"):
-                                    _wdd   += _pa2 * abs(_pd2["max_dd"])
-                            _calc_vol = round(_wvol / _wden2, 1) if _wden2 > 0 else 0
-                            _calc_mdd = round(-_wdd / _wden2, 1) if _wden2 > 0 else 0
-                            if _er == 0 and _actual_1y is not None:
-                                _er = _actual_1y
-                            if _rv == 0 and _calc_vol > 0:
-                                _rv = _calc_vol
-                            if _sr == 0 and _rv > 0 and _er != 0:
-                                _sr = round((_er - 1.5) / _rv, 2)
-                            if _mdd == 0 and _calc_mdd != 0:
-                                _mdd = _calc_mdd
-                            _met_label = "実績から計算"
-
-                        _sr_c = "#4ade80" if _sr > 1.0 else "#fbbf24" if _sr > 0.5 else "#ef4444"
-                        _er_c = "#4ade80" if _er > 12 else "#fbbf24" if _er > 6 else "#94a3b8"
-
-                        def _ret_color(v):
-                            return "#4ade80" if (v or 0) > 0 else "#ef4444"
-                        def _ret_fmt(v, label):
-                            if v is None:
-                                return ""
-                            _c = _ret_color(v)
-                            return (
-                                f'<div style="text-align:center;border-left:1px solid #334155;padding-left:12px">'
-                                f'<div style="font-size:11px;color:#64748b">{label}</div>'
-                                f'<div style="font-size:20px;font-weight:800;color:{_c}">{v:+.1f}%</div>'
-                                f'<div style="font-size:9px;color:#475569">実績(加重平均)</div></div>'
-                            )
-
-                        st.markdown(
-                            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
-                            f'padding:12px 16px;margin-bottom:10px">'
-                            f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
-                            f'予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
-                            f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">'
-                            f'<div style="text-align:center">'
-                            f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:{_er_c}">{_er:+.1f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
-                            f'<div style="text-align:center">'
-                            f'<div style="font-size:11px;color:#64748b">ボラティリティ</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:#f97316">{_rv:.1f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
-                            f'<div style="text-align:center">'
-                            f'<div style="font-size:11px;color:#64748b">シャープレシオ</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:{_sr_c}">{_sr:.2f}</div>'
-                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
-                            f'<div style="text-align:center">'
-                            f'<div style="font-size:11px;color:#64748b">最大DD推定</div>'
-                            f'<div style="font-size:20px;font-weight:800;color:#ef4444">{_mdd:.0f}%</div>'
-                            f'<div style="font-size:9px;color:#475569">{_met_label}</div></div>'
-                            + _ret_fmt(_actual_1y, "過去1年実績")
-                            + _ret_fmt(_actual_3y, "過去3年実績")
-                            + '</div>'
-                            + (f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;border-top:1px solid #1e293b;'
-                               f'padding-top:6px">💬 {_cmt}</div>' if _cmt else '')
-                            + '</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                        # 株価取得（リアルタイム価格ベース計算用）
-                        _pf_tickers = tuple(
-                            _it.get("ticker", "") for _it in _ip_pf if _it.get("ticker")
-                        )
-                        _px = _fetch_portfolio_prices(_pf_tickers) if _pf_tickers else {}
-                        _usdjpy = _px.get("_usdjpy", 150.0)
-
-                        # ポートフォリオテーブル
-                        st.markdown(
-                            '<div style="font-size:10px;color:#94a3b8;background:#1e293b;'
-                            'border:1px solid #334155;border-radius:6px;padding:6px 10px;margin-bottom:8px">'
-                            '📖 <b style="color:#e2e8f0">指標の見方</b>　'
-                            '<b>3m/6m/1y</b>: 過去3ヶ月・6ヶ月・1年の株価リターン（騰落率）　'
-                            '<b>ボラ</b>: 年率ボラティリティ（値動きの荒さ、低いほど安定）　'
-                            '<b>SR</b>: シャープレシオ（リスク1%あたりのリターン、1.0以上が優秀）　'
-                            '<b>DD</b>: 最大ドローダウン（直近1年の最大下落幅、マイナスが大きいほどリスク高）　'
-                            '<b>配当利回り</b>: 過去12ヶ月の実配当合計÷現在値（日米共通）'
-                            '</div>',
-                            unsafe_allow_html=True,
-                        )
-                        _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
-                        for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "投資テーマ（▼で根拠詳細）"]):
-                            _h.markdown(f'<div style="font-size:11px;color:#94a3b8;font-weight:700">{_lbl}</div>',
-                                        unsafe_allow_html=True)
-
-                        _ip_total_actual = 0  # 合計実際投資額の集計用
-                        for _item in _ip_pf:
-                            _flag   = _item.get("flag", "🌐")
-                            _tk     = _item.get("ticker", "")
-                            # _KNOWN_NAMESを優先してAIの誤名を上書き
-                            _nm     = _KNOWN_NAMES.get(_tk) or _item.get("name", _tk) or _tk
-                            _alloc  = float(_item.get("allocation", 0))
-                            if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
-                                continue
-                            # 予算×比率で投資金額を確定（AIの計算ミスを無効化）
-                            _amt    = int(_ip_bv * _alloc / 100)
-                            _rat    = _item.get("rationale", "")
-                            _bar_w  = min(int(_alloc), 100)
-                            _a_c    = ("#60a5fa" if _alloc >= 20 else "#a78bfa" if _alloc >= 10 else "#94a3b8")
-                            _is_jp  = _tk.endswith(".T")
-                            _tdat   = _px.get(_tk) or {}
-                            _price  = _tdat.get("price") if isinstance(_tdat, dict) else None
-
-                            # 株数・必要金額を株価ベースで計算
-                            if _price and _price > 0:
-                                if _is_jp:
-                                    _is_jp_etf = _tk in _JP_ETF_TICKERS
-                                    if _is_jp_etf:
-                                        # ETFは1口単位
-                                        _units    = int(_amt / _price)
-                                        if _units == 0:
-                                            _shares_str  = f"⚠️ 予算外（1口¥{_price:,.0f}）"
-                                            _price_str   = f"¥{_price:,.0f}/口"
-                                            _actual_cost = 0
-                                        else:
-                                            _actual_cost = int(_units * _price)
-                                            _shares_str  = f"{_units:,}口"
-                                            _price_str   = f"¥{_price:,.0f}/口"
-                                    else:
-                                        _lot_cost = _price * 100
-                                        _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
-                                        if _lots == 0:
-                                            # 1単元が配分予算を超える場合は予算外表示
-                                            _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
-                                            _price_str   = f"¥{_price:,.0f}/株"
-                                            _actual_cost = 0
-                                        else:
-                                            _shares      = _lots * 100
-                                            _actual_cost = int(_lots * _lot_cost)
-                                            _shares_str  = f"{_shares:,}株 ({_lots}単元)"
-                                            _price_str   = f"¥{_price:,.0f}/株"
-                                else:
-                                    _price_jpy = _price * _usdjpy
-                                    _shares    = int(_amt / _price_jpy)  # max(1)なし
-                                    if _shares == 0:
-                                        _shares_str  = f"⚠️ 予算外（1株¥{_price_jpy:,.0f}）"
-                                        _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
-                                        _actual_cost = 0
-                                    else:
-                                        _actual_cost = int(_shares * _price_jpy)
-                                        _shares_str  = f"{_shares}株"
-                                        _price_str   = f"${_price:.2f}=¥{_price_jpy:,.0f}/株"
-                            else:
-                                _shares_str  = "—"
-                                _price_str   = "価格取得中"
-                                _actual_cost = _amt
-                            _ip_total_actual += _actual_cost
-
-                            # パフォーマンス指標
-                            _tdat   = _px.get(_tk) or {}
-                            _ret1y  = _tdat.get("ret_1y")  if isinstance(_tdat, dict) else None
-                            _ret6m  = _tdat.get("ret_6m")  if isinstance(_tdat, dict) else None
-                            _ret3m  = _tdat.get("ret_3m")  if isinstance(_tdat, dict) else None
-                            _pvol   = _tdat.get("volatility") if isinstance(_tdat, dict) else None
-                            _psr    = _tdat.get("sharpe")   if isinstance(_tdat, dict) else None
-                            _pmdd   = _tdat.get("max_dd")   if isinstance(_tdat, dict) else None
-                            _pdiv   = _tdat.get("div_yield") if isinstance(_tdat, dict) else None
-
-                            def _rc(v):
-                                return "#16a34a" if (v or 0) >= 0 else "#dc2626"
-                            def _rv(v):
-                                return f"{v:+.1f}%" if v is not None else "—"
-
-                            _div_html = (
-                                f'&nbsp;&nbsp;<span style="color:#475569">配当利回り:</span>'
-                                f'<span style="color:#0891b2;font-weight:700"> {_pdiv:.2f}%</span>'
-                                if _pdiv is not None else ""
-                            )
-
-                            if any(v is not None for v in [_ret1y, _ret6m, _ret3m]):
-                                _sr_c2 = "#16a34a" if (_psr or 0) >= 1.0 else "#ca8a04" if (_psr or 0) >= 0.5 else "#dc2626"
-                                _stats_html = (
-                                    f'<div style="font-size:10px;margin-top:4px;line-height:1.6">'
-                                    f'<span style="color:#475569">3m:</span>'
-                                    f'<span style="color:{_rc(_ret3m)};font-weight:700"> {_rv(_ret3m)}</span>'
-                                    f'&nbsp;&nbsp;'
-                                    f'<span style="color:#475569">6m:</span>'
-                                    f'<span style="color:{_rc(_ret6m)};font-weight:700"> {_rv(_ret6m)}</span>'
-                                    f'&nbsp;&nbsp;'
-                                    f'<span style="color:#475569">1y:</span>'
-                                    f'<span style="color:{_rc(_ret1y)};font-weight:700"> {_rv(_ret1y)}</span>'
-                                    f'<br>'
-                                    f'<span style="color:#475569">ボラ:{_pvol:.1f}%</span>'
-                                    f'&nbsp;'
-                                    f'<span style="color:{_sr_c2}">SR:{_psr:.2f}</span>'
-                                    f'&nbsp;'
-                                    f'<span style="color:#b45309">DD:{_pmdd:.1f}%</span>'
-                                    f'{_div_html}'
-                                    f'</div>'
-                                )
-                            else:
-                                _stats_html = ""
-
-                            # 下落警告バッジ
-                            if _ret1y is not None and _ret1y <= -30:
-                                _mom_badge = '<span style="background:#7f1d1d;color:#fca5a5;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚠️ 強下落継続</span>'
-                            elif _ret1y is not None and _ret1y <= -15:
-                                _mom_badge = '<span style="background:#78350f;color:#fde68a;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700;margin-left:4px">⚡ 下落注意</span>'
-                            else:
-                                _mom_badge = ""
-                            if _item.get("_fabrication_warning"):
-                                _mom_badge += (
-                                    '<span style="background:#581c87;color:#e9d5ff;font-size:9px;padding:1px 6px;'
-                                    'border-radius:10px;font-weight:700;margin-left:4px" '
-                                    'title="未提供のはずの財務指標（ROIC/ROE/PER等）が根拠に含まれています。数値の正確性は未検証です">'
-                                    '⚠️ 数値未検証</span>'
-                                )
-
-                            _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
-                            _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
-                                             unsafe_allow_html=True)
-                            _row[1].markdown(
-                                f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}{_mom_badge}</div>'
-                                f'<div style="font-size:10px;color:#94a3b8">{_nm}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            _row[2].markdown(
-                                f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
-                                f'<div style="background:#334155;border-radius:3px;height:4px;margin-top:3px">'
-                                f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
-                                unsafe_allow_html=True,
-                            )
-                            _row[3].markdown(
-                                f'<div style="font-size:12px;color:#e2e8f0;font-weight:700">{_shares_str}</div>'
-                                f'<div style="font-size:10px;color:#94a3b8">{_price_str}</div>'
-                                f'<div style="font-size:10px;color:#93c5fd;font-weight:600">≒¥{_actual_cost:,}</div>',
-                                unsafe_allow_html=True,
-                            )
-                            _row[4].markdown(
-                                f'<div style="font-size:11px;color:#e2e8f0;font-weight:600">{_rat}</div>'
-                                + _stats_html,
-                                unsafe_allow_html=True,
-                            )
-
-                            # メリット・デメリット expander
-                            _merits    = _item.get("merits", [])
-                            _demerits  = _item.get("demerits", [])
-                            _conc      = _item.get("conclusion", "") or _item.get("thesis", "")
-                            _entry_px  = _item.get("entry_price")
-                            _entry_nt  = _item.get("entry_note", "")
-                            if _merits or _demerits or _conc or _entry_px:
-                                with st.expander(f"📊 {_tk} 投資根拠 — {_rat}", expanded=False):
-                                    # エントリー価格バナー
-                                    if _entry_px:
-                                        _is_jp_entry = _tk.endswith(".T")
-                                        _ep_cur = "円" if _is_jp_entry else "USD"
-                                        _ep_fmt = f"¥{_entry_px:,.0f}" if _is_jp_entry else f"${_entry_px:.2f}"
-                                        st.markdown(
-                                            f'<div style="background:#0f2027;border:1px solid #0284c7;'
-                                            f'border-radius:6px;padding:8px 12px;margin-bottom:8px">'
-                                            f'<div style="font-size:11px;font-weight:700;color:#38bdf8;margin-bottom:3px">'
-                                            f'📍 推奨エントリー価格: {_ep_fmt} {_ep_cur}</div>'
-                                            + (f'<div style="font-size:10px;color:#94a3b8">{_entry_nt}</div>'
-                                               if _entry_nt else '')
-                                            + '</div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                    _col_m, _col_d = st.columns(2)
-                                    if _merits:
-                                        _col_m.markdown(
-                                            '<div style="font-size:11px;font-weight:700;color:#4ade80;margin-bottom:4px">✅ メリット</div>'
-                                            + "".join(
-                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
-                                                f'<span style="color:#86efac;font-weight:700">{_m.get("point","")}</span>'
-                                                f'<br><span style="color:#94a3b8">{_m.get("detail","")}</span></div>'
-                                                for _m in _merits
-                                            ),
-                                            unsafe_allow_html=True,
-                                        )
-                                    if _demerits:
-                                        _col_d.markdown(
-                                            '<div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:4px">⚠️ デメリット</div>'
-                                            + "".join(
-                                                f'<div style="font-size:10px;padding:4px 0;border-bottom:1px solid #334155">'
-                                                f'<span style="color:#fca5a5;font-weight:700">{_d.get("point","")}</span>'
-                                                f'<br><span style="color:#94a3b8">{_d.get("detail","")}</span></div>'
-                                                for _d in _demerits
-                                            ),
-                                            unsafe_allow_html=True,
-                                        )
-                                    if _conc:
-                                        st.markdown(
-                                            f'<div style="font-size:11px;background:#0f2027;border-left:3px solid #0284c7;'
-                                            f'padding:8px 10px;margin-top:8px;border-radius:4px;color:#e2e8f0">'
-                                            f'💡 <b style="color:#38bdf8">結論:</b> {_conc}</div>',
-                                            unsafe_allow_html=True,
-                                        )
-
-                        # 余剰資金をETFで自動充填（ロット丸め後の残金を吸収）
-                        _fill_cash_pct = _ip_r.get("cash_reserve_pct", 0)
-                        _fill_target = int(_ip_bv * (100 - _fill_cash_pct) / 100)
-                        _fill_gap    = _fill_target - _ip_total_actual
-                        _FILL_ETFS = [
-                            ("2244.T", "iFreeETF NASDAQ100", "🇯🇵"),
-                            ("2558.T", "MAXIS S&P500(H無)", "🇯🇵"),
-                            ("1321.T", "野村日経225ETF",     "🇯🇵"),
-                        ]
-                        if _fill_gap >= 3000:
-                            for _fe_tk, _fe_nm, _fe_fl in _FILL_ETFS:
-                                _fe_pd = _disp_cperf.get(_fe_tk) or {}
-                                _fe_px = _fe_pd.get("price")
-                                if not (_fe_px and _fe_px > 0):
-                                    continue
-                                _fe_units = int(_fill_gap / _fe_px)
-                                if _fe_units <= 0:
-                                    continue
-                                _fe_cost = int(_fe_units * _fe_px)
-                                _ip_total_actual += _fe_cost
-                                st.markdown(
-                                    f'<div style="background:#0f2418;border:1px dashed #4ade80;'
-                                    f'border-radius:6px;padding:6px 10px;margin:4px 0;'
-                                    f'font-size:11px;color:#86efac">'
-                                    f'🔧 <b>余剰充填枠（自動）</b>　{_fe_fl} {_fe_tk} {_fe_nm}　'
-                                    f'{_fe_units:,}口　¥{_fe_px:,.0f}/口　≒¥{_fe_cost:,}'
-                                    f'<span style="color:#4ade80;margin-left:8px">残余剰: ¥{_fill_gap - _fe_cost:,}</span>'
-                                    f'</div>',
-                                    unsafe_allow_html=True,
-                                )
-                                break
-
-                        # 合計・余剰資金フッター
-                        _ip_cash = max(0, _ip_bv - _ip_total_actual)
-                        _inv_pct = int(_ip_total_actual / _ip_bv * 100) if _ip_bv else 0
-                        # 余剰理由を動的に生成（クラッシュリスク優先）
-                        _cash_reasons = []
-                        _r_cash_pct = _ip_r.get("cash_reserve_pct", 0)
-                        _r_crs_lbl  = _ip_r.get("crash_risk_label", "")
-                        _r_crs_sc   = _ip_r.get("crash_risk_score", 0)
-                        _mctx_sigs  = (st.session_state.get("_alloc_mktctx") or {}).get("crash_signals", [])
-                        if _r_cash_pct > 0:
-                            _sig_s = "・".join(_mctx_sigs[:3]) if _mctx_sigs else "複合リスクシグナル"
-                            _cash_reasons.append(
-                                f"クラッシュ前兆シグナル({_r_crs_lbl} score:{_r_crs_sc})"
-                                f" → {_r_cash_pct}%キャッシュ留保指示（{_sig_s}）"
-                            )
-                        _has_jp = any(
-                            _it.get("ticker", "").endswith(".T")
-                            for _it in _ip_pf if float(_it.get("allocation", 0)) > 0
-                        )
-                        if _has_jp:
-                            _cash_reasons.append("日本株の100株単元ロット丸め")
-                        _ai_comment = _ip_met.get("comment", "")
-                        _cash_reason_str = " ／ ".join(_cash_reasons) if _cash_reasons else "単元ロット丸めによる端数"
-                        _cash_color = "#ef4444" if _inv_pct < 60 else "#fbbf24" if _inv_pct < 85 else "#4ade80"
-                        st.markdown(
-                            f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
-                            f'padding:10px 14px;margin-top:8px">'
-                            f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'
-                            f'<div><div style="font-size:10px;color:#64748b">合計投資金額（単元後）</div>'
-                            f'<div style="font-size:15px;font-weight:800;color:#4ade80">¥{_ip_total_actual:,}</div></div>'
-                            f'<div><div style="font-size:10px;color:#64748b">余剰資金（現金）</div>'
-                            f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">¥{_ip_cash:,}</div></div>'
-                            f'<div><div style="font-size:10px;color:#64748b">投資効率</div>'
-                            f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">{_inv_pct}%</div></div>'
-                            f'<div style="font-size:10px;color:#475569;margin-left:auto">予算 ¥{_ip_bv:,}</div>'
-                            f'</div>'
-                            f'<div style="font-size:10px;color:#94a3b8;border-top:1px solid #1e293b;padding-top:6px">'
-                            f'💡 <b style="color:#e2e8f0">余剰資金の理由:</b> {_cash_reason_str}'
-                            + (f'　｜　<span style="color:#64748b">{_ai_comment}</span>' if _ai_comment else '')
-                            + '</div></div>',
-                            unsafe_allow_html=True,
-                        )
-
-            # ── リスク-リターン比較チャート ──────────────────────────
-            if _ip_disp and any(_ip_disp.get(k, {}).get("metrics") for k in ["etf", "individual"]):
-                import plotly.graph_objects as _go2
-                _chart_pts = []
-                _COLORS = {"etf": "#38bdf8", "individual": "#a78bfa"}
-                _LABELS = {"etf": "ETF混合", "individual": "個別株"}
-                for _mk in ["etf", "individual"]:
-                    _mr = _ip_disp.get(_mk, {})
-                    _mm = _mr.get("metrics", {})
-                    if not _mm:
-                        continue
-                    _chart_pts.append({
-                        "x": float(_mm.get("risk_volatility", 0)),
-                        "y": float(_mm.get("expected_return", 0)),
-                        "label": _LABELS[_mk],
-                        "sr": float(_mm.get("sharpe_ratio", 0)),
-                        "mdd": float(_mm.get("max_drawdown_estimate", 0)),
-                        "color": _COLORS[_mk],
-                    })
-                # 参考ベンチマーク
-                _refs = [
-                    {"x": 0.0,  "y": 0.5,  "label": "現金"},
-                    {"x": 5.0,  "y": 2.0,  "label": "日本国債"},
-                    {"x": 15.0, "y": 10.0, "label": "S&P500"},
-                    {"x": 20.0, "y": 14.0, "label": "NASDAQ100"},
-                ]
-                _fig_rr = _go2.Figure()
-                # 参考点
-                _fig_rr.add_trace(_go2.Scatter(
-                    x=[r["x"] for r in _refs], y=[r["y"] for r in _refs],
-                    mode="markers+text",
-                    marker=dict(size=11, color="#64748b", symbol="diamond",
-                                line=dict(width=1, color="#cbd5e1")),
-                    text=[r["label"] for r in _refs],
-                    textposition="top center",
-                    textfont=dict(size=11, color="#cbd5e1"),
-                    name="参考",
-                    hovertemplate="%{text}<br>リスク: %{x:.1f}%<br>リターン: %{y:.1f}%<extra></extra>",
-                ))
-                # ポートフォリオ点
-                for _pt in _chart_pts:
-                    _fig_rr.add_trace(_go2.Scatter(
-                        x=[_pt["x"]], y=[_pt["y"]],
-                        mode="markers+text",
-                        marker=dict(size=16, color=_pt["color"],
-                                    line=dict(width=2, color="#ffffff")),
-                        text=[_pt["label"]],
-                        textposition="top center",
-                        textfont=dict(size=11, color=_pt["color"], family="Arial Black"),
-                        name=_pt["label"],
-                        hovertemplate=(
-                            f"<b>{_pt['label']}</b><br>"
-                            f"リスク(ボラ): {_pt['x']:.1f}%<br>"
-                            f"期待リターン: {_pt['y']:+.1f}%<br>"
-                            f"シャープ: {_pt['sr']:.2f}<br>"
-                            f"最大DD推定: {_pt['mdd']:.0f}%<extra></extra>"
-                        ),
-                    ))
-                # シャープレシオ1.0の参照線 (return = 1.5 + vol)
-                _vx = list(range(0, 41, 2))
-                _fig_rr.add_trace(_go2.Scatter(
-                    x=_vx, y=[1.5 + v for v in _vx],
-                    mode="lines",
-                    line=dict(dash="dash", color="#f59e0b", width=2),
-                    name="SR=1.0ライン",
-                    hoverinfo="skip",
-                ))
-                _fig_rr.update_layout(
-                    paper_bgcolor="#0f172a", plot_bgcolor="#0d1117",
-                    font=dict(color="#e2e8f0"),
-                    height=300, margin=dict(l=40, r=20, t=36, b=40),
-                    title=dict(text="📐 リスク-リターン マップ", font=dict(size=13, color="#94a3b8"), x=0),
-                    xaxis=dict(
-                        title="リスク（年率ボラティリティ %）",
-                        tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
-                        gridcolor="#1e293b", range=[-2, 42],
-                    ),
-                    yaxis=dict(
-                        title="期待リターン（年率 %）",
-                        tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
-                        gridcolor="#1e293b",
-                    ),
-                    legend=dict(font=dict(color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
-                    hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                    showlegend=True,
-                )
-                st.plotly_chart(_fig_rr, use_container_width=True)
-
-            st.markdown(
-                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
-                unsafe_allow_html=True,
-            )
-
-            # ── 日本株シャープレシオ TOP10 ────────────────────────────
-            st.markdown(
-                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
-                'margin:4px 0 8px">── 📐 日本株シャープレシオ TOP10 ──</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
-                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
-                '📊 日経225主要銘柄（30銘柄）の直近1年のリターン・リスクからシャープレシオ'
-                '（無リスク金利控除後リターン÷リスク）を算出し、効率よく稼げている銘柄をランキングします。'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            _sharpe_df = _compute_jp_sharpe_ranking()
-            if _sharpe_df.empty:
-                st.caption("シャープレシオの計算に必要な株価データを取得できませんでした。")
-            else:
-                _sharpe_top10 = _sharpe_df.head(10).copy()
-                _sharpe_top10.insert(0, "順位", range(1, len(_sharpe_top10) + 1))
-                st.dataframe(
-                    _sharpe_top10.set_index("順位"),
-                    use_container_width=True,
-                    column_config={
-                        "シャープレシオ": st.column_config.NumberColumn(format="%.4f"),
-                        "年間平均リターン(%)": st.column_config.NumberColumn(format="%.2f%%"),
-                        "年間リスク(%)": st.column_config.NumberColumn(format="%.2f%%"),
-                        "アルファ(%)": st.column_config.NumberColumn(format="%.2f%%"),
-                        "ベータ": st.column_config.NumberColumn(format="%.4f"),
-                    },
-                )
-                st.caption("※ 無リスク金利0.5%想定・ベンチマークは日経平均（^N225）。あくまで過去1年の実績値です。")
-
-            st.markdown(
-                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
-                unsafe_allow_html=True,
-            )
-
-            # ── 来期想定利益スクリーニング ────────────────────────────
-            st.markdown(
-                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
-                'margin:4px 0 8px">── 🔮 来期想定利益スクリーニング ──</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
-                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
-                '📊 yfinance（予想PER/EPS）から、来期の利益成長が見込める割安成長株を'
-                '日経225主要銘柄の中から抽出します。上位銘柄は任意でJ-Quants決算短信の'
-                '実績値と突き合わせられます。'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            _fs_c1, _fs_c2, _fs_c3, _fs_c4 = st.columns(4)
-            _fs_per_max = _fs_c1.number_input("予想PER 上限（倍）", min_value=1.0, max_value=100.0, value=20.0, step=1.0, key="fs_per_max")
-            _fs_eps_min = _fs_c2.number_input("EPS成長率 下限（%）", min_value=-50.0, max_value=200.0, value=10.0, step=1.0, key="fs_eps_min")
-            _fs_peg_max = _fs_c3.number_input("PEGレシオ 上限", min_value=0.1, max_value=10.0, value=1.5, step=0.1, key="fs_peg_max")
-            _fs_opm_min = _fs_c4.number_input("営業利益率 下限（%）", min_value=-50.0, max_value=80.0, value=5.0, step=1.0, key="fs_opm_min")
-
-            if st.button("🔍 スクリーニングを実行", key="btn_fwd_screen"):
-                with st.spinner("日経225主要銘柄のforward指標を取得中..."):
-                    st.session_state["_fwd_earnings_universe"] = _fetch_forward_earnings_universe()
-
-            _fs_universe = st.session_state.get("_fwd_earnings_universe")
-            if _fs_universe is not None:
-                if _fs_universe.empty:
-                    st.caption("forward指標を取得できませんでした。")
-                else:
-                    _fs_result = _screen_forward_earnings(
-                        _fs_universe, _fs_per_max, _fs_eps_min, _fs_peg_max, _fs_opm_min,
+                    _has_jp = any(
+                        _it.get("ticker", "").endswith(".T")
+                        for _it in _ip_pf if float(_it.get("allocation", 0)) > 0
                     )
-                    if _fs_result.empty:
-                        st.info("条件に合致する銘柄がありませんでした。条件を緩めて再実行してください。")
-                    else:
-                        st.dataframe(
-                            _fs_result[[
-                                "ティッカー", "銘柄名", "現在値", "実績PER", "予想PER",
-                                "PEGレシオ", "EPS成長率(%)", "営業利益率(%)",
-                            ]],
-                            use_container_width=True, hide_index=True,
-                            column_config={
-                                "予想PER": st.column_config.NumberColumn(format="%.1f倍"),
-                                "実績PER": st.column_config.NumberColumn(format="%.1f倍"),
-                                "PEGレシオ": st.column_config.NumberColumn(format="%.2f"),
-                                "EPS成長率(%)": st.column_config.NumberColumn(format="%.1f%%"),
-                                "営業利益率(%)": st.column_config.NumberColumn(format="%.1f%%"),
-                            },
-                        )
-                        with st.expander("📋 J-Quants決算短信で実績値を確認（上位5銘柄）"):
-                            for _, _fs_row in _fs_result.head(5).iterrows():
-                                _fs_code = _fs_row["ティッカー"]
-                                _fs_fin = _fetch_jquants_fins_statements(_fs_code)
-                                if not _fs_fin.get("ok"):
-                                    st.caption(f"{_fs_code} {_fs_row['銘柄名']}: {_fs_fin.get('reason', '取得失敗')}")
-                                    continue
-                                st.markdown(
-                                    f"**{_fs_code} {_fs_row['銘柄名']}**（{_fs_fin.get('period_end', '')}期）　"
-                                    f"売上高予想比 {_fs_fin.get('sales_growth_fc_pct', '-')}%　"
-                                    f"営業利益予想比 {_fs_fin.get('op_profit_growth_fc_pct', '-')}%　"
-                                    f"純利益予想比 {_fs_fin.get('profit_growth_fc_pct', '-')}%"
-                                )
-                        st.caption("※ PEGレシオが小さいほど成長性に対して割安。あくまで参考情報で投資判断は自己責任です。")
+                    if _has_jp:
+                        _cash_reasons.append("日本株の100株単元ロット丸め")
+                    _ai_comment = _ip_met.get("comment", "")
+                    _cash_reason_str = " ／ ".join(_cash_reasons) if _cash_reasons else "単元ロット丸めによる端数"
+                    _cash_color = "#ef4444" if _inv_pct < 60 else "#fbbf24" if _inv_pct < 85 else "#4ade80"
+                    st.markdown(
+                        f'<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;'
+                        f'padding:10px 14px;margin-top:8px">'
+                        f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'
+                        f'<div><div style="font-size:10px;color:#64748b">合計投資金額（単元後）</div>'
+                        f'<div style="font-size:15px;font-weight:800;color:#4ade80">¥{_ip_total_actual:,}</div></div>'
+                        f'<div><div style="font-size:10px;color:#64748b">余剰資金（現金）</div>'
+                        f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">¥{_ip_cash:,}</div></div>'
+                        f'<div><div style="font-size:10px;color:#64748b">投資効率</div>'
+                        f'<div style="font-size:15px;font-weight:800;color:{_cash_color}">{_inv_pct}%</div></div>'
+                        f'<div style="font-size:10px;color:#475569;margin-left:auto">予算 ¥{_ip_bv:,}</div>'
+                        f'</div>'
+                        f'<div style="font-size:10px;color:#94a3b8;border-top:1px solid #1e293b;padding-top:6px">'
+                        f'💡 <b style="color:#e2e8f0">余剰資金の理由:</b> {_cash_reason_str}'
+                        + (f'　｜　<span style="color:#64748b">{_ai_comment}</span>' if _ai_comment else '')
+                        + '</div></div>',
+                        unsafe_allow_html=True,
+                    )
 
-            st.markdown(
-                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
-                unsafe_allow_html=True,
+        # ── リスク-リターン比較チャート ──────────────────────────
+        if _ip_disp and any(_ip_disp.get(k, {}).get("metrics") for k in ["etf", "individual"]):
+            import plotly.graph_objects as _go2
+            _chart_pts = []
+            _COLORS = {"etf": "#38bdf8", "individual": "#a78bfa"}
+            _LABELS = {"etf": "ETF混合", "individual": "個別株"}
+            for _mk in ["etf", "individual"]:
+                _mr = _ip_disp.get(_mk, {})
+                _mm = _mr.get("metrics", {})
+                if not _mm:
+                    continue
+                _chart_pts.append({
+                    "x": float(_mm.get("risk_volatility", 0)),
+                    "y": float(_mm.get("expected_return", 0)),
+                    "label": _LABELS[_mk],
+                    "sr": float(_mm.get("sharpe_ratio", 0)),
+                    "mdd": float(_mm.get("max_drawdown_estimate", 0)),
+                    "color": _COLORS[_mk],
+                })
+            # 参考ベンチマーク
+            _refs = [
+                {"x": 0.0,  "y": 0.5,  "label": "現金"},
+                {"x": 5.0,  "y": 2.0,  "label": "日本国債"},
+                {"x": 15.0, "y": 10.0, "label": "S&P500"},
+                {"x": 20.0, "y": 14.0, "label": "NASDAQ100"},
+            ]
+            _fig_rr = _go2.Figure()
+            # 参考点
+            _fig_rr.add_trace(_go2.Scatter(
+                x=[r["x"] for r in _refs], y=[r["y"] for r in _refs],
+                mode="markers+text",
+                marker=dict(size=11, color="#64748b", symbol="diamond",
+                            line=dict(width=1, color="#cbd5e1")),
+                text=[r["label"] for r in _refs],
+                textposition="top center",
+                textfont=dict(size=11, color="#cbd5e1"),
+                name="参考",
+                hovertemplate="%{text}<br>リスク: %{x:.1f}%<br>リターン: %{y:.1f}%<extra></extra>",
+            ))
+            # ポートフォリオ点
+            for _pt in _chart_pts:
+                _fig_rr.add_trace(_go2.Scatter(
+                    x=[_pt["x"]], y=[_pt["y"]],
+                    mode="markers+text",
+                    marker=dict(size=16, color=_pt["color"],
+                                line=dict(width=2, color="#ffffff")),
+                    text=[_pt["label"]],
+                    textposition="top center",
+                    textfont=dict(size=11, color=_pt["color"], family="Arial Black"),
+                    name=_pt["label"],
+                    hovertemplate=(
+                        f"<b>{_pt['label']}</b><br>"
+                        f"リスク(ボラ): {_pt['x']:.1f}%<br>"
+                        f"期待リターン: {_pt['y']:+.1f}%<br>"
+                        f"シャープ: {_pt['sr']:.2f}<br>"
+                        f"最大DD推定: {_pt['mdd']:.0f}%<extra></extra>"
+                    ),
+                ))
+            # シャープレシオ1.0の参照線 (return = 1.5 + vol)
+            _vx = list(range(0, 41, 2))
+            _fig_rr.add_trace(_go2.Scatter(
+                x=_vx, y=[1.5 + v for v in _vx],
+                mode="lines",
+                line=dict(dash="dash", color="#f59e0b", width=2),
+                name="SR=1.0ライン",
+                hoverinfo="skip",
+            ))
+            _fig_rr.update_layout(
+                paper_bgcolor="#0f172a", plot_bgcolor="#0d1117",
+                font=dict(color="#e2e8f0"),
+                height=300, margin=dict(l=40, r=20, t=36, b=40),
+                title=dict(text="📐 リスク-リターン マップ", font=dict(size=13, color="#94a3b8"), x=0),
+                xaxis=dict(
+                    title="リスク（年率ボラティリティ %）",
+                    tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
+                    gridcolor="#1e293b", range=[-2, 42],
+                ),
+                yaxis=dict(
+                    title="期待リターン（年率 %）",
+                    tickfont=dict(color="#94a3b8"), title_font=dict(color="#94a3b8"),
+                    gridcolor="#1e293b",
+                ),
+                legend=dict(font=dict(color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
+                hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                showlegend=True,
             )
+            st.plotly_chart(_fig_rr, use_container_width=True)
 
+        st.markdown(
+            '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
+
+
+        # ── 日本株シャープレシオ TOP10 ────────────────────────────
+        st.markdown(
+            '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+            'margin:4px 0 8px">── 📐 日本株シャープレシオ TOP10 ──</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+            'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+            '📊 日経225主要銘柄（30銘柄）の直近1年のリターン・リスクからシャープレシオ'
+            '（無リスク金利控除後リターン÷リスク）を算出し、効率よく稼げている銘柄をランキングします。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _sharpe_df = _compute_jp_sharpe_ranking()
+        if _sharpe_df.empty:
+            st.caption("シャープレシオの計算に必要な株価データを取得できませんでした。")
+        else:
+            _sharpe_top10 = _sharpe_df.head(10).copy()
+            _sharpe_top10.insert(0, "順位", range(1, len(_sharpe_top10) + 1))
+            st.dataframe(
+                _sharpe_top10.set_index("順位"),
+                use_container_width=True,
+                column_config={
+                    "シャープレシオ": st.column_config.NumberColumn(format="%.4f"),
+                    "年間平均リターン(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "年間リスク(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "アルファ(%)": st.column_config.NumberColumn(format="%.2f%%"),
+                    "ベータ": st.column_config.NumberColumn(format="%.4f"),
+                },
+            )
+            st.caption("※ 無リスク金利0.5%想定・ベンチマークは日経平均（^N225）。あくまで過去1年の実績値です。")
+
+        st.markdown(
+            '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
+
+
+        # ── 来期想定利益スクリーニング ────────────────────────────
+        st.markdown(
+            '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+            'margin:4px 0 8px">── 🔮 来期想定利益スクリーニング ──</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+            'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+            '📊 yfinance（予想PER/EPS）から、来期の利益成長が見込める割安成長株を'
+            '日経225主要銘柄の中から抽出します。上位銘柄は任意でJ-Quants決算短信の'
+            '実績値と突き合わせられます。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _fs_c1, _fs_c2, _fs_c3, _fs_c4 = st.columns(4)
+        _fs_per_max = _fs_c1.number_input("予想PER 上限（倍）", min_value=1.0, max_value=100.0, value=20.0, step=1.0, key="fs_per_max")
+        _fs_eps_min = _fs_c2.number_input("EPS成長率 下限（%）", min_value=-50.0, max_value=200.0, value=10.0, step=1.0, key="fs_eps_min")
+        _fs_peg_max = _fs_c3.number_input("PEGレシオ 上限", min_value=0.1, max_value=10.0, value=1.5, step=0.1, key="fs_peg_max")
+        _fs_opm_min = _fs_c4.number_input("営業利益率 下限（%）", min_value=-50.0, max_value=80.0, value=5.0, step=1.0, key="fs_opm_min")
+
+        if st.button("🔍 スクリーニングを実行", key="btn_fwd_screen"):
+            with st.spinner("日経225主要銘柄のforward指標を取得中..."):
+                st.session_state["_fwd_earnings_universe"] = _fetch_forward_earnings_universe()
+
+        _fs_universe = st.session_state.get("_fwd_earnings_universe")
+        if _fs_universe is not None:
+            if _fs_universe.empty:
+                st.caption("forward指標を取得できませんでした。")
+            else:
+                _fs_result = _screen_forward_earnings(
+                    _fs_universe, _fs_per_max, _fs_eps_min, _fs_peg_max, _fs_opm_min,
+                )
+                if _fs_result.empty:
+                    st.info("条件に合致する銘柄がありませんでした。条件を緩めて再実行してください。")
+                else:
+                    st.dataframe(
+                        _fs_result[[
+                            "ティッカー", "銘柄名", "現在値", "実績PER", "予想PER",
+                            "PEGレシオ", "EPS成長率(%)", "営業利益率(%)",
+                        ]],
+                        use_container_width=True, hide_index=True,
+                        column_config={
+                            "予想PER": st.column_config.NumberColumn(format="%.1f倍"),
+                            "実績PER": st.column_config.NumberColumn(format="%.1f倍"),
+                            "PEGレシオ": st.column_config.NumberColumn(format="%.2f"),
+                            "EPS成長率(%)": st.column_config.NumberColumn(format="%.1f%%"),
+                            "営業利益率(%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        },
+                    )
+                    with st.expander("📋 J-Quants決算短信で実績値を確認（上位5銘柄）"):
+                        for _, _fs_row in _fs_result.head(5).iterrows():
+                            _fs_code = _fs_row["ティッカー"]
+                            _fs_fin = _fetch_jquants_fins_statements(_fs_code)
+                            if not _fs_fin.get("ok"):
+                                st.caption(f"{_fs_code} {_fs_row['銘柄名']}: {_fs_fin.get('reason', '取得失敗')}")
+                                continue
+                            st.markdown(
+                                f"**{_fs_code} {_fs_row['銘柄名']}**（{_fs_fin.get('period_end', '')}期）　"
+                                f"売上高予想比 {_fs_fin.get('sales_growth_fc_pct', '-')}%　"
+                                f"営業利益予想比 {_fs_fin.get('op_profit_growth_fc_pct', '-')}%　"
+                                f"純利益予想比 {_fs_fin.get('profit_growth_fc_pct', '-')}%"
+                            )
+                    st.caption("※ PEGレシオが小さいほど成長性に対して割安。あくまで参考情報で投資判断は自己責任です。")
+
+        st.markdown(
+            '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
+
+
+        if all_options:
             # ── AI開示評価（LLM as a Judge） ──────────────────────────
             _jp_held_tickers = tuple(sorted(t for t in open_pos if t.endswith(".T")))
             if _jp_held_tickers:
@@ -30193,337 +30203,341 @@ def render_claude_trading_project():
                     unsafe_allow_html=True,
                 )
 
-            # ── サイズ/バリューファクター分析・価値創造分析 ────────────
-            st.markdown(
-                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
-                'margin:4px 0 8px">── 📏💰🌟 ファクター分析 ──</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
-                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
-                '📊 日経225主要銘柄を対象に、サイズ（時価総額）・バリュー（PBR）の観点から'
-                'ファクタープレミアムを検証し、CAPMベースの資本コストとROEを比較して'
-                '株主価値を創造できている銘柄を抽出します。'
-                '</div>',
-                unsafe_allow_html=True,
-            )
 
-            _fac_t1, _fac_t2, _fac_t3 = st.tabs([
-                "📏 サイズファクター", "💰 バリューファクター", "🌟 価値創造分析",
-            ])
+        # ── サイズ/バリューファクター分析・価値創造分析 ────────────
+        st.markdown(
+            '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+            'margin:4px 0 8px">── 📏💰🌟 ファクター分析 ──</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+            'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+            '📊 日経225主要銘柄を対象に、サイズ（時価総額）・バリュー（PBR）の観点から'
+            'ファクタープレミアムを検証し、CAPMベースの資本コストとROEを比較して'
+            '株主価値を創造できている銘柄を抽出します。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-            with _fac_t1:
-                if st.button("📏 サイズファクター分析を実行", key="btn_size_factor"):
-                    with st.spinner("時価総額データ取得中..."):
-                        st.session_state["_factor_universe"] = _compute_jp_factor_universe()
+        _fac_t1, _fac_t2, _fac_t3 = st.tabs([
+            "📏 サイズファクター", "💰 バリューファクター", "🌟 価値創造分析",
+        ])
 
-                _sz_df = st.session_state.get("_factor_universe")
-                if _sz_df is None:
-                    st.caption("ボタンを押すとサイズ別の銘柄分布・パフォーマンスを分析します。")
-                elif _sz_df.empty:
-                    st.caption("データを取得できませんでした。")
-                else:
-                    _sz_valid = _sz_df.dropna(subset=["時価総額"])
-                    _SIZE_ORDER = ["大型株(>3兆)", "中型株(5000億-3兆)", "小型株(<5000億)"]
-                    _sz_cols = st.columns(3)
-                    for _i, _lbl in enumerate(_SIZE_ORDER):
-                        _sz_cols[_i].metric(_lbl, f"{int((_sz_valid['サイズ分類'] == _lbl).sum())}銘柄")
+        with _fac_t1:
+            if st.button("📏 サイズファクター分析を実行", key="btn_size_factor"):
+                with st.spinner("時価総額データ取得中..."):
+                    st.session_state["_factor_universe"] = _compute_jp_factor_universe()
 
-                    _sz_agg = _sz_valid.dropna(subset=["シャープレシオ"]).groupby("サイズ分類").agg(
-                        平均リターン=("年間平均リターン(%)", "mean"),
-                        平均リスク=("年間リスク(%)", "mean"),
-                        平均シャープレシオ=("シャープレシオ", "mean"),
-                        平均アルファ=("アルファ(%)", "mean"),
-                    ).round(2).reindex(_SIZE_ORDER).dropna(how="all")
-                    if not _sz_agg.empty:
-                        st.dataframe(_sz_agg, use_container_width=True)
+            _sz_df = st.session_state.get("_factor_universe")
+            if _sz_df is None:
+                st.caption("ボタンを押すとサイズ別の銘柄分布・パフォーマンスを分析します。")
+            elif _sz_df.empty:
+                st.caption("データを取得できませんでした。")
+            else:
+                _sz_valid = _sz_df.dropna(subset=["時価総額"])
+                _SIZE_ORDER = ["大型株(>3兆)", "中型株(5000億-3兆)", "小型株(<5000億)"]
+                _sz_cols = st.columns(3)
+                for _i, _lbl in enumerate(_SIZE_ORDER):
+                    _sz_cols[_i].metric(_lbl, f"{int((_sz_valid['サイズ分類'] == _lbl).sum())}銘柄")
 
-                    st.markdown("**時価総額 上位10銘柄**")
-                    st.dataframe(
-                        _sz_valid.nlargest(10, "時価総額")[["ティッカー", "銘柄名", "サイズ分類", "時価総額(億円)", "シャープレシオ"]],
-                        use_container_width=True, hide_index=True,
-                    )
+                _sz_agg = _sz_valid.dropna(subset=["シャープレシオ"]).groupby("サイズ分類").agg(
+                    平均リターン=("年間平均リターン(%)", "mean"),
+                    平均リスク=("年間リスク(%)", "mean"),
+                    平均シャープレシオ=("シャープレシオ", "mean"),
+                    平均アルファ=("アルファ(%)", "mean"),
+                ).round(2).reindex(_SIZE_ORDER).dropna(how="all")
+                if not _sz_agg.empty:
+                    st.dataframe(_sz_agg, use_container_width=True)
 
-                    st.markdown("##### 📉 SMBファクター（小型株マイナス大型株）")
-                    _smb_days = st.slider("分析期間（営業日）", 30, 250, 120, key="smb_days")
-                    _sz_by_mc = _sz_valid.dropna(subset=["時価総額"]).sort_values("時価総額")
-                    _n_smb = max(int(len(_sz_by_mc) * 0.3), 3)
-                    _smb_small = tuple(_sz_by_mc.head(_n_smb)["ティッカー"])
-                    _smb_large = tuple(_sz_by_mc.tail(_n_smb)["ティッカー"])
-                    with st.spinner("SMBファクター計算中..."):
-                        _smb = _compute_factor_spread(_smb_small, _smb_large, _smb_days)
-                    if not _smb.get("ok"):
-                        st.caption("SMBファクターの計算に必要なデータを取得できませんでした。")
-                    else:
-                        _smb_c1, _smb_c2, _smb_c3 = st.columns(3)
-                        _smb_c1.metric("小型株バスケット", f"{_smb['low_final']:+.2f}%")
-                        _smb_c2.metric("大型株バスケット", f"{_smb['high_final']:+.2f}%")
-                        _smb_c3.metric("SMBスプレッド", f"{_smb['spread_final']:+.2f}%",
-                                       "小型株プレミアム" if _smb["spread_final"] > 0 else "大型株優位")
-                        _fig_smb = go.Figure()
-                        _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["low_cum"], name="小型株", line=dict(color="#4ade80")))
-                        _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["high_cum"], name="大型株", line=dict(color="#60a5fa")))
-                        _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["spread_cum"], name="SMBスプレッド", line=dict(color="#fbbf24", dash="dot")))
-                        _fig_smb.update_layout(
-                            height=350, margin=dict(l=10, r=10, t=30, b=10),
-                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-                            font=dict(color="#e2e8f0"),
-                            yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-                            xaxis=dict(tickfont=dict(color="#e2e8f0")),
-                            legend=dict(font=dict(color="#e2e8f0")),
-                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                        )
-                        st.plotly_chart(_fig_smb, use_container_width=True)
-
-            with _fac_t2:
-                if st.button("💰 バリューファクター分析を実行", key="btn_value_factor"):
-                    with st.spinner("PBRデータ取得中..."):
-                        st.session_state["_factor_universe"] = _compute_jp_factor_universe()
-
-                _vl_df = st.session_state.get("_factor_universe")
-                if _vl_df is None:
-                    st.caption("ボタンを押すとPBR別の銘柄分布・パフォーマンスを分析します。")
-                elif _vl_df.empty:
-                    st.caption("データを取得できませんでした。")
-                else:
-                    _vl_c1, _vl_c2 = st.columns(2)
-                    _pbr_max_vl = _vl_c1.slider("最大PBR", 0.3, 5.0, 1.5, 0.1, key="vl_pbr_max")
-                    _per_max_vl = _vl_c2.slider("最大PER", 5, 80, 30, key="vl_per_max")
-                    _vl_valid = _vl_df.dropna(subset=["PBR", "PER"])
-                    _vl_screen = _vl_valid[
-                        (_vl_valid["PBR"] > 0) & (_vl_valid["PBR"] <= _pbr_max_vl) &
-                        (_vl_valid["PER"] > 0) & (_vl_valid["PER"] <= _per_max_vl)
-                    ].sort_values("PBR").reset_index(drop=True)
-                    st.markdown(f"**{len(_vl_screen)}銘柄** が条件を満たしています（PBR≤{_pbr_max_vl} かつ PER≤{_per_max_vl}）")
-                    if not _vl_screen.empty:
-                        st.dataframe(
-                            _vl_screen[["ティッカー", "銘柄名", "PBR", "PER", "配当利回り(%)", "ROE(%)"]],
-                            use_container_width=True, hide_index=True,
-                        )
-
-                    _VALUE_ORDER = ["割安(PBR<1)", "適正(PBR 1-2)", "やや割高(PBR 2-3)", "割高(PBR>3)"]
-                    _vl_agg = _vl_df.dropna(subset=["PBR", "シャープレシオ"]).groupby("バリュー分類").agg(
-                        平均PBR=("PBR", "mean"),
-                        平均リターン=("年間平均リターン(%)", "mean"),
-                        平均シャープレシオ=("シャープレシオ", "mean"),
-                        平均アルファ=("アルファ(%)", "mean"),
-                    ).round(2).reindex(_VALUE_ORDER).dropna(how="all")
-                    if not _vl_agg.empty:
-                        st.markdown("**バリュー分類別パフォーマンス**")
-                        st.dataframe(_vl_agg, use_container_width=True)
-
-                    st.markdown("##### 📉 HMLファクター（低PBRマイナス高PBR）")
-                    _hml_days = st.slider("分析期間（営業日）", 30, 250, 120, key="hml_days")
-                    _vl_by_pbr = _vl_df.dropna(subset=["PBR"])
-                    _vl_by_pbr = _vl_by_pbr[_vl_by_pbr["PBR"] > 0].sort_values("PBR")
-                    _n_hml = max(int(len(_vl_by_pbr) * 0.3), 3)
-                    _hml_low = tuple(_vl_by_pbr.head(_n_hml)["ティッカー"])
-                    _hml_high = tuple(_vl_by_pbr.tail(_n_hml)["ティッカー"])
-                    with st.spinner("HMLファクター計算中..."):
-                        _hml = _compute_factor_spread(_hml_low, _hml_high, _hml_days)
-                    if not _hml.get("ok"):
-                        st.caption("HMLファクターの計算に必要なデータを取得できませんでした。")
-                    else:
-                        _hml_c1, _hml_c2, _hml_c3 = st.columns(3)
-                        _hml_c1.metric("低PBR（バリュー）", f"{_hml['low_final']:+.2f}%")
-                        _hml_c2.metric("高PBR（グロース）", f"{_hml['high_final']:+.2f}%")
-                        _hml_c3.metric("HMLスプレッド", f"{_hml['spread_final']:+.2f}%",
-                                       "バリュープレミアム" if _hml["spread_final"] > 0 else "グロース優位")
-                        _fig_hml = go.Figure()
-                        _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["low_cum"], name="低PBR(バリュー)", line=dict(color="#4ade80")))
-                        _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["high_cum"], name="高PBR(グロース)", line=dict(color="#f87171")))
-                        _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["spread_cum"], name="HMLスプレッド", line=dict(color="#fbbf24", dash="dot")))
-                        _fig_hml.update_layout(
-                            height=350, margin=dict(l=10, r=10, t=30, b=10),
-                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-                            font=dict(color="#e2e8f0"),
-                            yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-                            xaxis=dict(tickfont=dict(color="#e2e8f0")),
-                            legend=dict(font=dict(color="#e2e8f0")),
-                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
-                        )
-                        st.plotly_chart(_fig_hml, use_container_width=True)
-
-            with _fac_t3:
-                st.caption(
-                    "価値創造（Value Creation）= ROE ＞ 資本コスト（CAPMベース: "
-                    "無リスク金利＋β×株式リスクプレミアム5%）。伊藤レポートの提唱するROE 8%基準も参考表示します。"
+                st.markdown("**時価総額 上位10銘柄**")
+                st.dataframe(
+                    _sz_valid.nlargest(10, "時価総額")[["ティッカー", "銘柄名", "サイズ分類", "時価総額(億円)", "シャープレシオ"]],
+                    use_container_width=True, hide_index=True,
                 )
-                if st.button("🌟 価値創造分析を実行", key="btn_value_creation"):
-                    with st.spinner("ROE・β データ取得中..."):
-                        st.session_state["_factor_universe"] = _compute_jp_factor_universe()
 
-                _vc_df = st.session_state.get("_factor_universe")
-                if _vc_df is None:
-                    st.caption("ボタンを押すと価値創造スプレッド（ROE−資本コスト）を分析します。")
-                elif _vc_df.empty:
-                    st.caption("データを取得できませんでした。")
+                st.markdown("##### 📉 SMBファクター（小型株マイナス大型株）")
+                _smb_days = st.slider("分析期間（営業日）", 30, 250, 120, key="smb_days")
+                _sz_by_mc = _sz_valid.dropna(subset=["時価総額"]).sort_values("時価総額")
+                _n_smb = max(int(len(_sz_by_mc) * 0.3), 3)
+                _smb_small = tuple(_sz_by_mc.head(_n_smb)["ティッカー"])
+                _smb_large = tuple(_sz_by_mc.tail(_n_smb)["ティッカー"])
+                with st.spinner("SMBファクター計算中..."):
+                    _smb = _compute_factor_spread(_smb_small, _smb_large, _smb_days)
+                if not _smb.get("ok"):
+                    st.caption("SMBファクターの計算に必要なデータを取得できませんでした。")
                 else:
-                    _vc = _vc_df.dropna(subset=["ROE(%)", "ベータ", "PBR"]).copy()
-                    _vc = _vc[_vc["ROE(%)"].abs() < 200]
-                    _jgb = _fetch_jgb10y_history()
-                    _rf_pct = float(_jgb["yield"].iloc[-1]) if not _jgb.empty else 0.5
-                    _ERP_JAPAN = 5.0
-                    _vc["資本コスト(%)"] = (_rf_pct + _vc["ベータ"] * _ERP_JAPAN).round(2)
-                    _vc["価値創造スプレッド(%)"] = (_vc["ROE(%)"] - _vc["資本コスト(%)"]).round(2)
-                    _vc["価値創造判定"] = _vc["価値創造スプレッド(%)"].apply(lambda x: "✅ 価値創造" if x > 0 else "❌ 価値破壊")
+                    _smb_c1, _smb_c2, _smb_c3 = st.columns(3)
+                    _smb_c1.metric("小型株バスケット", f"{_smb['low_final']:+.2f}%")
+                    _smb_c2.metric("大型株バスケット", f"{_smb['high_final']:+.2f}%")
+                    _smb_c3.metric("SMBスプレッド", f"{_smb['spread_final']:+.2f}%",
+                                   "小型株プレミアム" if _smb["spread_final"] > 0 else "大型株優位")
+                    _fig_smb = go.Figure()
+                    _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["low_cum"], name="小型株", line=dict(color="#4ade80")))
+                    _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["high_cum"], name="大型株", line=dict(color="#60a5fa")))
+                    _fig_smb.add_trace(go.Scatter(x=_smb["dates"], y=_smb["spread_cum"], name="SMBスプレッド", line=dict(color="#fbbf24", dash="dot")))
+                    _fig_smb.update_layout(
+                        height=350, margin=dict(l=10, r=10, t=30, b=10),
+                        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        font=dict(color="#e2e8f0"),
+                        yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                        xaxis=dict(tickfont=dict(color="#e2e8f0")),
+                        legend=dict(font=dict(color="#e2e8f0")),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    )
+                    st.plotly_chart(_fig_smb, use_container_width=True)
 
-                    _creators   = int((_vc["価値創造スプレッド(%)"] > 0).sum())
-                    _destroyers = int((_vc["価値創造スプレッド(%)"] <= 0).sum())
-                    _ito_pass   = int((_vc["ROE(%)"] >= 8).sum())
+        with _fac_t2:
+            if st.button("💰 バリューファクター分析を実行", key="btn_value_factor"):
+                with st.spinner("PBRデータ取得中..."):
+                    st.session_state["_factor_universe"] = _compute_jp_factor_universe()
 
-                    _vc_m1, _vc_m2, _vc_m3, _vc_m4 = st.columns(4)
-                    _vc_m1.metric("✅ 価値創造企業", f"{_creators}社")
-                    _vc_m2.metric("❌ 価値破壊企業", f"{_destroyers}社")
-                    _vc_m3.metric("平均スプレッド", f"{_vc['価値創造スプレッド(%)'].mean():+.2f}%")
-                    _vc_m4.metric("伊藤レポート ROE≥8%", f"{_ito_pass}社")
-                    st.caption(f"資本コスト = 無リスク金利({_rf_pct:.2f}%、日本10年国債利回り) + β × 株式リスクプレミアム({_ERP_JAPAN:.0f}%)")
-
-                    st.markdown("**🏆 価値創造ランキング（上位10）**")
+            _vl_df = st.session_state.get("_factor_universe")
+            if _vl_df is None:
+                st.caption("ボタンを押すとPBR別の銘柄分布・パフォーマンスを分析します。")
+            elif _vl_df.empty:
+                st.caption("データを取得できませんでした。")
+            else:
+                _vl_c1, _vl_c2 = st.columns(2)
+                _pbr_max_vl = _vl_c1.slider("最大PBR", 0.3, 5.0, 1.5, 0.1, key="vl_pbr_max")
+                _per_max_vl = _vl_c2.slider("最大PER", 5, 80, 30, key="vl_per_max")
+                _vl_valid = _vl_df.dropna(subset=["PBR", "PER"])
+                _vl_screen = _vl_valid[
+                    (_vl_valid["PBR"] > 0) & (_vl_valid["PBR"] <= _pbr_max_vl) &
+                    (_vl_valid["PER"] > 0) & (_vl_valid["PER"] <= _per_max_vl)
+                ].sort_values("PBR").reset_index(drop=True)
+                st.markdown(f"**{len(_vl_screen)}銘柄** が条件を満たしています（PBR≤{_pbr_max_vl} かつ PER≤{_per_max_vl}）")
+                if not _vl_screen.empty:
                     st.dataframe(
-                        _vc[_vc["価値創造スプレッド(%)"] > 0].nlargest(10, "価値創造スプレッド(%)")[
-                            ["ティッカー", "銘柄名", "ROE(%)", "資本コスト(%)", "価値創造スプレッド(%)", "PBR"]
-                        ],
+                        _vl_screen[["ティッカー", "銘柄名", "PBR", "PER", "配当利回り(%)", "ROE(%)"]],
                         use_container_width=True, hide_index=True,
                     )
-                    _vc_bottom = _vc[_vc["価値創造スプレッド(%)"] <= 0].nsmallest(5, "価値創造スプレッド(%)")
-                    if not _vc_bottom.empty:
-                        st.markdown("**⚠️ 価値破壊 下位5銘柄**")
+
+                _VALUE_ORDER = ["割安(PBR<1)", "適正(PBR 1-2)", "やや割高(PBR 2-3)", "割高(PBR>3)"]
+                _vl_agg = _vl_df.dropna(subset=["PBR", "シャープレシオ"]).groupby("バリュー分類").agg(
+                    平均PBR=("PBR", "mean"),
+                    平均リターン=("年間平均リターン(%)", "mean"),
+                    平均シャープレシオ=("シャープレシオ", "mean"),
+                    平均アルファ=("アルファ(%)", "mean"),
+                ).round(2).reindex(_VALUE_ORDER).dropna(how="all")
+                if not _vl_agg.empty:
+                    st.markdown("**バリュー分類別パフォーマンス**")
+                    st.dataframe(_vl_agg, use_container_width=True)
+
+                st.markdown("##### 📉 HMLファクター（低PBRマイナス高PBR）")
+                _hml_days = st.slider("分析期間（営業日）", 30, 250, 120, key="hml_days")
+                _vl_by_pbr = _vl_df.dropna(subset=["PBR"])
+                _vl_by_pbr = _vl_by_pbr[_vl_by_pbr["PBR"] > 0].sort_values("PBR")
+                _n_hml = max(int(len(_vl_by_pbr) * 0.3), 3)
+                _hml_low = tuple(_vl_by_pbr.head(_n_hml)["ティッカー"])
+                _hml_high = tuple(_vl_by_pbr.tail(_n_hml)["ティッカー"])
+                with st.spinner("HMLファクター計算中..."):
+                    _hml = _compute_factor_spread(_hml_low, _hml_high, _hml_days)
+                if not _hml.get("ok"):
+                    st.caption("HMLファクターの計算に必要なデータを取得できませんでした。")
+                else:
+                    _hml_c1, _hml_c2, _hml_c3 = st.columns(3)
+                    _hml_c1.metric("低PBR（バリュー）", f"{_hml['low_final']:+.2f}%")
+                    _hml_c2.metric("高PBR（グロース）", f"{_hml['high_final']:+.2f}%")
+                    _hml_c3.metric("HMLスプレッド", f"{_hml['spread_final']:+.2f}%",
+                                   "バリュープレミアム" if _hml["spread_final"] > 0 else "グロース優位")
+                    _fig_hml = go.Figure()
+                    _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["low_cum"], name="低PBR(バリュー)", line=dict(color="#4ade80")))
+                    _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["high_cum"], name="高PBR(グロース)", line=dict(color="#f87171")))
+                    _fig_hml.add_trace(go.Scatter(x=_hml["dates"], y=_hml["spread_cum"], name="HMLスプレッド", line=dict(color="#fbbf24", dash="dot")))
+                    _fig_hml.update_layout(
+                        height=350, margin=dict(l=10, r=10, t=30, b=10),
+                        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        font=dict(color="#e2e8f0"),
+                        yaxis=dict(title="累積リターン(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                        xaxis=dict(tickfont=dict(color="#e2e8f0")),
+                        legend=dict(font=dict(color="#e2e8f0")),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    )
+                    st.plotly_chart(_fig_hml, use_container_width=True)
+
+        with _fac_t3:
+            st.caption(
+                "価値創造（Value Creation）= ROE ＞ 資本コスト（CAPMベース: "
+                "無リスク金利＋β×株式リスクプレミアム5%）。伊藤レポートの提唱するROE 8%基準も参考表示します。"
+            )
+            if st.button("🌟 価値創造分析を実行", key="btn_value_creation"):
+                with st.spinner("ROE・β データ取得中..."):
+                    st.session_state["_factor_universe"] = _compute_jp_factor_universe()
+
+            _vc_df = st.session_state.get("_factor_universe")
+            if _vc_df is None:
+                st.caption("ボタンを押すと価値創造スプレッド（ROE−資本コスト）を分析します。")
+            elif _vc_df.empty:
+                st.caption("データを取得できませんでした。")
+            else:
+                _vc = _vc_df.dropna(subset=["ROE(%)", "ベータ", "PBR"]).copy()
+                _vc = _vc[_vc["ROE(%)"].abs() < 200]
+                _jgb = _fetch_jgb10y_history()
+                _rf_pct = float(_jgb["yield"].iloc[-1]) if not _jgb.empty else 0.5
+                _ERP_JAPAN = 5.0
+                _vc["資本コスト(%)"] = (_rf_pct + _vc["ベータ"] * _ERP_JAPAN).round(2)
+                _vc["価値創造スプレッド(%)"] = (_vc["ROE(%)"] - _vc["資本コスト(%)"]).round(2)
+                _vc["価値創造判定"] = _vc["価値創造スプレッド(%)"].apply(lambda x: "✅ 価値創造" if x > 0 else "❌ 価値破壊")
+
+                _creators   = int((_vc["価値創造スプレッド(%)"] > 0).sum())
+                _destroyers = int((_vc["価値創造スプレッド(%)"] <= 0).sum())
+                _ito_pass   = int((_vc["ROE(%)"] >= 8).sum())
+
+                _vc_m1, _vc_m2, _vc_m3, _vc_m4 = st.columns(4)
+                _vc_m1.metric("✅ 価値創造企業", f"{_creators}社")
+                _vc_m2.metric("❌ 価値破壊企業", f"{_destroyers}社")
+                _vc_m3.metric("平均スプレッド", f"{_vc['価値創造スプレッド(%)'].mean():+.2f}%")
+                _vc_m4.metric("伊藤レポート ROE≥8%", f"{_ito_pass}社")
+                st.caption(f"資本コスト = 無リスク金利({_rf_pct:.2f}%、日本10年国債利回り) + β × 株式リスクプレミアム({_ERP_JAPAN:.0f}%)")
+
+                st.markdown("**🏆 価値創造ランキング（上位10）**")
+                st.dataframe(
+                    _vc[_vc["価値創造スプレッド(%)"] > 0].nlargest(10, "価値創造スプレッド(%)")[
+                        ["ティッカー", "銘柄名", "ROE(%)", "資本コスト(%)", "価値創造スプレッド(%)", "PBR"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+                _vc_bottom = _vc[_vc["価値創造スプレッド(%)"] <= 0].nsmallest(5, "価値創造スプレッド(%)")
+                if not _vc_bottom.empty:
+                    st.markdown("**⚠️ 価値破壊 下位5銘柄**")
+                    st.dataframe(
+                        _vc_bottom[["ティッカー", "銘柄名", "ROE(%)", "資本コスト(%)", "価値創造スプレッド(%)", "PBR"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                _vc_scatter = _vc[_vc["PBR"].between(0.1, 15)]
+                if not _vc_scatter.empty:
+                    _fig_vc = go.Figure()
+                    for _judg, _color in [("✅ 価値創造", "#4ade80"), ("❌ 価値破壊", "#f87171")]:
+                        _sub = _vc_scatter[_vc_scatter["価値創造判定"] == _judg]
+                        if _sub.empty:
+                            continue
+                        _fig_vc.add_trace(go.Scatter(
+                            x=_sub["ROE(%)"], y=_sub["PBR"], mode="markers", name=_judg,
+                            marker=dict(color=_color, size=9, opacity=0.8),
+                            text=_sub["銘柄名"], hovertemplate="%{text}<br>ROE=%{x:.1f}%<br>PBR=%{y:.2f}<extra></extra>",
+                        ))
+                    _fig_vc.add_hline(y=1.0, line_dash="dot", line_color="#64748b")
+                    _fig_vc.add_vline(x=8.0, line_dash="dot", line_color="#fbbf24")
+                    _fig_vc.update_layout(
+                        height=420, margin=dict(l=10, r=10, t=30, b=10),
+                        title=dict(text="PBR-ROEマトリクス（💎左上=割安の価値創造企業）", font=dict(color="#e2e8f0")),
+                        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        font=dict(color="#e2e8f0"),
+                        xaxis=dict(title="ROE(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                        yaxis=dict(title="PBR", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                        legend=dict(font=dict(color="#e2e8f0")),
+                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+                    )
+                    st.plotly_chart(_fig_vc, use_container_width=True)
+                st.caption("※ 資本コストはβから逆算した簡易CAPM推定値です。投資判断は自己責任でお願いします。")
+
+        st.markdown(
+            '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
+
+
+        # ── 需給・出来高スクリーニング / 価格パターン分析 ──────────
+        st.markdown(
+            '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
+            'margin:4px 0 8px">── 🔥📊 需給・価格パターンスクリーニング ──</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
+            'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
+            '📊 日経225主要銘柄を対象に、出来高急増・VWAP乖離（需給）や'
+            '52週高値安値・移動平均乖離・ゴールデンクロス/デッドクロス（価格パターン）を'
+            '一括スクリーニングします。個別銘柄の信用残高分析は「個別銘柄分析」の'
+            '需給分析セクションをご利用ください。'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        _sd_t1, _sd_t2 = st.tabs(["🔥 需給・出来高", "📊 価格パターン"])
+
+        if st.button("🔍 スクリーニング用データを取得", key="btn_nk225_ohlcv"):
+            with st.spinner("日経225主要銘柄の価格・出来高データ取得中..."):
+                st.session_state["_nk225_ohlcv"] = _fetch_nk225_ohlcv_batch()
+
+        _ohlcv = st.session_state.get("_nk225_ohlcv")
+
+        with _sd_t1:
+            if _ohlcv is None:
+                st.caption("上のボタンを押すとデータを取得します。")
+            elif not _ohlcv:
+                st.caption("データを取得できませんでした。")
+            else:
+                st.markdown("**📊 出来高急増スクリーナー**（直近5日平均出来高が20日平均の指定倍率以上）")
+                _surge_ratio = st.slider("出来高急増の閾値（倍）", 1.5, 5.0, 2.0, 0.5, key="surge_ratio")
+                _df_surge = _screen_volume_surge(_ohlcv, surge_ratio=_surge_ratio)
+                if _df_surge.empty:
+                    st.caption("条件に合致する銘柄はありませんでした。")
+                else:
+                    st.dataframe(_df_surge, use_container_width=True, hide_index=True)
+
+                st.markdown("**📏 VWAP乖離率ランキング**（直近20日、割高・割安の目安）")
+                _df_vwap = _screen_vwap_deviation(_ohlcv)
+                if _df_vwap.empty:
+                    st.caption("データがありません。")
+                else:
+                    _vw_c1, _vw_c2 = st.columns(2)
+                    with _vw_c1:
+                        st.caption("VWAP上方乖離（過熱気味）上位10")
+                        st.dataframe(_df_vwap.head(10), use_container_width=True, hide_index=True)
+                    with _vw_c2:
+                        st.caption("VWAP下方乖離（売られすぎ気味）上位10")
                         st.dataframe(
-                            _vc_bottom[["ティッカー", "銘柄名", "ROE(%)", "資本コスト(%)", "価値創造スプレッド(%)", "PBR"]],
+                            _df_vwap[_df_vwap["VWAP乖離率(%)"] < 0].tail(10).sort_values("VWAP乖離率(%)"),
                             use_container_width=True, hide_index=True,
                         )
 
-                    _vc_scatter = _vc[_vc["PBR"].between(0.1, 15)]
-                    if not _vc_scatter.empty:
-                        _fig_vc = go.Figure()
-                        for _judg, _color in [("✅ 価値創造", "#4ade80"), ("❌ 価値破壊", "#f87171")]:
-                            _sub = _vc_scatter[_vc_scatter["価値創造判定"] == _judg]
-                            if _sub.empty:
-                                continue
-                            _fig_vc.add_trace(go.Scatter(
-                                x=_sub["ROE(%)"], y=_sub["PBR"], mode="markers", name=_judg,
-                                marker=dict(color=_color, size=9, opacity=0.8),
-                                text=_sub["銘柄名"], hovertemplate="%{text}<br>ROE=%{x:.1f}%<br>PBR=%{y:.2f}<extra></extra>",
-                            ))
-                        _fig_vc.add_hline(y=1.0, line_dash="dot", line_color="#64748b")
-                        _fig_vc.add_vline(x=8.0, line_dash="dot", line_color="#fbbf24")
-                        _fig_vc.update_layout(
-                            height=420, margin=dict(l=10, r=10, t=30, b=10),
-                            title=dict(text="PBR-ROEマトリクス（💎左上=割安の価値創造企業）", font=dict(color="#e2e8f0")),
-                            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
-                            font=dict(color="#e2e8f0"),
-                            xaxis=dict(title="ROE(%)", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-                            yaxis=dict(title="PBR", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
-                            legend=dict(font=dict(color="#e2e8f0")),
-                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        with _sd_t2:
+            if _ohlcv is None:
+                st.caption("上のボタンを押すとデータを取得します。")
+            elif not _ohlcv:
+                st.caption("データを取得できませんでした。")
+            else:
+                st.markdown("**🎯 52週高値・安値ウォッチ**")
+                _df_hl = _screen_52w_highlow(_ohlcv)
+                if _df_hl.empty:
+                    st.caption("データがありません。")
+                else:
+                    _hl_c1, _hl_c2 = st.columns(2)
+                    with _hl_c1:
+                        st.caption("52週高値に接近・更新中")
+                        st.dataframe(
+                            _df_hl.sort_values("高値からの乖離(%)", ascending=False).head(10),
+                            use_container_width=True, hide_index=True,
                         )
-                        st.plotly_chart(_fig_vc, use_container_width=True)
-                    st.caption("※ 資本コストはβから逆算した簡易CAPM推定値です。投資判断は自己責任でお願いします。")
+                    with _hl_c2:
+                        st.caption("52週安値に接近・更新中")
+                        st.dataframe(
+                            _df_hl.sort_values("安値からの乖離(%)").head(10),
+                            use_container_width=True, hide_index=True,
+                        )
 
-            st.markdown(
-                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
-                unsafe_allow_html=True,
-            )
+                st.markdown("**📐 移動平均線乖離率ランキング**")
+                _df_ma = _screen_ma_deviation(_ohlcv)
+                if not _df_ma.empty:
+                    st.dataframe(_df_ma, use_container_width=True, hide_index=True)
 
-            # ── 需給・出来高スクリーニング / 価格パターン分析 ──────────
-            st.markdown(
-                '<div style="font-size:13px;font-weight:600;color:#38bdf8;'
-                'margin:4px 0 8px">── 🔥📊 需給・価格パターンスクリーニング ──</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="background:#0c1a2e;border:1px solid #0ea5e9;border-radius:8px;'
-                'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
-                '📊 日経225主要銘柄を対象に、出来高急増・VWAP乖離（需給）や'
-                '52週高値安値・移動平均乖離・ゴールデンクロス/デッドクロス（価格パターン）を'
-                '一括スクリーニングします。個別銘柄の信用残高分析は「個別銘柄分析」の'
-                '需給分析セクションをご利用ください。'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            _sd_t1, _sd_t2 = st.tabs(["🔥 需給・出来高", "📊 価格パターン"])
-
-            if st.button("🔍 スクリーニング用データを取得", key="btn_nk225_ohlcv"):
-                with st.spinner("日経225主要銘柄の価格・出来高データ取得中..."):
-                    st.session_state["_nk225_ohlcv"] = _fetch_nk225_ohlcv_batch()
-
-            _ohlcv = st.session_state.get("_nk225_ohlcv")
-
-            with _sd_t1:
-                if _ohlcv is None:
-                    st.caption("上のボタンを押すとデータを取得します。")
-                elif not _ohlcv:
-                    st.caption("データを取得できませんでした。")
+                st.markdown("**✨ ゴールデンクロス / デッドクロス（直近10営業日）**")
+                _df_cross = _screen_cross_signals(_ohlcv)
+                if _df_cross.empty:
+                    st.caption("直近10営業日以内のシグナルはありませんでした。")
                 else:
-                    st.markdown("**📊 出来高急増スクリーナー**（直近5日平均出来高が20日平均の指定倍率以上）")
-                    _surge_ratio = st.slider("出来高急増の閾値（倍）", 1.5, 5.0, 2.0, 0.5, key="surge_ratio")
-                    _df_surge = _screen_volume_surge(_ohlcv, surge_ratio=_surge_ratio)
-                    if _df_surge.empty:
-                        st.caption("条件に合致する銘柄はありませんでした。")
-                    else:
-                        st.dataframe(_df_surge, use_container_width=True, hide_index=True)
+                    st.dataframe(_df_cross, use_container_width=True, hide_index=True)
 
-                    st.markdown("**📏 VWAP乖離率ランキング**（直近20日、割高・割安の目安）")
-                    _df_vwap = _screen_vwap_deviation(_ohlcv)
-                    if _df_vwap.empty:
-                        st.caption("データがありません。")
-                    else:
-                        _vw_c1, _vw_c2 = st.columns(2)
-                        with _vw_c1:
-                            st.caption("VWAP上方乖離（過熱気味）上位10")
-                            st.dataframe(_df_vwap.head(10), use_container_width=True, hide_index=True)
-                        with _vw_c2:
-                            st.caption("VWAP下方乖離（売られすぎ気味）上位10")
-                            st.dataframe(
-                                _df_vwap[_df_vwap["VWAP乖離率(%)"] < 0].tail(10).sort_values("VWAP乖離率(%)"),
-                                use_container_width=True, hide_index=True,
-                            )
+        st.markdown(
+            '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
+            unsafe_allow_html=True,
+        )
 
-            with _sd_t2:
-                if _ohlcv is None:
-                    st.caption("上のボタンを押すとデータを取得します。")
-                elif not _ohlcv:
-                    st.caption("データを取得できませんでした。")
-                else:
-                    st.markdown("**🎯 52週高値・安値ウォッチ**")
-                    _df_hl = _screen_52w_highlow(_ohlcv)
-                    if _df_hl.empty:
-                        st.caption("データがありません。")
-                    else:
-                        _hl_c1, _hl_c2 = st.columns(2)
-                        with _hl_c1:
-                            st.caption("52週高値に接近・更新中")
-                            st.dataframe(
-                                _df_hl.sort_values("高値からの乖離(%)", ascending=False).head(10),
-                                use_container_width=True, hide_index=True,
-                            )
-                        with _hl_c2:
-                            st.caption("52週安値に接近・更新中")
-                            st.dataframe(
-                                _df_hl.sort_values("安値からの乖離(%)").head(10),
-                                use_container_width=True, hide_index=True,
-                            )
 
-                    st.markdown("**📐 移動平均線乖離率ランキング**")
-                    _df_ma = _screen_ma_deviation(_ohlcv)
-                    if not _df_ma.empty:
-                        st.dataframe(_df_ma, use_container_width=True, hide_index=True)
-
-                    st.markdown("**✨ ゴールデンクロス / デッドクロス（直近10営業日）**")
-                    _df_cross = _screen_cross_signals(_ohlcv)
-                    if _df_cross.empty:
-                        st.caption("直近10営業日以内のシグナルはありませんでした。")
-                    else:
-                        st.dataframe(_df_cross, use_container_width=True, hide_index=True)
-
-            st.markdown(
-                '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',
-                unsafe_allow_html=True,
-            )
-
+        if all_options:
             # ── 個別銘柄分析 ────────────────────────────────────────
             st.markdown(
                 '<div style="font-size:13px;font-weight:600;color:#94a3b8;'
@@ -30812,6 +30826,7 @@ def render_claude_trading_project():
                                     f'</div>',
                                     unsafe_allow_html=True,
                                 )
+
 
     # ── タブ③: 取引記録入力 ────────────────────────────────────
     elif _active_tab == _TAB_TRADE:
