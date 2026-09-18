@@ -352,6 +352,12 @@ MODEL_FALLBACKS = [
     "gemini-2.5-pro",
 ]
 
+# genai.Client()にはデフォルトのタイムアウトが無く、Google側が応答を返さないまま
+# 詰まると無期限に待ち続める（実際に発生: Agent Aが「マクロ市場環境を分析中...」で
+# 止まったまま終了）。Groq/DeepSeek/NVIDIA/OpenRouterのrequests.post(timeout=N)と
+# 同様に、必ず打ち切られるよう明示的なタイムアウトを設定する（単位はミリ秒）。
+_GEMINI_TIMEOUT_MS = 30_000
+
 # ===========================
 # キャッシュ設定
 # ===========================
@@ -930,7 +936,10 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
     if GENAI_AVAILABLE and GEMINI_API_KEY:
         last_error_msg = ""
         quota_exceeded = False
-        _gclient = genai.Client(api_key=GEMINI_API_KEY)
+        _gclient = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
+        )
         for model_name in MODEL_FALLBACKS:
             try:
                 response = _gclient.models.generate_content(
@@ -1002,7 +1011,10 @@ def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int,
         if provider == "gemini":
             if not (GENAI_AVAILABLE and GEMINI_API_KEY):
                 return None, None
-            _gclient = genai.Client(api_key=GEMINI_API_KEY)
+            _gclient = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
+        )
             _resp = _gclient.models.generate_content(
                 model=MODEL_FALLBACKS[0],
                 contents=prompt,
@@ -1190,7 +1202,10 @@ def _call_ai_for_trading(
     elif model_pref == "gemini":
         # Gemini のみを試行、失敗時はそのままエラーを返す（他へは落とさない）
         if GENAI_AVAILABLE and GEMINI_API_KEY:
-            _gclient = genai.Client(api_key=GEMINI_API_KEY)
+            _gclient = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
+        )
             for model_name in MODEL_FALLBACKS:
                 try:
                     resp = _gclient.models.generate_content(
@@ -1249,7 +1264,10 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
     # 含める（原因不明のまま「読み取れませんでした」とだけ表示すると、この開発環境からは
     # 実際のGemini応答を直接確認できず、以後の切り分けができないため）
     _last_err = ""
-    _gclient = genai.Client(api_key=GEMINI_API_KEY)
+    _gclient = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
+    )
     for model_name in MODEL_FALLBACKS:
         try:
             resp = _gclient.models.generate_content(
@@ -33894,7 +33912,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         if st.checkbox(t("利用可能なGeminiモデルを表示", "Show available Gemini models"), value=False):
             if GENAI_AVAILABLE and GEMINI_API_KEY:
                 try:
-                    _gclient_dbg = genai.Client(api_key=GEMINI_API_KEY)
+                    _gclient_dbg = genai.Client(
+                        api_key=GEMINI_API_KEY,
+                        http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
+                    )
                     models_list = [
                         m.name for m in _gclient_dbg.models.list()
                         if m.supported_actions and 'generateContent' in m.supported_actions
