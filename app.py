@@ -27033,6 +27033,87 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
     return "\n".join(_lines)
 
 
+def _optimize_sharpe_weights(tickers: list, invest_pct: float, max_weight: float = 0.35) -> dict | None:
+    """選定銘柄（Agent Cが選んだティッカー）の過去2年の日次リターンから期待リターン・
+    共分散行列を推定し、シャープレシオを最大化する配分比率を平均分散最適化（Markowitz）
+    で解く。「どの銘柄を買うか」はAgent A/B/Cの定性判断に任せ、「どの比率で買うか」だけを
+    ここで数理的に決める、という役割分担。
+    過去リターンを期待リターンの代理変数として使うのはMVOの標準的な手法だが、将来のリターン
+    を保証するものではない点に注意（一般的なMVOの限界）。データ不足・最適化失敗時はNoneを
+    返し、呼び出し側はAIの配分をそのまま使うフォールバックに切り替える。
+    Returns: {"weights": {ticker: pct}, "expected_return": float(%),
+              "volatility": float(%), "sharpe": float} | None
+    """
+    if len(tickers) < 2:
+        return None
+    try:
+        import numpy as _np
+        from scipy.optimize import minimize as _minimize
+    except ImportError:
+        return None
+    try:
+        _raw = yf.download(
+            tickers, period="2y", interval="1d",
+            auto_adjust=True, progress=False, timeout=45,
+        )
+        if _raw.empty:
+            return None
+        _cl = _raw["Close"] if "Close" in _raw.columns else _raw
+        if not hasattr(_cl, "columns"):
+            return None
+        _cl = _cl[[t for t in tickers if t in _cl.columns]]
+        # 欠損が2割を超える銘柄（上場間もない・データ不備）は共分散推定から除外
+        _cl = _cl.dropna(axis=1, thresh=int(len(_cl) * 0.8))
+        if _cl.shape[1] < 2:
+            return None
+        _rets = _cl.pct_change().dropna(how="all").fillna(0)
+        if len(_rets) < 60:  # 直近3ヶ月未満のデータしかない場合は信頼できないため諦める
+            return None
+        _mu_arr  = (_rets.mean() * 252).values
+        _cov_arr = (_rets.cov() * 252).values
+        _valid_tickers = list(_cl.columns)
+        _n = len(_valid_tickers)
+        # 数値安定化のため共分散行列の対角に微小なリッジを加える
+        _cov_arr = _cov_arr + _np.eye(_n) * 1e-6
+
+        _target_sum = invest_pct / 100.0
+        # 銘柄数が少ないとn×max_weight<目標配分で制約が実行不可能になるため、
+        # その場合だけ上限を緩めて必ず解けるようにする
+        _eff_max_weight = max(max_weight, _target_sum / _n)
+        _bounds = [(0.0, _eff_max_weight) for _ in range(_n)]
+        _constraints = [{"type": "eq", "fun": lambda w: _np.sum(w) - _target_sum}]
+        _w0 = _np.full(_n, _target_sum / _n)
+
+        def _neg_sharpe(w):
+            _ret = _np.dot(w, _mu_arr)
+            _vol = _np.sqrt(_np.dot(w, _np.dot(_cov_arr, w)))
+            return -_ret / _vol if _vol > 1e-8 else 0.0
+
+        _res = _minimize(
+            _neg_sharpe, _w0, method="SLSQP",
+            bounds=_bounds, constraints=_constraints,
+            options={"maxiter": 200, "ftol": 1e-9},
+        )
+        if not _res.success:
+            return None
+        _w = _np.clip(_res.x, 0, None)  # 数値誤差による微小な負値を除去
+        _port_ret = float(_np.dot(_w, _mu_arr))
+        _port_vol = float(_np.sqrt(_np.dot(_w, _np.dot(_cov_arr, _w))))
+        _sharpe = _port_ret / _port_vol if _port_vol > 1e-8 else 0.0
+        _weights = {t: round(float(w) * 100, 1) for t, w in zip(_valid_tickers, _w) if w > 0.001}
+        if not _weights:
+            return None
+        return {
+            "weights": _weights,
+            "expected_return": round(_port_ret * 100, 1),
+            "volatility": round(_port_vol * 100, 1),
+            "sharpe": round(_sharpe, 2),
+        }
+    except Exception as e:
+        logger.warning(f"[trading] ポートフォリオ最適化失敗: {e}")
+        return None
+
+
 def _generate_investment_portfolio_rec(
     budget: int,
     model_type: str,       # "etf" | "individual"
@@ -27466,13 +27547,32 @@ else ""}
                 _min_pct2 = _min_cost2 / budget * 100 + 1  # +1%バッファ
                 if _al2 < _min_pct2:
                     _itm["allocation"] = round(_min_pct2, 1)
-            # allocation合計を _invest_pct% に正規化（キャッシュ留保を反映）
+            # 配分比率の決定: Agent Cが選んだ銘柄（_pf_list）に対して、まず平均分散最適化
+            # （シャープレシオ最大化）を試みる。銘柄選定はAIの定性判断のまま、配分比率だけ
+            # 数理的に決めることで「AIが適当だと思う%」から「過去データ上シャープレシオを
+            # 最大化する%」に置き換える。データ不足等で最適化できない場合のみ、従来通り
+            # AIが出した比率を_invest_pct%に按分で正規化するフォールバックを使う。
             _pf_list = [_i for _i in parsed.get("portfolio", []) if float(_i.get("allocation", 0)) > 0]
-            _alloc_sum = sum(float(_i.get("allocation", 0)) for _i in _pf_list)
-            if _alloc_sum > 0:
-                _scale = float(_invest_pct) / _alloc_sum
+            _opt_tickers = [_i.get("ticker", "") for _i in _pf_list if _i.get("ticker")]
+            _opt_result = _optimize_sharpe_weights(_opt_tickers, _invest_pct) if len(_opt_tickers) >= 2 else None
+            if _opt_result:
+                _opt_w = _opt_result["weights"]
                 for _itm in _pf_list:
-                    _itm["allocation"] = round(float(_itm["allocation"]) * _scale, 1)
+                    _itm["allocation"] = _opt_w.get(_itm.get("ticker", ""), 0.0)
+                _pf_list = [_i for _i in _pf_list if float(_i.get("allocation", 0)) > 0]
+                parsed["_optimized"] = True
+                parsed["_opt_metrics"] = {
+                    "expected_return": _opt_result["expected_return"],
+                    "risk_volatility": _opt_result["volatility"],
+                    "sharpe_ratio": _opt_result["sharpe"],
+                }
+            else:
+                parsed["_optimized"] = False
+                _alloc_sum = sum(float(_i.get("allocation", 0)) for _i in _pf_list)
+                if _alloc_sum > 0:
+                    _scale = float(_invest_pct) / _alloc_sum
+                    for _itm in _pf_list:
+                        _itm["allocation"] = round(float(_itm["allocation"]) * _scale, 1)
             # allocation比率からamountを再計算してAIの計算ミスを修正
             for _itm in parsed.get("portfolio", []):
                 _al = float(_itm.get("allocation", 0))
@@ -29321,6 +29421,8 @@ def render_claude_trading_project():
             'padding:8px 14px;margin-bottom:10px;font-size:12px;color:#6ee7b7">'
             '既存保有銘柄を参考に、AI が日米株・ETFから最適な新規投資先を1ポートフォリオで提案します。'
             'Agent A（マクロ分析）→ Agent B（銘柄分析）→ Agent C（組み立て）の3段階で生成。'
+            '銘柄が決まった後の配分比率は、過去2年の日次リターンから平均分散最適化（シャープレシオ'
+            '最大化）で数理的に算出します（データ不足時はAIの配分にフォールバック）。'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -29541,12 +29643,25 @@ def render_claude_trading_project():
                         )
 
                     # リスク指標カード
-                    _er   = float(_ip_met.get("expected_return", 0) or 0)
-                    _rv   = float(_ip_met.get("risk_volatility", 0) or 0)
-                    _sr   = float(_ip_met.get("sharpe_ratio", 0) or 0)
-                    _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
-                    _cmt  = _ip_met.get("comment", "")
-                    _met_label = "AI推定"
+                    # 配分比率を平均分散最適化で決めた場合、期待リターン/ボラ/シャープレシオも
+                    # AIの自己申告ではなく、その最適化が実際に計算した数値をそのまま使う
+                    # （AIの見積もりより実測に基づく数値の方が信頼できるため）。
+                    # 最大DD推定だけは最適化の対象外なのでAIの値のまま。
+                    _opt_metrics = _ip_r.get("_opt_metrics") if _ip_r.get("_optimized") else None
+                    if _opt_metrics:
+                        _er   = float(_opt_metrics.get("expected_return", 0) or 0)
+                        _rv   = float(_opt_metrics.get("risk_volatility", 0) or 0)
+                        _sr   = float(_opt_metrics.get("sharpe_ratio", 0) or 0)
+                        _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
+                        _cmt  = _ip_met.get("comment", "")
+                        _met_label = "最適化(過去2年)"
+                    else:
+                        _er   = float(_ip_met.get("expected_return", 0) or 0)
+                        _rv   = float(_ip_met.get("risk_volatility", 0) or 0)
+                        _sr   = float(_ip_met.get("sharpe_ratio", 0) or 0)
+                        _mdd  = float(_ip_met.get("max_drawdown_estimate", 0) or 0)
+                        _cmt  = _ip_met.get("comment", "")
+                        _met_label = "AI推定"
 
                     # 実績リターン（候補銘柄データから加重平均）
                     _today_disp = datetime.now(JST).strftime("%Y-%m-%d")
@@ -29567,8 +29682,8 @@ def render_claude_trading_project():
                     _actual_1y = round(_w1y_num / _w_den, 1) if _w_den > 0 else None
                     _actual_3y = round(_w3y_num / _w_den, 1) if _w_den > 0 else None
 
-                    # AIメトリクスが0/未設定のとき実績データから計算
-                    if (_er == 0 or _rv == 0) and _disp_cperf:
+                    # AIメトリクスが0/未設定のとき実績データから計算（最適化済みの場合は不要）
+                    if not _opt_metrics and (_er == 0 or _rv == 0) and _disp_cperf:
                         _wvol = _wdd = _wden2 = 0.0
                         for _pit2 in _ip_pf:
                             _pa2 = float(_pit2.get("allocation", 0))
@@ -29612,7 +29727,11 @@ def render_claude_trading_project():
                         f'<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;'
                         f'padding:12px 16px;margin-bottom:10px">'
                         f'<div style="font-size:12px;color:#64748b;margin-bottom:8px">'
-                        f'予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}</div>'
+                        f'予算 {_ip_bv:,}円 ｜ 🤖 {_ai_mdl}'
+                        + (' ｜ <span style="color:#4ade80">📐 配分比率: 平均分散最適化（シャープレシオ最大化・過去2年）</span>'
+                           if _opt_metrics else
+                           ' ｜ <span style="color:#94a3b8">配分比率: AI判断（最適化データ不足のためフォールバック）</span>')
+                        + '</div>'
                         f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">'
                         f'<div style="text-align:center">'
                         f'<div style="font-size:11px;color:#64748b">期待リターン</div>'
