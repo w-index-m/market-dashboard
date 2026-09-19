@@ -34039,7 +34039,15 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
                         m.name for m in _gclient_dbg.models.list()
                         if m.supported_actions and 'generateContent' in m.supported_actions
                     ]
-                    st.write(models_list[:10])
+                    # MODEL_FALLBACKS（このアプリが実際に試す順）の各モデルが、この
+                    # APIキーで本当に利用可能なモデル一覧に含まれているかを直接照合する。
+                    # 全件表示だと埋もれて見づらいため、先にこの照合結果だけ出す。
+                    st.write(t("**MODEL_FALLBACKSの照合結果:**", "**MODEL_FALLBACKS check:**"))
+                    for _mf in MODEL_FALLBACKS:
+                        _found = any(_mf in _m for _m in models_list)
+                        st.write(("✅ " if _found else "❌ ") + _mf)
+                    st.caption(t(f"利用可能なモデル一覧（全{len(models_list)}件）:", f"All available models ({len(models_list)}):"))
+                    st.write(models_list)
                 except Exception as e:
                     st.error(f"{'モデル一覧取得エラー' if st.session_state.get('lang')!='en' else 'Model list error'}: {e}")
             else:
