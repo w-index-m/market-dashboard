@@ -29800,9 +29800,15 @@ def render_claude_trading_project():
                         '</div>',
                         unsafe_allow_html=True,
                     )
+                    # 各セルにbackground:#0f172aを明示しているのは、Streamlit側のページ全体の
+                    # テーマ（config.tomlでdark指定済みだが、Streamlit Cloud側の設定で上書きされる
+                    # ことがある）に依存せず、常に読める配色を保証するため。テキスト色のみだと、
+                    # ページ背景が想定と違う（白など）場合に文字が埋もれて見えなくなる不具合が
+                    # 実際に発生した。
+                    _cell_bg = "background:#0f172a;padding:4px 6px;border-radius:4px;"
                     _hdr = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
                     for _h, _lbl in zip(_hdr, ["", "銘柄", "比率", "株数 / 必要金額", "投資テーマ（▼で根拠詳細）"]):
-                        _h.markdown(f'<div style="font-size:11px;color:#94a3b8;font-weight:700">{_lbl}</div>',
+                        _h.markdown(f'<div style="{_cell_bg}font-size:11px;color:#94a3b8;font-weight:700">{_lbl}</div>',
                                     unsafe_allow_html=True)
 
                     _ip_total_actual = 0  # 合計実際投資額の集計用
@@ -29929,28 +29935,28 @@ def render_claude_trading_project():
                             )
 
                         _row = st.columns([0.6, 2.0, 1.0, 2.2, 4.0])
-                        _row[0].markdown(f'<div style="font-size:16px">{_flag}</div>',
+                        _row[0].markdown(f'<div style="{_cell_bg}font-size:16px">{_flag}</div>',
                                          unsafe_allow_html=True)
                         _row[1].markdown(
-                            f'<div style="font-size:12px;font-weight:700;color:#e2e8f0">{_tk}{_mom_badge}</div>'
-                            f'<div style="font-size:10px;color:#94a3b8">{_nm}</div>',
+                            f'<div style="{_cell_bg}font-size:12px;font-weight:700;color:#e2e8f0">{_tk}{_mom_badge}</div>'
+                            f'<div style="{_cell_bg}font-size:10px;color:#94a3b8;margin-top:2px">{_nm}</div>',
                             unsafe_allow_html=True,
                         )
                         _row[2].markdown(
-                            f'<div style="font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
-                            f'<div style="background:#334155;border-radius:3px;height:4px;margin-top:3px">'
-                            f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div>',
+                            f'<div style="{_cell_bg}font-size:13px;font-weight:700;color:{_a_c}">{_alloc:.0f}%</div>'
+                            f'<div style="{_cell_bg}margin-top:2px"><div style="background:#334155;border-radius:3px;height:4px">'
+                            f'<div style="background:{_a_c};width:{_bar_w}%;height:4px;border-radius:3px"></div></div></div>',
                             unsafe_allow_html=True,
                         )
                         _row[3].markdown(
-                            f'<div style="font-size:12px;color:#e2e8f0;font-weight:700">{_shares_str}</div>'
-                            f'<div style="font-size:10px;color:#94a3b8">{_price_str}</div>'
-                            f'<div style="font-size:10px;color:#93c5fd;font-weight:600">≒¥{_actual_cost:,}</div>',
+                            f'<div style="{_cell_bg}font-size:12px;color:#e2e8f0;font-weight:700">{_shares_str}</div>'
+                            f'<div style="{_cell_bg}font-size:10px;color:#94a3b8;margin-top:2px">{_price_str}</div>'
+                            f'<div style="{_cell_bg}font-size:10px;color:#93c5fd;font-weight:600;margin-top:2px">≒¥{_actual_cost:,}</div>',
                             unsafe_allow_html=True,
                         )
                         _row[4].markdown(
-                            f'<div style="font-size:11px;color:#e2e8f0;font-weight:600">{_rat}</div>'
-                            + _stats_html,
+                            f'<div style="{_cell_bg}font-size:11px;color:#e2e8f0;font-weight:600">{_rat}</div>'
+                            + (f'<div style="{_cell_bg}margin-top:2px">{_stats_html}</div>' if _stats_html else ''),
                             unsafe_allow_html=True,
                         )
 
