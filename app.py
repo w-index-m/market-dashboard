@@ -774,11 +774,12 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
         return "⚠️ OPENROUTER_API_KEY が設定されていません", ""
     # 以前は7モデルを順に試していたが、1モデルのタイムアウトが45sあるため
     # 全滅時に最大5分以上かかっていた（Agent Cが極端に遅くなる原因の一つ）。
-    # 上位3モデルに絞り、他プロバイダーへのフォールバックに委ねる。
+    # 上位モデルに絞り、他プロバイダーへのフォールバックに委ねる。
+    # "qwen/qwen-2.5-72b-instruct:free" はOpenRouter側で無料版が廃止され有料版
+    # （":free"サフィックスなしのslug）のみになったため削除済み（404で判明）。
     OPENROUTER_MODELS = [
         "meta-llama/llama-3.3-70b-instruct:free",
         "meta-llama/llama-3.1-8b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
     ]
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -786,7 +787,10 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
         "HTTP-Referer": "https://market-dashboard.streamlit.app",
         "X-Title": "Market Dashboard",
     }
-    _last_reason = "不明なエラー"
+    # 各モデルの失敗理由を全部集めて返す（最後の1件だけだと、他のモデルが
+    # 何で落ちているのか分からず切り分けできないため — 実際にqwenが有料化されて
+    # いた一方、llama系がなぜ失敗しているのか最後の1件表示では分からなかった）。
+    _reasons = []
     for model_name in OPENROUTER_MODELS:
         payload = {
             "model": model_name,
@@ -800,10 +804,10 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
                 headers=headers, json=payload, timeout=20,
             )
             if resp.status_code == 429:
-                _last_reason = f"{model_name}: 429 {resp.text[:150]}"
+                _reasons.append(f"{model_name}: 429 {resp.text[:150]}")
                 continue
             if resp.status_code in (404, 400):
-                _last_reason = f"{model_name}: {resp.status_code} {resp.text[:150]}"
+                _reasons.append(f"{model_name}: {resp.status_code} {resp.text[:150]}")
                 continue
             if resp.status_code in (401, 403):
                 return "⚠️ OpenRouter認証エラー。OPENROUTER_API_KEY を確認してください。", ""
@@ -811,15 +815,15 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
             text = resp.json()["choices"][0]["message"]["content"].strip()
             if text:
                 return text, model_name
-            _last_reason = f"{model_name}: 空レスポンス"
+            _reasons.append(f"{model_name}: 空レスポンス")
         except requests.exceptions.Timeout:
-            _last_reason = f"{model_name}: タイムアウト"
+            _reasons.append(f"{model_name}: タイムアウト")
             continue
         except Exception as e:
             logger.error(f"OpenRouter error ({model_name}): {e}")
-            _last_reason = f"{model_name}: {str(e)[:150]}"
+            _reasons.append(f"{model_name}: {str(e)[:150]}")
             continue
-    return f"⚠️ OpenRouter: 全モデルで応答を取得できませんでした（{_last_reason}）", ""
+    return "⚠️ OpenRouter: 全モデルで応答を取得できませんでした（" + " / ".join(_reasons) + "）", ""
 
 
 # ===========================
