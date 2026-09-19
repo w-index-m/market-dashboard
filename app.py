@@ -34044,6 +34044,21 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
                     st.error(f"{'モデル一覧取得エラー' if st.session_state.get('lang')!='en' else 'Model list error'}: {e}")
             else:
                 st.warning(t("Gemini APIキーが設定されていません", "Gemini API key not configured"))
+        if st.checkbox(t("DeepSeek接続テスト", "Test DeepSeek connection"), value=False):
+            if not DEEPSEEK_API_KEY:
+                st.warning(t("DEEPSEEK_API_KEYが設定されていません", "DEEPSEEK_API_KEY not configured"))
+            else:
+                with st.spinner(t("DeepSeek APIに接続確認中...", "Testing DeepSeek API...")):
+                    _dbg_text, _dbg_model = summarize_with_deepseek(
+                        "接続テスト。「OK」とだけ日本語で返してください。", max_tokens=10, temperature=0,
+                    )
+                if _dbg_model:
+                    st.success(f"✅ {t('接続成功', 'Connected')}: {_dbg_model} → {_dbg_text[:50]}")
+                else:
+                    # summarize_with_deepseek()は402(残高不足)/404(モデル廃止)/401(認証エラー)等の
+                    # 実際の失敗理由をそのまま返すので、ここで理由を握りつぶさず表示する
+                    st.error(f"❌ {t('接続失敗', 'Connection failed')}")
+                    st.code(_dbg_text, language=None, wrap_lines=True)
 
     # ===================================================
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）
