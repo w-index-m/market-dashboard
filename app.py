@@ -769,18 +769,35 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
 # ===========================
 # OpenRouter API（フォールバック第3候補）
 # ===========================
+# ハードコードしたモデルslugは、OpenRouter側が無料版を予告なく廃止/有料化すると
+# 即404になり打つ手がない（実際に llama-3.3/3.1・qwen-2.5 の無料slugが全滅した）。
+# OpenRouterの/api/v1/modelsは認証不要で無料モデル一覧を返すため、これを毎回
+# 動的に取得して":free"サフィックスのモデルから選ぶ方式に変更し、この種の
+# 無料枠の入れ替わりに自動で追従できるようにする。1時間キャッシュ。
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_openrouter_free_models() -> list:
+    try:
+        resp = requests.get("https://openrouter.ai/api/v1/models", timeout=15)
+        resp.raise_for_status()
+        _data = resp.json().get("data", [])
+        _free = [m["id"] for m in _data if isinstance(m.get("id"), str) and m["id"].endswith(":free")]
+        return _free
+    except Exception as e:
+        logger.warning(f"OpenRouter無料モデル一覧の取得失敗: {e}")
+        return []
+
+
 def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not OPENROUTER_API_KEY:
         return "⚠️ OPENROUTER_API_KEY が設定されていません", ""
-    # 以前は7モデルを順に試していたが、1モデルのタイムアウトが45sあるため
-    # 全滅時に最大5分以上かかっていた（Agent Cが極端に遅くなる原因の一つ）。
-    # 上位モデルに絞り、他プロバイダーへのフォールバックに委ねる。
-    # "qwen/qwen-2.5-72b-instruct:free" はOpenRouter側で無料版が廃止され有料版
-    # （":free"サフィックスなしのslug）のみになったため削除済み（404で判明）。
-    OPENROUTER_MODELS = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "meta-llama/llama-3.1-8b-instruct:free",
-    ]
+    # 動的取得を優先。取得失敗時のみ、最後に確認できていたハードコード値に
+    # フォールバックする（これも将来死ぬ可能性があるが、何もないよりはまし）。
+    OPENROUTER_MODELS = _fetch_openrouter_free_models()[:4]
+    if not OPENROUTER_MODELS:
+        OPENROUTER_MODELS = [
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+        ]
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -847,6 +864,8 @@ def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: floa
             # 推論(thinking)モデルのため、内部の思考トークン分の余裕を持たせて
             # 呼び出し元指定のmax_tokensより大きめの値を使う（小さいと思考の
             # 途中で打ち切られ最終回答が空になることがあるため）。
+            # reasoning_budget（サーバー側でthinking_token_budgetに対応）は
+            # 現在のV2 model runnerが未対応で400エラーになることが判明したため削除。
             # chat_template_kwargs/reasoning_budgetはOpenAI SDKのextra_body
             # 相当（このAPIはOpenAI互換）で、直接requests.postする場合は
             # トップレベルのフィールドとして渡す。
@@ -854,7 +873,6 @@ def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: floa
             "temperature": temperature,
             "top_p": 0.95,
             "chat_template_kwargs": {"enable_thinking": True},
-            "reasoning_budget": 8192,
         }
         try:
             resp = requests.post(
