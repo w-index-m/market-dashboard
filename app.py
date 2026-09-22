@@ -8160,6 +8160,39 @@ def fetch_sp500_constituents() -> dict:
 
 
 @st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def fetch_sp600_constituents() -> dict:
+    """
+    S&P600（小型株指数）の全構成銘柄をWikipediaから取得する（{ticker: 企業名}）。
+    テンバガー候補スクリーニング（🌱長期育成モード）の母集団として使う ——
+    S&P500は時価総額の大きい大型株限定のためテンバガー狙いの候補母集団には
+    そもそも不向きで、S&P600は組み入れ基準自体が時価総額のレンジで区切られている
+    実在の小型株指数のため、手動でティッカーを選ぶより網羅的かつ正確。
+    構成銘柄は年数回程度しか入れ替わらないため7日キャッシュ。取得失敗時は空dictを返す
+    （フォールバック用の代表銘柄リストは持たない——小型株は代表銘柄という概念が
+    馴染まないため、失敗時は素直に候補0件として呼び出し元にフォールバックさせる）。
+    """
+    try:
+        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies")
+        df = tables[0]
+        _sym_col = next((c for c in df.columns if "Symbol" in str(c)), None)
+        _name_col = next((c for c in df.columns if "Company" in str(c) or "Security" in str(c)), None)
+        if _sym_col is None or _name_col is None:
+            raise ValueError(f"想定した列が見つかりません: {list(df.columns)}")
+        result = {}
+        for _, row in df.iterrows():
+            ticker = str(row[_sym_col]).strip().replace(".", "-")  # BRK.B → BRK-B（yfinance表記）
+            name = str(row[_name_col]).strip()
+            if ticker and ticker.lower() != "nan":
+                result[ticker] = name
+        if len(result) < 400:
+            raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
+        return result
+    except Exception as e:
+        logger.warning(f"[sp600_constituents] 取得失敗: {e}")
+        return {}
+
+
+@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
 def fetch_nikkei225_constituents() -> dict:
     """
     日経225の全構成銘柄をWikipediaから取得する（{ticker(.T付き): 企業名}）。7日キャッシュ。
@@ -26264,6 +26297,11 @@ RRG改善セクター: {improving_str}
 
 
 _AGENT_B_FABRICATED_METRIC_RE = re.compile(r'(ROIC|ROE|ROA|PER|PBR|PSR|DOE|EPS成長率?)\s*[:：]?\s*\d+(\.\d+)?\s*%?', re.IGNORECASE)
+# 長期育成(テンバガー)モードのAgent Cだけは、_build_tenbagger_fundamentals_table()経由で
+# 実際のROE(簡易ROIC代替指標)を渡している。ROEへの言及は捏造ではなく正当な引用なので、
+# このモードのAgent C出力チェックだけはROEを除外した版を使う（ROIC/ROA/PER等の
+# 他指標はこのモードでも未提供のため、引き続き捏造検知の対象）。
+_AGENT_C_FABRICATED_METRIC_RE_GROWTH = re.compile(r'(ROIC|ROA|PER|PBR|PSR|DOE|EPS成長率?)\s*[:：]?\s*\d+(\.\d+)?\s*%?', re.IGNORECASE)
 
 
 def _verify_stock_agent_result(result: dict, ret_3m: float, ret_6m: float, ret_1y: float) -> dict:
@@ -26382,10 +26420,10 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
     """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
     _usdjpy = 150.0
     _max_per = budget * 0.35
-    if trading_mode == "stable_growth":
-        # cand_perfは_fetch_stable_growth_candidates()の時点でstability_r2降順に
-        # 既に絞り込み済みなので、ここではモメンタム基準の再スコアリングをせず、
-        # 予算内で購入可能なものを順に採用するだけにとどめる
+    if trading_mode in ("stable_growth", "growth"):
+        # cand_perfは_fetch_stable_growth_candidates()/_fetch_tenbagger_candidates()の時点で
+        # それぞれの指標（stability_r2 / 実財務指標スコア）降順に既に絞り込み済みなので、
+        # ここではモメンタム基準の再スコアリングをせず、予算内で購入可能なものを順に採用する
         _out = []
         for _tk, _d in cand_perf.items():
             _px = _d.get("price", 0) or 0
@@ -26898,16 +26936,147 @@ def _fetch_stable_growth_candidates(top_n: int = 20, max_dd_threshold: float = -
         return {}
 
 
+_TENBAGGER_MCAP_MIN = 500_000_000    # $5億
+_TENBAGGER_MCAP_MAX = 3_000_000_000  # $30億
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
+    """🌱長期育成モード専用の候補選定（テンバガー狙いの小型株スクリーニング）。
+    S&P600（実在する小型株指数、組み入れ基準自体が時価総額レンジで区切られている）を
+    母集団に、時価総額5〜30億ドルで一次絞り込みし、粗利率・ROE（簡易ROIC代替指標）・
+    インサイダー保有比率・有利子負債/EBITDAという4つの実データスコアで上位top_n銘柄を選ぶ。
+    大型株（NVDA/AAPL等）ならAIの学習知識である程度ROIC-WACC等を語れるが、無名の
+    小型株でAIに「知識で推定」させると実在しない数値を捏造するリスクが高いため、
+    このモードだけは必ず実際にfetchした数値だけをプロンプトに渡す方針にする
+    （他モードのAgent B/Cが未提供の財務指標を書かせない設計と、方向性は同じ:
+    「渡していないデータは書かせない」の裏返しとして「渡すデータは実データのみ」）。
+    Returns: _fetch_candidate_performance と同じ形式の {ticker: {...}} dict。
+             price/ret_3m/ret_6m/ret_1yに加えmarket_cap/gross_margin/insider_pct/
+             debt_ebitda/roeを含む（取得できなかった項目はNone）。1日キャッシュ。
+    """
+    import concurrent.futures as _cf_tb
+
+    _universe = fetch_sp600_constituents()
+    if not _universe:
+        logger.warning("[trading] tenbagger候補: S&P600構成銘柄の取得に失敗したため候補0件")
+        return {}
+    _tickers = list(_universe.keys())
+
+    def _one(ticker):
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            return None
+        if not info:
+            return None
+        _mcap = info.get("marketCap")
+        if not _mcap or not (_TENBAGGER_MCAP_MIN <= _mcap <= _TENBAGGER_MCAP_MAX):
+            return None  # 時価総額レンジ外は一次除外（テンバガー狙いの定義そのもの）
+        _price = info.get("currentPrice") or info.get("regularMarketPrice")
+        if not _price or _price <= 0:
+            return None
+        _gm      = info.get("grossMargins")
+        _insider = info.get("heldPercentInsiders")
+        _roe     = info.get("returnOnEquity")
+        _debt    = info.get("totalDebt")
+        _ebitda  = info.get("ebitda")
+        _debt_ebitda = (_debt / _ebitda) if (_debt is not None and _ebitda and _ebitda > 0) else None
+        return {
+            "ticker": ticker, "name": _universe.get(ticker, ticker), "price": float(_price),
+            "market_cap":   _mcap,
+            "gross_margin": round(_gm * 100, 1) if _gm is not None else None,
+            "insider_pct":  round(_insider * 100, 1) if _insider is not None else None,
+            "roe":          round(_roe * 100, 1) if _roe is not None else None,
+            "debt_ebitda":  round(_debt_ebitda, 2) if _debt_ebitda is not None else None,
+        }
+
+    _rows = []
+    # S&P600は約600銘柄あり、yf.download()のようなバッチ価格APIには時価総額が
+    # 含まれないため.info()を1銘柄ずつ叩く必要がある（_fetch_forward_earnings_universe()
+    # と同じ制約）。1日1回・初回アクセス時のみ発生するコストなのでmax_workersを
+    # やや多めにして待ち時間を抑える。
+    with _cf_tb.ThreadPoolExecutor(max_workers=16) as _ex:
+        for _res in _ex.map(_one, _tickers):
+            if _res:
+                _rows.append(_res)
+
+    if not _rows:
+        logger.warning(f"[trading] tenbagger候補: 時価総額5〜30億ドルに合致する銘柄が0件（母集団{len(_tickers)}銘柄）")
+        return {}
+
+    # 4指標を正規化して合成スコア化（欠損項目は0点扱い・他の指標で評価）
+    def _score(row):
+        _s = 0.0
+        if row["gross_margin"] is not None:
+            _s += min(max(row["gross_margin"], 0), 80) / 80 * 30       # 粗利率: 最大30点
+        if row["roe"] is not None:
+            _s += min(max(row["roe"], 0), 40) / 40 * 30                # ROE: 最大30点
+        if row["insider_pct"] is not None:
+            _s += min(max(row["insider_pct"], 0), 30) / 30 * 25        # インサイダー保有: 最大25点
+        if row["debt_ebitda"] is not None:
+            _s += max(0.0, (3 - row["debt_ebitda"]) / 3) * 15          # 負債が少ないほど加点: 最大15点
+        return _s
+
+    # 時価総額条件を通過した銘柄だけ、価格データ（3m/6m/1yリターン）を追加取得してマージ
+    _price_perf = {}
+    try:
+        _raw = yf.download(
+            [r["ticker"] for r in _rows], period="1y", interval="1d",
+            auto_adjust=True, progress=False, timeout=45,
+        )
+        if not _raw.empty:
+            _cl = _raw["Close"] if "Close" in _raw.columns else _raw
+            if hasattr(_cl, "columns"):
+                for _tk in _cl.columns:
+                    _s = _cl[_tk].dropna()
+                    if len(_s) < 50:
+                        continue
+                    _cur = float(_s.iloc[-1])
+
+                    def _r(days, _s=_s, _cur=_cur):
+                        _idx = max(0, len(_s) - days - 1)
+                        _p = float(_s.iloc[_idx])
+                        return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
+
+                    _price_perf[_tk] = {"ret_3m": _r(63), "ret_6m": _r(126), "ret_1y": _r(252)}
+    except Exception as e:
+        logger.warning(f"[trading] tenbagger価格取得失敗: {e}")
+
+    for _row in _rows:
+        _row["_score"] = _score(_row)
+        _pp = _price_perf.get(_row["ticker"], {})
+        _row["ret_3m"] = _pp.get("ret_3m")
+        _row["ret_6m"] = _pp.get("ret_6m")
+        _row["ret_1y"] = _pp.get("ret_1y")
+
+    _rows.sort(key=lambda r: r["_score"], reverse=True)
+    _result = {}
+    for _row in _rows[:top_n]:
+        _tk = _row.pop("ticker")
+        _row.pop("_score", None)
+        _result[_tk] = _row
+    logger.info(
+        f"[trading] tenbagger候補: {len(_result)}銘柄選定"
+        f"（時価総額条件通過{len(_rows)}銘柄/母集団{len(_tickers)}銘柄）"
+    )
+    return _result
+
+
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
 def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict:
     """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + trading_mode + 12h TTL）。
     trading_mode="stable_growth" の場合は_fetch_stable_growth_candidates()に委譲し、
-    日経225+S&P500全銘柄からのチャートベーススクリーニング結果を返す
+    日経225+S&P500全銘柄からのチャートベーススクリーニング結果を返す。
+    trading_mode="growth" の場合は_fetch_tenbagger_candidates()に委譲し、S&P600全銘柄からの
+    時価総額5〜30億ドル・実財務指標ベースのスクリーニング結果を返す
     （それ以外のモードは従来通り_TRADING_CANDIDATESが対象）。
     Returns: {ticker: {ret_1y, ret_6m, ret_3m, ret_1m}} — 全て %表記float
     """
     if trading_mode == "stable_growth":
         return _fetch_stable_growth_candidates()
+    if trading_mode == "growth":
+        return _fetch_tenbagger_candidates()
     try:
         import yfinance as _yf
         _raw = _yf.download(
@@ -26953,6 +27122,34 @@ def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict
     except Exception as e:
         logger.warning(f"[trading] candidate_performance fetch失敗: {e}")
         return {}
+
+
+def _build_tenbagger_fundamentals_table(cand_perf: dict) -> str:
+    """🌱長期育成モード専用: _fetch_tenbagger_candidates()が実際に取得した財務データ
+    （時価総額・粗利率・ROE・インサイダー保有比率・負債/EBITDA）をプロンプト用テキストに
+    変換する。ここに並ぶ数値は全て実際にyfinanceから取得した値であり、AIの推定ではない
+    ——そのためAgent C側のプロンプトでは「これらの項目は実データなので根拠として
+    引用してよい」と明示できる（他の未提供指標との扱いの違いを明確にするため）。
+    """
+    if not cand_perf:
+        return ""
+    _lines = ["【実財務データ（時価総額5〜30億ドルの小型株のみ・全て実際に取得した数値）】"]
+    for _tk, _d in cand_perf.items():
+        _mc  = _d.get("market_cap")
+        _gm  = _d.get("gross_margin")
+        _roe = _d.get("roe")
+        _ins = _d.get("insider_pct")
+        _de  = _d.get("debt_ebitda")
+        _mc_str  = f"${_mc/1e8:.1f}億" if _mc else "—"
+        _gm_str  = f"{_gm:.1f}%" if _gm is not None else "—"
+        _roe_str = f"{_roe:.1f}%" if _roe is not None else "—"
+        _ins_str = f"{_ins:.1f}%" if _ins is not None else "—"
+        _de_str  = f"{_de:.1f}x" if _de is not None else "—"
+        _lines.append(
+            f"  {_tk:6s} 時価総額:{_mc_str:>8s}  粗利率:{_gm_str:>6s}  "
+            f"ROE:{_roe_str:>6s}  インサイダー保有:{_ins_str:>6s}  負債/EBITDA:{_de_str:>5s}"
+        )
+    return "\n".join(_lines)
 
 
 def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_000_000, usdjpy: float = 150.0) -> str:
@@ -27250,12 +27447,13 @@ def _generate_investment_portfolio_rec(
   ⑤ バリュエーション（不問。高PERでもモメンタム継続なら許容）""",
 
         "growth": """\
-評価軸の優先順位（🌱 長期育成モード — この順番で重視すること）:
-  ① ROIC-WACC スプレッド【重要】: スプレッド>5%優秀、>10%卓越
+評価軸の優先順位（🌱 長期育成(テンバガー)モード — この順番で重視すること）:
+  候補は既にS&P600（小型株指数）から時価総額5〜30億ドルでスクリーニング済み。
+  ① 粗利率・ROE・インサイダー保有比率・負債/EBITDA【実データ提供時は最優先】
+     渡されたデータに数値があれば、AIの推定ではなくその実数値を根拠にすること
   ② EPS成長率・売上成長率: 3年CAGR 15%以上を目安
   ③ 株価モメンタム: 直近トレンドが崩壊していない銘柄（1y -20%以上の下落は原則避ける）
-  ④ バリュエーション: PEG<2.0を目安に割高すぎる銘柄は避ける
-  ⑤ 財務健全性: 自己資本比率・キャッシュフロー安定性""",
+  ④ バリュエーション: PEG<2.0を目安に割高すぎる銘柄は避ける""",
 
         "ai_mix": """\
 評価軸の優先順位（✨ Claude AIミックス — AI特化テーマバスケット）:
@@ -27405,7 +27603,15 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "株価トレンドの安定性・ドローダウンの小ささをmeritsの根拠にすること。"
             "値動きが荒い・PERが極端に高い銘柄がリストに紛れていても選定しない"
             if trading_mode == "stable_growth"
+            else "\n・【長期育成(テンバガー)モード専用】銘柄はAgent Bリストのティッカーのみから選定"
+            "（S&P600の中から時価総額5〜30億ドルで事前スクリーニング済みの小型株）。"
+            "【実財務データ】に記載の粗利率・ROE・インサイダー保有比率・負債/EBITDAは実際に"
+            "取得した数値なので、merits/demeritsの根拠として積極的に引用してよい"
+            if trading_mode == "growth"
             else ""
+        )
+        _tb_fund_table = (
+            _build_tenbagger_fundamentals_table(candidate_perf) if trading_mode == "growth" else ""
         )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
 事前分析済みの結果を使ってポートフォリオのみを構築してください。
@@ -27424,6 +27630,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 
 【Agent B: 銘柄別分析結果（キャッシュ済・スコア順）】
 {_ab_str}
+{_tb_fund_table}
 
 【配分ルール（必須）】
 ・銘柄数: {_n_stocks}銘柄（{_budget_note}）
@@ -27433,8 +27640,11 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・予算超過銘柄（最低%記載あり）はその割合以上の配分必須
 ・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}{_ab_flag_constraint}
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
-・meritsはAgent Bの分析（スコア・thesis・merits/demerits）と実株価モメンタムデータのみを根拠にすること。
-  ROIC・ROE・DOE・PER等の財務指標はAgent A/Bに一切渡していないため、具体的な数値を作って記載しないこと
+・meritsはAgent Bの分析（スコア・thesis・merits/demerits）と実株価モメンタムデータのみを根拠にすること。{
+  "長期育成モードのみ、上記【実財務データ】の粗利率・ROE・インサイダー保有比率・負債/EBITDAも根拠に使ってよい。それ以外の"
+  if trading_mode == "growth" else ""
+}
+  ROIC・PER等{("・ROE・DOE" if trading_mode != "growth" else "・DOE")}の財務指標はAgent A/Bに一切渡していないため、具体的な数値を作って記載しないこと
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
 ・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_theme_constraint}
 
@@ -27603,6 +27813,8 @@ else ""}
             # Agent Cの出力にも、Agent Bと同じ「未提供の財務指標を具体的数値付きで捏造していないか」
             # チェックをかける（プロンプト側で指示は外したが、AIが自発的に数値を作る可能性は残るため
             # 最終防衛ラインとして必須）。Agent Bの_verify_stock_agent_result()と同じ正規表現を使う。
+            # 長期育成(テンバガー)モードだけはROEを実際に渡しているため、ROEを除外した専用パターンを使う。
+            _fab_re = _AGENT_C_FABRICATED_METRIC_RE_GROWTH if trading_mode == "growth" else _AGENT_B_FABRICATED_METRIC_RE
             _fab_flagged = []
             for _itm in parsed.get("portfolio", []):
                 _text_parts = [str(_itm.get("rationale", "")), str(_itm.get("conclusion", ""))]
@@ -27611,7 +27823,7 @@ else ""}
                 for _m in _itm.get("demerits", []) or []:
                     _text_parts.append(f"{_m.get('point','')} {_m.get('detail','')}")
                 _combined = " ".join(_text_parts)
-                if _AGENT_B_FABRICATED_METRIC_RE.search(_combined):
+                if _fab_re.search(_combined):
                     _itm["_fabrication_warning"] = True
                     _fab_flagged.append(_itm.get("ticker", "?"))
             if _fab_flagged:
@@ -28416,12 +28628,12 @@ def render_claude_trading_project():
                 "key":    "growth",
                 "emoji":  "🌱",
                 "label":  "長期育成モード",
-                "sub":    "ファンダメンタルズ重視 · 保有期間 6ヶ月〜2年",
+                "sub":    "テンバガー候補 · 小型株(時価総額5〜30億ドル) · 保有期間6ヶ月〜2年",
                 "detail": (
-                    "・ROIC-WACCスプレッドが5%超（理想10%超）の資本効率の良い銘柄を最優先<br>"
+                    "・S&P600（小型株指数）から時価総額5〜30億ドルの銘柄を実データで事前抽出<br>"
+                    "・粗利率・ROE・インサイダー保有比率・負債/EBITDAは実際に取得した数値のみ使用（AI推定なし）<br>"
                     "・EPS/売上高の3年CAGR15%以上を目安に成長性を評価<br>"
-                    "・直近1年で-20%を超える急落トレンドの銘柄は原則除外<br>"
-                    "・損切り-15〜20% · 目標株価=適正PER×予想EPS"
+                    "・損切り-15〜20%。カバレッジの薄い小型株ゆえの情報非対称性を狙う"
                 ),
                 "color":  "#4ade80", "sub_color": "#86efac",
                 "border": "#22c55e", "bg": "#052e16",
