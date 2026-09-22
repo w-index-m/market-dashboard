@@ -26937,14 +26937,16 @@ def _fetch_stable_growth_candidates(top_n: int = 20, max_dd_threshold: float = -
 
 
 _TENBAGGER_MCAP_MIN = 500_000_000    # $5億
-_TENBAGGER_MCAP_MAX = 3_000_000_000  # $30億
+_TENBAGGER_MCAP_MAX = 5_000_000_000  # $50億（当初$30億だったが、S&P600の現行の組入時価総額レンジ
+                                      # 自体がそれより上（母集団全体の時価総額上昇に伴い年々切り上がる）
+                                      # のため候補が枯渇し、上限を引き上げた）
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     """🌱長期育成モード専用の候補選定（テンバガー狙いの小型株スクリーニング）。
     S&P600（実在する小型株指数、組み入れ基準自体が時価総額レンジで区切られている）を
-    母集団に、時価総額5〜30億ドルで一次絞り込みし、粗利率・ROE（簡易ROIC代替指標）・
+    母集団に、時価総額5〜50億ドルで一次絞り込みし、粗利率・ROE（簡易ROIC代替指標）・
     インサイダー保有比率・有利子負債/EBITDAという4つの実データスコアで上位top_n銘柄を選ぶ。
     大型株（NVDA/AAPL等）ならAIの学習知識である程度ROIC-WACC等を語れるが、無名の
     小型株でAIに「知識で推定」させると実在しない数値を捏造するリスクが高いため、
@@ -27002,7 +27004,7 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
                 _rows.append(_res)
 
     if not _rows:
-        logger.warning(f"[trading] tenbagger候補: 時価総額5〜30億ドルに合致する銘柄が0件（母集団{len(_tickers)}銘柄）")
+        logger.warning(f"[trading] tenbagger候補: 時価総額5〜50億ドルに合致する銘柄が0件（母集団{len(_tickers)}銘柄）")
         return {}
 
     # 4指標を正規化して合成スコア化（欠損項目は0点扱い・他の指標で評価）
@@ -27069,7 +27071,7 @@ def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict
     trading_mode="stable_growth" の場合は_fetch_stable_growth_candidates()に委譲し、
     日経225+S&P500全銘柄からのチャートベーススクリーニング結果を返す。
     trading_mode="growth" の場合は_fetch_tenbagger_candidates()に委譲し、S&P600全銘柄からの
-    時価総額5〜30億ドル・実財務指標ベースのスクリーニング結果を返す
+    時価総額5〜50億ドル・実財務指標ベースのスクリーニング結果を返す
     （それ以外のモードは従来通り_TRADING_CANDIDATESが対象）。
     Returns: {ticker: {ret_1y, ret_6m, ret_3m, ret_1m}} — 全て %表記float
     """
@@ -27133,7 +27135,7 @@ def _build_tenbagger_fundamentals_table(cand_perf: dict) -> str:
     """
     if not cand_perf:
         return ""
-    _lines = ["【実財務データ（時価総額5〜30億ドルの小型株のみ・全て実際に取得した数値）】"]
+    _lines = ["【実財務データ（時価総額5〜50億ドルの小型株のみ・全て実際に取得した数値）】"]
     for _tk, _d in cand_perf.items():
         _mc  = _d.get("market_cap")
         _gm  = _d.get("gross_margin")
@@ -27448,7 +27450,7 @@ def _generate_investment_portfolio_rec(
 
         "growth": """\
 評価軸の優先順位（🌱 長期育成(テンバガー)モード — この順番で重視すること）:
-  候補は既にS&P600（小型株指数）から時価総額5〜30億ドルでスクリーニング済み。
+  候補は既にS&P600（小型株指数）から時価総額5〜50億ドルでスクリーニング済み。
   ① 粗利率・ROE・インサイダー保有比率・負債/EBITDA【実データ提供時は最優先】
      渡されたデータに数値があれば、AIの推定ではなくその実数値を根拠にすること
   ② EPS成長率・売上成長率: 3年CAGR 15%以上を目安
@@ -27604,7 +27606,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "値動きが荒い・PERが極端に高い銘柄がリストに紛れていても選定しない"
             if trading_mode == "stable_growth"
             else "\n・【長期育成(テンバガー)モード専用】銘柄はAgent Bリストのティッカーのみから選定"
-            "（S&P600の中から時価総額5〜30億ドルで事前スクリーニング済みの小型株）。"
+            "（S&P600の中から時価総額5〜50億ドルで事前スクリーニング済みの小型株）。"
             "【実財務データ】に記載の粗利率・ROE・インサイダー保有比率・負債/EBITDAは実際に"
             "取得した数値なので、merits/demeritsの根拠として積極的に引用してよい"
             if trading_mode == "growth"
@@ -28628,9 +28630,9 @@ def render_claude_trading_project():
                 "key":    "growth",
                 "emoji":  "🌱",
                 "label":  "長期育成モード",
-                "sub":    "テンバガー候補 · 小型株(時価総額5〜30億ドル) · 保有期間6ヶ月〜2年",
+                "sub":    "テンバガー候補 · 小型株(時価総額5〜50億ドル) · 保有期間6ヶ月〜2年",
                 "detail": (
-                    "・S&P600（小型株指数）から時価総額5〜30億ドルの銘柄を実データで事前抽出<br>"
+                    "・S&P600（小型株指数）から時価総額5〜50億ドルの銘柄を実データで事前抽出<br>"
                     "・粗利率・ROE・インサイダー保有比率・負債/EBITDAは実際に取得した数値のみ使用（AI推定なし）<br>"
                     "・EPS/売上高の3年CAGR15%以上を目安に成長性を評価<br>"
                     "・損切り-15〜20%。カバレッジの薄い小型株ゆえの情報非対称性を狙う"
