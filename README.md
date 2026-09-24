@@ -6,6 +6,12 @@
 個別銘柄診断・ポートフォリオ提案、そして実際の取引記録管理までを1つに統合した
 [Streamlit](https://streamlit.io/) 製マーケットダッシュボードです。
 
+🤖 単なる株価表示ツールではなく、**AIマルチエージェント**（マクロ分析→銘柄分析→ポートフォリオ組み立ての
+3段階、5社のAIプロバイダーを自動フォールバック）と、**10種類以上の外部API・データソース**
+（yfinance・Tiingo・FMP・BLS・FRED・J-Quants・Finnhub・Gemini/Groq/DeepSeek/NVIDIA/OpenRouter等）を
+組み合わせて動いている点が特徴です。詳しくは[AIマルチエージェント・パイプライン](#aiマルチエージェントパイプライン)と
+[データソースと冗長化戦略](#データソースと冗長化戦略)をご覧ください。
+
 📝 English explanation is also available further down this page → [Jump to English version](#english)
 
 **🔗 公開URL: [windex.streamlit.app](https://windex.streamlit.app/)** ｜ [🇺🇸 English version ↓](#english)
@@ -237,6 +243,13 @@ scripts/
 A [Streamlit](https://streamlit.io/)-based market dashboard that unifies macro market context, sentiment
 analysis, Japan-equity-focused factor analysis, an AI multi-agent stock/portfolio advisor, and real trade
 record management for both Japanese and US equities.
+
+🤖 This isn't just a price-quote viewer — it's built around an **AI multi-agent pipeline** (macro analysis
+→ per-stock analysis → portfolio assembly, with automatic fallback across 5 AI providers) and **10+
+external APIs and data sources** (yfinance, Tiingo, FMP, BLS, FRED, J-Quants, Finnhub, Gemini/Groq/
+DeepSeek/NVIDIA/OpenRouter, and more) working together. See
+[The AI multi-agent pipeline](#the-ai-multi-agent-pipeline) and
+[Data sources and redundancy](#data-sources-and-redundancy) for details.
 
 **🔗 Live: [windex.streamlit.app](https://windex.streamlit.app/)** | [🇯🇵 日本語版 ↑](#japanese)
 
