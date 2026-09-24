@@ -26757,7 +26757,14 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     """
     tickers, is_ranked = _get_mode_backtest_tickers(mode_key)
     if not tickers:
-        return {"ok": False, "reason": "対象銘柄を取得できませんでした。"}
+        _reason = "対象銘柄を取得できませんでした。"
+        if mode_key == "growth":
+            # 長期育成(テンバガー)モードはS&P600の約600銘柄に.info()を個別に叩く
+            # 都合上、Yahoo側の一時的なレート制限で候補が0件になることがある。
+            # 原因を切り分けやすいよう他モードと違うメッセージにしておく。
+            _reason = ("S&P600の財務データ取得に失敗しました（Yahoo側の一時的なレート制限の"
+                       "可能性）。時間を置いてページを再読み込みしてください。")
+        return {"ok": False, "reason": _reason}
 
     bench = "^GSPC"
     end   = datetime.now()
@@ -26966,10 +26973,19 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     _tickers = list(_universe.keys())
 
     def _one(ticker):
-        try:
-            info = yf.Ticker(ticker).info or {}
-        except Exception:
-            return None
+        # Yahoo Finance側のレート制限で単発失敗することがあるため、1回だけ短い
+        # 待機を挟んでリトライする（600銘柄という規模で並列に.info()を叩くと
+        # レート制限に引っかかりやすく、実際に候補が0件になる不具合が発生した）。
+        info = None
+        for _attempt in range(2):
+            try:
+                info = yf.Ticker(ticker).info or {}
+                break
+            except Exception:
+                if _attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                return None
         if not info:
             return None
         _mcap = info.get("marketCap")
@@ -26996,15 +27012,18 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     _rows = []
     # S&P600は約600銘柄あり、yf.download()のようなバッチ価格APIには時価総額が
     # 含まれないため.info()を1銘柄ずつ叩く必要がある（_fetch_forward_earnings_universe()
-    # と同じ制約）。1日1回・初回アクセス時のみ発生するコストなのでmax_workersを
-    # やや多めにして待ち時間を抑える。
-    with _cf_tb.ThreadPoolExecutor(max_workers=16) as _ex:
+    # と同じ制約）。並列数を上げすぎるとYahoo側のレート制限に引っかかり、実際に
+    # 候補が0件になる不具合が起きたため、控えめな並列数に抑えてリトライで補う。
+    with _cf_tb.ThreadPoolExecutor(max_workers=6) as _ex:
         for _res in _ex.map(_one, _tickers):
             if _res:
                 _rows.append(_res)
 
     if not _rows:
-        logger.warning(f"[trading] tenbagger候補: 時価総額5〜50億ドルに合致する銘柄が0件（母集団{len(_tickers)}銘柄）")
+        logger.warning(
+            f"[trading] tenbagger候補: 財務データ取得または時価総額5〜50億ドル条件で"
+            f"0件になりました（母集団{len(_tickers)}銘柄）。Yahoo側のレート制限の可能性があります。"
+        )
         return {}
 
     # 4指標を正規化して合成スコア化（欠損項目は0点扱い・他の指標で評価）
