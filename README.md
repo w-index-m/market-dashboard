@@ -6,6 +6,8 @@
 個別銘柄診断・ポートフォリオ提案、そして実際の取引記録管理までを1つに統合した
 [Streamlit](https://streamlit.io/) 製マーケットダッシュボードです。
 
+📝 English explanation is also available further down this page → [Jump to English version](#english)
+
 **🔗 公開URL: [windex.streamlit.app](https://windex.streamlit.app/)** ｜ [🇺🇸 English version ↓](#english)
 
 > ⚠️ 本アプリで表示される情報・AIによる分析コメントは投資判断の参考情報であり、投資の助言や勧誘を
