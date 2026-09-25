@@ -8646,6 +8646,78 @@ def _compute_jp_factor_universe() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_jp_roic_wacc_universe() -> pd.DataFrame:
+    """日経225主要銘柄のROIC・WACC・スプレッドをyfinanceから並列取得して計算する。
+    🌟価値創造分析（ROE vs CAPM資本コスト、株主資本のみのシンプル版）とは別に、
+    ROIC-WACCは負債も含めた「事業全体に投下した資本」に対する収益性を見る、より
+    厳密な指標として区別している（AIマルチエージェント・パイプラインの🌱長期育成
+    モードがROIC-WACCスプレッドを最重要視しているのと同じ考え方）。
+
+    簡略化の内訳（README「分析手法の透明性」にも明記）:
+    ・NOPAT = EBIT×(1-実効税率)。EBITがyfinanceに無い銘柄はEBITDAで代用（D&Aを
+      引いていない分、真のNOPATよりやや過大評価になる）
+    ・投下資本 = 有利子負債 + 自己資本（簿価: bookValue×発行済株式数）− 現金同等物
+    ・実効税率は日本の実効税率の目安として一律30%を仮定（個社の実際の税率とは異なる）
+    ・負債コストは無リスク金利+信用スプレッド目安1.2%の簡易プロキシ（個社の実際の
+      支払利息データはyfinanceで網羅的に取得できないため）
+    """
+    import concurrent.futures as _cf_rw
+
+    _jgb = _fetch_jgb10y_history()
+    _rf_pct = float(_jgb["yield"].iloc[-1]) if not _jgb.empty else 0.5
+    _erp = 5.0       # 株式リスクプレミアム（🌟価値創造分析と同じ前提）
+    _debt_spread = 1.2  # 負債コストの簡易信用スプレッド目安（%pt）
+    _tax_rate = 0.30    # 実効税率の一律仮定
+
+    def _one(ticker):
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            return None
+        if not info:
+            return None
+        _ebit  = info.get("ebit")
+        _basis = "EBIT"
+        if _ebit is None:
+            _ebit = info.get("ebitda")
+            _basis = "EBITDA代用"
+        _debt  = info.get("totalDebt")
+        _cash  = info.get("totalCash")
+        _bvps  = info.get("bookValue")
+        _shares = info.get("sharesOutstanding")
+        _mc    = info.get("marketCap")
+        _beta  = info.get("beta")
+        if None in (_ebit, _debt, _cash, _bvps, _shares, _mc, _beta):
+            return None
+        _book_equity = _bvps * _shares
+        _invested_capital = _debt + _book_equity - _cash
+        if _invested_capital <= 0 or _mc <= 0:
+            return None
+        _nopat = _ebit * (1 - _tax_rate)
+        _roic = _nopat / _invested_capital * 100
+
+        _cost_equity = _rf_pct + _beta * _erp
+        _cost_debt_after_tax = (_rf_pct + _debt_spread) * (1 - _tax_rate)
+        _v = _mc + _debt
+        _wacc = (_mc / _v) * _cost_equity + (_debt / _v) * _cost_debt_after_tax
+
+        return {
+            "ティッカー": ticker, "銘柄名": _NK225_STOCKS.get(ticker, ticker),
+            "ROIC(%)": round(_roic, 2), "WACC(%)": round(_wacc, 2),
+            "ROIC-WACCスプレッド(%)": round(_roic - _wacc, 2),
+            "算出基準": _basis,
+            "有利子負債比率(%)": round(_debt / _v * 100, 1),
+        }
+
+    rows = []
+    with _cf_rw.ThreadPoolExecutor(max_workers=8) as _ex:
+        for _res in _ex.map(_one, list(_NK225_STOCKS.keys())):
+            if _res:
+                rows.append(_res)
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _compute_factor_spread(tickers_low: tuple, tickers_high: tuple, days: int) -> dict:
     """2つの等重みバスケット（例: 小型株 vs 大型株、または低PBR vs 高PBR）の日次リターンを
     1回のyf.download()でまとめて取得し、累積リターン・スプレッド（SMB/HMLファクター）を
@@ -30840,13 +30912,14 @@ def render_claude_trading_project():
             'padding:8px 14px;margin-bottom:8px;font-size:12px;color:#7dd3fc">'
             '📊 日経225主要銘柄を対象に、サイズ（時価総額）・バリュー（PBR）の観点から'
             'ファクタープレミアムを検証し、CAPMベースの資本コストとROEを比較して'
-            '株主価値を創造できている銘柄を抽出します。'
+            '株主価値を創造できている銘柄を抽出します。負債も含めた厳密な'
+            'ROIC-WACCスプレッドは「📐 ROIC-WACC分析」タブで確認できます。'
             '</div>',
             unsafe_allow_html=True,
         )
 
-        _fac_t1, _fac_t2, _fac_t3 = st.tabs([
-            "📏 サイズファクター", "💰 バリューファクター", "🌟 価値創造分析",
+        _fac_t1, _fac_t2, _fac_t3, _fac_t4 = st.tabs([
+            "📏 サイズファクター", "💰 バリューファクター", "🌟 価値創造分析", "📐 ROIC-WACC分析",
         ])
 
         with _fac_t1:
@@ -31057,6 +31130,64 @@ def render_claude_trading_project():
                     )
                     st.plotly_chart(_fig_vc, use_container_width=True)
                 st.caption("※ 資本コストはβから逆算した簡易CAPM推定値です。投資判断は自己責任でお願いします。")
+
+        with _fac_t4:
+            st.caption(
+                "ROIC（投下資本利益率）＞ WACC（加重平均資本コスト）で「事業が資本コストを上回る"
+                "収益を生んでいるか」を判定します。🌟価値創造分析（ROE vs 資本コスト、株主資本のみ）"
+                "と違い、負債も含めた事業全体への投下資本を見るため、より厳密な指標です。"
+            )
+            if st.button("📐 ROIC-WACC分析を実行", key="btn_roic_wacc"):
+                with st.spinner("EBIT・負債・資本コストのデータ取得中..."):
+                    st.session_state["_roic_wacc_universe"] = _compute_jp_roic_wacc_universe()
+
+            _rw_df = st.session_state.get("_roic_wacc_universe")
+            if _rw_df is None:
+                st.caption("ボタンを押すとROIC-WACCスプレッドを分析します（日経225主要銘柄、初回30秒程度）。")
+            elif _rw_df.empty:
+                st.caption("データを取得できませんでした（EBIT・負債等のデータが揃っている銘柄が少ない可能性があります）。")
+            else:
+                _rw = _rw_df.copy()
+                _rw["判定"] = _rw["ROIC-WACCスプレッド(%)"].apply(lambda x: "✅ 資本コスト超過" if x > 0 else "❌ 資本コスト未達")
+
+                _rw_creators = int((_rw["ROIC-WACCスプレッド(%)"] > 0).sum())
+                _rw_m1, _rw_m2, _rw_m3, _rw_m4 = st.columns(4)
+                _rw_m1.metric("✅ 資本コスト超過", f"{_rw_creators}社")
+                _rw_m2.metric("❌ 資本コスト未達", f"{len(_rw) - _rw_creators}社")
+                _rw_m3.metric("平均ROIC", f"{_rw['ROIC(%)'].mean():.1f}%")
+                _rw_m4.metric("平均WACC", f"{_rw['WACC(%)'].mean():.1f}%")
+                st.caption(
+                    f"取得できた銘柄数: {len(_rw)}/225社（EBIT代用EBITDA使用: "
+                    f"{int((_rw['算出基準'] == 'EBITDA代用').sum())}社）"
+                )
+
+                st.markdown("**🏆 ROIC-WACCスプレッド 上位10**")
+                st.dataframe(
+                    _rw.nlargest(10, "ROIC-WACCスプレッド(%)")[
+                        ["ティッカー", "銘柄名", "ROIC(%)", "WACC(%)", "ROIC-WACCスプレッド(%)", "有利子負債比率(%)"]
+                    ],
+                    use_container_width=True, hide_index=True,
+                )
+                _rw_bottom = _rw[_rw["ROIC-WACCスプレッド(%)"] <= 0].nsmallest(5, "ROIC-WACCスプレッド(%)")
+                if not _rw_bottom.empty:
+                    st.markdown("**⚠️ ROIC-WACCスプレッド 下位5**")
+                    st.dataframe(
+                        _rw_bottom[["ティッカー", "銘柄名", "ROIC(%)", "WACC(%)", "ROIC-WACCスプレッド(%)", "有利子負債比率(%)"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                with st.expander("📖 算出方法・簡略化の内訳"):
+                    st.markdown(f"""
+- **ROIC** = NOPAT ÷ 投下資本 = EBIT×(1-実効税率{30:.0f}%) ÷ (有利子負債＋自己資本簿価－現金同等物)
+- **WACC** = 株式コスト×(時価総額/企業価値) ＋ 負債コスト×(1-税率)×(有利子負債/企業価値)
+- 株式コスト（CAPM） = 無リスク金利(日本10年国債) ＋ β × 株式リスクプレミアム5%
+- 負債コスト = 無リスク金利 ＋ 簡易信用スプレッド目安1.2%（個社の実際の支払利息データは
+  yfinanceで網羅的に取得できないための簡略化）
+- EBITが取得できない銘柄はEBITDAで代用（減価償却費を引いていない分、真のNOPATよりやや
+  過大評価になる点に注意）
+- 実効税率は日本企業の目安として一律30%を仮定（個社の実際の税率とは異なる）
+                    """)
+                st.caption("※ 上記の通り複数の簡略化を含む推定値です。投資判断は自己責任でお願いします。")
 
         st.markdown(
             '<div style="border-top:1px solid #1e293b;margin:14px 0 10px"></div>',

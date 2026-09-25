@@ -52,6 +52,7 @@
 - 🔮 来期想定利益スクリーニング（yfinance予想PER/EPS × J-Quants決算短信データの突合）
 - 📏 サイズファクター分析（SMB）／💰 バリューファクター分析（HML）／🌟 CAPMベースの価値創造
   （ROE vs 資本コスト）分析 — 伊藤レポート基準のROE 8%ラインも参考表示
+- 📐 ROIC-WACC分析 — 負債も含めた投下資本に対する収益性を、日経225主要銘柄一括で算出
 - 🔥 出来高急増・VWAP乖離などの需給スクリーニング、📊 52週高値安値・移動平均乖離・
   ゴールデンクロス/デッドクロス等の価格パターン分析
 - 信用残高（J-Quants V2 / 取得不可時はirbank.netへ自動フォールバック）、
@@ -298,6 +299,8 @@ DeepSeek/NVIDIA/OpenRouter, and more) working together. See
 - 🔮 Forward-earnings screening (yfinance forward PER/EPS cross-referenced with J-Quants earnings data)
 - 📏 Size-factor (SMB) and 💰 value-factor (HML) analysis, plus 🌟 CAPM-based value-creation analysis
   (ROE vs. cost of equity), with the Ito Report's ROE ≥ 8% benchmark shown for reference
+- 📐 ROIC-WACC analysis — profitability against total invested capital (including debt), computed in bulk
+  across the Nikkei 225 constituents
 - 🔥 Supply/demand screens (volume surges, VWAP deviation), 📊 price-pattern screens (52-week highs/lows,
   moving-average deviation, golden/dead crosses)
 - Margin balance data (J-Quants V2, falling back to irbank.net), US institutional holdings and insider
