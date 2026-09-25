@@ -136,6 +136,13 @@ yfinanceから実際に取得してAgent Cに渡しています。他モード�
   戦略を1〜3年前から運用していた場合よりも良い数値が出る）を含みます。画面上にもこの旨を明記しています。
 - **需給・価格パターン系のスクリーニング**: あくまで統計的な過去パターンの検出であり、急落や
   出来高急増の「原因」（特定ファンドの強制清算など）までは特定できません。
+- **金利上昇スピード（🐻弱気相場リスク判定の1項目）**: 米10年債利回りの「水準の高さ」ではなく
+  「直近1年でどれだけ急に上がったか」で危険域を判定します（水準は時代によって基準が変わる
+  相対的なものですが、上昇スピードは市場ストレスとの相関がより一貫しているため）。閾値は
+  2022年の急騰局面（約10ヶ月で+2.7pt、弱気相場と同時進行）と2018年Q4（年間+0.8ptでも急落を
+  誘発）を参考に設定した経験則であり、統計的に最適化されたものではありません。今のように
+  金利が既に高い状態でも、直近1年の上昇が緩やかならこの指標単体では「安全水域」寄りに
+  判定されます（水準自体への警戒はイールドカーブ・信用スプレッドの指標が別途カバー）。
 
 ## アーキテクチャと設計判断
 
@@ -385,6 +392,13 @@ To avoid being a black box, here's how the core analytics are computed and where
   years ago). This is called out directly in the UI.
 - **Supply/demand and price-pattern screens**: these detect statistical patterns in past price/volume data
   only — they cannot identify the actual *cause* of a move (e.g., a specific fund's forced liquidation).
+- **Rate-of-rise in yields (one signal in 🐻 Bear Market Risk Assessment)**: flags danger not by the
+  *level* of the US 10-year yield (a relative benchmark that shifts across eras) but by how fast it rose
+  over the trailing 12 months, since pace correlates with market stress more consistently than level.
+  Thresholds are a rule of thumb calibrated against 2022 (+2.7pt in ~10 months, coinciding with a bear
+  market) and Q4 2018 (a mere +0.8pt/year still preceded a sharp selloff) — not a statistically optimized
+  cutoff. Even with yields already elevated, a mild 12-month rise scores this one signal toward "safe
+  zone" (the level itself is separately covered by the yield-curve and credit-spread signals).
 
 ## Architecture and design decisions
 
