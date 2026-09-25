@@ -9558,6 +9558,10 @@ def render_macro_indicators(macro: dict | None = None):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    render_rate_inflation_card()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     # ── 各指標の詳細解説 ───────────────────────────────────────
     with st.expander("📖 各指標の読み方 — シンクタンクはここを見る", expanded=False):
 
@@ -11531,6 +11535,169 @@ def _compute_fed_hike_probability() -> dict:
     }
 
 
+# ===========================
+# 💡 金利とインフレの関係解説
+# ===========================
+# r-star（中立実質金利）推定値やテイラールールからの乖離といった議論は、NY連銀・BofA等が
+# 不定期に公表する分析であり、このアプリが自動取得できるAPIは存在しない。_MAJOR_CRASH_REFERENCE
+# と同様、手動でリサーチして更新する参考情報として持ち、ライブ取得できる数値（FF金利・10年債
+# 利回り・CPI）と組み合わせてAIに解説文を書かせる。AIには「ここに書いていない具体的な数値
+# （他機関の予測値など）を作らないこと」と明示し、捏造を防ぐ。
+_RATE_INFLATION_CONTEXT_NOTES = {
+    "as_of": "2026年9月",
+    "notes": [
+        "NY連銀のr-star（中立実質金利）推定値は2025年Q1の1.36%から2026年Q2に1.65%へ上昇。"
+        "FOMC自身の長期FF金利見通し（中央値）も2026年3月時点で3.1%と、ゼロ金利時代の"
+        "2〜2.5%程度という前提から明確に切り上がっている",
+        "BofA（2026年5月）は現在のFedがテイラールール（現在のインフレ・需給ギャップを前提とすると"
+        "4〜5%超のFF金利を示唆）から「意味のある逸脱」をしていると指摘している",
+        "10年債利回りの上昇は政策金利見通しの上昇だけでなく、財政赤字拡大に伴う国債供給増や、"
+        "AI/ハイパースケーラー企業の設備投資向け長期社債発行の増加によるタームプレミアム上昇も"
+        "要因として指摘されている",
+        "関税がコアインフレの押し上げ要因の一定割合を説明するとの推定があり、脱グローバル化・"
+        "国内生産回帰・防衛費増加が構造的にインフレ率を高め、不安定にしているとの見方もある"
+        "（銀行によって濃淡があり、コンセンサスではない）",
+        "2022年に7回の利上げで政策金利5.25〜5.50%まで引き上げ→2024年後半から2025年にかけて"
+        "複数回の利下げで4.25〜4.50%まで低下→2026年に入り再び利上げへ転換、という"
+        "「利下げからの再利上げ」のUターンが今サイクルの特徴的な動き",
+    ],
+}
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_us_cpi_yoy() -> Optional[float]:
+    """米CPI総合指数（FRED CPIAUCSL、APIキー不要のCSVエンドポイント）から
+    直近の前年同月比(%)を計算する。"""
+    try:
+        r = requests.get(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL",
+            timeout=12, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return None
+        rows = []
+        for line in r.text.strip().split("\n")[1:]:
+            parts = line.split(",")
+            if len(parts) < 2 or parts[1].strip() == ".":
+                continue
+            try:
+                rows.append((parts[0].strip(), float(parts[1].strip())))
+            except ValueError:
+                continue
+        if len(rows) < 13:
+            return None
+        rows.sort(key=lambda x: x[0])
+        _latest = rows[-1][1]
+        _year_ago = rows[-13][1]
+        if _year_ago <= 0:
+            return None
+        return round((_latest / _year_ago - 1) * 100, 1)
+    except Exception as e:
+        logger.warning(f"[rate_inflation] CPI取得失敗: {e}")
+        return None
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def generate_rate_inflation_narrative(date_str: str) -> dict:
+    """💡 金利とインフレの関係解説。FF金利・10年債利回り・CPIのライブ数値と、
+    手動更新の参考情報(_RATE_INFLATION_CONTEXT_NOTES)を組み合わせ、AIに日本語で
+    現在の金利環境を解説させる。date_str単位で24hキャッシュ。
+    """
+    _fed_prob = _compute_fed_hike_probability()
+    _ff_rate = _fed_prob.get("current_rate") if _fed_prob.get("ok") else None
+
+    try:
+        _tnx_raw = yf.download("^TNX", period="2y", interval="1d",
+                                progress=False, auto_adjust=True, timeout=20)
+        _tnx = _tnx_raw["Close"].dropna() if not _tnx_raw.empty else pd.Series(dtype=float)
+        if hasattr(_tnx, "columns"):
+            _tnx = _tnx.iloc[:, 0]
+    except Exception:
+        _tnx = pd.Series(dtype=float)
+    _tnx_cur = float(_tnx.iloc[-1]) if len(_tnx) else None
+    _tnx_1y  = float(_tnx.iloc[-252]) if len(_tnx) >= 252 else None
+
+    _cpi_yoy = _fetch_us_cpi_yoy()
+
+    if _ff_rate is None and _tnx_cur is None and _cpi_yoy is None:
+        return {"ok": False, "reason": "金利・インフレのライブデータを取得できませんでした。"}
+
+    _live_lines = []
+    if _ff_rate is not None:
+        _live_lines.append(f"FF金利（誘導目標、先物ベース推定）: 約{_ff_rate:.2f}%")
+    if _tnx_cur is not None:
+        _chg_str = f"（1年前は約{_tnx_1y:.2f}%、{_tnx_cur - _tnx_1y:+.2f}pt）" if _tnx_1y is not None else ""
+        _live_lines.append(f"米10年債利回り: {_tnx_cur:.2f}% {_chg_str}")
+    if _cpi_yoy is not None:
+        _live_lines.append(f"米CPI総合 前年同月比: {_cpi_yoy:+.1f}%")
+    _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
+
+    _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
+
+    _prompt = f"""あなたは市場解説の専門家です。以下の実データと参考情報だけを根拠に、
+「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか」を
+日本語5〜6文で簡潔に解説してください。
+
+【現在のライブデータ】
+{_live_str}
+
+【参考情報（{_RATE_INFLATION_CONTEXT_NOTES["as_of"]}時点でリサーチ済み、定期更新）】
+{_notes_str}
+
+【厳守事項】
+・上記に書かれていない具体的な数値（他機関の将来予測値・過去の詳細な統計等）を作らないこと
+・断定的な将来予測（「必ず◯%まで上がる」等）は避け、複数の見方があることを示すこと
+・結論として「歴史的に見て今の水準が異常かどうか」と「上昇スピードが今後も続くかが焦点」
+  という論点で締めくくること"""
+
+    try:
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=500, temperature=0.3)
+    except Exception as e:
+        logger.warning(f"[rate_inflation] AI呼び出し失敗: {e}")
+        return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
+
+    return {
+        "ok": True, "narrative": _text, "model": _model,
+        "ff_rate": _ff_rate, "tnx_cur": _tnx_cur, "tnx_1y": _tnx_1y, "cpi_yoy": _cpi_yoy,
+        "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
+    }
+
+
+def render_rate_inflation_card():
+    """💡 金利とインフレの関係解説セクション。"""
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#c4b5fd;margin:4px 0 8px">'
+        '💡 金利とインフレの関係解説 — 今は「安全水域」か？</div>',
+        unsafe_allow_html=True,
+    )
+    _today_str = datetime.now(JST).strftime("%Y-%m-%d")
+    with st.spinner("金利環境を分析中..."):
+        _result = generate_rate_inflation_narrative(_today_str)
+
+    if not _result.get("ok"):
+        st.caption(f"取得できませんでした: {_result.get('reason', '不明なエラー')}")
+        return
+
+    _rc1, _rc2, _rc3 = st.columns(3)
+    if _result.get("ff_rate") is not None:
+        _rc1.metric("FF金利（推定）", f"{_result['ff_rate']:.2f}%")
+    if _result.get("tnx_cur") is not None:
+        _tnx_delta = (f"{_result['tnx_cur'] - _result['tnx_1y']:+.2f}pt/1y"
+                      if _result.get("tnx_1y") is not None else None)
+        _rc2.metric("米10年債利回り", f"{_result['tnx_cur']:.2f}%", delta=_tnx_delta)
+    if _result.get("cpi_yoy") is not None:
+        _rc3.metric("米CPI 前年比", f"{_result['cpi_yoy']:+.1f}%")
+
+    st.markdown(
+        f'<div style="background:#1e1b3a;border:1px solid #6d28d9;border-radius:8px;'
+        f'padding:12px 16px;font-size:13px;color:#e2e8f0;line-height:1.7;margin-top:6px">'
+        f'{_result["narrative"]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"🤖 {_result.get('model', '')} ｜ 参考情報は{_result.get('as_of', '')}時点のリサーチに基づく手動更新データ。"
+        "投資助言ではありません。"
+    )
 
 
 # ===========================
