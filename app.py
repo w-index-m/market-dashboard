@@ -11811,13 +11811,12 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
 
     _prompt = f"""あなたは市場解説の専門家です。以下の実データと参考情報だけを根拠に、
 「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか（あと"余地"は
-あるのか）」を日本語7〜9文で解説してください。画面にはFF金利・米10年債利回りの過去6年の
-推移チャートと、複数の観点（実質金利vsr-star・簡易テイラールール・株式益回り差・イールド
-カーブ）を並べた表も一緒に表示されるので、それぞれの観点が「余地あり」「引き締め的」の
-どちらを示しているか、観点によって結論が割れているならそれも含めて総合的に判断してください。
-水準の説明だけでなく「どういう経路でここまで来たか」（2022年の利上げ→2024-25年の利下げ
-→2026年の再利上げというUターンの経緯）にも触れて、読者がチャートと文章を合わせて
-理解できるようにしてください。
+あるのか）」を分析し、JSON形式のみで回答してください（前後にテキスト不要）。
+
+画面にはFF金利・米10年債利回りの過去6年の推移チャートと、複数の観点（実質金利vsr-star・
+簡易テイラールール・株式益回り差・イールドカーブ）を並べた表も一緒に表示されるので、
+それぞれの観点が「余地あり」「引き締め的」のどちらを示しているか、観点によって結論が
+割れているならそれも含めて総合的に判断してください。
 
 【現在のライブデータ（複数の観点）】
 {_live_str}
@@ -11829,17 +11828,34 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
 ・上記に書かれていない具体的な数値（他機関の将来予測値・過去の詳細な統計等）を作らないこと
 ・断定的な将来予測（「必ず◯%まで上がる」等）は避け、複数の見方があることを示すこと
 ・複数の観点のうち一致している点と割れている点を区別すること
-・結論として「歴史的に見て今の水準が異常かどうか」と「上昇スピードが今後も続くかが焦点」
-  という論点で締めくくること"""
+
+以下のJSON形式のみで回答:
+{{"verdict": "「結局まだ上げられるのか」に対する一言の直接的な結論を40〜60字で。"
+  "例のような形式で書くこと: 「◯◯かと聞かれれば△△。ただし□□かと聞かれれば✕✕」",
+ "narrative": "水準の説明だけでなく「どういう経路でここまで来たか」（2022年の利上げ→"
+  "2024-25年の利下げ→2026年の再利上げというUターンの経緯）にも触れ、結論として「歴史的に"
+  "見て今の水準が異常かどうか」と「上昇スピードが今後も続くかが焦点」という論点で締めくくる、"
+  "日本語7〜9文の解説"}}"""
 
     try:
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=800, temperature=0.3)
+        _raw_text, _model = call_ai_with_fallback(_prompt, max_output_tokens=900, temperature=0.3)
     except Exception as e:
         logger.warning(f"[rate_inflation] AI呼び出し失敗: {e}")
         return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
 
+    import json as _json_ri
+    _verdict, _text = None, _raw_text
+    _m = re.search(r'\{[\s\S]*\}', _raw_text)
+    if _m:
+        try:
+            _parsed = _json_ri.loads(_m.group())
+            _verdict = _parsed.get("verdict")
+            _text = _parsed.get("narrative") or _raw_text
+        except ValueError:
+            logger.warning("[rate_inflation] JSON解析失敗、生テキストを使用")
+
     return {
-        "ok": True, "narrative": _text, "model": _model,
+        "ok": True, "narrative": _text, "verdict": _verdict, "model": _model,
         "ff_rate": _ff_rate, "tnx_cur": _tnx_cur, "tnx_1y": _tnx_1y, "cpi_yoy": _cpi_yoy,
         "cpi_core_yoy": _cpi_core_yoy,
         "real_yield_headline": _real_yield_headline, "real_yield_core": _real_yield_core,
@@ -11927,6 +11943,14 @@ def render_rate_inflation_card():
         st.caption(
             "各観点は前提・仮定が異なるため、必ずしも一致しません。割れている場合はそれ自体が"
             "「判断が難しい局面」であることを示します（詳細はタブ内の解説文参照）。"
+        )
+
+    if _result.get("verdict"):
+        st.markdown(
+            f'<div style="background:#2d1b4e;border:2px solid #a78bfa;border-radius:8px;'
+            f'padding:12px 16px;font-size:14px;font-weight:700;color:#e9d5ff;line-height:1.6;margin-top:8px">'
+            f'💬 {_result["verdict"]}</div>',
+            unsafe_allow_html=True,
         )
 
     st.markdown(
