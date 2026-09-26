@@ -10307,14 +10307,28 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
     def _fetch_one(sym: str, name: str):
         # .infoは一時的なレート制限で失敗しやすく、この関数は3hキャッシュのため
         # リトライ無しで諦めると1回の失敗が3時間分そのティッカー欠落のまま固定される。
+        # また、例外は出ずに.info自体は返ってきても、Yahoo側がquoteSummaryの
+        # financialData/recommendationTrendサブモジュールだけ欠落させて返すことが
+        # ある（price/forwardPE等は入るのにtargetHighPrice等が全部Noneになる、
+        # yfinance 1.6.0の変更履歴にも同種の「Yahoo APIのnullレスポンス」対応が
+        # 記載されている既知の挙動）。例外が出ないため従来のリトライでは救えず、
+        # 実際にアナリスト目標株価列だけ全銘柄で空になる不具合が発生した。
+        # price/analystデータの両方が揃うまで、例外時と同様にリトライする。
         info = {}
-        for _attempt in range(3):
+        for _attempt in range(4):
             try:
-                info = yf.Ticker(sym).info
-                break
+                info = yf.Ticker(sym).info or {}
             except Exception:
-                if _attempt < 2:
-                    time.sleep(0.8 * (_attempt + 1))
+                info = {}
+            _has_price = bool(info.get("currentPrice") or info.get("regularMarketPrice"))
+            _has_analyst = any(
+                info.get(k) is not None
+                for k in ("targetHighPrice", "targetLowPrice", "targetMeanPrice", "numberOfAnalystOpinions")
+            )
+            if _has_price and _has_analyst:
+                break
+            if _attempt < 3:
+                time.sleep(0.8 * (_attempt + 1))
         price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0) if info else 0
         if price <= 0:
             return sym, None
