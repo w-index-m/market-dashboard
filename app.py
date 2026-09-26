@@ -11670,6 +11670,40 @@ def _fetch_us_cpi_yoy() -> Optional[float]:
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_fed_funds_rate_history(years: int = 6) -> pd.Series:
+    """FF金利（実効フェデラルファンド金利、FRED DFF、APIキー不要のCSVエンドポイント）の
+    日次推移を取得する。_compute_fed_hike_probability()のFed Funds先物ベース推定値は
+    「次回会合時点の見込み」用で、過去の推移グラフには不向きなため別途これを使う。
+    Returns: pd.Series（index=Timestamp, values=%）。取得失敗時は空Series。
+    """
+    try:
+        r = requests.get(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code != 200:
+            return pd.Series(dtype=float)
+        _dates, _vals = [], []
+        for line in r.text.strip().split("\n")[1:]:
+            parts = line.split(",")
+            if len(parts) < 2 or parts[1].strip() == ".":
+                continue
+            try:
+                _dates.append(parts[0].strip())
+                _vals.append(float(parts[1].strip()))
+            except ValueError:
+                continue
+        if not _dates:
+            return pd.Series(dtype=float)
+        s = pd.Series(_vals, index=pd.to_datetime(_dates)).sort_index()
+        _cutoff = datetime.now() - timedelta(days=365 * years)
+        return s[s.index >= _cutoff]
+    except Exception as e:
+        logger.warning(f"[rate_inflation] FF金利推移取得失敗: {e}")
+        return pd.Series(dtype=float)
+
+
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
 def generate_rate_inflation_narrative(date_str: str) -> dict:
     """💡 金利とインフレの関係解説。FF金利・10年債利回り・CPIのライブ数値と、
     手動更新の参考情報(_RATE_INFLATION_CONTEXT_NOTES)を組み合わせ、AIに日本語で
@@ -11679,7 +11713,7 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     _ff_rate = _fed_prob.get("current_rate") if _fed_prob.get("ok") else None
 
     try:
-        _tnx_raw = yf.download("^TNX", period="2y", interval="1d",
+        _tnx_raw = yf.download("^TNX", period="6y", interval="1d",
                                 progress=False, auto_adjust=True, timeout=20)
         _tnx = _tnx_raw["Close"].dropna() if not _tnx_raw.empty else pd.Series(dtype=float)
         if hasattr(_tnx, "columns"):
@@ -11688,6 +11722,8 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _tnx = pd.Series(dtype=float)
     _tnx_cur = float(_tnx.iloc[-1]) if len(_tnx) else None
     _tnx_1y  = float(_tnx.iloc[-252]) if len(_tnx) >= 252 else None
+
+    _ff_series = _fetch_fed_funds_rate_history()
 
     _cpi_yoy = _fetch_us_cpi_yoy()
 
@@ -11708,7 +11744,10 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
 
     _prompt = f"""あなたは市場解説の専門家です。以下の実データと参考情報だけを根拠に、
 「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか」を
-日本語5〜6文で簡潔に解説してください。
+日本語6〜8文で解説してください。画面にはFF金利・米10年債利回りの過去6年の推移チャートも
+一緒に表示されるので、水準の説明だけでなく「どういう経路でここまで来たか」（2022年の利上げ
+→2024-25年の利下げ→2026年の再利上げというUターンの経緯）にも触れて、読者がチャートと
+文章を合わせて理解できるようにしてください。
 
 【現在のライブデータ】
 {_live_str}
@@ -11723,7 +11762,7 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
   という論点で締めくくること"""
 
     try:
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=500, temperature=0.3)
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=700, temperature=0.3)
     except Exception as e:
         logger.warning(f"[rate_inflation] AI呼び出し失敗: {e}")
         return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
@@ -11731,6 +11770,7 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     return {
         "ok": True, "narrative": _text, "model": _model,
         "ff_rate": _ff_rate, "tnx_cur": _tnx_cur, "tnx_1y": _tnx_1y, "cpi_yoy": _cpi_yoy,
+        "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
 
@@ -11766,6 +11806,34 @@ def render_rate_inflation_card():
         f'{_result["narrative"]}</div>',
         unsafe_allow_html=True,
     )
+
+    # ── 過去の推移チャート（FF金利・10年債利回り、直近6年） ──────────
+    _tnx_s = _result.get("tnx_series")
+    _ff_s  = _result.get("ff_series")
+    if (_tnx_s is not None and len(_tnx_s) > 0) or (_ff_s is not None and len(_ff_s) > 0):
+        _fig_rate = go.Figure()
+        if _tnx_s is not None and len(_tnx_s) > 0:
+            _fig_rate.add_trace(go.Scatter(
+                x=_tnx_s.index, y=_tnx_s.values, mode="lines", name="米10年債利回り",
+                line=dict(color="#38bdf8", width=2),
+            ))
+        if _ff_s is not None and len(_ff_s) > 0:
+            _fig_rate.add_trace(go.Scatter(
+                x=_ff_s.index, y=_ff_s.values, mode="lines", name="FF金利（実効）",
+                line=dict(color="#f97316", width=2),
+            ))
+        _fig_rate.update_layout(
+            height=320, margin=dict(l=10, r=10, t=30, b=10),
+            title=dict(text="過去6年の推移 — 2022年利上げ→2024-25年利下げ→2026年再利上げ", font=dict(color="#e2e8f0")),
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+            font=dict(color="#e2e8f0"),
+            yaxis=dict(title="%", tickfont=dict(color="#e2e8f0"), title_font=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+            xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+            legend=dict(font=dict(color="#e2e8f0")),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(_fig_rate, use_container_width=True)
+
     st.caption(
         f"🤖 {_result.get('model', '')} ｜ 参考情報は{_result.get('as_of', '')}時点のリサーチに基づく手動更新データ。"
         "投資助言ではありません。"
