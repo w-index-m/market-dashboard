@@ -11748,6 +11748,39 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         round(_tnx_cur - _cpi_core_yoy, 2) if (_tnx_cur is not None and _cpi_core_yoy is not None) else None
     )
 
+    # 簡易テイラールール（r* + インフレ + 0.5×(インフレ−目標2%)。産出ギャップ項は
+    # 失業率データの取得コストに見合わないため省略した簡略版）と、実際のFF金利との比較。
+    _taylor_rate = (
+        round(_R_STAR_LATEST + _cpi_core_yoy + 0.5 * (_cpi_core_yoy - 2.0), 2)
+        if _cpi_core_yoy is not None else None
+    )
+    _taylor_gap = round(_ff_rate - _taylor_rate, 2) if (_ff_rate is not None and _taylor_rate is not None) else None
+
+    # 株式益回り（S&P500トラッキングETF=SPYのtrailingPERの逆数）と10年債利回りの差
+    # （Fedモデル/エクイティ・リスクプレミアムの簡易版）。差が小さい/マイナスほど、
+    # 株式が債券対比で割高＝金利上昇を吸収する「のりしろ」が乏しいと解釈できる。
+    _equity_yield_gap = None
+    try:
+        _spy_pe = yf.Ticker("SPY").info.get("trailingPE")
+        if _spy_pe and _spy_pe > 0 and _tnx_cur is not None:
+            _equity_yield_gap = round((1 / _spy_pe * 100) - _tnx_cur, 2)
+    except Exception:
+        pass
+
+    # イールドカーブ（10年−3ヶ月）。逆イールドは市場が将来の利下げ（またはリセッション）を
+    # 織り込んでいるサイン。
+    _yield_curve = None
+    try:
+        _irx_raw = yf.download("^IRX", period="5d", interval="1d",
+                                progress=False, auto_adjust=True, timeout=15)
+        _irx = _irx_raw["Close"].dropna() if not _irx_raw.empty else pd.Series(dtype=float)
+        if hasattr(_irx, "columns"):
+            _irx = _irx.iloc[:, 0]
+        if len(_irx) and _tnx_cur is not None:
+            _yield_curve = round(_tnx_cur - float(_irx.iloc[-1]), 2)
+    except Exception:
+        pass
+
     if _ff_rate is None and _tnx_cur is None and _cpi_yoy is None:
         return {"ok": False, "reason": "金利・インフレのライブデータを取得できませんでした。"}
 
@@ -11766,6 +11799,12 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     if _real_yield_core is not None:
         _live_lines.append(f"実質金利（10年債−コアCPI）: {_real_yield_core:+.2f}%")
     _live_lines.append(f"r-star（NY連銀推定・中立実質金利の目安）: {_R_STAR_LATEST:.2f}%")
+    if _taylor_rate is not None:
+        _live_lines.append(f"簡易テイラールール推定FF金利: {_taylor_rate:.2f}%（実際との差: {_taylor_gap:+.2f}pt）")
+    if _equity_yield_gap is not None:
+        _live_lines.append(f"株式益回り(SPY)−10年債利回り（簡易エクイティ・リスクプレミアム）: {_equity_yield_gap:+.2f}pt")
+    if _yield_curve is not None:
+        _live_lines.append(f"イールドカーブ（10年−3ヶ月）: {_yield_curve:+.2f}pt")
     _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
 
     _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
@@ -11773,13 +11812,14 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     _prompt = f"""あなたは市場解説の専門家です。以下の実データと参考情報だけを根拠に、
 「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか（あと"余地"は
 あるのか）」を日本語7〜9文で解説してください。画面にはFF金利・米10年債利回りの過去6年の
-推移チャートも一緒に表示されるので、水準の説明だけでなく「どういう経路でここまで来たか」
-（2022年の利上げ→2024-25年の利下げ→2026年の再利上げというUターンの経緯）にも触れて、
-読者がチャートと文章を合わせて理解できるようにしてください。実質金利とr-starの差から
-「引き締め的かどうか」を判断し、コアCPI基準とヘッドラインCPI基準で結論が変わりうる場合は
-その曖昧さも正直に示してください。
+推移チャートと、複数の観点（実質金利vsr-star・簡易テイラールール・株式益回り差・イールド
+カーブ）を並べた表も一緒に表示されるので、それぞれの観点が「余地あり」「引き締め的」の
+どちらを示しているか、観点によって結論が割れているならそれも含めて総合的に判断してください。
+水準の説明だけでなく「どういう経路でここまで来たか」（2022年の利上げ→2024-25年の利下げ
+→2026年の再利上げというUターンの経緯）にも触れて、読者がチャートと文章を合わせて
+理解できるようにしてください。
 
-【現在のライブデータ】
+【現在のライブデータ（複数の観点）】
 {_live_str}
 
 【参考情報（{_RATE_INFLATION_CONTEXT_NOTES["as_of"]}時点でリサーチ済み、定期更新）】
@@ -11788,11 +11828,12 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
 【厳守事項】
 ・上記に書かれていない具体的な数値（他機関の将来予測値・過去の詳細な統計等）を作らないこと
 ・断定的な将来予測（「必ず◯%まで上がる」等）は避け、複数の見方があることを示すこと
+・複数の観点のうち一致している点と割れている点を区別すること
 ・結論として「歴史的に見て今の水準が異常かどうか」と「上昇スピードが今後も続くかが焦点」
   という論点で締めくくること"""
 
     try:
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=700, temperature=0.3)
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=800, temperature=0.3)
     except Exception as e:
         logger.warning(f"[rate_inflation] AI呼び出し失敗: {e}")
         return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
@@ -11803,6 +11844,8 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         "cpi_core_yoy": _cpi_core_yoy,
         "real_yield_headline": _real_yield_headline, "real_yield_core": _real_yield_core,
         "r_star": _R_STAR_LATEST,
+        "taylor_rate": _taylor_rate, "taylor_gap": _taylor_gap,
+        "equity_yield_gap": _equity_yield_gap, "yield_curve": _yield_curve,
         "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
@@ -11846,6 +11889,44 @@ def render_rate_inflation_card():
             "実質金利がr-starを上回っているほど「引き締め的」（＝上昇余地は乏しい/既に無理をしている）"
             "と見なせます。コアCPI基準と総合CPI基準で結論が割れる場合、それ自体が"
             "「境界線上にいる」というシグナルです。"
+        )
+
+    # ── 複数の視点で見る「金利の余地」表 ──────────────────────────
+    _persp_rows = []
+    if _result.get("real_yield_core") is not None:
+        _gap = round(_result["real_yield_core"] - _result["r_star"], 2)
+        _verdict = "🔴 引き締め的" if _gap > 0.5 else "🟢 余地あり" if _gap < -0.5 else "🟡 中立"
+        _persp_rows.append({
+            "観点": "実質金利(コア) vs r-star", "現在値": f"{_gap:+.2f}pt差",
+            "判定": _verdict, "補足": "コアCPI基準の実質金利がr-starよりどれだけ高いか",
+        })
+    if _result.get("taylor_gap") is not None:
+        _verdict = ("🔴 引き締め的" if _result["taylor_gap"] > 0.5
+                     else "🟢 余地あり" if _result["taylor_gap"] < -0.5 else "🟡 中立")
+        _persp_rows.append({
+            "観点": "簡易テイラールール比", "現在値": f"{_result['taylor_gap']:+.2f}pt",
+            "判定": _verdict,
+            "補足": f"実際のFF金利 − テイラールール推定値({_result['taylor_rate']:.2f}%)",
+        })
+    if _result.get("equity_yield_gap") is not None:
+        _verdict = ("🔴 株式に割高感" if _result["equity_yield_gap"] < 0
+                     else "🟢 株式に妙味あり" if _result["equity_yield_gap"] > 2 else "🟡 中立")
+        _persp_rows.append({
+            "観点": "株式益回り−10年債（Fedモデル）", "現在値": f"{_result['equity_yield_gap']:+.2f}pt",
+            "判定": _verdict, "補足": "小さい/マイナスほど株式が債券に対し金利上昇を吸収する余地が乏しい",
+        })
+    if _result.get("yield_curve") is not None:
+        _verdict = "🔴 逆イールド(将来の利下げ/景気後退を織込み)" if _result["yield_curve"] < 0 else "🟢 順イールド"
+        _persp_rows.append({
+            "観点": "イールドカーブ(10y-3m)", "現在値": f"{_result['yield_curve']:+.2f}pt",
+            "判定": _verdict, "補足": "逆イールドは市場が将来の政策転換を織り込んでいるサイン",
+        })
+    if _persp_rows:
+        st.caption("🧭 複数の視点で見る「金利の余地」")
+        st.dataframe(pd.DataFrame(_persp_rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "各観点は前提・仮定が異なるため、必ずしも一致しません。割れている場合はそれ自体が"
+            "「判断が難しい局面」であることを示します（詳細はタブ内の解説文参照）。"
         )
 
     st.markdown(
