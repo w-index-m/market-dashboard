@@ -144,6 +144,12 @@ yfinanceから実際に取得してAgent Cに渡しています。他モード�
   誘発）を参考に設定した経験則であり、統計的に最適化されたものではありません。今のように
   金利が既に高い状態でも、直近1年の上昇が緩やかならこの指標単体では「安全水域」寄りに
   判定されます（水準自体への警戒はイールドカーブ・信用スプレッドの指標が別途カバー）。
+- **実質金利 vs r-star（💡金利とインフレの関係解説カードの1項目）**: 「あと上昇余地があるか」の
+  目安として、10年債利回りから物価上昇率を引いた実質金利を、NY連銀のr-star（中立実質金利）
+  推定値と比較します。物価上昇率にコアCPI・総合CPIのどちらを使うかで実質金利の値自体が
+  変わり、結論が割れることがあります（このアプリは両方を並べて表示し、割れること自体を
+  シグナルとして扱います）。r-star自体もNY連銀が不定期に改定する推定値であり、唯一絶対の
+  基準ではありません。
 
 ## アーキテクチャと設計判断
 
@@ -402,6 +408,12 @@ To avoid being a black box, here's how the core analytics are computed and where
   market) and Q4 2018 (a mere +0.8pt/year still preceded a sharp selloff) — not a statistically optimized
   cutoff. Even with yields already elevated, a mild 12-month rise scores this one signal toward "safe
   zone" (the level itself is separately covered by the yield-curve and credit-spread signals).
+- **Real yield vs. r-star (one item in the 💡 rate/inflation card)**: as a rough gauge of "how much room
+  is left" for rates to rise, the card compares the 10-year yield minus inflation (real yield) against
+  the NY Fed's r-star (neutral real rate) estimate. The real-yield figure itself shifts depending on
+  whether core or headline CPI is used, and the two can disagree — this app shows both side by side and
+  treats that disagreement as a signal in itself (being on the borderline) rather than picking one. r-star
+  is itself an estimate the NY Fed periodically revises, not a fixed ground truth.
 
 ## Architecture and design decisions
 

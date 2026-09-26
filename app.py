@@ -11632,17 +11632,30 @@ _RATE_INFLATION_CONTEXT_NOTES = {
         "2022年に7回の利上げで政策金利5.25〜5.50%まで引き上げ→2024年後半から2025年にかけて"
         "複数回の利下げで4.25〜4.50%まで低下→2026年に入り再び利上げへ転換、という"
         "「利下げからの再利上げ」のUターンが今サイクルの特徴的な動き",
+        "「あと何%上がれるか」を測る本筋は水準そのものより実質金利（10年債利回り−インフレ率）と"
+        "r-starの差。ただしコアCPIを使うかヘッドラインCPIを使うかで結論が変わりうる境界線上に"
+        "いることが多く、実質金利だけで一意に結論は出せない",
+        "住宅着工数など金利感応度の高い経済指標は、実質金利が引き締め的かどうかの先読みには"
+        "向かず、むしろ「既に行き過ぎた引き締めが実体経済を痛め始めているか」を後から確認する"
+        "遅行〜一致指標として位置づけられる",
+        "株価が好調（高PER）な局面ほど、将来キャッシュフローの割引現在価値に占める割引率の影響が"
+        "大きく、金利急騰に対する感応度がむしろ高い。2022年・2018年Q4はいずれも株価が高値圏に"
+        "あった局面からの金利ショックで急落しており、「株価が良いから金利耐性がある」とは"
+        "必ずしも言えない",
     ],
 }
+_R_STAR_LATEST = 1.65  # NY連銀 Laubach-Williams r-star推定値（2026年Q2時点）
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
-def _fetch_us_cpi_yoy() -> Optional[float]:
-    """米CPI総合指数（FRED CPIAUCSL、APIキー不要のCSVエンドポイント）から
-    直近の前年同月比(%)を計算する。"""
+def _fetch_us_cpi_yoy(series_id: str = "CPIAUCSL") -> Optional[float]:
+    """米CPI指数（FRED、APIキー不要のCSVエンドポイント）から直近の前年同月比(%)を計算する。
+    series_id="CPIAUCSL"（総合）または"CPILFESL"（コア、食品・エネルギー除く）。
+    実質金利を計算する際、総合CPIとコアCPIのどちらを使うかで結論が変わることがあるため、
+    両方を呼び出し元で使い分けられるようにしている。"""
     try:
         r = requests.get(
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL",
+            f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
             timeout=12, headers={"User-Agent": "Mozilla/5.0"},
         )
         if r.status_code != 200:
@@ -11665,7 +11678,7 @@ def _fetch_us_cpi_yoy() -> Optional[float]:
             return None
         return round((_latest / _year_ago - 1) * 100, 1)
     except Exception as e:
-        logger.warning(f"[rate_inflation] CPI取得失敗: {e}")
+        logger.warning(f"[rate_inflation] CPI取得失敗({series_id}): {e}")
         return None
 
 
@@ -11725,7 +11738,15 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
 
     _ff_series = _fetch_fed_funds_rate_history()
 
-    _cpi_yoy = _fetch_us_cpi_yoy()
+    _cpi_yoy      = _fetch_us_cpi_yoy("CPIAUCSL")
+    _cpi_core_yoy = _fetch_us_cpi_yoy("CPILFESL")
+
+    _real_yield_headline = (
+        round(_tnx_cur - _cpi_yoy, 2) if (_tnx_cur is not None and _cpi_yoy is not None) else None
+    )
+    _real_yield_core = (
+        round(_tnx_cur - _cpi_core_yoy, 2) if (_tnx_cur is not None and _cpi_core_yoy is not None) else None
+    )
 
     if _ff_rate is None and _tnx_cur is None and _cpi_yoy is None:
         return {"ok": False, "reason": "金利・インフレのライブデータを取得できませんでした。"}
@@ -11738,16 +11759,25 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _live_lines.append(f"米10年債利回り: {_tnx_cur:.2f}% {_chg_str}")
     if _cpi_yoy is not None:
         _live_lines.append(f"米CPI総合 前年同月比: {_cpi_yoy:+.1f}%")
+    if _cpi_core_yoy is not None:
+        _live_lines.append(f"米コアCPI（食品・エネルギー除く）前年同月比: {_cpi_core_yoy:+.1f}%")
+    if _real_yield_headline is not None:
+        _live_lines.append(f"実質金利（10年債−総合CPI）: {_real_yield_headline:+.2f}%")
+    if _real_yield_core is not None:
+        _live_lines.append(f"実質金利（10年債−コアCPI）: {_real_yield_core:+.2f}%")
+    _live_lines.append(f"r-star（NY連銀推定・中立実質金利の目安）: {_R_STAR_LATEST:.2f}%")
     _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
 
     _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
 
     _prompt = f"""あなたは市場解説の専門家です。以下の実データと参考情報だけを根拠に、
-「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか」を
-日本語6〜8文で解説してください。画面にはFF金利・米10年債利回りの過去6年の推移チャートも
-一緒に表示されるので、水準の説明だけでなく「どういう経路でここまで来たか」（2022年の利上げ
-→2024-25年の利下げ→2026年の再利上げというUターンの経緯）にも触れて、読者がチャートと
-文章を合わせて理解できるようにしてください。
+「今の金利とインフレの関係は過去と違うのか、論理的に金利はどこまで上がりうるか（あと"余地"は
+あるのか）」を日本語7〜9文で解説してください。画面にはFF金利・米10年債利回りの過去6年の
+推移チャートも一緒に表示されるので、水準の説明だけでなく「どういう経路でここまで来たか」
+（2022年の利上げ→2024-25年の利下げ→2026年の再利上げというUターンの経緯）にも触れて、
+読者がチャートと文章を合わせて理解できるようにしてください。実質金利とr-starの差から
+「引き締め的かどうか」を判断し、コアCPI基準とヘッドラインCPI基準で結論が変わりうる場合は
+その曖昧さも正直に示してください。
 
 【現在のライブデータ】
 {_live_str}
@@ -11770,6 +11800,9 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     return {
         "ok": True, "narrative": _text, "model": _model,
         "ff_rate": _ff_rate, "tnx_cur": _tnx_cur, "tnx_1y": _tnx_1y, "cpi_yoy": _cpi_yoy,
+        "cpi_core_yoy": _cpi_core_yoy,
+        "real_yield_headline": _real_yield_headline, "real_yield_core": _real_yield_core,
+        "r_star": _R_STAR_LATEST,
         "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
@@ -11799,6 +11832,21 @@ def render_rate_inflation_card():
         _rc2.metric("米10年債利回り", f"{_result['tnx_cur']:.2f}%", delta=_tnx_delta)
     if _result.get("cpi_yoy") is not None:
         _rc3.metric("米CPI 前年比", f"{_result['cpi_yoy']:+.1f}%")
+
+    # ── 実質金利 vs r-star（「あとどれくらい余地があるか」の目安） ──────
+    if _result.get("real_yield_headline") is not None or _result.get("real_yield_core") is not None:
+        st.caption("📐 実質金利 vs r-star（中立実質金利） — 引き締めの度合いの目安")
+        _rq1, _rq2, _rq3 = st.columns(3)
+        if _result.get("real_yield_core") is not None:
+            _rq1.metric("実質金利(コアCPI基準)", f"{_result['real_yield_core']:+.2f}%")
+        if _result.get("real_yield_headline") is not None:
+            _rq2.metric("実質金利(総合CPI基準)", f"{_result['real_yield_headline']:+.2f}%")
+        _rq3.metric("r-star（NY連銀推定）", f"{_result['r_star']:.2f}%")
+        st.caption(
+            "実質金利がr-starを上回っているほど「引き締め的」（＝上昇余地は乏しい/既に無理をしている）"
+            "と見なせます。コアCPI基準と総合CPI基準で結論が割れる場合、それ自体が"
+            "「境界線上にいる」というシグナルです。"
+        )
 
     st.markdown(
         f'<div style="background:#1e1b3a;border:1px solid #6d28d9;border-radius:8px;'
