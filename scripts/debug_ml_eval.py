@@ -97,3 +97,18 @@ def _dd():
 _show("US direction models (existing)", _us)
 _show("Nikkei direction model (existing)", _jp)
 _show("Drawdown risk model (new)", _dd)
+
+
+def _skill():
+    for kind, sym in (("us", "^GSPC"), ("us", "^NDX"), ("us", "^DJI"), ("jp", "^N225")):
+        print(f"  {sym}:", _ns["_evaluate_direction_skill"](kind, sym))
+
+
+def _dxy():
+    s = yf.download("DX-Y.NYB", period="1mo", progress=False, auto_adjust=True)["Close"].dropna()
+    print(f"  DX-Y.NYB rows={len(s)} last={float(s.iloc[-1].iloc[0] if hasattr(s.iloc[-1], 'iloc') else s.iloc[-1]):.2f}"
+          if len(s) else "  DX-Y.NYB: NO DATA")
+
+
+_show("Direction-score skill banners", _skill)
+_show("Dollar index ticker", _dxy)

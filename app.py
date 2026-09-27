@@ -4124,14 +4124,20 @@ def render_nikkei_prediction():
 
     st.divider()
 
+    # ─── 過去の実力（単純な基準との比較） ────────
+    _verified = _render_direction_skill_banner(_evaluate_direction_skill("jp", "^N225"))
+    _ref = "" if _verified else "（参考）"
+
     # ─── ゲージ + レーダー + 総合シグナル ────────
     col_t, col_w, col_radar, col_conf = st.columns([1, 1, 1.2, 0.9])
 
     with col_t:
         color_t = "#1a7f37" if prob_up_t > 55 else ("#d1242f" if prob_up_t < 45 else "#888")
+        if not _verified:
+            color_t = "#888"
         st.markdown(
             '<div style="text-align:center;font-size:15px;font-weight:700;'
-            'margin-bottom:4px;">📅 明日の予測</div>',
+            f'margin-bottom:4px;">📅 明日のシグナル{_ref}</div>',
             unsafe_allow_html=True
         )
         st.image(render_prediction_gauge(prob_up_t), width="stretch")
@@ -4148,9 +4154,11 @@ def render_nikkei_prediction():
 
     with col_w:
         color_w = "#1a7f37" if prob_up_w > 55 else ("#d1242f" if prob_up_w < 45 else "#888")
+        if not _verified:
+            color_w = "#888"
         st.markdown(
             '<div style="text-align:center;font-size:15px;font-weight:700;'
-            'margin-bottom:4px;">📆 今週の予測</div>',
+            f'margin-bottom:4px;">📆 今週のシグナル{_ref}</div>',
             unsafe_allow_html=True
         )
         st.image(render_prediction_gauge(prob_up_w), width="stretch")
@@ -4325,7 +4333,7 @@ def run_backtest_us(symbol: str = "^GSPC", lookback_years: int = 3) -> Dict[str,
         xlk  = _g("XLK")   # テック
         xlf  = _g("XLF")   # 金融
         oil  = _g("CL=F")
-        dxy  = _g("DX=F")
+        dxy  = _g("DX-Y.NYB")
         spy  = _g("SPY")
         iwm  = _g("IWM")
 
@@ -4588,6 +4596,66 @@ def _walk_forward_eval(X: np.ndarray, y: np.ndarray, make_model, n_splits: int =
     }
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _evaluate_direction_skill(kind: str, symbol: str) -> Dict[str, Any]:
+    """「明日の予測」ゲージと同じ考え方の合成スコアが、過去に本当に当たっていたかを測る。
+    ゲージ本体は過去に遡って取得できないシグナル（センチメント等）も含むため、ここで検証するのは
+    バックテスト関数が過去データで再現できるシグナルだけで作った簡易版の合成スコア。
+    固定ルール（学習なし）なので、過去データ全体での的中率をそのまま使える。
+    「毎日上昇（または多い方）と答えるだけ」の基準と、閾値に依存しないAUCで比べる。"""
+    try:
+        from sklearn.metrics import roc_auc_score
+        bt = run_backtest_us(symbol, lookback_years=3) if kind == "us" else run_backtest(symbol, lookback_years=2)
+        if not bt.get("ok"):
+            return {"ok": False}
+        _y = np.asarray(bt["y"])
+        _up = float(_y.mean()) * 100
+        _base = max(_up, 100 - _up)
+        _hit = float(bt["overall_hit"])
+        _cs = np.asarray(bt["composite_scores"])
+        _auc = float(roc_auc_score(_y, _cs)) if len(np.unique(_y)) == 2 else None
+        ml = optimize_weights_ml_us(bt) if kind == "us" else optimize_weights_ml(bt)
+        ev = ml.get("eval") or {}
+        _skill = (_hit - _base > 1.0) and (_auc or 0) > 0.52
+        return {"ok": True, "n": len(_y), "n_feats": len(bt.get("feat_names", [])),
+                "up_rate": round(_up, 1), "baseline": round(_base, 1),
+                "hit": round(_hit, 1), "lift": round(_hit - _base, 1),
+                "auc": round(_auc, 3) if _auc is not None else None, "skill": _skill,
+                "ml_lift": ev.get("lift"), "ml_auc": ev.get("auc")}
+    except Exception as e:
+        logger.warning(f"[direction_skill] {kind}/{symbol} 評価失敗: {e}")
+        return {"ok": False}
+
+
+def _render_direction_skill_banner(sk: Dict[str, Any]) -> bool:
+    """ゲージの上に過去の実力を表示する。実力が確認できない場合はFalseを返し、呼び出し側で
+    ゲージを「参考表示」の扱いにする。"""
+    if not sk or not sk.get("ok"):
+        return True
+    if sk["skill"]:
+        st.markdown(
+            f'<div style="background:#0f2418;border:1px solid #166534;border-radius:8px;padding:8px 14px;'
+            f'font-size:12px;color:#bbf7d0;margin-bottom:8px;">📏 検証済み：同じ考え方のスコアを過去データで'
+            f'再現できる{sk["n_feats"]}シグナルで計算すると、翌日方向の的中率は'
+            f'過去{sk["n"]}営業日で{sk["hit"]:.1f}%で、「毎日{"上昇" if sk["up_rate"] >= 50 else "下落"}」'
+            f'と答えるだけの基準{sk["baseline"]:.1f}%を{sk["lift"]:+.1f}pt上回っています（AUC {sk["auc"]:.2f}）。</div>',
+            unsafe_allow_html=True)
+        return True
+    _ml = (f"機械学習で重みを最適化したモデルも基準との差{sk['ml_lift']:+.1f}pt・AUC {sk['ml_auc']:.2f}です。"
+           if sk.get("ml_lift") is not None and sk.get("ml_auc") is not None else "")
+    st.markdown(
+        f'<div style="background:#2a1f0a;border:1px solid #a16207;border-radius:8px;padding:8px 14px;'
+        f'font-size:12px;color:#fde68a;margin-bottom:8px;line-height:1.6;">⚠️ <b>予測としての精度は確認できていません。</b>'
+        f'同じ考え方のスコアを過去データで再現できる{sk["n_feats"]}シグナルで計算すると、'
+        f'翌日方向の的中率は過去{sk["n"]}営業日で{sk["hit"]:.1f}%で、'
+        f'「毎日{"上昇" if sk["up_rate"] >= 50 else "下落"}」と答えるだけの基準{sk["baseline"]:.1f}%に対して'
+        f'{sk["lift"]:+.1f}pt（AUC {sk["auc"]:.2f}、0.5=当て推量）でした。{_ml}'
+        f'下のゲージは各シグナルの現状をまとめた<b>参考表示</b>として見てください。'
+        f'検証で有効性を確認できている指標は「⚠️ 下落リスク（20日）」タブにあります。</div>',
+        unsafe_allow_html=True)
+    return False
+
+
 def _make_lr_pipeline(C: float = 0.1, class_weight=None):
     """標準化＋ロジスティック回帰。_walk_forward_evalに渡すmake_model用。"""
     from sklearn.linear_model import LogisticRegression
@@ -4757,7 +4825,7 @@ def compute_ensemble_us(target: str = "SP500") -> Dict[str, Any]:
         xlf  = _h("XLF")
         spy  = _h("SPY")
         iwm  = _h("IWM")
-        dxy  = _h("DX=F")
+        dxy  = _h("DX-Y.NYB")
 
         if len(main) < 30:
             return {"ok": False, "reason": "データ不足"}
@@ -5439,7 +5507,7 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
                        "金↑=リスクオフ→株弱気", f"{gold_r1:+.2f}%")
 
         # DXY（ドル指数）
-        dxy_df = _h("DX=F")
+        dxy_df = _h("DX-Y.NYB")
         if not dxy_df.empty and len(dxy_df) >= 6:
             dxy_c  = dxy_df["Close"].dropna()
             dxy_r5 = (dxy_c.iloc[-1] / dxy_c.iloc[-6] - 1) * 100
@@ -5796,11 +5864,17 @@ def render_us_prediction():
 
             st.divider()
 
+            _us_sym = {"SP500": "^GSPC", "NASDAQ": "^NDX", "DOW": "^DJI"}.get(target, "^GSPC")
+            _verified = _render_direction_skill_banner(_evaluate_direction_skill("us", _us_sym))
+            _ref = "" if _verified else "（参考）"
+
             col_t, col_w, col_radar, col_conf = st.columns([1, 1, 1.2, 0.9])
 
             with col_t:
                 color_t = "#1a7f37" if prob_up_t > 55 else ("#d1242f" if prob_up_t < 45 else "#888")
-                st.markdown('<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📅 明日の予測</div>', unsafe_allow_html=True)
+                if not _verified:
+                    color_t = "#888"
+                st.markdown(f'<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📅 明日のシグナル{_ref}</div>', unsafe_allow_html=True)
                 st.image(render_prediction_gauge(prob_up_t), width="stretch")
                 st.markdown(
                     f'<div style="text-align:center;">'
@@ -5812,7 +5886,9 @@ def render_us_prediction():
 
             with col_w:
                 color_w = "#1a7f37" if prob_up_w > 55 else ("#d1242f" if prob_up_w < 45 else "#888")
-                st.markdown('<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📆 今週の予測</div>', unsafe_allow_html=True)
+                if not _verified:
+                    color_w = "#888"
+                st.markdown(f'<div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">📆 今週のシグナル{_ref}</div>', unsafe_allow_html=True)
                 st.image(render_prediction_gauge(prob_up_w), width="stretch")
                 st.markdown(
                     f'<div style="text-align:center;">'
@@ -6528,7 +6604,7 @@ def compute_correlation_matrix(period_days: int = 90) -> Dict[str, Any]:
         "XLK":       "XLK",
         "XLE":       "XLE",
         "GLD":       "GLD",
-        "DXY":       "DX=F",
+        "DXY":       "DX-Y.NYB",
     }
     try:
         end   = datetime.now(timezone.utc)
@@ -8318,7 +8394,7 @@ def _fetch_summary_prices() -> Dict[str, Any]:
         start = end - timedelta(days=30)  # 休場考慮で多めに取得
         for sym, key in [
             ("^GSPC","sp"), ("^N225","nk"), ("^VIX","vix"),
-            ("^TNX","tnx"), ("DX=F","dxy"),
+            ("^TNX","tnx"), ("DX-Y.NYB","dxy"),
             ("YM=F","dow_f"), ("NQ=F","ndx_f"), ("NKD=F","nk_f"),
         ]:
             try:
