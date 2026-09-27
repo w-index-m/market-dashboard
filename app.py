@@ -4503,6 +4503,153 @@ def run_backtest_us(symbol: str = "^GSPC", lookback_years: int = 3) -> Dict[str,
         return {"ok": False, "reason": str(e)[:200]}
 
 
+def _walk_forward_eval(X: np.ndarray, y: np.ndarray, make_model, n_splits: int = 5,
+                       gap: int = 0, n_bins: int = 5,
+                       threshold_mult: Optional[float] = None) -> Dict[str, Any]:
+    """時系列ウォークフォワード検証を行い、正解率だけでなく「単純な基準と比べて本当に
+    役立っているか」を測る指標をまとめて返す。
+
+    - 基準正解率: 学習期間で多かった方のクラスを常に答えるだけの予測（株なら「毎日上昇」）。
+      上昇日が多い相場ではこれだけで55%前後になるため、正解率はこれと比べて初めて意味を持つ
+    - AUC: 閾値に依存しない順位付けの力（0.5=当て推量）
+    - ブライアースコア/スキル: 確率予測の誤差。学習期間の上昇率を常に答える基準に対する改善率
+    - PR-AUC・適合率・再現率: 稀なイベント（大きな下落など）を当てるモデル向け
+    - 較正: 予測確率を5分位に分け、実際の発生率と比べる（「62%」が本当に62%か）
+    make_model: 引数なしで未学習モデルを返す関数（標準化を含むPipelineを想定。学習期間ごとに
+      当てはめ直すことで、全期間で標準化してから分割する場合の未来情報の混入を防ぐ）
+    gap: 学習と検証の間に空ける件数。ラベルが先N日を見る場合はNを指定し、期間の重なりによる
+      情報漏れを防ぐ
+    threshold_mult: 指定すると警報の閾値を「学習期間の発生率×この倍率」にする（稀なイベントでは
+      50%の閾値だとほぼ警報が出ないため）。未指定なら0.5
+    """
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import (accuracy_score, average_precision_score, brier_score_loss,
+                                 precision_score, recall_score, roc_auc_score)
+
+    tscv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
+    oof_p, oof_y, oof_base, oof_pred = [], [], [], []
+    folds = []
+    for k, (tr, te) in enumerate(tscv.split(X)):
+        if len(np.unique(y[tr])) < 2:
+            continue
+        m = make_model()
+        m.fit(X[tr], y[tr])
+        p = m.predict_proba(X[te])[:, 1]
+        _base_rate = float(y[tr].mean())
+        _majority = 1 if _base_rate >= 0.5 else 0
+        _thr = _base_rate * threshold_mult if threshold_mult else 0.5
+        _fold_pred = (p >= _thr).astype(int)
+        _auc = roc_auc_score(y[te], p) if len(np.unique(y[te])) == 2 else None
+        folds.append({
+            "fold": k + 1, "train_n": len(tr), "test_n": len(te),
+            "accuracy": round(accuracy_score(y[te], _fold_pred) * 100, 1),
+            "baseline": round(float((y[te] == _majority).mean()) * 100, 1),
+            "auc": round(_auc, 3) if _auc is not None else None,
+        })
+        oof_p.append(p)
+        oof_y.append(y[te])
+        oof_base.append(np.full(len(te), _base_rate))
+        oof_pred.append(_fold_pred)
+    if not folds:
+        return {"ok": False}
+
+    p, yy, bp = np.concatenate(oof_p), np.concatenate(oof_y), np.concatenate(oof_base)
+    _pred = np.concatenate(oof_pred)
+    _acc = [f["accuracy"] for f in folds]
+    _brier, _brier_base = brier_score_loss(yy, p), brier_score_loss(yy, bp)
+    _two_class = len(np.unique(yy)) == 2
+
+    calib = []
+    try:
+        _bins = pd.qcut(p, q=n_bins, duplicates="drop")
+        for _b, _grp in pd.DataFrame({"p": p, "y": yy}).groupby(_bins, observed=True):
+            calib.append({"予測確率(平均)": round(float(_grp["p"].mean()) * 100, 1),
+                          "実際の発生率": round(float(_grp["y"].mean()) * 100, 1), "件数": len(_grp)})
+    except ValueError:
+        pass
+
+    return {
+        "ok": True,
+        "accuracy": round(float(np.mean(_acc)), 1),
+        "accuracy_std": round(float(np.std(_acc)), 1),
+        "baseline": round(float(np.mean([f["baseline"] for f in folds])), 1),
+        "lift": round(float(np.mean([f["accuracy"] - f["baseline"] for f in folds])), 1),
+        "auc": round(roc_auc_score(yy, p), 3) if _two_class else None,
+        "brier": round(_brier, 4), "brier_base": round(_brier_base, 4),
+        "brier_skill": round((1 - _brier / _brier_base) * 100, 1) if _brier_base > 0 else None,
+        "prevalence": round(float(yy.mean()) * 100, 1),
+        "pr_auc": round(average_precision_score(yy, p), 3) if _two_class else None,
+        "precision": round(precision_score(yy, _pred, zero_division=0) * 100, 1),
+        "recall": round(recall_score(yy, _pred, zero_division=0) * 100, 1),
+        "alert_rate": round(float(_pred.mean()) * 100, 1),
+        "calibration": calib,
+        "folds": folds,
+        "oof_p": p, "oof_y": yy,
+    }
+
+
+def _make_lr_pipeline(C: float = 0.1, class_weight=None):
+    """標準化＋ロジスティック回帰。_walk_forward_evalに渡すmake_model用。"""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    return make_pipeline(StandardScaler(),
+                         LogisticRegression(C=C, max_iter=1000, random_state=42, class_weight=class_weight))
+
+
+def _render_wf_eval_metrics(ev: Dict[str, Any], rare_event: bool = False) -> None:
+    """_walk_forward_evalの結果を、基準との比較が一目で分かる形で表示する。
+    rare_event=Trueでは正解率の代わりに適合率・再現率・PR-AUCを主役にする。"""
+    if not ev or not ev.get("ok"):
+        return
+
+    def _card(col, title, value, sub, color):
+        col.markdown(
+            f'<div style="text-align:center;padding:10px;background:#1e293b;border:1px solid #334155;'
+            f'border-radius:8px;"><div style="font-size:11px;color:#94a3b8;">{title}</div>'
+            f'<div style="font-size:22px;font-weight:900;color:{color};">{value}</div>'
+            f'<div style="font-size:11px;color:#64748b;">{sub}</div></div>',
+            unsafe_allow_html=True)
+
+    def _good(v, hi, lo):
+        return "#4ade80" if v is not None and v >= hi else "#f87171" if v is not None and v <= lo else "#e2e8f0"
+
+    c1, c2, c3, c4 = st.columns(4)
+    if rare_event:
+        _pa, _prev = ev.get("pr_auc"), ev.get("prevalence")
+        _card(c1, "PR-AUC", f"{_pa:.3f}" if _pa is not None else "—",
+              f"基準（発生率）{_prev / 100:.3f}", _good(_pa, (_prev or 0) / 100 * 1.5, (_prev or 0) / 100))
+        _card(c2, "適合率", f"{ev['precision']:.1f}%", f"警報時に実際に起きた割合（基準{_prev:.1f}%）",
+              _good(ev["precision"], (_prev or 0) * 1.5, _prev or 0))
+        _card(c3, "再現率", f"{ev['recall']:.1f}%", f"実際の発生を事前に警報できた割合（警報頻度{ev['alert_rate']:.0f}%）",
+              "#e2e8f0")
+    else:
+        _card(c1, "正解率", f"{ev['accuracy']:.1f}%", f"±{ev['accuracy_std']:.1f}%", "#e2e8f0")
+        _card(c2, "基準との差", f"{ev['lift']:+.1f}pt", f"「常に多い方」を答えるだけで{ev['baseline']:.1f}%",
+              _good(ev["lift"], 2.0, 0.0))
+        _card(c3, "確率の精度（改善率）",
+              f"{ev['brier_skill']:+.1f}%" if ev.get("brier_skill") is not None else "—",
+              "基準の確率予測に対するブライアースコア改善", _good(ev.get("brier_skill"), 1.0, 0.0))
+    _card(c4, "AUC", f"{ev['auc']:.3f}" if ev.get("auc") is not None else "—", "0.5=当て推量",
+          _good(ev.get("auc"), 0.55, 0.5))
+
+    _lift_ok = (ev.get("pr_auc") or 0) > (ev.get("prevalence") or 0) / 100 * 1.2 if rare_event \
+        else ev["lift"] > 1.0 and (ev.get("auc") or 0) > 0.52
+    st.caption(
+        ("✅ 検証期間で基準を上回っており、シグナルに一定の意味がある可能性があります。"
+         if _lift_ok else
+         "⚠️ 検証期間で単純な基準をほとんど上回っていません。予測値は参考程度に見てください。")
+        + "（全て学習に使っていない検証期間での成績。緑=基準より良い、赤=基準以下）"
+    )
+    with st.expander("📋 確率の較正と検証期間ごとの成績", expanded=False):
+        if ev.get("calibration"):
+            st.caption("予測確率を5つに分けたときの、実際の発生率。両者が近いほど「◯%」という表示が信頼できます。")
+            st.dataframe(pd.DataFrame(ev["calibration"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(ev["folds"]).rename(columns={
+            "fold": "期間", "train_n": "学習件数", "test_n": "検証件数", "accuracy": "正解率(%)",
+            "baseline": "基準正解率(%)", "auc": "AUC"}), use_container_width=True, hide_index=True)
+
+
 def optimize_weights_ml_us(bt_result: Dict) -> Dict[str, Any]:
     """米国株ML重み最適化（Walk-forward検証）"""
     if not bt_result.get("ok") or not SKLEARN_AVAILABLE:
@@ -4510,26 +4657,15 @@ def optimize_weights_ml_us(bt_result: Dict) -> Dict[str, Any]:
     try:
         from sklearn.linear_model import LogisticRegression
         from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import TimeSeriesSplit
-        from sklearn.metrics import accuracy_score
 
         X, y = bt_result["X"], bt_result["y"]
         feat_names = bt_result["feat_names"]
         if len(X) < 100:
             return {"ok": False, "reason": "サンプル不足"}
 
+        ev = _walk_forward_eval(X, y, lambda: _make_lr_pipeline(C=0.1))
         scaler   = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        tscv     = TimeSeriesSplit(n_splits=5)
-        fold_scores, fold_details = [], []
-
-        for fold, (tr, te) in enumerate(tscv.split(X_scaled)):
-            lr = LogisticRegression(C=0.1, max_iter=500, random_state=42)
-            lr.fit(X_scaled[tr], y[tr])
-            sc = accuracy_score(y[te], lr.predict(X_scaled[te]))
-            fold_scores.append(sc)
-            fold_details.append({"fold": fold+1, "train_n": len(tr),
-                                  "test_n": len(te), "accuracy": round(sc*100, 1)})
 
         final_lr = LogisticRegression(C=0.1, max_iter=500, random_state=42)
         final_lr.fit(X_scaled, y)
@@ -4573,10 +4709,11 @@ def optimize_weights_ml_us(bt_result: Dict) -> Dict[str, Any]:
 
         return {
             "ok":             True,
-            "cv_mean":        round(float(np.mean(fold_scores)) * 100, 1),
-            "cv_std":         round(float(np.std(fold_scores))  * 100, 1),
+            "cv_mean":        ev.get("accuracy"),
+            "cv_std":         ev.get("accuracy_std"),
+            "eval":           ev,
             "importance_df":  importance_df,
-            "fold_details":   fold_details,
+            "fold_details":   ev.get("folds", []),
             "optimized_prob": optimized_prob,
             "has_xgb":        XGB_AVAILABLE and xgb_coefs is not None,
             "label_map":      label_map,
@@ -4952,14 +5089,8 @@ def render_us_quant_analysis(target: str = "SP500"):
                 else:
                     ml = optimize_weights_ml_us(bt2)
             if ml.get("ok"):
-                cv_color = "#1a7f37" if ml["cv_mean"] > 54 else ("#d1242f" if ml["cv_mean"] < 50 else "#888")
-                c1, c2, c3 = st.columns(3)
-                c1.markdown(
-                    f'<div style="text-align:center;padding:12px;background:#f8f9fa;border-radius:8px;">'
-                    f'<div style="font-size:11px;color:#666;">CV Accuracy</div>'
-                    f'<div style="font-size:26px;font-weight:900;color:{cv_color};">{ml["cv_mean"]}%</div>'
-                    f'<div style="font-size:11px;color:#999;">±{ml["cv_std"]}%</div></div>',
-                    unsafe_allow_html=True)
+                _render_wf_eval_metrics(ml.get("eval"))
+                c2, c3 = st.columns(2)
                 c2.markdown(
                     f'<div style="text-align:center;padding:12px;background:#f8f9fa;border-radius:8px;">'
                     f'<div style="font-size:11px;color:#666;">ML Optimized</div>'
@@ -5450,6 +5581,173 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"compute_us_prediction error: {e}", exc_info=True)
         return {"ok": False, "reason": f"計算エラー: {str(e)[:200]}"}
+
+
+# ── 下落リスクモデル（今後20営業日でS&P500が5%以上下落するか） ─────────────
+_DD_HORIZON = 20       # 何営業日先までを見るか
+_DD_THRESHOLD = -0.05  # その間の最安値が今日の終値から何%下がったら「下落」とみなすか
+_DD_FEATURE_LABELS = {
+    "spy_ret20": "S&P500 20日リターン", "spy_ret60": "S&P500 60日リターン",
+    "spy_dist200": "S&P500 200日線乖離", "spy_vol20": "S&P500 20日ボラティリティ",
+    "vix": "VIX水準", "vix_term": "VIX/VIX3M（1超=短期不安）",
+    "curve": "イールドカーブ(10y-3m)", "curve_ch20": "カーブ 20日変化",
+    "tnx_ch20": "米10年債 20日変化", "credit_20": "HY債/IG債 20日", "credit_60": "HY債/IG債 60日",
+    "sb_corr60": "株と債券の60日相関", "usdjpy_ch20": "ドル円 20日変化",
+    "usjp_spread_ch60": "日米金利差 60日変化",
+}
+
+
+@st.cache_data(ttl=TTL_DAILY * 6, show_spinner=False)
+def compute_drawdown_risk_model() -> Dict[str, Any]:
+    """「今後20営業日のうちにS&P500が今日の終値から5%以上下落するか」を当てるモデル。
+    翌日の上げ下げと違い、金利・信用・相関・為替といったマクロ寄りの指標が効きやすい
+    時間軸を狙う。特徴量は全て日次・無料・事後改定のない市場データのみ（月次の経済指標は
+    発表日のずれと改定により未来情報が混入しやすいため使わない）。水準ではなく変化幅・
+    比率を中心にして、相場環境による水準の違いに引きずられにくくしている。
+    評価はウォークフォワード（学習と検証の間に20日の空白を置き、ラベル期間の重なりに
+    よる情報漏れを防ぐ）で、稀なイベントなので正解率ではなく適合率・再現率・PR-AUCを見る。
+    """
+    if not SKLEARN_AVAILABLE:
+        return {"ok": False, "reason": "scikit-learnが未インストールです。"}
+    try:
+        _tickers = ["SPY", "^VIX", "^VIX3M", "^TNX", "^IRX", "HYG", "LQD", "TLT", "JPY=X"]
+        _raw = yf.download(_tickers, period="15y", interval="1d", progress=False,
+                           auto_adjust=True, timeout=60)["Close"]
+        if "SPY" not in _raw or _raw["SPY"].dropna().empty:
+            return {"ok": False, "reason": "S&P500のデータを取得できませんでした。"}
+        _idx = _raw["SPY"].dropna().index
+        px = _raw.reindex(_idx).ffill(limit=5)
+        spy = px["SPY"]
+
+        f = pd.DataFrame(index=_idx)
+        _r = spy.pct_change()
+        f["spy_ret20"] = spy.pct_change(20)
+        f["spy_ret60"] = spy.pct_change(60)
+        f["spy_dist200"] = spy / spy.rolling(200).mean() - 1
+        f["spy_vol20"] = _r.rolling(20).std() * np.sqrt(252)
+        f["vix"] = px["^VIX"]
+        f["vix_term"] = px["^VIX"] / px["^VIX3M"]
+        f["curve"] = px["^TNX"] - px["^IRX"]
+        f["curve_ch20"] = f["curve"].diff(20)
+        f["tnx_ch20"] = px["^TNX"].diff(20)
+        _cr = px["HYG"] / px["LQD"]
+        f["credit_20"] = _cr.pct_change(20)
+        f["credit_60"] = _cr.pct_change(60)
+        f["sb_corr60"] = _r.rolling(60).corr(px["TLT"].pct_change())
+        f["usdjpy_ch20"] = px["JPY=X"].pct_change(20)
+        _jgb = _fetch_jgb10y_history(period="max")
+        if not _jgb.empty:
+            _jy = _jgb["yield"].copy()
+            if getattr(_jy.index, "tz", None) is not None:
+                _jy.index = _jy.index.tz_localize(None)
+            _spy_idx = _idx.tz_localize(None) if getattr(_idx, "tz", None) is not None else _idx
+            _jy = _jy[~_jy.index.duplicated()].reindex(_spy_idx, method="ffill", limit=5)
+            _jy.index = _idx
+            f["usjp_spread_ch60"] = (px["^TNX"] - _jy).diff(60)
+
+        # ラベル: 翌営業日〜20営業日後の終値の最安値が、今日の終値から5%以上下なら1
+        _fwd_min = pd.concat([spy.shift(-k) for k in range(1, _DD_HORIZON + 1)], axis=1).min(axis=1)
+        _label = (_fwd_min / spy - 1 <= _DD_THRESHOLD).astype(float)
+        _label[_fwd_min.isna()] = np.nan  # 直近20日分はまだ答えが出ていない
+
+        _cols = [c for c in _DD_FEATURE_LABELS if c in f.columns and f[c].notna().sum() > 1000]
+        _data = f[_cols].replace([np.inf, -np.inf], np.nan)
+        _latest_row = _data.dropna().iloc[-1:] if not _data.dropna().empty else None
+        _train = _data.join(_label.rename("y")).dropna()
+        if len(_train) < 750 or _latest_row is None:
+            return {"ok": False, "reason": f"学習データ不足（{len(_train)}件）"}
+        X, y = _train[_cols].values, _train["y"].astype(int).values
+
+        ev = _walk_forward_eval(X, y, lambda: _make_lr_pipeline(C=0.1), n_splits=5,
+                                gap=_DD_HORIZON, threshold_mult=2.0)
+        final = _make_lr_pipeline(C=0.1)
+        final.fit(X, y)
+        _p_now = float(final.predict_proba(_latest_row[_cols].values)[0, 1])
+        _base = float(y.mean())
+
+        # 今日の確率を押し上げ/押し下げている要因（標準化後の値×係数）
+        _scaler, _lr = final.named_steps["standardscaler"], final.named_steps["logisticregression"]
+        _z = _scaler.transform(_latest_row[_cols].values)[0]
+        _contrib = sorted(
+            ({"要因": _DD_FEATURE_LABELS[c], "今日の値": round(float(_latest_row[c].iloc[0]), 4),
+              "寄与": round(float(_z[i] * _lr.coef_[0][i]), 3)} for i, c in enumerate(_cols)),
+            key=lambda d: abs(d["寄与"]), reverse=True,
+        )
+
+        _oof_n = len(ev.get("oof_p", [])) if ev.get("ok") else 0
+        _hist = pd.DataFrame({"date": _train.index[-_oof_n:], "prob": ev["oof_p"], "event": ev["oof_y"]}) \
+            if _oof_n else pd.DataFrame()
+        return {
+            "ok": True, "prob_now": round(_p_now * 100, 1), "base_rate": round(_base * 100, 1),
+            "ratio": round(_p_now / _base, 2) if _base > 0 else None,
+            "as_of": str(_latest_row.index[-1].date()), "n_train": len(y),
+            "train_start": str(_train.index[0].date()), "features": _cols,
+            "contrib": _contrib, "eval": ev, "history": _hist,
+        }
+    except Exception as e:
+        logger.error(f"compute_drawdown_risk_model error: {e}", exc_info=True)
+        return {"ok": False, "reason": str(e)[:200]}
+
+
+def render_drawdown_risk_model():
+    st.markdown("#### ⚠️ 今後20営業日の下落リスク（S&P500が5%以上下落する確率）")
+    st.caption(
+        "翌日の上げ下げではなく「近いうちに大きく下がる危険が高まっているか」を見るモデル。"
+        "金利・信用・株と債券の相関・為替などの日次の市場データのみを使い、"
+        "学習に使っていない期間での成績を正直に表示します。"
+    )
+    with st.spinner("下落リスクモデルを計算中（初回は15年分のデータ取得のため時間がかかります）..."):
+        dd = compute_drawdown_risk_model()
+    if not dd.get("ok"):
+        st.error(f"計算できませんでした: {dd.get('reason')}")
+        return
+
+    _ratio = dd.get("ratio") or 0
+    _color = "#f87171" if _ratio >= 2 else "#fbbf24" if _ratio >= 1.3 else "#4ade80"
+    _label = ("🔴 平常時の2倍以上" if _ratio >= 2 else "🟡 平常時よりやや高い" if _ratio >= 1.3
+              else "🟢 平常時並み以下")
+    st.markdown(
+        f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px 18px;">'
+        f'<div style="font-size:12px;color:#94a3b8;">{dd["as_of"]}時点のモデル推定</div>'
+        f'<div style="font-size:30px;font-weight:900;color:{_color};">{dd["prob_now"]:.1f}%'
+        f'<span style="font-size:14px;color:#94a3b8;font-weight:400;"> ／ 平常時の発生率 {dd["base_rate"]:.1f}%'
+        f'（{_ratio:.1f}倍）</span></div>'
+        f'<div style="font-size:14px;font-weight:700;color:{_color};">{_label}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("**📏 このモデルの実力（学習に使っていない期間での成績）**")
+    _render_wf_eval_metrics(dd["eval"], rare_event=True)
+    st.caption("警報は「予測確率が学習期間の発生率の2倍以上」のときに出す設定で評価しています。")
+
+    _h = dd.get("history")
+    if _h is not None and not _h.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=_h["date"], y=_h["prob"] * 100, mode="lines", name="予測確率",
+                                 line=dict(color="#60a5fa", width=1)))
+        _ev = _h[_h["event"] == 1]
+        fig.add_trace(go.Scatter(x=_ev["date"], y=[0] * len(_ev), mode="markers", name="実際に5%以上下落した起点",
+                                 marker=dict(color="#f87171", size=4, symbol="line-ns-open")))
+        fig.add_hline(y=dd["base_rate"], line_dash="dot", line_color="#94a3b8",
+                      annotation_text="平常時の発生率", annotation_font_color="#94a3b8")
+        fig.update_layout(
+            height=300, margin=dict(l=10, r=10, t=30, b=10),
+            title=dict(text="検証期間の予測確率と実際の下落（学習に使っていない期間のみ）",
+                       font=dict(color="#e2e8f0", size=13)),
+            paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"),
+            yaxis=dict(title=dict(text="%", font=dict(color="#e2e8f0")), tickfont=dict(color="#e2e8f0"),
+                       gridcolor="#334155"),
+            xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#334155"),
+            legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=-0.2),
+            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("🔍 今日の確率を押し上げ／押し下げている要因", expanded=False):
+        st.caption("寄与がプラスの要因ほど下落リスクを押し上げています（標準化した今日の値×モデルの係数）。")
+        st.dataframe(pd.DataFrame(dd["contrib"]), use_container_width=True, hide_index=True)
+        st.caption(f"学習期間: {dd['train_start']}〜（{dd['n_train']:,}営業日）。"
+                   "過去の関係が今後も続くとは限らず、投資判断の推奨ではありません。")
 
 
 def render_us_prediction():
@@ -16183,7 +16481,6 @@ def render_advanced_analytics():
 try:
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import TimeSeriesSplit
     from sklearn.metrics import accuracy_score
     SKLEARN_AVAILABLE = True
 except ImportError:
@@ -16464,30 +16761,11 @@ def optimize_weights_ml(bt_result: Dict) -> Dict[str, Any]:
         if len(X) < 100:
             return {"ok": False, "reason": "サンプル不足（100件以上必要）"}
 
+        # ── Walk-forward検証（学習期間ごとに標準化し直し、基準との比較まで行う）──
+        ev = _walk_forward_eval(X, y, lambda: _make_lr_pipeline(C=0.1))
+
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-
-        # ── Walk-forward検証（時系列対応）───────────────
-        tscv = TimeSeriesSplit(n_splits=5)
-        fold_scores = []
-        fold_details = []
-
-        for fold, (train_idx, test_idx) in enumerate(tscv.split(X_scaled)):
-            X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
-            y_train, y_test = y[train_idx],        y[test_idx]
-
-            # ロジスティック回帰
-            lr = LogisticRegression(C=0.1, max_iter=500, random_state=42)
-            lr.fit(X_train, y_train)
-            lr_score = accuracy_score(y_test, lr.predict(X_test))
-
-            fold_scores.append(lr_score)
-            fold_details.append({
-                "fold":    fold + 1,
-                "train_n": len(train_idx),
-                "test_n":  len(test_idx),
-                "accuracy": round(lr_score * 100, 1),
-            })
 
         # ── 全データで最終モデル学習 ─────────────────────
         final_lr = LogisticRegression(C=0.1, max_iter=500, random_state=42)
@@ -16530,15 +16808,13 @@ def optimize_weights_ml(bt_result: Dict) -> Dict[str, Any]:
         if latest_x is not None:
             optimized_prob = float(final_lr.predict_proba(latest_x)[0][1] * 100)
 
-        cv_mean  = float(np.mean(fold_scores) * 100)
-        cv_std   = float(np.std(fold_scores)  * 100)
-
         return {
             "ok":              True,
-            "cv_mean":         round(cv_mean, 1),
-            "cv_std":          round(cv_std,  1),
+            "cv_mean":         ev.get("accuracy"),
+            "cv_std":          ev.get("accuracy_std"),
+            "eval":            ev,
             "importance_df":   importance_df,
-            "fold_details":    fold_details,
+            "fold_details":    ev.get("folds", []),
             "optimized_prob":  optimized_prob,
             "model":           final_lr,
             "scaler":          scaler,
@@ -16886,15 +17162,9 @@ def render_ml_optimization_section():
         st.error(f"ML最適化失敗: {ml.get('reason')}")
         return
 
-    # CV精度
-    cv_color = "#1a7f37" if ml["cv_mean"] > 54 else ("#d1242f" if ml["cv_mean"] < 50 else "#888")
-    col1, col2, col3 = st.columns(3)
-    col1.markdown(
-        f'<div style="text-align:center;padding:12px;background:#f8f9fa;border-radius:8px;">'
-        f'<div style="font-size:11px;color:#666;">CV Accuracy</div>'
-        f'<div style="font-size:26px;font-weight:900;color:{cv_color};">{ml["cv_mean"]}%</div>'
-        f'<div style="font-size:11px;color:#999;">±{ml["cv_std"]}%</div></div>',
-        unsafe_allow_html=True)
+    # 検証成績（単純な基準との比較込み）
+    _render_wf_eval_metrics(ml.get("eval"))
+    col2, col3 = st.columns(2)
     col2.markdown(
         f'<div style="text-align:center;padding:12px;background:#f8f9fa;border-radius:8px;">'
         f'<div style="font-size:11px;color:#666;">ML Optimized Pred</div>'
@@ -16934,15 +17204,11 @@ def render_ml_optimization_section():
         plt.tight_layout()
         st.pyplot(fig, clear_figure=True)
 
-    # Walk-forward詳細
-    with st.expander("📋 Walk-forward Detail", expanded=False):
-        folds = ml.get("fold_details", [])
-        if folds:
-            st.dataframe(pd.DataFrame(folds), width="stretch", hide_index=True)
-        st.caption(
-            "Walk-forward検証: 時系列を5分割し、過去データで学習→未来データで検証を繰り返す。"
-            "CV平均>53%であれば統計的に有意なシグナルが存在すると考えられます。"
-        )
+    st.caption(
+        "Walk-forward検証: 時系列を5分割し、過去データで学習→未来データで検証を繰り返す。"
+        "上昇日が多い相場では「毎日上昇」と答えるだけで正解率が50%を超えるため、正解率そのものでは"
+        "なく「基準との差」とAUCで判断してください。"
+    )
 
 
 # =====================================================
@@ -36864,11 +37130,14 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ===================================================
     # ★ 方向性予測スコア（日本株・米国株）
     # ===================================================
-    tab_jp_pred, tab_us_pred = st.tabs(["🇯🇵 日本株（日経平均）", "🇺🇸 米国株（S&P500/NASDAQ/ダウ）"])
+    tab_jp_pred, tab_us_pred, tab_dd_pred = st.tabs(
+        ["🇯🇵 日本株（日経平均）", "🇺🇸 米国株（S&P500/NASDAQ/ダウ）", "⚠️ 下落リスク（20日）"])
     with tab_jp_pred:
         render_nikkei_prediction()
     with tab_us_pred:
         render_us_prediction()
+    with tab_dd_pred:
+        render_drawdown_risk_model()
     st.divider()
 
     # ★ マーケットリサーチAI
