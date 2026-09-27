@@ -1,0 +1,32 @@
+name: Precompute S&P600 tenbagger candidates
+
+on:
+  schedule:
+    - cron: "0 17 * * *"   # 17:00 UTC = 02:00 JST（翌日）。_fetch_tenbagger_candidates()の24hキャッシュに合わせ1日1回
+  workflow_dispatch: {}
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests pandas openpyxl lxml yfinance
+
+      - name: Run precompute script
+        run: python scripts/precompute_sp600_candidates.py
+
+      - name: Commit updated candidates file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sp600_candidates.json
+          git diff --cached --quiet && echo "No changes" || git commit -m "Update S&P600 tenbagger candidates data"
+          git push origin HEAD:main

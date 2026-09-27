@@ -27462,22 +27462,24 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     if not tickers:
         _reason = "対象銘柄を取得できませんでした。"
         if mode_key == "growth":
-            # 長期育成(テンバガー)モードは①S&P600銘柄一覧の取得(SPSM/IJR ETF公式データ→
-            # Wikipediaスクレイピングの順にフォールバック)→②その約600銘柄に.info()を
-            # 個別に叩く、の2段階。①が空なら3ソース全滅、①は取れているのに0件なら
-            # ②のYahoo側レート制限、と切り分けて表示する（原因の当たりをつけやすくする）。
-            _sp600 = fetch_sp600_constituents()
-            if not _sp600:
-                _reason = ("S&P600銘柄一覧の取得に失敗しました（SPSM/IJR ETF公式データ、"
-                           "Wikipediaいずれのソースからも取得できませんでした）。銘柄一覧の"
-                           "取得自体ができていません。")
+            # 長期育成(テンバガー)モードは、Streamlit Cloud上でYahoo Financeへの大量
+            # アクセスが失敗する不具合を避けるため、GitHub Actionsが毎日事前計算した
+            # data/sp600_candidates.jsonを主に使う（scripts/precompute_sp600_candidates.py）。
+            # ここが空の場合の原因を、①ファイル自体が空/未生成 ②時価総額条件で0件、の
+            # どちらかに切り分けて表示する。
+            _precomputed_diag = _load_precomputed_sp600_candidates()
+            if not _precomputed_diag:
+                _reason = ("事前計算データ（data/sp600_candidates.json）がまだ空か未生成です。"
+                           "GitHub Actionsの「Precompute S&P600 tenbagger candidates」ワークフロー"
+                           "（毎日AM2:00 JST自動実行、Actionsタブから手動実行も可能）の完了をお待ち"
+                           "ください。")
             else:
-                _reason = (f"S&P600銘柄一覧は{len(_sp600)}件取得できましたが、財務データ取得"
-                           "（時価総額5〜50億ドル等の条件判定）が0件でした。GitHub Actions等の"
-                           "別環境からは同じ処理が問題なく成功しているため、Streamlit Cloud側の"
-                           "IPアドレスがYahoo Financeから制限されている可能性があります。"
-                           "「Manage app」のログ画面で「tenbagger内訳」を検索すると、通信エラー"
-                           "件数など詳しい内訳が確認できます。")
+                _n_precomputed = len(_precomputed_diag.get("candidates") or {})
+                _reason = (f"事前計算データ（生成: {_precomputed_diag.get('generated_at')}、"
+                           f"母集団{_precomputed_diag.get('universe_size')}銘柄中{_n_precomputed}銘柄の"
+                           "財務データを保持）はありますが、時価総額5〜50億ドルの条件を満たす銘柄が"
+                           "0件でした。S&P600全体の時価総額水準が変わっている可能性があるため、"
+                           "_TENBAGGER_MCAP_MIN/MAXの見直しが必要かもしれません。")
         elif mode_key == "jp_tenbagger":
             # 同様に①JPX銘柄一覧→②財務データの2段階で切り分ける。
             _jp_universe = fetch_jp_smallcap_universe()
@@ -27674,6 +27676,30 @@ _TENBAGGER_MCAP_MAX = 5_000_000_000  # $50億（当初$30億だったが、S&P60
                                       # のため候補が枯渇し、上限を引き上げた）
 
 
+def _load_precomputed_sp600_candidates() -> dict | None:
+    """scripts/precompute_sp600_candidates.py がGitHub Actions上で毎日生成する
+    data/sp600_candidates.jsonを読む。Streamlit Cloudの共有IPからYahoo Finance
+    (yfinance)への大量アクセスが失敗する不具合（GitHub Actionsランナーからは
+    同じアクセスが成功することを確認済み）を、Yahooアクセスが正常なGitHub Actions
+    側で事前計算しリポジトリにコミットしておくことで回避する。ファイルが存在しない
+    ／空／壊れている場合はNoneを返し、呼び出し元はライブ取得にフォールバックする。
+    時価総額フィルタはここでは適用せず生データのまま返す（フィルタ条件を後で
+    変えてもファイルの再生成なしに反映できるようにするため）。
+    """
+    import json as _json_sp600
+    path = os.path.join(os.path.dirname(__file__), "data", "sp600_candidates.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = _json_sp600.load(f)
+        _candidates = data.get("candidates") or {}
+        if not _candidates:
+            return None
+        return data
+    except Exception as e:
+        logger.warning(f"[trading] sp600_candidates.json読込失敗: {e}")
+        return None
+
+
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     """🌱長期育成モード専用の候補選定（テンバガー狙いの小型株スクリーニング）。
@@ -27689,114 +27715,93 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
              price/ret_3m/ret_6m/ret_1yに加えmarket_cap/gross_margin/insider_pct/
              debt_ebitda/roeを含む（取得できなかった項目はNone）。1日キャッシュ。
     """
-    import concurrent.futures as _cf_tb
+    # Streamlit Cloudの共有IPからYahoo Financeへの大量アクセスが失敗する不具合
+    # （GitHub Actionsランナーからは同じアクセスが成功することを確認済み）を回避する
+    # ため、まずGitHub Actions側で毎日事前計算されたdata/sp600_candidates.jsonを
+    # 読みに行く。存在する場合はyfinanceに一切アクセスせずこのファイルだけで完結する。
+    _precomputed = _load_precomputed_sp600_candidates()
+    if _precomputed:
+        _rows = []
+        for _tk, _d in _precomputed["candidates"].items():
+            _mcap = _d.get("market_cap")
+            if not _mcap or not (_TENBAGGER_MCAP_MIN <= _mcap <= _TENBAGGER_MCAP_MAX):
+                continue  # 時価総額レンジ外は一次除外（テンバガー狙いの定義そのもの）
+            if not _d.get("price"):
+                continue
+            _rows.append({"ticker": _tk, **_d})
+        _universe_size = _precomputed.get("universe_size") or 0
+        logger.info(
+            f"[trading] tenbagger候補: 事前計算データ（生成: {_precomputed.get('generated_at')}、"
+            f"母集団{_universe_size}銘柄）から時価総額条件後{len(_rows)}件"
+        )
+    else:
+        # 事前計算ファイルが無い/壊れている場合のみ、その場でyfinanceにライブアクセスする
+        # （Streamlit Cloud上では既知の理由で失敗しやすいフォールバック経路）。
+        import concurrent.futures as _cf_tb
 
-    _universe = fetch_sp600_constituents()
-    if not _universe:
-        logger.warning("[trading] tenbagger候補: S&P600構成銘柄の取得に失敗したため候補0件")
-        return {}
-    _tickers = list(_universe.keys())
+        _universe = fetch_sp600_constituents()
+        if not _universe:
+            logger.warning("[trading] tenbagger候補: S&P600構成銘柄の取得に失敗したため候補0件")
+            return {}
+        _tickers = list(_universe.keys())
+        _universe_size = len(_tickers)
 
-    import threading
+        def _one(ticker):
+            try:
+                info = yf.Ticker(ticker).info or {}
+            except Exception:
+                return None
+            if not info:
+                return None
+            _mcap = info.get("marketCap")
+            if not _mcap or not (_TENBAGGER_MCAP_MIN <= _mcap <= _TENBAGGER_MCAP_MAX):
+                return None
+            _price = info.get("currentPrice") or info.get("regularMarketPrice")
+            if not _price or _price <= 0:
+                return None
+            _gm      = info.get("grossMargins")
+            _insider = info.get("heldPercentInsiders")
+            _roe     = info.get("returnOnEquity")
+            _debt    = info.get("totalDebt")
+            _ebitda  = info.get("ebitda")
+            _debt_ebitda = (_debt / _ebitda) if (_debt is not None and _ebitda and _ebitda > 0) else None
+            return {
+                "ticker": ticker,
+                "name": _universe.get(ticker) if _universe.get(ticker) not in (None, ticker)
+                else (info.get("longName") or info.get("shortName") or ticker),
+                "price": float(_price),
+                "market_cap":   _mcap,
+                "gross_margin": round(_gm * 100, 1) if _gm is not None else None,
+                "insider_pct":  round(_insider * 100, 1) if _insider is not None else None,
+                "roe":          round(_roe * 100, 1) if _roe is not None else None,
+                "debt_ebitda":  round(_debt_ebitda, 2) if _debt_ebitda is not None else None,
+            }
 
-    # GitHub Actionsランナー（このsandboxと違い制限のない通常のネット環境）から同じ
-    # 606銘柄に.info()を叩いたところ40件中40件が一発成功した一方、Streamlit Cloud上
-    # では候補が0件になる不具合が解消しないため、「遅い/ハングしている」のではなく
-    # 「Streamlit Cloud側のIPからのアクセスだけがすぐ失敗している」疑いが強い。
-    # 実際の失敗理由（通信エラーの内容・空データ・時価総額範囲外等）をログに残し、
-    # Streamlit Cloudの「Manage app」ログ画面で原因を特定できるようにする。
-    _stats_lock = threading.Lock()
-    _stats = {"total": 0, "http_error": 0, "empty_info": 0, "mcap_out_of_range": 0, "no_price": 0, "passed": 0}
-    _sample_errors = []  # 原因の異なりそうな例外メッセージを数件だけ保持（ログ肥大化を防ぐ）
-
-    def _one(ticker):
-        with _stats_lock:
-            _stats["total"] += 1
+        # yfinance側のHTTPリクエストにタイムアウトが設定されていないため、606銘柄のうち
+        # 1銘柄でも接続がハングすると、executor.map()は投入順に結果を返す仕様上そこで
+        # 待機し続けてしまい、処理全体が止まって見える不具合が起きた。submit()+
+        # as_completed(timeout=...)に変更し、全体で90秒経っても終わらない場合は
+        # そこまでに集まった結果だけで打ち切る。
+        _rows = []
+        _ex = _cf_tb.ThreadPoolExecutor(max_workers=6)
+        _futs = {_ex.submit(_one, t): t for t in _tickers}
         try:
-            info = yf.Ticker(ticker).info or {}
-        except Exception as e:
-            with _stats_lock:
-                _stats["http_error"] += 1
-                if len(_sample_errors) < 5:
-                    _sample_errors.append(f"{ticker}: {type(e).__name__}: {e}")
-            return None
-        if not info:
-            with _stats_lock:
-                _stats["empty_info"] += 1
-            return None
-        _mcap = info.get("marketCap")
-        if not _mcap or not (_TENBAGGER_MCAP_MIN <= _mcap <= _TENBAGGER_MCAP_MAX):
-            with _stats_lock:
-                _stats["mcap_out_of_range"] += 1
-            return None  # 時価総額レンジ外は一次除外（テンバガー狙いの定義そのもの）
-        _price = info.get("currentPrice") or info.get("regularMarketPrice")
-        if not _price or _price <= 0:
-            with _stats_lock:
-                _stats["no_price"] += 1
-            return None
-        _gm      = info.get("grossMargins")
-        _insider = info.get("heldPercentInsiders")
-        _roe     = info.get("returnOnEquity")
-        _debt    = info.get("totalDebt")
-        _ebitda  = info.get("ebitda")
-        _debt_ebitda = (_debt / _ebitda) if (_debt is not None and _ebitda and _ebitda > 0) else None
-        with _stats_lock:
-            _stats["passed"] += 1
-        return {
-            "ticker": ticker,
-            # _universeの値がticker自身と同じ場合（GitHub mirrorソースなど企業名を
-            # 持たないソースで解決した場合）はyfinance側のlongName/shortNameで補完する
-            "name": _universe.get(ticker) if _universe.get(ticker) not in (None, ticker)
-            else (info.get("longName") or info.get("shortName") or ticker),
-            "price": float(_price),
-            "market_cap":   _mcap,
-            "gross_margin": round(_gm * 100, 1) if _gm is not None else None,
-            "insider_pct":  round(_insider * 100, 1) if _insider is not None else None,
-            "roe":          round(_roe * 100, 1) if _roe is not None else None,
-            "debt_ebitda":  round(_debt_ebitda, 2) if _debt_ebitda is not None else None,
-        }
+            for _fut in _cf_tb.as_completed(_futs, timeout=90):
+                _res = _fut.result()
+                if _res:
+                    _rows.append(_res)
+        except _cf_tb.TimeoutError:
+            logger.warning(f"[trading] tenbagger候補: 90秒でタイムアウト、{len(_rows)}件で打ち切り")
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)
 
-    _rows = []
-    # S&P600は約600銘柄あり、yf.download()のようなバッチ価格APIには時価総額が
-    # 含まれないため.info()を1銘柄ずつ叩く必要がある（_fetch_forward_earnings_universe()
-    # と同じ制約）。並列数を上げすぎるとYahoo側のレート制限に引っかかり、実際に
-    # 候補が0件になる不具合が起きたため、控えめな並列数に抑える。
-    # yfinance側のHTTPリクエストにタイムアウトが設定されていないため、606銘柄のうち
-    # 1銘柄でも接続がハングすると、executor.map()は投入順に結果を返す仕様上そこで
-    # 待機し続けてしまい、処理全体が止まって見える不具合が起きた。submit()+
-    # as_completed(timeout=...)に変更し、全体で90秒経っても終わらない場合は
-    # そこまでに集まった結果だけで打ち切る（cancel_futures=Trueで未着手分は破棄、
-    # 実行中の一部はバックグラウンドで終わるまで放置してよい——Streamlitのサーバー
-    # プロセス自体は動き続けているため害はない）。
-    _ex = _cf_tb.ThreadPoolExecutor(max_workers=6)
-    _futs = {_ex.submit(_one, t): t for t in _tickers}
-    try:
-        for _fut in _cf_tb.as_completed(_futs, timeout=90):
-            _res = _fut.result()
-            if _res:
-                _rows.append(_res)
-    except _cf_tb.TimeoutError:
-        logger.warning(f"[trading] tenbagger候補: 90秒でタイムアウト、{len(_rows)}件で打ち切り")
-    finally:
-        _ex.shutdown(wait=False, cancel_futures=True)
-
-    # 内訳を必ずログに残す（成功していても将来のデバッグ用に）。Streamlit Cloudの
-    # 「Manage app」→ログ画面で "[trading] tenbagger内訳" を検索すれば、実際に
-    # どの段階で何件失敗しているか（通信エラーが多いのかmcap範囲外が多いのか）が分かる。
-    logger.info(
-        f"[trading] tenbagger内訳: 総数{_stats['total']} 成功{_stats['passed']} "
-        f"通信エラー{_stats['http_error']} 空データ{_stats['empty_info']} "
-        f"時価総額範囲外{_stats['mcap_out_of_range']} 価格取得不可{_stats['no_price']}"
-    )
-    if _sample_errors:
-        logger.info(f"[trading] tenbagger通信エラー例: {' / '.join(_sample_errors)}")
+        if not _rows:
+            logger.warning(
+                f"[trading] tenbagger候補: 財務データ取得または時価総額5〜50億ドル条件で"
+                f"0件になりました（母集団{len(_tickers)}銘柄）。Yahoo側のレート制限の可能性があります。"
+            )
 
     if not _rows:
-        logger.warning(
-            f"[trading] tenbagger候補: 財務データ取得または時価総額5〜50億ドル条件で"
-            f"0件になりました（母集団{len(_tickers)}銘柄、通信エラー{_stats['http_error']}件）。"
-            f"Yahoo側のレート制限の可能性があります。"
-        )
         return {}
 
     # 4指標を正規化して合成スコア化（欠損項目は0点扱い・他の指標で評価）
@@ -27852,7 +27857,7 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
         _result[_tk] = _row
     logger.info(
         f"[trading] tenbagger候補: {len(_result)}銘柄選定"
-        f"（時価総額条件通過{len(_rows)}銘柄/母集団{len(_tickers)}銘柄）"
+        f"（時価総額条件通過{len(_rows)}銘柄/母集団{_universe_size}銘柄）"
     )
     return _result
 
