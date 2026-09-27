@@ -27473,8 +27473,11 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
                            "取得自体ができていません。")
             else:
                 _reason = (f"S&P600銘柄一覧は{len(_sp600)}件取得できましたが、財務データ取得"
-                           "（時価総額5〜50億ドル等の条件判定）が0件でした（Yahoo側の一時的な"
-                           "レート制限の可能性）。時間を置いてページを再読み込みしてください。")
+                           "（時価総額5〜50億ドル等の条件判定）が0件でした。GitHub Actions等の"
+                           "別環境からは同じ処理が問題なく成功しているため、Streamlit Cloud側の"
+                           "IPアドレスがYahoo Financeから制限されている可能性があります。"
+                           "「Manage app」のログ画面で「tenbagger内訳」を検索すると、通信エラー"
+                           "件数など詳しい内訳が確認できます。")
         elif mode_key == "jp_tenbagger":
             # 同様に①JPX銘柄一覧→②財務データの2段階で切り分ける。
             _jp_universe = fetch_jp_smallcap_universe()
@@ -27694,25 +27697,42 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
         return {}
     _tickers = list(_universe.keys())
 
+    import threading
+
+    # GitHub Actionsランナー（このsandboxと違い制限のない通常のネット環境）から同じ
+    # 606銘柄に.info()を叩いたところ40件中40件が一発成功した一方、Streamlit Cloud上
+    # では候補が0件になる不具合が解消しないため、「遅い/ハングしている」のではなく
+    # 「Streamlit Cloud側のIPからのアクセスだけがすぐ失敗している」疑いが強い。
+    # 実際の失敗理由（通信エラーの内容・空データ・時価総額範囲外等）をログに残し、
+    # Streamlit Cloudの「Manage app」ログ画面で原因を特定できるようにする。
+    _stats_lock = threading.Lock()
+    _stats = {"total": 0, "http_error": 0, "empty_info": 0, "mcap_out_of_range": 0, "no_price": 0, "passed": 0}
+    _sample_errors = []  # 原因の異なりそうな例外メッセージを数件だけ保持（ログ肥大化を防ぐ）
+
     def _one(ticker):
-        # リトライ+待機を多段にする案を試したが、606銘柄×最大3回×最大4.5秒待機は
-        # 合計の実行時間を大きく伸ばし、Streamlit Cloud上でボタン押下後に処理が
-        # 止まって見える（タイムアウトらしき）症状につながった。GitHub Actions
-        # ランナー（sandboxと違い制限のない通常のネット環境）で実際にこの母集団に
-        # .info()を叩いたところ40件中40件が一発成功しておりリトライ自体の必要性が
-        # 薄いことを確認済みのため、リトライなしの単発呼び出しに戻す
-        # （同じ構造で単発呼び出しのjp_tenbagger側は問題なく動いていることとも整合）。
+        with _stats_lock:
+            _stats["total"] += 1
         try:
             info = yf.Ticker(ticker).info or {}
-        except Exception:
+        except Exception as e:
+            with _stats_lock:
+                _stats["http_error"] += 1
+                if len(_sample_errors) < 5:
+                    _sample_errors.append(f"{ticker}: {type(e).__name__}: {e}")
             return None
         if not info:
+            with _stats_lock:
+                _stats["empty_info"] += 1
             return None
         _mcap = info.get("marketCap")
         if not _mcap or not (_TENBAGGER_MCAP_MIN <= _mcap <= _TENBAGGER_MCAP_MAX):
+            with _stats_lock:
+                _stats["mcap_out_of_range"] += 1
             return None  # 時価総額レンジ外は一次除外（テンバガー狙いの定義そのもの）
         _price = info.get("currentPrice") or info.get("regularMarketPrice")
         if not _price or _price <= 0:
+            with _stats_lock:
+                _stats["no_price"] += 1
             return None
         _gm      = info.get("grossMargins")
         _insider = info.get("heldPercentInsiders")
@@ -27720,6 +27740,8 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
         _debt    = info.get("totalDebt")
         _ebitda  = info.get("ebitda")
         _debt_ebitda = (_debt / _ebitda) if (_debt is not None and _ebitda and _ebitda > 0) else None
+        with _stats_lock:
+            _stats["passed"] += 1
         return {
             "ticker": ticker,
             # _universeの値がticker自身と同じ場合（GitHub mirrorソースなど企業名を
@@ -27758,10 +27780,22 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     finally:
         _ex.shutdown(wait=False, cancel_futures=True)
 
+    # 内訳を必ずログに残す（成功していても将来のデバッグ用に）。Streamlit Cloudの
+    # 「Manage app」→ログ画面で "[trading] tenbagger内訳" を検索すれば、実際に
+    # どの段階で何件失敗しているか（通信エラーが多いのかmcap範囲外が多いのか）が分かる。
+    logger.info(
+        f"[trading] tenbagger内訳: 総数{_stats['total']} 成功{_stats['passed']} "
+        f"通信エラー{_stats['http_error']} 空データ{_stats['empty_info']} "
+        f"時価総額範囲外{_stats['mcap_out_of_range']} 価格取得不可{_stats['no_price']}"
+    )
+    if _sample_errors:
+        logger.info(f"[trading] tenbagger通信エラー例: {' / '.join(_sample_errors)}")
+
     if not _rows:
         logger.warning(
             f"[trading] tenbagger候補: 財務データ取得または時価総額5〜50億ドル条件で"
-            f"0件になりました（母集団{len(_tickers)}銘柄）。Yahoo側のレート制限の可能性があります。"
+            f"0件になりました（母集団{len(_tickers)}銘柄、通信エラー{_stats['http_error']}件）。"
+            f"Yahoo側のレート制限の可能性があります。"
         )
         return {}
 
