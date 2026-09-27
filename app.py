@@ -29670,21 +29670,35 @@ def render_claude_trading_project():
                     st.rerun()
 
         # ── 全モード比較表（1年・3年） ────────────────────────────
-        # 選択中モードだけでなく6モード全部を並列計算してキャッシュしておく
+        # 選択中モードだけでなく7モード全部を並列計算してキャッシュしておく
         # （選択中モードの詳細セクションはこのキャッシュを再利用するだけなので二重計算にならない）。
+        # ただし🌱長期育成(S&P600約600銘柄)・🚀日本株10倍株候補(JP小型株)は、内部で
+        # yf.Ticker().info()を最大6並列で何百回も叩く重い候補スキャンを伴う。この2つを
+        # 他の軽量モードと同時に走らせると、Yahoo側のレート制限を奪い合って両方（または
+        # 片方）失敗する不具合が実際に発生したため、軽量モードは並列、重いスキャン系の
+        # 2モードだけは直列に実行してそれぞれのリトライ・並列数が最大限効くようにする。
+        _HEAVY_SCAN_MODE_KEYS = {"growth", "jp_tenbagger"}
+        _light_mode_defs = [_md for _md in _MODE_DEFS if _md["key"] not in _HEAVY_SCAN_MODE_KEYS]
+        _heavy_mode_defs = [_md for _md in _MODE_DEFS if _md["key"] in _HEAVY_SCAN_MODE_KEYS]
+        _bt_all = {}
         with st.spinner("全モードのバックテスト計算中..."):
-            with ThreadPoolExecutor(max_workers=len(_MODE_DEFS)) as _bt_ex:
+            with ThreadPoolExecutor(max_workers=max(len(_light_mode_defs), 1)) as _bt_ex:
                 _bt_futures = {
                     _md["key"]: _bt_ex.submit(_compute_mode_basket_backtest, _md["key"])
-                    for _md in _MODE_DEFS
+                    for _md in _light_mode_defs
                 }
-                _bt_all = {}
                 for _k, _fut in _bt_futures.items():
                     try:
                         _bt_all[_k] = _fut.result()
                     except Exception as _e:
                         logger.warning(f"[mode_backtest] {_k} 計算失敗: {_e}")
                         _bt_all[_k] = {"ok": False, "reason": "計算エラー"}
+            for _md in _heavy_mode_defs:
+                try:
+                    _bt_all[_md["key"]] = _compute_mode_basket_backtest(_md["key"])
+                except Exception as _e:
+                    logger.warning(f"[mode_backtest] {_md['key']} 計算失敗: {_e}")
+                    _bt_all[_md["key"]] = {"ok": False, "reason": "計算エラー"}
 
         st.markdown(
             '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:8px 0 4px">'
