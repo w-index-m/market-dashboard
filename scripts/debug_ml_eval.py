@@ -8,7 +8,7 @@ import re
 import traceback
 import types
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,7 +32,7 @@ def _extract(start_marker: str, end_marker: str) -> str:
 _ns = {
     "np": np, "pd": pd, "yf": yf, "re": re, "requests": requests, "logger": logger,
     "datetime": datetime, "timedelta": timedelta, "timezone": timezone,
-    "Dict": Dict, "Any": Any, "Optional": Optional, "JST": pytz.timezone("Asia/Tokyo"),
+    "Dict": Dict, "Any": Any, "Optional": Optional, "List": List, "Tuple": Tuple, "JST": pytz.timezone("Asia/Tokyo"),
     "st": types.SimpleNamespace(cache_data=lambda **_k: (lambda f: f)),
     "TTL_DAILY": 3600, "TTL_INTRADAY": 300, "SKLEARN_AVAILABLE": True, "XGB_AVAILABLE": False,
     "LogisticRegression": LogisticRegression, "StandardScaler": StandardScaler, "accuracy_score": accuracy_score,
