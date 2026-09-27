@@ -1,4 +1,4 @@
-name: Precompute S&P600 tenbagger candidates
+name: Precompute tenbagger candidates (S&P600 / TSE Standard)
 
 on:
   schedule:
@@ -18,15 +18,22 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install requests pandas openpyxl lxml yfinance
+        run: pip install requests pandas openpyxl xlrd lxml yfinance
 
-      - name: Run precompute script
+      # 片方が失敗しても、もう片方の結果は保存・コミットする（失敗した側は前日のファイルのまま）
+      - name: Precompute S&P600 (🌱長期育成)
+        continue-on-error: true
         run: python scripts/precompute_sp600_candidates.py
+
+      - name: Precompute TSE Standard small caps (🚀日本株10倍株候補)
+        continue-on-error: true
+        run: python scripts/precompute_jp_tenbagger.py
 
       - name: Commit updated candidates file
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/sp600_candidates.json
-          git diff --cached --quiet && echo "No changes" || git commit -m "Update S&P600 tenbagger candidates data"
+          [ -f data/jp_tenbagger_raw.json ] && git add data/jp_tenbagger_raw.json
+          git diff --cached --quiet && echo "No changes" || git commit -m "Update tenbagger candidates data (S&P600 / TSE Standard)"
           git push origin HEAD:main
