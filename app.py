@@ -8193,6 +8193,67 @@ def fetch_sp600_constituents() -> dict:
 
 
 @st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def fetch_jp_smallcap_universe() -> dict:
+    """JPX（日本取引所グループ）が毎月公表する上場銘柄一覧（data_j.xlsx、認証不要・
+    全上場銘柄約3,900件を含む公式ファイル）から、東証グロース市場・スタンダード市場に
+    上場する銘柄のうち、規模区分がTOPIX Small1/Small2または番付外（=大型株指数の
+    Large70/Mid400に入っていない、実質的な小型株）の銘柄だけを抽出する
+    （{ticker(.T付き): 企業名}）。
+
+    日本株のテンバガー候補スクリーニング用の母集団。グロース市場だけに絞ると、
+    早期段階で赤字先行の企業が多く「予想PER15〜20倍以内」という条件でほぼ全滅する
+    ため、黒字化した小型株が多いスタンダード市場も含める。ただし市場区分を絞らず
+    全銘柄（約3,900件）を対象にすると個別データ取得が重すぎるため、規模区分で
+    小型株に絞り込むことで件数を現実的な範囲に抑える。
+
+    JPXは2026年9月頃にファイル拡張子を.xlsから.xlsxへ変更したため、両方試す。
+    月次更新のため7日キャッシュ。取得失敗時は空dictを返す（フォールバック用の
+    代表銘柄リストは持たない——小型株は代表銘柄という概念が馴染まないため）。
+    """
+    _base_url = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j"
+    _df = None
+    for _ext in (".xlsx", ".xls"):
+        try:
+            _df = pd.read_excel(_base_url + _ext)
+            break
+        except Exception as e:
+            logger.debug(f"[jp_smallcap_universe] {_ext}取得失敗: {e}")
+            continue
+    if _df is None:
+        logger.warning("[jp_smallcap_universe] JPX上場銘柄一覧の取得に失敗しました。")
+        return {}
+
+    try:
+        _code_col   = next((c for c in _df.columns if "コード" in str(c)), None)
+        _name_col   = next((c for c in _df.columns if "銘柄名" in str(c)), None)
+        _market_col = next((c for c in _df.columns if "市場" in str(c) and "商品" in str(c)), None)
+        _size_col   = next((c for c in _df.columns if "規模" in str(c) and "区分" in str(c)), None)
+        if not (_code_col and _name_col and _market_col and _size_col):
+            raise ValueError(f"想定した列が見つかりません: {list(_df.columns)}")
+
+        result = {}
+        for _, row in _df.iterrows():
+            _market = str(row[_market_col])
+            if not ("グロース" in _market or "スタンダード" in _market):
+                continue  # プライム・ETF/ETN/REIT等は除外
+            _size = str(row[_size_col])
+            # Large70・Mid400（大型〜中型）は除外。Small1/Small2/番付外(-)のみ対象。
+            if "Large70" in _size or "Mid400" in _size:
+                continue
+            _code = str(row[_code_col]).strip()
+            if not _code.isdigit():
+                continue
+            result[f"{_code}.T"] = str(row[_name_col]).strip()
+
+        if len(result) < 300:
+            raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
+        return result
+    except Exception as e:
+        logger.warning(f"[jp_smallcap_universe] 解析失敗: {e}")
+        return {}
+
+
+@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
 def fetch_nikkei225_constituents() -> dict:
     """
     日経225の全構成銘柄をWikipediaから取得する（{ticker(.T付き): 企業名}）。7日キャッシュ。
@@ -23461,6 +23522,7 @@ def _generate_replacement_rec(
         "optical_mix":     "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
         "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り3%以上の銘柄のみ選定）",
         "stable_growth":   "財務指標不使用・5年チャートが滑らかに右肩上がりの銘柄のみ（日経225・S&P500全銘柄からスクリーニング）",
+        "jp_tenbagger":    "日本株10倍株候補（東証グロース/スタンダード小型株、成長性・割安度・競争優位性・10倍化余地を100点満点で評価）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -26808,6 +26870,11 @@ _AGENT_B_FABRICATED_METRIC_RE = re.compile(r'(ROIC|ROE|ROA|PER|PBR|PSR|DOE|EPS�
 # このモードのAgent C出力チェックだけはROEを除外した版を使う（ROIC/ROA/PER等の
 # 他指標はこのモードでも未提供のため、引き続き捏造検知の対象）。
 _AGENT_C_FABRICATED_METRIC_RE_GROWTH = re.compile(r'(ROIC|ROA|PER|PBR|PSR|DOE|EPS成長率?)\s*[:：]?\s*\d+(\.\d+)?\s*%?', re.IGNORECASE)
+# 日本株10倍株候補モードのAgent Cだけは、_build_jp_tenbagger_fundamentals_table()経由で
+# 実際のPER・成長率を渡している。PERへの言及は捏造ではなく正当な引用なので、
+# このモードのAgent C出力チェックだけはPERを除外した版を使う（ROIC/ROE/PBR等の
+# 他指標はこのモードでも未提供のため、引き続き捏造検知の対象）。
+_AGENT_C_FABRICATED_METRIC_RE_JP_TENBAGGER = re.compile(r'(ROIC|ROE|ROA|PBR|PSR|DOE)\s*[:：]?\s*\d+(\.\d+)?\s*%?', re.IGNORECASE)
 
 
 def _verify_stock_agent_result(result: dict, ret_3m: float, ret_6m: float, ret_1y: float) -> dict:
@@ -26926,9 +26993,10 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
     """モメンタムスコア上位N銘柄を (ticker, r3m, r6m, r1y, price) のリストで返す。"""
     _usdjpy = 150.0
     _max_per = budget * 0.35
-    if trading_mode in ("stable_growth", "growth"):
-        # cand_perfは_fetch_stable_growth_candidates()/_fetch_tenbagger_candidates()の時点で
-        # それぞれの指標（stability_r2 / 実財務指標スコア）降順に既に絞り込み済みなので、
+    if trading_mode in ("stable_growth", "growth", "jp_tenbagger"):
+        # cand_perfは_fetch_stable_growth_candidates()/_fetch_tenbagger_candidates()/
+        # _fetch_jp_tenbagger_candidates()の時点でそれぞれの指標（stability_r2 /
+        # 実財務指標スコア / STEP1+STEP2合計スコア）降順に既に絞り込み済みなので、
         # ここではモメンタム基準の再スコアリングをせず、予算内で購入可能なものを順に採用する
         _out = []
         for _tk, _d in cand_perf.items():
@@ -27270,6 +27338,10 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
             # 原因を切り分けやすいよう他モードと違うメッセージにしておく。
             _reason = ("S&P600の財務データ取得に失敗しました（Yahoo側の一時的なレート制限の"
                        "可能性）。時間を置いてページを再読み込みしてください。")
+        elif mode_key == "jp_tenbagger":
+            _reason = ("東証グロース/スタンダード銘柄一覧またはその財務データの取得に失敗しました"
+                       "（JPXファイル形式の変更、またはYahoo側の一時的なレート制限の可能性）。"
+                       "時間を置いてページを再読み込みしてください。")
         return {"ok": False, "reason": _reason}
 
     bench = "^GSPC"
@@ -27591,6 +27663,249 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
 
 
 @st.cache_data(ttl=3600 * 12, show_spinner=False)
+def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
+    """🚀 日本株10倍株候補モード専用の候補選定。
+
+    ユーザー提供の厳密なスクリーニング方針をベースに、以下の2段階で選定する:
+
+    STEP1（Pythonによる決定論的スクリーニング・足切り＋定量スコア60点）:
+      東証グロース+スタンダード市場の小型株（fetch_jp_smallcap_universe()）を対象に、
+      ①成長性(30pt): 売上高/営業利益成長率(YoY) ②割安度(20pt): PER/PEGレシオ
+      ④財務・CF(10pt): 自己資本比率の簡易代理指標・ネットキャッシュ、を実データのみで採点。
+      赤字（PER算出不可）・営業CF赤字・売上高減少の銘柄は原則除外する。
+
+    STEP2（AIによる定性スコア・上位候補のみ・40点）:
+      STEP1通過銘柄のうち決定論的スコア上位のものだけをAIに渡し、③競争優位性(20pt)
+      ⑤10倍化余地(20pt)を、実際に取得できたセクター・財務データのみを根拠に採点させる
+      （渡していない具体的な財務数値を作らせない設計）。
+
+    合計70点未満は候補から除外。「候補数を埋めるために基準を緩めない」というユーザー方針を
+    尊重し、該当が少なければ少ないまま返す。12hキャッシュ。
+    Returns: _fetch_candidate_performance と同じ形式の {ticker: {...}} dict。
+             price/ret_3m/ret_6m/ret_1yに加えscore_total/score_growth/score_value/
+             score_finance/score_moat/score_10x/ai_comment等を含む。
+    """
+    import concurrent.futures as _cf_jt
+
+    _universe = fetch_jp_smallcap_universe()
+    if not _universe:
+        logger.warning("[trading] JP10倍株候補: 小型株ユニバースの取得に失敗したため候補0件")
+        return {}
+    _tickers = list(_universe.keys())
+
+    def _one(ticker):
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            return None
+        if not info:
+            return None
+        _price = info.get("currentPrice") or info.get("regularMarketPrice")
+        if not _price or _price <= 0:
+            return None
+        _per = info.get("trailingPE") or info.get("forwardPE")
+        _peg = info.get("pegRatio")
+        _rev_g = info.get("revenueGrowth")     # YoY, 例: 0.15 = +15%
+        _earn_g = info.get("earningsGrowth")   # YoY
+        _op_margin = info.get("operatingMargins")
+        _ocf = info.get("operatingCashflow")
+        _debt_eq = info.get("debtToEquity")    # %表記（例: 50 = 負債/自己資本50%）
+        _cash = info.get("totalCash")
+        _debt = info.get("totalDebt")
+        _mcap = info.get("marketCap")
+
+        # STEP1足切り: 赤字（PER算出不可）・営業CF赤字・売上高減少は原則除外。
+        # データ自体が取得できない項目は「除外」ではなく該当スコアを0点にして減点するに留める
+        # （yfinanceのJP小型株カバレッジは項目によって欠損が多いため、過度な足切りで
+        # 候補が0件になるのを避ける）。
+        if _per is None or _per <= 0 or _per > 25:
+            return None
+        if _ocf is not None and _ocf <= 0:
+            return None
+        if _rev_g is not None and _rev_g < 0:
+            return None
+
+        # ①成長性30pt: 売上高・営業利益成長率(YoY)が高いほど高得点（30%成長で満点）
+        _score_growth = 0.0
+        if _rev_g is not None:
+            _score_growth += min(max(_rev_g, 0), 0.30) / 0.30 * 15
+        if _earn_g is not None:
+            _score_growth += min(max(_earn_g, 0), 0.30) / 0.30 * 15
+
+        # ②割安度20pt: PERが低いほど、PEGが1.5未満なら加点
+        _score_value = max(0.0, (20 - _per) / 20) * 10
+        if _peg is not None and _peg > 0:
+            _score_value += max(0.0, (1.5 - _peg) / 1.5) * 10
+        else:
+            _score_value += max(0.0, (20 - _per) / 20) * 10  # PEG欠損時はPER評価を倍加で代用
+
+        # ④財務・CF10pt: 自己資本比率の簡易代理指標（負債比率の逆数）とネットキャッシュ
+        _score_finance = 0.0
+        if _debt_eq is not None:
+            _equity_ratio_proxy = 100 / (100 + max(_debt_eq, 0))
+            if _equity_ratio_proxy >= 0.40:
+                _score_finance += 5
+        if _cash is not None and _debt is not None and _cash > _debt:
+            _score_finance += 5
+
+        return {
+            "ticker": ticker, "name": _universe.get(ticker, ticker), "price": float(_price),
+            "per": round(_per, 1), "peg": round(_peg, 2) if _peg is not None else None,
+            "rev_growth": round(_rev_g * 100, 1) if _rev_g is not None else None,
+            "earnings_growth": round(_earn_g * 100, 1) if _earn_g is not None else None,
+            "op_margin": round(_op_margin * 100, 1) if _op_margin is not None else None,
+            "market_cap": _mcap,
+            "sector": info.get("sector") or "", "industry": info.get("industry") or "",
+            "summary": (info.get("longBusinessSummary") or "")[:300],
+            "score_growth": round(_score_growth, 1),
+            "score_value": round(_score_value, 1),
+            "score_finance": round(_score_finance, 1),
+        }
+
+    _rows = []
+    with _cf_jt.ThreadPoolExecutor(max_workers=6) as _ex:
+        for _res in _ex.map(_one, _tickers):
+            if _res:
+                _rows.append(_res)
+
+    if not _rows:
+        logger.warning(f"[trading] JP10倍株候補: STEP1条件を満たす銘柄が0件（母集団{len(_tickers)}銘柄）")
+        return {}
+
+    for _row in _rows:
+        _row["_det_score"] = _row["score_growth"] + _row["score_value"] + _row["score_finance"]
+    _rows.sort(key=lambda r: r["_det_score"], reverse=True)
+
+    # AIによる定性スコアリング(STEP2)は上位候補のみに絞って1回のバッチ呼び出しで行う
+    # （銘柄ごとに個別AI呼び出しをするとクォータ消費・待ち時間が銘柄数倍になるため）。
+    _ai_candidates = _rows[:20]
+    _ai_scores = _score_jp_tenbagger_qualitative(_ai_candidates)
+
+    for _row in _rows:
+        _ai = _ai_scores.get(_row["ticker"], {})
+        _row["score_moat"] = _ai.get("score_moat", 0.0)
+        _row["score_10x"] = _ai.get("score_10x", 0.0)
+        _row["ai_comment"] = _ai.get("comment", "")
+        _row["score_total"] = round(
+            _row["_det_score"] + _row["score_moat"] + _row["score_10x"], 1
+        )
+
+    # 合計70点未満は除外。「候補数を埋めるために基準を緩めない」というユーザー方針のため、
+    # 該当が少なくてもそのまま返す（水増ししない）。
+    _qualified = [r for r in _rows if r["score_total"] >= 70]
+    _qualified.sort(key=lambda r: r["score_total"], reverse=True)
+
+    # 価格データ（3m/6m/1yリターン）を追加取得してマージ
+    _price_perf = {}
+    try:
+        _q_tickers = [r["ticker"] for r in _qualified[:top_n]]
+        if _q_tickers:
+            _raw = yf.download(_q_tickers, period="1y", interval="1d",
+                                auto_adjust=True, progress=False, timeout=45)
+            if not _raw.empty:
+                _cl = _raw["Close"] if "Close" in _raw.columns else _raw
+                if hasattr(_cl, "columns"):
+                    for _tk in _cl.columns:
+                        _s = _cl[_tk].dropna()
+                        if len(_s) < 50:
+                            continue
+                        _cur = float(_s.iloc[-1])
+
+                        def _r(days, _s=_s, _cur=_cur):
+                            _idx = max(0, len(_s) - days - 1)
+                            _p = float(_s.iloc[_idx])
+                            return round((_cur / _p - 1) * 100, 1) if _p > 0 else None
+
+                        _price_perf[_tk] = {"ret_3m": _r(63), "ret_6m": _r(126), "ret_1y": _r(252)}
+    except Exception as e:
+        logger.warning(f"[trading] JP10倍株候補価格取得失敗: {e}")
+
+    _result = {}
+    for _row in _qualified[:top_n]:
+        _tk = _row.pop("ticker")
+        _row.pop("_det_score", None)
+        _pp = _price_perf.get(_tk, {})
+        _row["ret_3m"] = _pp.get("ret_3m")
+        _row["ret_6m"] = _pp.get("ret_6m")
+        _row["ret_1y"] = _pp.get("ret_1y")
+        _result[_tk] = _row
+    logger.info(
+        f"[trading] JP10倍株候補: {len(_result)}銘柄選定"
+        f"（STEP1通過{len(_rows)}銘柄/母集団{len(_tickers)}銘柄、70点以上{len(_qualified)}銘柄）"
+    )
+    return _result
+
+
+def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
+    """🚀 日本株10倍株候補モードSTEP2: 決定論的スコア上位の候補について、AIに
+    ③競争優位性(20pt)・⑤10倍化余地(20pt)を採点させる（1回のバッチ呼び出し）。
+    渡すのはセクター・業種・事業概要・実測の成長率/PER等の実データのみで、財務指標の
+    具体的な数値をAIに創作させない（他モードと同じ捏造対策）。
+    Returns: {ticker: {"score_moat": float, "score_10x": float, "comment": str}}
+    """
+    if not candidates:
+        return {}
+    _lines = []
+    for _c in candidates:
+        _lines.append(
+            f"銘柄: {_c['ticker']} {_c['name']}\n"
+            f"  セクター: {_c['sector'] or '不明'} / 業種: {_c['industry'] or '不明'}\n"
+            f"  PER: {_c['per']}倍 / 売上成長率: {_c['rev_growth']}% / "
+            f"営業利益成長率: {_c['earnings_growth']}% / 営業利益率: {_c['op_margin']}%\n"
+            f"  事業概要: {_c['summary'] or '（取得できず）'}"
+        )
+    _candidates_str = "\n\n".join(_lines)
+
+    _prompt = f"""あなたは日本株の中小型成長株分析に強い株式アナリストです。
+以下の候補銘柄それぞれについて、実際に提供されたデータのみを根拠に、
+③競争優位性（シェア・参入障壁・ブランド・顧客基盤・ストック性、0〜20点）と
+⑤10倍化余地（TAM拡大・シェア上昇・海外展開・利益率改善等、再現可能な成長ドライバーが
+あるか、0〜20点）を採点し、JSON形式のみで回答してください。
+
+【候補銘柄】
+{_candidates_str}
+
+【厳守事項】
+・上記に記載されていない具体的な財務数値（売上高の実額、利益率の詳細等）を作らないこと
+・事業概要やセクター情報から合理的に推測できる範囲でのみ評価すること
+・単なるPER上昇頼みのシナリオは10倍化余地として評価しないこと
+・情報が乏しく判断できない場合は低めのスコアにすること
+
+以下のJSON形式のみで回答（前後のテキスト不要）:
+{{"scores": [{{"ticker": "銘柄コード", "score_moat": 0〜20の数値, "score_10x": 0〜20の数値,
+  "comment": "根拠を40字以内で"}}]}}"""
+
+    try:
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=2500, temperature=0.3)
+    except Exception as e:
+        logger.warning(f"[trading] JP10倍株候補AI評価失敗: {e}")
+        return {}
+
+    import json as _json_jt
+    _m = re.search(r'\{[\s\S]*\}', _text)
+    if not _m:
+        logger.warning(f"[trading] JP10倍株候補AI評価: JSON未検出: {_text[:200]}")
+        return {}
+    try:
+        _parsed = _json_jt.loads(_m.group())
+    except ValueError:
+        logger.warning("[trading] JP10倍株候補AI評価: JSON解析失敗")
+        return {}
+
+    _result = {}
+    for _s in _parsed.get("scores", []):
+        _tk = _s.get("ticker", "")
+        if not _tk:
+            continue
+        _result[_tk] = {
+            "score_moat": min(max(float(_s.get("score_moat", 0) or 0), 0), 20),
+            "score_10x":  min(max(float(_s.get("score_10x", 0) or 0), 0), 20),
+            "comment": _s.get("comment", ""),
+        }
+    return _result
+
+
+@st.cache_data(ttl=3600 * 12, show_spinner=False)
 def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict:
     """候補銘柄の株価パフォーマンスを一括取得。当日キャッシュ（date key + trading_mode + 12h TTL）。
     trading_mode="stable_growth" の場合は_fetch_stable_growth_candidates()に委譲し、
@@ -27604,6 +27919,8 @@ def _fetch_candidate_performance(today_str: str, trading_mode: str = "") -> dict
         return _fetch_stable_growth_candidates()
     if trading_mode == "growth":
         return _fetch_tenbagger_candidates()
+    if trading_mode == "jp_tenbagger":
+        return _fetch_jp_tenbagger_candidates()
     try:
         import yfinance as _yf
         _raw = _yf.download(
@@ -27675,6 +27992,33 @@ def _build_tenbagger_fundamentals_table(cand_perf: dict) -> str:
         _lines.append(
             f"  {_tk:6s} 時価総額:{_mc_str:>8s}  粗利率:{_gm_str:>6s}  "
             f"ROE:{_roe_str:>6s}  インサイダー保有:{_ins_str:>6s}  負債/EBITDA:{_de_str:>5s}"
+        )
+    return "\n".join(_lines)
+
+
+def _build_jp_tenbagger_fundamentals_table(cand_perf: dict) -> str:
+    """🚀 日本株10倍株候補モード専用: _fetch_jp_tenbagger_candidates()が実際に計算した
+    STEP1定量スコア・STEP2 AI定性スコアの内訳をプロンプト用テキストに変換する。
+    PER/成長率等は実データ、競争優位性・10倍化余地はSTEP2で既にAIが一度採点済みの
+    ものなので、Agent Cはこれをそのまま根拠として引用してよい（再度ゼロから
+    財務指標を創作させないため）。
+    """
+    if not cand_perf:
+        return ""
+    _lines = ["【実財務データ＋事前スコアリング結果（東証グロース/スタンダード小型株のみ）】"]
+    for _tk, _d in cand_perf.items():
+        _per = _d.get("per")
+        _rg  = _d.get("rev_growth")
+        _eg  = _d.get("earnings_growth")
+        _st  = _d.get("score_total")
+        _cm  = _d.get("ai_comment") or ""
+        _per_str = f"{_per:.1f}倍" if _per is not None else "—"
+        _rg_str  = f"{_rg:+.1f}%" if _rg is not None else "—"
+        _eg_str  = f"{_eg:+.1f}%" if _eg is not None else "—"
+        _st_str  = f"{_st:.0f}/100点" if _st is not None else "—"
+        _lines.append(
+            f"  {_tk:8s} PER:{_per_str:>7s}  売上成長:{_rg_str:>7s}  利益成長:{_eg_str:>7s}  "
+            f"総合スコア:{_st_str:>9s}  {_cm}"
         )
     return "\n".join(_lines)
 
@@ -27957,6 +28301,13 @@ def _generate_investment_portfolio_rec(
             "銘柄のみを機械的にスクリーニング済み。保有期間は長め（1年以上）を想定。"
             "損切-15〜20%・目標=トレンド継続前提の緩やかな上昇。",
         ),
+        "jp_tenbagger": (
+            "🚀 日本株10倍株候補モード",
+            "東証グロース/スタンダード市場の小型株から、5〜10年で株価10倍を狙える割安成長株を"
+            "スクリーニング。成長性・割安度・財務健全性を実データで、競争優位性・10倍化余地を"
+            "AIで採点し、合計70点未満は除外する100点満点方式。損切-15〜20%・目標=長期の"
+            "業績拡大に伴う株価数倍化。",
+        ),
     }
     _mode_label, _mode_guide = _mode_info.get(trading_mode, _mode_info["growth"])
 
@@ -28032,6 +28383,15 @@ def _generate_investment_portfolio_rec(
      候補は既に5年最大ドローダウン-30%以内で足切り済み。その中でもより小さい銘柄を優先
   ③ 財務指標は不問（このモードでは意図的にファンダメンタルズを評価軸に含めない）
   ※ 「地味だが着実」なポジショニングを重視し、高PER・値動きの荒い銘柄は避けること""",
+
+        "jp_tenbagger": """\
+評価軸の優先順位（🚀 日本株10倍株候補モード — STEP1定量60点+STEP2 AI定性40点で事前選定済み）:
+  候補は既に東証グロース/スタンダードの小型株から、PER・成長率・財務健全性（実データ）と
+  競争優位性・10倍化余地（AI事前採点）の合計100点満点で70点以上のものだけに絞り込み済み。
+  ① 総合スコア・成長率・PERは実データなのでそのまま根拠に使ってよい
+  ② 事前のAIコメント（競争優位性・10倍化余地の根拠）があれば引用すること
+  ③ 単なるPER上昇頼みのシナリオは評価しない。再現可能な成長ドライバー
+     （TAM拡大・シェア上昇・海外展開・利益率改善等）の有無を重視すること""",
     }.get(trading_mode, "")
 
     # 実株価モメンタムテーブルを生成（取得できた場合のみ注入）
@@ -28135,10 +28495,18 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "【実財務データ】に記載の粗利率・ROE・インサイダー保有比率・負債/EBITDAは実際に"
             "取得した数値なので、merits/demeritsの根拠として積極的に引用してよい"
             if trading_mode == "growth"
+            else "\n・【日本株10倍株候補モード専用】銘柄はAgent Bリストのティッカーのみから選定"
+            "（東証グロース/スタンダードの小型株からPER・成長率等の実データで事前スクリーニング"
+            "＋AIによる競争優位性・10倍化余地の事前採点済み）。【実財務データ＋事前スコアリング"
+            "結果】に記載のPER・成長率・総合スコア・事前コメントは実際の計算結果なので、"
+            "merits/demeritsの根拠として積極的に引用してよい"
+            if trading_mode == "jp_tenbagger"
             else ""
         )
         _tb_fund_table = (
-            _build_tenbagger_fundamentals_table(candidate_perf) if trading_mode == "growth" else ""
+            _build_tenbagger_fundamentals_table(candidate_perf) if trading_mode == "growth"
+            else _build_jp_tenbagger_fundamentals_table(candidate_perf) if trading_mode == "jp_tenbagger"
+            else ""
         )
         prompt = f"""あなたは日米株式ポートフォリオ設計の専門家です（Agent C）。
 事前分析済みの結果を使ってポートフォリオのみを構築してください。
@@ -28169,9 +28537,15 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent Bの分析（スコア・thesis・merits/demerits）と実株価モメンタムデータのみを根拠にすること。{
   "長期育成モードのみ、上記【実財務データ】の粗利率・ROE・インサイダー保有比率・負債/EBITDAも根拠に使ってよい。それ以外の"
-  if trading_mode == "growth" else ""
+  if trading_mode == "growth" else
+  "日本株10倍株候補モードのみ、上記【実財務データ＋事前スコアリング結果】のPER・成長率・総合スコアも根拠に使ってよい。それ以外の"
+  if trading_mode == "jp_tenbagger" else ""
 }
-  ROIC・PER等{("・ROE・DOE" if trading_mode != "growth" else "・DOE")}の財務指標はAgent A/Bに一切渡していないため、具体的な数値を作って記載しないこと
+  {
+    "ROIC・ROE・PBR・PSR・DOE等" if trading_mode == "jp_tenbagger"
+    else "ROIC・PER・PBR・PSR・DOE等" if trading_mode == "growth"
+    else "ROIC・ROE・PER・PBR・PSR・DOE等"
+  }の財務指標はAgent A/Bに一切渡していないため、具体的な数値を作って記載しないこと
 ・entry_price: 現在の推奨エントリー価格（米国株はUSD、日本株は円。現値±10%以内の現実的な水準）
 ・entry_note: エントリー根拠と損切ライン・目標価格を40字以内で（例: "MA50付近の押し目。$120割れで撤退"）{_theme_constraint}
 
@@ -28226,6 +28600,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
 else "・【配当安定モード専用】3yMDD -35%以内の銘柄のみ選定可。日米ともに配当利回り3%以上を必須条件とする。損切ライン-10〜15%で統一" if trading_mode == "dividend_stable"
 else "・【安定成長モード専用】財務指標は評価に使わず、5年チャートの滑らかさ（stability_r2）と最大ドローダウンの小ささのみを根拠にすること" if trading_mode == "stable_growth"
+else "・【日本株10倍株候補モード専用】候補は既にSTEP1(実データ60点)+STEP2(AI定性40点)で70点以上に絞り込み済み。PER・成長率・総合スコアは実データとして引用可" if trading_mode == "jp_tenbagger"
 else ""}
 
 【キャッシュ留保指示（必ず守ること）】
@@ -28341,7 +28716,11 @@ else ""}
             # チェックをかける（プロンプト側で指示は外したが、AIが自発的に数値を作る可能性は残るため
             # 最終防衛ラインとして必須）。Agent Bの_verify_stock_agent_result()と同じ正規表現を使う。
             # 長期育成(テンバガー)モードだけはROEを実際に渡しているため、ROEを除外した専用パターンを使う。
-            _fab_re = _AGENT_C_FABRICATED_METRIC_RE_GROWTH if trading_mode == "growth" else _AGENT_B_FABRICATED_METRIC_RE
+            _fab_re = (
+                _AGENT_C_FABRICATED_METRIC_RE_GROWTH if trading_mode == "growth"
+                else _AGENT_C_FABRICATED_METRIC_RE_JP_TENBAGGER if trading_mode == "jp_tenbagger"
+                else _AGENT_B_FABRICATED_METRIC_RE
+            )
             _fab_flagged = []
             for _itm in parsed.get("portfolio", []):
                 _text_parts = [str(_itm.get("rationale", "")), str(_itm.get("conclusion", ""))]
@@ -29237,12 +29616,32 @@ def render_claude_trading_project():
                 "color":  "#94a3b8", "sub_color": "#cbd5e1",
                 "border": "#64748b", "bg": "#161e2b",
             },
+            {
+                "key":    "jp_tenbagger",
+                "emoji":  "🚀",
+                "label":  "日本株10倍株候補モード",
+                "sub":    "日本株テンバガー候補 · 東証グロース/スタンダード小型株 · 100点満点でスコアリング",
+                "detail": (
+                    "・東証グロース/スタンダード市場の小型株（規模区分で大型/中型を除外）が対象<br>"
+                    "・STEP1(60点): 実データで成長性30/割安度20/財務健全性10を採点。赤字銘柄・"
+                    "営業CF赤字・売上減少は原則除外<br>"
+                    "・STEP2(40点): AIが競争優位性20/10倍化余地20を事前採点（渡していない財務数値は捏造禁止）<br>"
+                    "・合計70点未満は除外（候補を埋めるために基準は緩めない）· 損切り-15〜20%"
+                ),
+                "color":  "#f472b6", "sub_color": "#f9a8d4",
+                "border": "#db2777", "bg": "#2e0a1f",
+            },
         ]
 
-        # 3+3 の2行レイアウトでモードボタンを表示
+        # 3+3+1 の3行レイアウトでモードボタンを表示
         _mode_row1 = _MODE_DEFS[:3]
-        _mode_row2 = _MODE_DEFS[3:]
-        _mode_pairs = [(_mode_row1, st.columns(3)), (_mode_row2, st.columns(len(_mode_row2)))]
+        _mode_row2 = _MODE_DEFS[3:6]
+        _mode_row3 = _MODE_DEFS[6:]
+        _mode_pairs = [
+            (_mode_row1, st.columns(3)),
+            (_mode_row2, st.columns(3)),
+            (_mode_row3, st.columns(len(_mode_row3))),
+        ]
         for _row_defs, _row_cols in _mode_pairs:
             for _md, _col in zip(_row_defs, _row_cols):
                 _is_sel = _cur_mode == _md["key"]

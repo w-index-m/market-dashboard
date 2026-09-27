@@ -62,9 +62,9 @@
 ログインすると、自分の保有銘柄に対してAIが3段階のマルチエージェント構成で投資判断を行います
 （詳細は[後述](#aiマルチエージェントパイプライン)）。
 
-- 🌱長期育成 / ⚡モメンタム / ✨Claude AIミックス / 💡光銘柄ミックス / 🏦配当安定 / 🪨安定成長 の
-  6つの投資戦略モードを切り替え可能。各モードの過去1年・3年バックテスト比較付き
-  （テーマ固定バスケットと、AIが実際に使うスコアリング基準で選ぶ銘柄群の両方に対応）
+- 🌱長期育成 / ⚡モメンタム / ✨Claude AIミックス / 💡光銘柄ミックス / 🏦配当安定 / 🪨安定成長 /
+  🚀日本株10倍株候補 の7つの投資戦略モードを切り替え可能。各モードの過去1年・3年バックテスト
+  比較付き（テーマ固定バスケットと、AIが実際に使うスコアリング基準で選ぶ銘柄群の両方に対応）
 - 保有銘柄ごとのニュース・決算情報をAIが並列取得・日本語で要約（進捗をストリーミング表示）
 - 予算・リスク許容度に応じた推奨ポートフォリオの自動生成（エントリー価格・損切ライン付き）
 
@@ -116,6 +116,14 @@ Agent Cに渡す前に軽量な整合性チェック（LLMを追加で呼ばず�
 「テンバガー候補スクリーニング」を行っており、粗利率・ROE・インサイダー保有比率・負債/EBITDAを
 yfinanceから実際に取得してAgent Cに渡しています。他モードと違い、これらの項目に限っては
 実データなので、AIが根拠として引用することを明示的に許可しています。
+
+**🚀日本株10倍株候補モードも同様の例外**: JPX公式の上場銘柄一覧から東証グロース/スタンダード市場の
+小型株を母集団に、2段階でスクリーニングします。STEP1（Python・実データ60点）で成長性・割安度・
+財務健全性を採点し、赤字銘柄や営業CF赤字は除外。STEP2（AI・40点）でSTEP1通過銘柄の上位だけを
+まとめて1回のAI呼び出しにかけ、競争優位性・10倍化余地をセクター/業種/事業概要という実データの
+範囲内で採点します。合計70点未満は除外し、候補数を埋めるために基準を緩めません。Agent Cには
+この事前スコアリング結果ごと渡すため、PER・成長率・総合スコアを根拠として引用してよいと
+明示しています。
 
 ---
 
@@ -216,6 +224,7 @@ main()                … トップレベルのエントリーポイント
 | 信用残高・投資部門別売買（日本株） | J-Quants API v2（有料プラン要） | irbank.net（無料・内訳データなしの簡易版） |
 | 米国株の機関投資家保有・インサイダー取引 | Finnhub | yfinance |
 | S&P600小型株の構成銘柄（テンバガー候補） | Wikipedia（スクレイピング） | — |
+| 日本株の東証グロース/スタンダード小型株一覧（10倍株候補） | JPX公式上場銘柄一覧（data_j.xlsx） | — |
 | AIコメント生成 | Gemini | Groq → DeepSeek → NVIDIA NIM → OpenRouter |
 
 ## 技術構成
@@ -321,10 +330,10 @@ DeepSeek/NVIDIA/OpenRouter, and more) working together. See
 After logging in, your holdings are analyzed by a 3-stage AI multi-agent pipeline (see
 [below](#the-ai-multi-agent-pipeline) for details).
 
-- Six switchable strategy modes — 🌱 Growth (tenbagger small-cap screener), ⚡ Momentum, ✨ Claude AI Mix,
-  💡 Claude Optical Mix, 🏦 Dividend Stable, and 🪨 Stable Growth — each with a 1-year/3-year backtest
-  comparison (covering both the fixed theme baskets and the same scoring criteria the AI actually uses to
-  narrow candidates)
+- Seven switchable strategy modes — 🌱 Growth (US tenbagger small-cap screener), ⚡ Momentum, ✨ Claude AI Mix,
+  💡 Claude Optical Mix, 🏦 Dividend Stable, 🪨 Stable Growth, and 🚀 JP Tenbagger Candidates (TSE Growth/
+  Standard small-cap screener) — each with a 1-year/3-year backtest comparison (covering both the fixed
+  theme baskets and the same scoring criteria the AI actually uses to narrow candidates)
 - Parallel fetch and Japanese-language AI summarization of news/earnings for each held ticker, with
   streaming progress display
 - Automatic recommended-portfolio generation based on budget and risk tolerance — stock selection is the
