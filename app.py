@@ -28007,6 +28007,7 @@ def _build_jp_tenbagger_fundamentals_table(cand_perf: dict) -> str:
         return ""
     _lines = ["【実財務データ＋事前スコアリング結果（東証グロース/スタンダード小型株のみ）】"]
     for _tk, _d in cand_perf.items():
+        _nm  = _d.get("name") or _tk
         _per = _d.get("per")
         _rg  = _d.get("rev_growth")
         _eg  = _d.get("earnings_growth")
@@ -28017,7 +28018,7 @@ def _build_jp_tenbagger_fundamentals_table(cand_perf: dict) -> str:
         _eg_str  = f"{_eg:+.1f}%" if _eg is not None else "—"
         _st_str  = f"{_st:.0f}/100点" if _st is not None else "—"
         _lines.append(
-            f"  {_tk:8s} PER:{_per_str:>7s}  売上成長:{_rg_str:>7s}  利益成長:{_eg_str:>7s}  "
+            f"  {_tk:8s} 会社名:{_nm:12s} PER:{_per_str:>7s}  売上成長:{_rg_str:>7s}  利益成長:{_eg_str:>7s}  "
             f"総合スコア:{_st_str:>9s}  {_cm}"
         )
     return "\n".join(_lines)
@@ -28499,7 +28500,9 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "（東証グロース/スタンダードの小型株からPER・成長率等の実データで事前スクリーニング"
             "＋AIによる競争優位性・10倍化余地の事前採点済み）。【実財務データ＋事前スコアリング"
             "結果】に記載のPER・成長率・総合スコア・事前コメントは実際の計算結果なので、"
-            "merits/demeritsの根拠として積極的に引用してよい"
+            "merits/demeritsの根拠として積極的に引用してよい。nameフィールドには必ず"
+            "【実財務データ＋事前スコアリング結果】に記載の「会社名:」の値をそのまま使うこと"
+            "（セクター名や自分で考えた名前を使わない）"
             if trading_mode == "jp_tenbagger"
             else ""
         )
@@ -30999,8 +31002,16 @@ def render_claude_trading_project():
                     for _item in _ip_pf:
                         _flag   = _item.get("flag", "🌐")
                         _tk     = _item.get("ticker", "")
-                        # _KNOWN_NAMESを優先してAIの誤名を上書き
-                        _nm     = _KNOWN_NAMES.get(_tk) or _item.get("name", _tk) or _tk
+                        # 会社名は実データ（_KNOWN_NAMES → 候補データの取得元・JPX/Wikipedia等）を
+                        # 優先し、それでも無ければAIの出力名にフォールバックする。AIに会社名を
+                        # 渡していないモード（日本株10倍株候補モード等）だと、AIが名前欄に
+                        # セクター名など別の情報を代わりに埋めてしまうことがあったため。
+                        _nm     = (
+                            _KNOWN_NAMES.get(_tk)
+                            or (_disp_cperf.get(_tk) or {}).get("name")
+                            or _item.get("name", _tk)
+                            or _tk
+                        )
                         _alloc  = float(_item.get("allocation", 0))
                         if _alloc <= 0:  # 0%銘柄（既存保有タグなど）はスキップ
                             continue
