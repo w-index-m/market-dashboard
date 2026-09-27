@@ -11849,14 +11849,18 @@ def _fetch_us_cpi_yoy(series_id: str = "CPIAUCSL") -> Optional[float]:
     """米CPI指数（FRED、APIキー不要のCSVエンドポイント）から直近の前年同月比(%)を計算する。
     series_id="CPIAUCSL"（総合）または"CPILFESL"（コア、食品・エネルギー除く）。
     実質金利を計算する際、総合CPIとコアCPIのどちらを使うかで結論が変わることがあるため、
-    両方を呼び出し元で使い分けられるようにしている。"""
+    両方を呼び出し元で使い分けられるようにしている。
+    Streamlit Cloud上でFREDからの取得が失敗しCPI・実質金利・テイラールールの行が
+    丸ごと表示されない不具合があったため、失敗時はBLS API（APIキー不要）に
+    フォールバックする。"""
     try:
         r = requests.get(
             f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
-            timeout=12, headers={"User-Agent": "Mozilla/5.0"},
+            timeout=25, headers={"User-Agent": "Mozilla/5.0"},
         )
         if r.status_code != 200:
-            return None
+            logger.warning(f"[rate_inflation] FRED CPI HTTP {r.status_code}({series_id})、BLSにフォールバック")
+            return _fetch_us_cpi_yoy_bls(series_id)
         rows = []
         for line in r.text.strip().split("\n")[1:]:
             parts = line.split(",")
@@ -11867,15 +11871,55 @@ def _fetch_us_cpi_yoy(series_id: str = "CPIAUCSL") -> Optional[float]:
             except ValueError:
                 continue
         if len(rows) < 13:
-            return None
+            return _fetch_us_cpi_yoy_bls(series_id)
         rows.sort(key=lambda x: x[0])
         _latest = rows[-1][1]
         _year_ago = rows[-13][1]
         if _year_ago <= 0:
-            return None
+            return _fetch_us_cpi_yoy_bls(series_id)
         return round((_latest / _year_ago - 1) * 100, 1)
     except Exception as e:
-        logger.warning(f"[rate_inflation] CPI取得失敗({series_id}): {e}")
+        logger.warning(f"[rate_inflation] FRED CPI取得失敗({series_id}): {e}、BLSにフォールバック")
+        return _fetch_us_cpi_yoy_bls(series_id)
+
+
+# FREDのシリーズID → 同じ指標のBLSシリーズID（季節調整なし。前年同月比は季節調整の
+# 有無でほぼ変わらず、BLS公表の前年同月比もこちらが基準）
+_FRED_TO_BLS_CPI = {"CPIAUCSL": "CUUR0000SA0", "CPILFESL": "CUUR0000SA0L1E"}
+
+
+def _fetch_us_cpi_yoy_bls(fred_series_id: str) -> Optional[float]:
+    """BLS API v2（APIキー不要）から米CPIの前年同月比(%)を計算する。_fetch_us_cpi_yoy()の
+    FRED取得失敗時のフォールバック。"""
+    _bls_id = _FRED_TO_BLS_CPI.get(fred_series_id)
+    if not _bls_id:
+        return None
+    try:
+        _now = datetime.now()
+        resp = requests.post(
+            "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+            json={"seriesid": [_bls_id], "startyear": str(_now.year - 2), "endyear": str(_now.year)},
+            headers={"Content-Type": "application/json"}, timeout=25,
+        )
+        _data = resp.json().get("Results", {}).get("series", [{}])[0].get("data", [])
+        _vals = {}
+        for _d in _data:
+            _p = _d.get("period", "")
+            if not _p.startswith("M") or _p == "M13":  # M13=年平均
+                continue
+            try:
+                _vals[(int(_d["year"]), int(_p[1:]))] = float(_d["value"])
+            except (KeyError, ValueError):
+                continue
+        if not _vals:
+            return None
+        _y, _mo = max(_vals)
+        _prev = _vals.get((_y - 1, _mo))
+        if not _prev:
+            return None
+        return round((_vals[(_y, _mo)] / _prev - 1) * 100, 1)
+    except Exception as e:
+        logger.warning(f"[rate_inflation] BLS CPI取得失敗({_bls_id}): {e}")
         return None
 
 
@@ -11911,6 +11955,37 @@ def _fetch_fed_funds_rate_history(years: int = 6) -> pd.Series:
     except Exception as e:
         logger.warning(f"[rate_inflation] FF金利推移取得失敗: {e}")
         return pd.Series(dtype=float)
+
+
+def _parse_verdict_narrative_json(raw: str) -> tuple:
+    """AIの{"verdict":..., "narrative":...}回答を解析する。```jsonフェンス付きや、
+    トークン上限で途中切れしてJSONが閉じていない場合も、各フィールドを正規表現で
+    個別に拾い出す。生のJSON文字列を画面に出さないことを優先し、何も拾えなければ
+    フェンスや波括弧を除いたテキストを解説として返す。Returns: (verdict, narrative)"""
+    import json as _json_ri
+    _s = re.sub(r"```(?:json)?", "", raw or "").strip()
+    _m = re.search(r"\{[\s\S]*\}", _s)
+    if _m:
+        try:
+            _p = _json_ri.loads(_m.group())
+            if isinstance(_p, dict) and (_p.get("verdict") or _p.get("narrative")):
+                return _p.get("verdict"), _p.get("narrative") or ""
+        except ValueError:
+            pass
+
+    def _field(name):
+        # 閉じ引用符が無い（途中切れ）場合は末尾までを採用する
+        _fm = re.search(rf'"{name}"\s*:\s*"((?:[^"\\]|\\.)*)("|$)', _s)
+        if not _fm:
+            return None
+        _v = _fm.group(1).replace('\\"', '"').replace("\\n", "\n").strip()
+        return (_v + "…") if _fm.group(2) == "" and _v else (_v or None)
+
+    _verdict, _narrative = _field("verdict"), _field("narrative")
+    if _verdict or _narrative:
+        logger.warning("[rate_inflation] JSONが不完全（途中切れの可能性）、フィールドを個別抽出")
+        return _verdict, _narrative or ""
+    return None, _s.strip("{} \n")
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -12035,21 +12110,14 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
   "日本語7〜9文の解説"}}"""
 
     try:
-        _raw_text, _model = call_ai_with_fallback(_prompt, max_output_tokens=900, temperature=0.3)
+        # 日本語7〜9文+verdictは900トークンでは途中で切れることがあり、JSONが閉じずに
+        # 解析失敗→生のJSON文字列がそのまま画面に出る不具合が起きたため余裕を持たせる
+        _raw_text, _model = call_ai_with_fallback(_prompt, max_output_tokens=1800, temperature=0.3)
     except Exception as e:
         logger.warning(f"[rate_inflation] AI呼び出し失敗: {e}")
         return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
 
-    import json as _json_ri
-    _verdict, _text = None, _raw_text
-    _m = re.search(r'\{[\s\S]*\}', _raw_text)
-    if _m:
-        try:
-            _parsed = _json_ri.loads(_m.group())
-            _verdict = _parsed.get("verdict")
-            _text = _parsed.get("narrative") or _raw_text
-        except ValueError:
-            logger.warning("[rate_inflation] JSON解析失敗、生テキストを使用")
+    _verdict, _text = _parse_verdict_narrative_json(_raw_text)
 
     return {
         "ok": True, "narrative": _text, "verdict": _verdict, "model": _model,

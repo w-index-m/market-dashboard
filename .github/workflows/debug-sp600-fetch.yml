@@ -19,7 +19,10 @@ jobs:
         run: pip install requests pandas openpyxl lxml yfinance
 
       - name: Run diagnostic
-        run: python scripts/debug_sp600_fetch.py | tee /tmp/debug_output.txt
+        run: |
+          python scripts/debug_sp600_fetch.py 2>&1 | tee /tmp/debug_output.txt
+          echo "=== CPI fetch (FRED -> BLS fallback) ===" | tee -a /tmp/debug_output.txt
+          python scripts/debug_cpi_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
 
       # Actions run logs are served from Azure Blob Storage, which the debugging
       # sandbox this repo's assistant runs in cannot reach (only github.com /
