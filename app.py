@@ -12318,6 +12318,9 @@ def _build_fx_summary(r: dict) -> Optional[dict]:
     _yen_weak = _fx_chg is not None and _fx_chg > 0
     if _narrowing and not _yen_weak:
         headline = "金利差の縮小と円高が同時進行 → 円ベースの米国株リターンが目減りしやすい"
+    elif _narrowing and _yen_weak and _fx_chg3m is not None and _fx_chg3m <= -3.0:
+        headline = ("金利差の縮小に続き、直近3ヶ月で円高に転じ始めた → 円キャリーの巻き戻しが始まりつつある"
+                    "可能性（2024年8月型に警戒）")
     elif _narrowing and _yen_weak:
         headline = "金利差は縮んでいるのに円安のまま → 巻き戻しが起きると円高が急になりやすい（2024年8月型に警戒）"
     elif _widening:
