@@ -163,6 +163,16 @@ yfinanceから実際に取得してAgent Cに渡しています。他モード�
   エクイティリスクプレミアム）・イールドカーブ形状（10年-3ヶ月）の3つを並べて表示します。
   それぞれ前提が異なる指標のため結論が一致しないことがあり、意図的に単一の「答え」に
   集約せず、割れていること自体を判断材料として示す設計にしています。
+  テイラールールは現在、失業率の項も含めた形（物価＋雇用）で計算しています。
+- **予測モデルの検証（📚 検証レポートタブ）**: 予測モデルを、学習に使っていない期間の実データで
+  ウォークフォワード検証しています（学習期間ごとに標準化、ラベル期間が重なる場合は空白期間を設定）。
+  正解率だけでなく「毎日上昇と答えるだけの基準との差」「AUC」「確率の較正」で評価した結果、
+  **翌日の方向予測はルールベース・機械学習とも基準に勝てない**ことが分かり、画面上は
+  「シグナル（参考）」表示にしています。一方、**20営業日以内に5%以上下落するか**については、
+  17の候補指標のうち全期間で安定して効いたのはVIXなどボラティリティ系だけで
+  （信用スプレッド・イールドカーブ・ドル円等は期間によって向きが反転）、VIXの1年内の位置から
+  過去の発生割合を出す単純な方法（AUC約0.66、警報時の的中率は平均の約1.7倍）が
+  複雑な機械学習モデルより良い成績でした。
 
 ## アーキテクチャと設計判断
 
@@ -428,6 +438,15 @@ To avoid being a black box, here's how the core analytics are computed and where
   whether core or headline CPI is used, and the two can disagree — this app shows both side by side and
   treats that disagreement as a signal in itself (being on the borderline) rather than picking one. r-star
   is itself an estimate the NY Fed periodically revises, not a fixed ground truth.
+- **Validating the prediction models (📚 validation report tab)**: models are evaluated walk-forward
+  on data they were never trained on (scaling refit per training window; an embargo gap when label
+  windows overlap), reporting not just accuracy but the edge over an "always predict up" baseline,
+  AUC, and probability calibration. Result: **next-day direction calls — both the rule-based score
+  and the ML model — do not beat that baseline**, so those gauges are now labeled as reference-only
+  signals. For **"will the S&P 500 fall 5%+ within 20 trading days"**, only volatility measures were
+  stable across all test periods out of 17 candidates (credit spreads, the yield curve, USD/JPY etc.
+  flipped direction between periods); a simple historical-frequency lookup on VIX's 1-year percentile
+  (AUC ≈ 0.66, alert precision ≈ 1.7x the base rate) beat the more complex ML models.
 
 ## Architecture and design decisions
 
