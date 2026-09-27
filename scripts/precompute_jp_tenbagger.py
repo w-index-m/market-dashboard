@@ -10,6 +10,7 @@ STEP1の判定・スコアリングはapp.pyの_jp_tenbagger_step1()に任せ、
 import concurrent.futures as cf
 import json
 import sys
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -75,13 +76,22 @@ def main():
         sys.exit(1)
 
     tickers = {}
-    with cf.ThreadPoolExecutor(max_workers=10) as ex:
-        futs = {ex.submit(fetch_info, t): t for t in universe}
-        for fut in cf.as_completed(futs, timeout=1500):
-            t = futs[fut]
-            info = fut.result()
-            if info:
-                tickers[t] = {"name": universe[t], "info": info}
+    # 1回目は並列10、取りこぼし（Yahooのレート制限で失敗した銘柄）は待機してから並列数を
+    # 下げて再取得する（1回目の成功数は実行ごとに約800〜1,200件とばらつきがあったため）。
+    for attempt, (workers, wait) in enumerate(((10, 0), (4, 60), (2, 120)), start=1):
+        todo = [t for t in universe if t not in tickers]
+        if not todo:
+            break
+        if wait:
+            time.sleep(wait)
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(fetch_info, t): t for t in todo}
+            for fut in cf.as_completed(futs, timeout=1500):
+                t = futs[fut]
+                info = fut.result()
+                if info:
+                    tickers[t] = {"name": universe[t], "info": info}
+        print(f"Pass {attempt} (workers={workers}): total {len(tickers)} / {len(universe)}")
 
     print(f"Fetched info for {len(tickers)} / {len(universe)} tickers")
     if len(tickers) < len(universe) * 0.3:
