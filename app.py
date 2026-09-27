@@ -27695,19 +27695,20 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     _tickers = list(_universe.keys())
 
     def _one(ticker):
-        # Yahoo Finance側のレート制限で単発失敗することがあるため、1回だけ短い
-        # 待機を挟んでリトライする（600銘柄という規模で並列に.info()を叩くと
-        # レート制限に引っかかりやすく、実際に候補が0件になる不具合が発生した）。
+        # Yahoo Finance側のレート制限で単発失敗することがあるため、待機を挟みながら
+        # リトライする（600銘柄という規模で並列に.info()を叩くとレート制限に
+        # 引っかかりやすく、実際に候補が0件になる不具合が発生した。2回→3回・待機時間も
+        # 段階的に伸ばして、他モード（jp_tenbagger）より母集団が大きい分の耐性を上げる）。
         info = None
-        for _attempt in range(2):
+        for _attempt, _wait in enumerate((1.5, 3.0, 0)):
             try:
                 info = yf.Ticker(ticker).info or {}
-                break
+                if info:
+                    break
             except Exception:
-                if _attempt == 0:
-                    time.sleep(1.5)
-                    continue
-                return None
+                pass
+            if _wait:
+                time.sleep(_wait)
         if not info:
             return None
         _mcap = info.get("marketCap")
@@ -29825,6 +29826,19 @@ def render_claude_trading_project():
                     st.session_state["trading_mode"] = _md["key"]
                     st.session_state.pop("_ip_results", None)  # モード変更時に旧ポートフォリオをクリア
                     st.rerun()
+
+        # 🌱長期育成/🚀日本株10倍株候補は候補選定自体を1日(JPは12h)キャッシュしているため、
+        # 母集団取得は直しても候補選定が0件だった過去の結果がキャッシュされたままだと
+        # ページ再読み込みだけでは反映されない（サイドバーの「🔄 マーケットデータ更新」も
+        # このキャッシュ対象外）。候補データだけを明示的に再取得できるボタンを用意する。
+        if st.button("🔄 候補データを再取得（長期育成/10倍株候補が0件の場合はこちら）",
+                     key="btn_clear_scan_mode_cache", use_container_width=True):
+            fetch_sp600_constituents.clear()
+            fetch_jp_smallcap_universe.clear()
+            _fetch_tenbagger_candidates.clear()
+            _fetch_jp_tenbagger_candidates.clear()
+            _compute_mode_basket_backtest.clear()
+            st.rerun()
 
         # ── 全モード比較表（1年・3年） ────────────────────────────
         # 選択中モードだけでなく7モード全部を並列計算してキャッシュしておく
