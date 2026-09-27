@@ -12085,22 +12085,28 @@ def _build_fed_room_summary(r: dict) -> Optional[dict]:
     _ppi_rising = _ppi is not None and _ppi3 is not None and _ppi > _ppi3 + 0.3
     infl_hot = ((_core is not None and _core >= 3.0) or (_wage is not None and _wage >= 4.0)
                 or (_ppi is not None and _ppi >= 3.0 and _ppi_rising))
+    _head = r.get("cpi_yoy")
     _infl = []
+    if _head is not None:
+        _infl.append(f"総合CPI{_head:+.1f}%")
     if _core is not None:
         _infl.append(f"コアCPI{_core:+.1f}%")
     if _ppi is not None:
-        _infl.append(f"PPI{_ppi:+.1f}%" + (f"（3ヶ月前{_ppi3:+.1f}%から加速）" if _ppi_rising
-                                          else f"（3ヶ月前{_ppi3:+.1f}%）" if _ppi3 is not None else ""))
+        _infl.append(f"PPI{_ppi:+.1f}%" + (f"（3ヶ月前{_ppi3:+.1f}%）" if _ppi3 is not None else ""))
     if _wage is not None:
         _infl.append(f"平均時給{_wage:+.1f}%")
     if _infl:
         _m = "・".join(_infl) + "。"
         if _ppi_rising:
             _m += "川上の物価（PPI）が加速しており、数ヶ月遅れてCPIが再加速するリスクがあります。"
+        elif _ppi is not None and _ppi >= 3.0:
+            _m += "PPIは高水準ですが減速中で、川上のコスト圧力は和らぎつつあります。"
         if _wage is not None and _wage >= 4.0:
             _m += "賃金の伸びが4%以上と高く、サービス価格が下がりにくい状態です。"
         if not infl_hot:
-            _m += "物価は目標の2%に近く、インフレ面から追加利上げを急ぐ理由は強くありません。"
+            _m += "FRBが重視するコアの物価は目標の2%に近く、インフレ面から追加利上げを急ぐ理由は強くありません"
+            _m += ("（ただし総合CPI・PPIは高めで、エネルギー等のコスト要因はまだ残っています）。"
+                   if ((_head is not None and _head >= 3.0) or (_ppi is not None and _ppi >= 3.0)) else "。")
         points.append("【物価】" + _m)
 
     # 雇用側
@@ -12118,16 +12124,19 @@ def _build_fed_room_summary(r: dict) -> Optional[dict]:
             _m += "失業率が最低値から0.5pt以上上昇しており、景気後退の初期に典型的なパターン（サーム・ルール）です。"
         elif _nfp is not None and _nfp < 50:
             _m += "雇用の伸びがほぼ止まっています。"
+        elif _nfp is not None and _nfp < 100:
+            _m += "雇用の伸びは鈍化気味ですが、失業率は低位で安定しており崩れてはいません。"
         else:
-            _m += "雇用は崩れておらず、利上げに耐えられる体力があります。"
+            _m += "雇用は堅調で、利上げに耐えられる体力があります。"
         points.append("【雇用】" + _m)
 
     if r.get("taylor_gap") is not None:
         points.append(
-            f"【ルール】テイラールール（{r.get('taylor_basis', '物価のみ')}）の推定は{r['taylor_rate']:.2f}%で、"
-            f"実際のFF金利はそれより{r['taylor_gap']:+.2f}pt"
-            + ("高い＝すでに引き締め気味。" if r["taylor_gap"] > 0.5
-               else "低い＝ルール上はまだ上げる余地あり。" if r["taylor_gap"] < -0.5 else "で、ほぼ適正水準。")
+            f"【ルール】テイラールール（{r.get('taylor_basis', '物価のみ')}）が示す適正なFF金利は{r['taylor_rate']:.2f}%、"
+            f"実際は{r['ff_rate']:.2f}%（差{r['taylor_gap']:+.2f}pt）。"
+            + ("実際のほうが高く、すでに引き締め気味です。" if r["taylor_gap"] > 0.5
+               else "実際のほうが低く、ルール上はまだ上げる余地があります。" if r["taylor_gap"] < -0.5
+               else "ほぼ適正水準で、ルール上は大きく動かす必要がありません。")
         )
 
     if infl_hot and not labor_weak:
@@ -12135,7 +12144,7 @@ def _build_fed_room_summary(r: dict) -> Optional[dict]:
     elif infl_hot and labor_weak:
         headline = "物価は高いのに雇用が崩れ始め → FRBは板挟み（スタグフレーション警戒）"
     elif not infl_hot and not labor_weak:
-        headline = "物価は落ち着き雇用は堅調 → 利上げを急ぐ必要は小さい（様子見が基本）"
+        headline = "コアの物価は落ち着き、雇用も崩れていない → 利上げを急ぐ必要は小さい（様子見が基本）"
     else:
         headline = "物価は落ち着き雇用が弱含み → 利下げ方向の条件が揃いつつある（株には追い風になりやすい）"
     return {"headline": headline, "points": points}
