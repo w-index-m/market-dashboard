@@ -8225,6 +8225,31 @@ def _fetch_sp600_from_ijr() -> dict:
         return {}
 
 
+def _fetch_sp600_from_github_mirror() -> dict:
+    """GitHub上のSPSM保有銘柄ミラー（major/index-etfsリポジトリ、GitHub Actionsで
+    毎日SPSM実データから自動更新）から取得。SPSM/IJR公式サイトが両方失敗した場合の
+    代替。ticker一覧のみで企業名は含まないため、値には仮にticker自体を入れておき、
+    呼び出し元でyfinance側から取得した企業名（longName/shortName）で補完する前提。"""
+    try:
+        _resp = requests.get(
+            "https://raw.githubusercontent.com/major/index-etfs/main/tickers/spsm.txt",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        _resp.raise_for_status()
+        result = {}
+        for line in _resp.text.splitlines():
+            ticker = line.strip().replace(".", "-")
+            # ファイル冒頭にCUSIP風のID行や"CASH"（ETFの現金ポジション）が混じるため、
+            # 通常のティッカー表記（英字始まり）のみを対象にする
+            if not ticker or ticker.lower() == "cash" or not re.match(r"^[A-Z][A-Z0-9\-]{0,6}$", ticker):
+                continue
+            result[ticker] = ticker
+        return result
+    except Exception as e:
+        logger.warning(f"[sp600_constituents:github_mirror] 取得失敗: {e}")
+        return {}
+
+
 def _fetch_sp600_from_wikipedia() -> dict:
     """Wikipedia「List of S&P 600 companies」のスクレイピング（ETF公式データが両方失敗した場合の最終フォールバック）。"""
     try:
@@ -8265,21 +8290,27 @@ def fetch_sp600_constituents() -> dict:
     実在の小型株指数のため、手動でティッカーを選ぶより網羅的かつ正確
     （S&P500と紛らわしいがtypoではなく、意図的に別の小型株指数を指している）。
 
-    データソースは優先順に3段構え: ① SPDR SPSM ETF（S&P600に完全連動）の公式日次
-    保有銘柄XLSX → ② iShares IJR ETFの公式CSV → ③ Wikipedia「List of S&P 600
-    companies」のスクレイピング。ETF発行体の公式ホールディングスファイルは
-    Wikipediaの表構造変更やスクレイピングブロックの影響を受けないため、①②を
-    優先することでWikipedia単独依存より堅牢にしている。
+    データソースは優先順に4段構え: ① SPDR SPSM ETF（S&P600に完全連動）の公式日次
+    保有銘柄XLSX → ② iShares IJR ETFの公式CSV → ③ GitHub上のSPSM保有銘柄ミラー
+    （毎日自動更新、企業名なしticker一覧のみ）→ ④ Wikipedia「List of S&P 600
+    companies」のスクレイピング。①〜③はいずれもWikipediaの表構造変更や
+    スクレイピングブロックの影響を受けないため、優先することでWikipedia単独
+    依存より堅牢にしている（③は2026年時点でsandbox環境から直接HTTPアクセスで
+    実在確認済み・604件中603件が④のWikipedia版と一致することも確認済み。
+    ①②のETF公式サイトはsandboxのネットワーク制限で直接検証できていない）。
     構成銘柄は年数回程度しか入れ替わらないため7日キャッシュ。全ソース失敗時は
     空dictを返す（フォールバック用の代表銘柄リストは持たない——小型株は代表銘柄
     という概念が馴染まないため、失敗時は素直に候補0件として呼び出し元にフォール
     バックさせる）。
     """
-    for _fetch_fn in (_fetch_sp600_from_spsm, _fetch_sp600_from_ijr, _fetch_sp600_from_wikipedia):
+    for _fetch_fn in (
+        _fetch_sp600_from_spsm, _fetch_sp600_from_ijr,
+        _fetch_sp600_from_github_mirror, _fetch_sp600_from_wikipedia,
+    ):
         result = _fetch_fn()
         if len(result) >= _SP600_MIN_COUNT:
             return result
-    logger.warning("[sp600_constituents] 全ソース（SPSM/IJR/Wikipedia）で取得失敗")
+    logger.warning("[sp600_constituents] 全ソース（SPSM/IJR/GitHub mirror/Wikipedia）で取得失敗")
     return {}
 
 
@@ -27692,7 +27723,12 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
         _ebitda  = info.get("ebitda")
         _debt_ebitda = (_debt / _ebitda) if (_debt is not None and _ebitda and _ebitda > 0) else None
         return {
-            "ticker": ticker, "name": _universe.get(ticker, ticker), "price": float(_price),
+            "ticker": ticker,
+            # _universeの値がticker自身と同じ場合（GitHub mirrorソースなど企業名を
+            # 持たないソースで解決した場合）はyfinance側のlongName/shortNameで補完する
+            "name": _universe.get(ticker) if _universe.get(ticker) not in (None, ticker)
+            else (info.get("longName") or info.get("shortName") or ticker),
+            "price": float(_price),
             "market_cap":   _mcap,
             "gross_margin": round(_gm * 100, 1) if _gm is not None else None,
             "insider_pct":  round(_insider * 100, 1) if _insider is not None else None,
@@ -27862,7 +27898,12 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
             _score_finance += 5
 
         return {
-            "ticker": ticker, "name": _universe.get(ticker, ticker), "price": float(_price),
+            "ticker": ticker,
+            # _universeの値がticker自身と同じ場合（GitHub mirrorソースなど企業名を
+            # 持たないソースで解決した場合）はyfinance側のlongName/shortNameで補完する
+            "name": _universe.get(ticker) if _universe.get(ticker) not in (None, ticker)
+            else (info.get("longName") or info.get("shortName") or ticker),
+            "price": float(_price),
             "per": round(_per, 1), "peg": round(_peg, 2) if _peg is not None else None,
             "rev_growth": round(_rev_g * 100, 1) if _rev_g is not None else None,
             "earnings_growth": round(_earn_g * 100, 1) if _earn_g is not None else None,
