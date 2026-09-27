@@ -16,11 +16,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install requests pandas openpyxl lxml yfinance beautifulsoup4 scikit-learn pytz
+        run: pip install requests pandas openpyxl xlrd lxml yfinance beautifulsoup4 scikit-learn pytz
 
       - name: Run diagnostic
         run: |
-          python scripts/debug_sp600_fetch.py 2>&1 | tee /tmp/debug_output.txt
+          echo "=== JP tenbagger precompute (dry run) ===" | tee /tmp/debug_output.txt
+          timeout 1200 python scripts/precompute_jp_tenbagger.py 2>&1 | grep -v "^HTTP Error\|possibly delisted" | tail -40 | tee -a /tmp/debug_output.txt
+          ls -la data/jp_tenbagger_raw.json 2>&1 | tee -a /tmp/debug_output.txt
+          python scripts/debug_sp600_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
           echo "=== CPI fetch (FRED -> BLS fallback) ===" | tee -a /tmp/debug_output.txt
           python scripts/debug_cpi_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
           echo "=== ML evaluation ===" | tee -a /tmp/debug_output.txt
