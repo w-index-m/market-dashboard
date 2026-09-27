@@ -27695,20 +27695,17 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     _tickers = list(_universe.keys())
 
     def _one(ticker):
-        # Yahoo Finance側のレート制限で単発失敗することがあるため、待機を挟みながら
-        # リトライする（600銘柄という規模で並列に.info()を叩くとレート制限に
-        # 引っかかりやすく、実際に候補が0件になる不具合が発生した。2回→3回・待機時間も
-        # 段階的に伸ばして、他モード（jp_tenbagger）より母集団が大きい分の耐性を上げる）。
-        info = None
-        for _attempt, _wait in enumerate((1.5, 3.0, 0)):
-            try:
-                info = yf.Ticker(ticker).info or {}
-                if info:
-                    break
-            except Exception:
-                pass
-            if _wait:
-                time.sleep(_wait)
+        # リトライ+待機を多段にする案を試したが、606銘柄×最大3回×最大4.5秒待機は
+        # 合計の実行時間を大きく伸ばし、Streamlit Cloud上でボタン押下後に処理が
+        # 止まって見える（タイムアウトらしき）症状につながった。GitHub Actions
+        # ランナー（sandboxと違い制限のない通常のネット環境）で実際にこの母集団に
+        # .info()を叩いたところ40件中40件が一発成功しておりリトライ自体の必要性が
+        # 薄いことを確認済みのため、リトライなしの単発呼び出しに戻す
+        # （同じ構造で単発呼び出しのjp_tenbagger側は問題なく動いていることとも整合）。
+        try:
+            info = yf.Ticker(ticker).info or {}
+        except Exception:
+            return None
         if not info:
             return None
         _mcap = info.get("marketCap")
@@ -27741,11 +27738,25 @@ def _fetch_tenbagger_candidates(top_n: int = 20) -> dict:
     # S&P600は約600銘柄あり、yf.download()のようなバッチ価格APIには時価総額が
     # 含まれないため.info()を1銘柄ずつ叩く必要がある（_fetch_forward_earnings_universe()
     # と同じ制約）。並列数を上げすぎるとYahoo側のレート制限に引っかかり、実際に
-    # 候補が0件になる不具合が起きたため、控えめな並列数に抑えてリトライで補う。
-    with _cf_tb.ThreadPoolExecutor(max_workers=6) as _ex:
-        for _res in _ex.map(_one, _tickers):
+    # 候補が0件になる不具合が起きたため、控えめな並列数に抑える。
+    # yfinance側のHTTPリクエストにタイムアウトが設定されていないため、606銘柄のうち
+    # 1銘柄でも接続がハングすると、executor.map()は投入順に結果を返す仕様上そこで
+    # 待機し続けてしまい、処理全体が止まって見える不具合が起きた。submit()+
+    # as_completed(timeout=...)に変更し、全体で90秒経っても終わらない場合は
+    # そこまでに集まった結果だけで打ち切る（cancel_futures=Trueで未着手分は破棄、
+    # 実行中の一部はバックグラウンドで終わるまで放置してよい——Streamlitのサーバー
+    # プロセス自体は動き続けているため害はない）。
+    _ex = _cf_tb.ThreadPoolExecutor(max_workers=6)
+    _futs = {_ex.submit(_one, t): t for t in _tickers}
+    try:
+        for _fut in _cf_tb.as_completed(_futs, timeout=90):
+            _res = _fut.result()
             if _res:
                 _rows.append(_res)
+    except _cf_tb.TimeoutError:
+        logger.warning(f"[trading] tenbagger候補: 90秒でタイムアウト、{len(_rows)}件で打ち切り")
+    finally:
+        _ex.shutdown(wait=False, cancel_futures=True)
 
     if not _rows:
         logger.warning(
@@ -27917,11 +27928,21 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
             "score_finance": round(_score_finance, 1),
         }
 
+    # growth(🌱)モードと同じ理由（yfinance側にタイムアウトがなく、1銘柄のハングが
+    # executor.map()の投入順待ちで全体を止めうる）で、submit()+as_completed(timeout=...)
+    # に統一する。
     _rows = []
-    with _cf_jt.ThreadPoolExecutor(max_workers=6) as _ex:
-        for _res in _ex.map(_one, _tickers):
+    _ex = _cf_jt.ThreadPoolExecutor(max_workers=6)
+    _futs = {_ex.submit(_one, t): t for t in _tickers}
+    try:
+        for _fut in _cf_jt.as_completed(_futs, timeout=90):
+            _res = _fut.result()
             if _res:
                 _rows.append(_res)
+    except _cf_jt.TimeoutError:
+        logger.warning(f"[trading] JP10倍株候補: 90秒でタイムアウト、{len(_rows)}件で打ち切り")
+    finally:
+        _ex.shutdown(wait=False, cancel_futures=True)
 
     if not _rows:
         logger.warning(f"[trading] JP10倍株候補: STEP1条件を満たす銘柄が0件（母集団{len(_tickers)}銘柄）")
@@ -29831,13 +29852,18 @@ def render_claude_trading_project():
         # 母集団取得は直しても候補選定が0件だった過去の結果がキャッシュされたままだと
         # ページ再読み込みだけでは反映されない（サイドバーの「🔄 マーケットデータ更新」も
         # このキャッシュ対象外）。候補データだけを明示的に再取得できるボタンを用意する。
+        # _compute_mode_basket_backtest.clear()は引数なしで呼ぶと7モード全部のキャッシュを
+        # 消してしまい、このボタン1回で軽量5モードまで巻き込んで再計算されて処理が重くなる
+        # （Streamlit Cloud上でボタン押下後に処理が止まって見える症状の一因になっていた）ため、
+        # 対象の2モードだけを指定してclear()する。
         if st.button("🔄 候補データを再取得（長期育成/10倍株候補が0件の場合はこちら）",
                      key="btn_clear_scan_mode_cache", use_container_width=True):
             fetch_sp600_constituents.clear()
             fetch_jp_smallcap_universe.clear()
             _fetch_tenbagger_candidates.clear()
             _fetch_jp_tenbagger_candidates.clear()
-            _compute_mode_basket_backtest.clear()
+            _compute_mode_basket_backtest.clear("growth")
+            _compute_mode_basket_backtest.clear("jp_tenbagger")
             st.rerun()
 
         # ── 全モード比較表（1年・3年） ────────────────────────────
