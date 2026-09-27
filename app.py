@@ -9615,15 +9615,67 @@ def _fetch_jgb10y_history(period: str = "10y") -> pd.DataFrame:
     """
     try:
         df = yf.Ticker("^JGB10Y").history(period=period, interval="1d", auto_adjust=False)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        s = df["Close"].dropna()
-        if s.empty:
-            return pd.DataFrame()
-        return s.to_frame(name="yield")
+        s = df["Close"].dropna() if (df is not None and not df.empty) else pd.Series(dtype=float)
+        if not s.empty:
+            return s.to_frame(name="yield")
     except Exception as e:
-        logger.warning(f"[JGB10Y] 取得失敗: {e}")
+        logger.warning(f"[JGB10Y] yfinance取得失敗: {e}")
+    # 2026-09時点でYahooが^JGB10Yを返さなくなっていることをGitHub Actions上で確認済み。
+    # 財務省の公表CSV（APIキー不要）にフォールバックする。
+    s = _fetch_jgb10y_mof()
+    if s.empty:
         return pd.DataFrame()
+    _years = {"1y": 1, "2y": 2, "5y": 5, "10y": 10}.get(period)
+    if _years:
+        s = s[s.index >= pd.Timestamp.now() - pd.DateOffset(years=_years)]
+    return s.to_frame(name="yield")
+
+
+def _jp_era_to_date(txt: str) -> Optional[pd.Timestamp]:
+    """財務省CSVの和暦日付（例: "R8.9.25", "H31.4.26", "S49.9.24"）を日付に変換する。"""
+    _m = re.match(r"^([SHR])(\d+)\.(\d+)\.(\d+)$", txt.strip())
+    if not _m:
+        return None
+    _base = {"S": 1925, "H": 1988, "R": 2018}[_m.group(1)]
+    try:
+        return pd.Timestamp(year=_base + int(_m.group(2)), month=int(_m.group(3)), day=int(_m.group(4)))
+    except ValueError:
+        return None
+
+
+def _fetch_jgb10y_mof() -> pd.Series:
+    """財務省「国債金利情報」CSVから10年債利回りの日次系列を取得する。過去分(jgbcm_all.csv、
+    前月末まで)と当月分(jgbcm.csv)を結合する。Shift_JIS、1行目はタイトル、2行目がヘッダー。"""
+    _vals = {}
+    for _url in ("https://www.mof.go.jp/jgbs/reference/interest_rate/data/jgbcm_all.csv",
+                 "https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv"):
+        try:
+            _r = requests.get(_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+            if _r.status_code != 200:
+                logger.warning(f"[JGB10Y] 財務省CSV HTTP {_r.status_code}: {_url}")
+                continue
+            _lines = _r.content.decode("shift_jis", errors="replace").splitlines()
+            _hdr_i = next((i for i, ln in enumerate(_lines[:5]) if ln.startswith("基準日")), None)
+            if _hdr_i is None:
+                continue
+            _cols = _lines[_hdr_i].split(",")
+            _c10 = _cols.index("10年") if "10年" in _cols else None
+            if _c10 is None:
+                continue
+            for _ln in _lines[_hdr_i + 1:]:
+                _p = _ln.split(",")
+                if len(_p) <= _c10:
+                    continue
+                _d = _jp_era_to_date(_p[0])
+                try:
+                    _v = float(_p[_c10])
+                except ValueError:
+                    continue  # "-"（未発行・欠測）
+                if _d is not None:
+                    _vals[_d] = _v
+        except Exception as e:
+            logger.warning(f"[JGB10Y] 財務省CSV取得失敗({_url}): {e}")
+    return pd.Series(_vals, dtype=float).sort_index() if _vals else pd.Series(dtype=float)
 
 
 def render_macro_indicators(macro: dict | None = None):
@@ -12292,7 +12344,8 @@ def _build_rate_scenarios(r: dict) -> list:
     return [
         {"シナリオ": "📈 利上げ継続", "次回FOMCの織込み": _p("prob_hike"),
          "起きる条件（現在値）": f"コアCPI3%超（{_v('cpi_core_yoy', '{:+.1f}%')}）・PPI再加速"
-                              f"（{_v('ppi_yoy', '{:+.1f}%')}）・賃金4%超（{_v('wage_yoy', '{:+.1f}%')}）",
+                              f"（{_v('ppi_yoy', '{:+.1f}%')}、3ヶ月前{_v('ppi_yoy_3m_ago', '{:+.1f}%')}）"
+                              f"・賃金4%超（{_v('wage_yoy', '{:+.1f}%')}）",
          "株": "↓ 高PER・グロース株に逆風", "債券(10年)": "利回り↑", "ドル円": "円安方向"},
         {"シナリオ": "⏸ 様子見", "次回FOMCの織込み": _p("prob_hold"),
          "起きる条件（現在値）": "物価・雇用とも大きく崩れず、現状維持（テイラールールとの差"
