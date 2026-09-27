@@ -25,6 +25,8 @@ jobs:
           python scripts/debug_cpi_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
           echo "=== ML evaluation ===" | tee -a /tmp/debug_output.txt
           python scripts/debug_ml_eval.py 2>&1 | tee -a /tmp/debug_output.txt
+          echo "=== Drawdown feature experiment ===" | tee -a /tmp/debug_output.txt
+          python scripts/debug_dd_experiment.py 2>&1 | tee -a /tmp/debug_output.txt
 
       # Actions run logs are served from Azure Blob Storage, which the debugging
       # sandbox this repo's assistant runs in cannot reach (only github.com /
