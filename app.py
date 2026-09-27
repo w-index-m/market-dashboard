@@ -11990,6 +11990,89 @@ def _parse_verdict_narrative_json(raw: str) -> tuple:
     return None, _s.strip("{} \n")
 
 
+def _classify_curve_move(tnx_cur, tnx_1y, irx_cur, irx_1y) -> Optional[dict]:
+    """10年債と3ヶ月金利それぞれの1年間の変化から、イールドカーブの傾きの変化が
+    どちらの金利に主導されたかを4類型に分類する。同じ「順イールド」でも、長期金利の
+    上昇で傾いたもの（ベア・スティープ）は株のバリュエーションに向かい風、短期金利の
+    低下で傾いたもの（ブル・スティープ）は追い風になりやすく、意味が逆になるため。"""
+    if None in (tnx_cur, tnx_1y, irx_cur, irx_1y):
+        return None
+    _l, _s = tnx_cur - tnx_1y, irx_cur - irx_1y
+    _d = f"10年債{_l:+.2f}pt・3ヶ月{_s:+.2f}pt/1年"
+    _slope = _l - _s
+    if abs(_slope) < 0.15:
+        return {"key": "parallel", "label": "平行移動", "detail": _d, "long_chg": _l, "short_chg": _s}
+    if _slope > 0:
+        if _l > 0:
+            return {"key": "bear_steep", "label": "ベア・スティープ（長期金利の上昇主導）",
+                    "detail": _d, "long_chg": _l, "short_chg": _s}
+        return {"key": "bull_steep", "label": "ブル・スティープ（短期金利の低下主導）",
+                "detail": _d, "long_chg": _l, "short_chg": _s}
+    if _s > 0:
+        return {"key": "bear_flat", "label": "ベア・フラット（短期金利の上昇主導）",
+                "detail": _d, "long_chg": _l, "short_chg": _s}
+    return {"key": "bull_flat", "label": "ブル・フラット（長期金利の低下主導）",
+            "detail": _d, "long_chg": _l, "short_chg": _s}
+
+
+def _build_stock_vs_bond_summary(r: dict) -> Optional[dict]:
+    """金利カードの数値だけから「今、株に投資する妙味はあるか」を決定論的に言語化する
+    （AIを使わないので数値と必ず一致し、途中切れや捏造の心配がない）。
+    Returns: {"headline": str, "points": [str, ...], "favored": [str, ...]} または None"""
+    _eg, _reg = r.get("equity_yield_gap"), r.get("real_equity_gap")
+    _ey, _tnx = r.get("earnings_yield"), r.get("tnx_cur")
+    if _eg is None or _ey is None or _tnx is None:
+        return None
+    points, favored = [], []
+
+    # ① 株 vs 債券（名目・実質）
+    if _eg < 0 and (_reg is None or _reg > 0):
+        headline = "株は債券に対して割高。ただしインフレ調整後はまだ僅かに優位 → 妙味は薄く、今後のリターンは利益成長頼み"
+    elif _eg < 0:
+        headline = "株は名目でも実質でも債券に見劣り → 割高感が強く、金利上昇に弱い局面"
+    elif _eg <= 2:
+        headline = "株の債券に対する優位は小さい（中立）"
+    else:
+        headline = "株は債券に対して相対的に妙味あり"
+    points.append(
+        f"S&P500の益回り{_ey:.1f}%に対し10年債利回り{_tnx:.2f}%（差{_eg:+.2f}pt）。"
+        + ("今の利益水準だけで見れば、ほぼ確実な国債のほうが利回りが高い状態です。" if _eg < 0
+           else "株のほうが利回り面で上回っています。")
+    )
+    if _reg is not None:
+        points.append(
+            f"株の利益はインフレに連動して伸びるため、実質10年金利（{r.get('real_yield_core'):+.2f}%）と比べると"
+            f"差は{_reg:+.2f}pt" + ("で、株はまだ上回っています（妙味はゼロではない）。" if _reg > 0
+                                    else "で、実質でも株が劣後しています。")
+        )
+
+    # ② イールドカーブの「中身」
+    _ct, _yc = r.get("curve_type"), r.get("yield_curve")
+    if _yc is not None and _yc < 0:
+        points.append(f"逆イールド（{_yc:+.2f}pt）：市場は将来の利下げや景気後退を織り込んでいます。")
+    elif _ct:
+        _msg = {
+            "bear_steep": "順イールドだが、短期金利ではなく長期金利の上昇で傾いた形。インフレ・財政懸念による"
+                          "長期金利上昇は、株の割高感をさらに強める向かい風で「順イールド＝安心」とは言えません。",
+            "bull_steep": "短期金利の低下（利下げ期待）で傾いた順イールド。景気回復局面に多く、株には追い風になりやすい形です。",
+            "bear_flat":  "短期金利の上昇（利上げ）で傾きが縮小。引き締めが景気を冷やし始めるサインに注意。",
+            "bull_flat":  "長期金利の低下で傾きが縮小。株の評価には追い風だが、景気減速を織り込み始めている可能性。",
+            "parallel":   "長短金利がほぼ同じだけ動いており、傾きの変化からは強いシグナルは出ていません。",
+        }[_ct["key"]]
+        points.append(f"イールドカーブ{_yc:+.2f}pt・{_ct['label']}（{_ct['detail']}）。{_msg}")
+
+    # ③ 金利上昇のスピード
+    if r.get("tnx_1y") is not None:
+        _chg = _tnx - r["tnx_1y"]
+        if _chg >= 1.0:
+            points.append(f"10年債利回りは1年で{_chg:+.2f}ptと速いペースで上昇中。水準より「スピード」が株価の重しになりやすい局面です。")
+
+    if _eg < 0 or (_ct and _ct["key"] == "bear_steep"):
+        favored = ["利益の伸びが確かな銘柄（割高さを利益成長で正当化できる）", "PERの低い割安株・高配当株",
+                   "利回り5%前後が取れる短〜中期の債券・預金"]
+    return {"headline": headline, "points": points, "favored": favored}
+
+
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
 def generate_rate_inflation_narrative(date_str: str) -> dict:
     """💡 金利とインフレの関係解説。FF金利・10年債利回り・CPIのライブ数値と、
@@ -12034,26 +12117,42 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     # （Fedモデル/エクイティ・リスクプレミアムの簡易版）。差が小さい/マイナスほど、
     # 株式が債券対比で割高＝金利上昇を吸収する「のりしろ」が乏しいと解釈できる。
     _equity_yield_gap = None
+    _earnings_yield = None
     try:
         _spy_pe = yf.Ticker("SPY").info.get("trailingPE")
         if _spy_pe and _spy_pe > 0 and _tnx_cur is not None:
-            _equity_yield_gap = round((1 / _spy_pe * 100) - _tnx_cur, 2)
+            _earnings_yield = round(1 / _spy_pe * 100, 2)
+            _equity_yield_gap = round(_earnings_yield - _tnx_cur, 2)
     except Exception:
         pass
+    # 株の利益はインフレに連動して伸びるのに対し債券の利回りは名目で固定のため、名目の
+    # Fedモデルは株に厳しめに出る。実質金利（コアCPI基準）と比べた差も併記する。
+    _real_equity_gap = (
+        round(_earnings_yield - _real_yield_core, 2)
+        if (_earnings_yield is not None and _real_yield_core is not None) else None
+    )
 
     # イールドカーブ（10年−3ヶ月）。逆イールドは市場が将来の利下げ（またはリセッション）を
-    # 織り込んでいるサイン。
+    # 織り込んでいるサイン。同じ順イールドでも「長期金利の上昇で傾いた（ベア・スティープ）」
+    # のか「短期金利の低下で傾いた（ブル・スティープ）」のかで株への意味が逆になるため、
+    # 1年前との比較で傾きの変化の主因も判定する。
     _yield_curve = None
+    _irx_cur = _irx_1y = None
     try:
-        _irx_raw = yf.download("^IRX", period="5d", interval="1d",
+        _irx_raw = yf.download("^IRX", period="1y", interval="1d",
                                 progress=False, auto_adjust=True, timeout=15)
         _irx = _irx_raw["Close"].dropna() if not _irx_raw.empty else pd.Series(dtype=float)
         if hasattr(_irx, "columns"):
             _irx = _irx.iloc[:, 0]
-        if len(_irx) and _tnx_cur is not None:
-            _yield_curve = round(_tnx_cur - float(_irx.iloc[-1]), 2)
+        if len(_irx):
+            _irx_cur = float(_irx.iloc[-1])
+            if len(_irx) >= 200:
+                _irx_1y = float(_irx.iloc[0])
+        if _irx_cur is not None and _tnx_cur is not None:
+            _yield_curve = round(_tnx_cur - _irx_cur, 2)
     except Exception:
         pass
+    _curve_type = _classify_curve_move(_tnx_cur, _tnx_1y, _irx_cur, _irx_1y)
 
     if _ff_rate is None and _tnx_cur is None and _cpi_yoy is None:
         return {"ok": False, "reason": "金利・インフレのライブデータを取得できませんでした。"}
@@ -12079,6 +12178,10 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _live_lines.append(f"株式益回り(SPY)−10年債利回り（簡易エクイティ・リスクプレミアム）: {_equity_yield_gap:+.2f}pt")
     if _yield_curve is not None:
         _live_lines.append(f"イールドカーブ（10年−3ヶ月）: {_yield_curve:+.2f}pt")
+    if _curve_type:
+        _live_lines.append(f"直近1年のイールドカーブ変化の型: {_curve_type['label']}（{_curve_type['detail']}）")
+    if _real_equity_gap is not None:
+        _live_lines.append(f"株式益回り−実質10年金利(コアCPI基準): {_real_equity_gap:+.2f}pt")
     _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
 
     _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
@@ -12129,6 +12232,8 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         "r_star": _R_STAR_LATEST,
         "taylor_rate": _taylor_rate, "taylor_gap": _taylor_gap,
         "equity_yield_gap": _equity_yield_gap, "yield_curve": _yield_curve,
+        "earnings_yield": _earnings_yield, "real_equity_gap": _real_equity_gap,
+        "irx_cur": _irx_cur, "curve_type": _curve_type,
         "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
@@ -12204,12 +12309,48 @@ def render_rate_inflation_card():
             "観点": "イールドカーブ(10y-3m)", "現在値": f"{_result['yield_curve']:+.2f}pt",
             "判定": _verdict, "補足": "逆イールドは市場が将来の政策転換を織り込んでいるサイン",
         })
+    if _result.get("curve_type"):
+        _ct = _result["curve_type"]
+        _persp_rows.append({
+            "観点": "カーブ変化の型(直近1年)", "現在値": _ct["detail"],
+            "判定": {"bear_steep": "🔴 ", "bear_flat": "🟡 ", "bull_steep": "🟢 ",
+                     "bull_flat": "🟡 ", "parallel": "⚪ "}[_ct["key"]] + _ct["label"],
+            "補足": "同じ順イールドでも長期金利の上昇で傾いた形（ベア・スティープ）は株に向かい風",
+        })
+    if _result.get("real_equity_gap") is not None:
+        _reg = _result["real_equity_gap"]
+        _persp_rows.append({
+            "観点": "株式益回り−実質10年金利", "現在値": f"{_reg:+.2f}pt",
+            "判定": "🔴 実質でも割高" if _reg < 0 else "🟢 株式に妙味あり" if _reg > 2 else "🟡 妙味は薄い",
+            "補足": "株の利益はインフレで伸びるため、名目のFedモデルより株に公平な比較",
+        })
     if _persp_rows:
         st.caption("🧭 複数の視点で見る「金利の余地」")
         st.dataframe(pd.DataFrame(_persp_rows), use_container_width=True, hide_index=True)
         st.caption(
             "各観点は前提・仮定が異なるため、必ずしも一致しません。割れている場合はそれ自体が"
             "「判断が難しい局面」であることを示します（詳細はタブ内の解説文参照）。"
+        )
+
+    # ── 株式投資の観点からのまとめ（数値から決定論的に生成） ──────────
+    _sb = _build_stock_vs_bond_summary(_result)
+    if _sb:
+        _pts = "".join(f"<li style='margin-bottom:4px'>{_p}</li>" for _p in _sb["points"])
+        _fav = (
+            "<div style='margin-top:8px;color:#94a3b8;font-size:12px'>こういう局面で相対的に有利になりやすいもの：</div>"
+            + "<ul style='margin:4px 0 0 18px;padding:0;color:#cbd5e1'>"
+            + "".join(f"<li>{_f}</li>" for _f in _sb["favored"]) + "</ul>"
+        ) if _sb["favored"] else ""
+        st.markdown(
+            f'<div style="background:#0f2027;border:1px solid #0e7490;border-radius:8px;'
+            f'padding:12px 16px;font-size:13px;color:#e2e8f0;line-height:1.7;margin-top:8px">'
+            f'<div style="font-size:12px;color:#67e8f9;font-weight:700;margin-bottom:4px">'
+            f'📝 株式投資の観点からのまとめ（ダッシュボードの数値から自動生成）</div>'
+            f'<div style="font-size:14px;font-weight:700;color:#a5f3fc;margin-bottom:6px">{_sb["headline"]}</div>'
+            f'<ul style="margin:0 0 0 18px;padding:0">{_pts}</ul>{_fav}'
+            f'<div style="margin-top:8px;color:#64748b;font-size:11px">数値からの一般的な読み方であり、個別の投資判断の推奨ではありません。</div>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
 
     if _result.get("verdict"):
