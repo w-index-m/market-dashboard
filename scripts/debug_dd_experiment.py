@@ -93,3 +93,33 @@ for nm, cols in [
 ]:
     evaluate(nm, cols)
     evaluate(nm + " C=0.01", cols, C=0.01)
+
+print("\n=== 安定した指標だけの単純合成スコア（学習なし・1年パーセンタイルの平均）===")
+
+
+def pct1y(s):
+    return s.rolling(252).rank(pct=True)
+
+
+g = pd.DataFrame(index=idx)
+g["vix"] = pct1y(px["^VIX"])
+g["volr"] = pct1y(r.rolling(20).std() / r.rolling(120).std())
+g["vixterm"] = pct1y(px["^VIX"] / px["^VIX3M"])
+g["below_trend"] = 1 - pct1y(spy / spy.rolling(200).mean() - 1)
+g["dd252"] = 1 - pct1y(spy / spy.rolling(252).max() - 1)
+gd = g.join(y.rename("y")).dropna()
+GY = gd["y"].astype(int).values
+gsplits = list(TimeSeriesSplit(n_splits=5, gap=H).split(gd))
+for nm, cols in [("A: VIXのみ", ["vix"]), ("B: VIX+ボラ比", ["vix", "volr"]),
+                 ("C: B+VIX期間構造", ["vix", "volr", "vixterm"]),
+                 ("D: C+トレンド割れ", ["vix", "volr", "vixterm", "below_trend"]),
+                 ("E: D+高値からの下落", ["vix", "volr", "vixterm", "below_trend", "dd252"]),
+                 ("F: VIX+ボラ比+トレンド割れ", ["vix", "volr", "below_trend"])]:
+    sc = gd[cols].mean(axis=1).values
+    aucs = [roc_auc_score(GY[te], sc[te]) for _, te in gsplits]
+    te_all = np.concatenate([te for _, te in gsplits])
+    q = pd.qcut(sc[te_all], 5, labels=False, duplicates="drop")
+    rates = [round(float(GY[te_all][q == k].mean()), 3) for k in range(int(q.max()) + 1)]
+    print(f"  {nm:24s} AUC={roc_auc_score(GY[te_all], sc[te_all]):.3f} "
+          f"PR-AUC={average_precision_score(GY[te_all], sc[te_all]):.3f} (基準{GY[te_all].mean():.3f}) "
+          f"folds={list(np.round(aucs, 2))} 5分位別の発生率={rates}")
