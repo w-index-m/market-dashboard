@@ -23556,7 +23556,7 @@ def _generate_replacement_rec(
 
 【制約】
 ・解放資金 {freed_str} で実際に購入可能な価格帯の銘柄を優先
-・日本株は最低100株単元。株価×100が解放資金以内のものを優先
+・日本株は単元未満株（ミニ株）で10株単位から購入可能。株価×10が解放資金以内のものを優先
 ・根拠は20字以内で端的に
 
 以下のJSONのみで回答:
@@ -27003,7 +27003,7 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
             _px = _d.get("price", 0) or 0
             if _px <= 0:
                 continue
-            _min = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+            _min = (_px * _JP_MINI_LOT_SIZE if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
                     else _px if _tk.endswith(".T") else _px * _usdjpy)
             if _min > _max_per:
                 continue
@@ -27023,7 +27023,7 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         _px = _d.get("price", 0) or 0
         if _px <= 0:
             continue
-        _min = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+        _min = (_px * _JP_MINI_LOT_SIZE if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
                 else _px if _tk.endswith(".T") else _px * _usdjpy)
         if _min > _max_per:
             continue
@@ -27095,12 +27095,19 @@ _TRADING_CANDIDATES = [
     "2914.T",   # JT（日本たばこ産業）
 ]
 
-# 日本ETF（1口から購入可能 → 100株単元ルール適用外）
+# 日本ETF（1口から購入可能 → ミニ株ロットルール適用外）
 _JP_ETF_TICKERS = {
     "1321.T", "1329.T", "1330.T", "1346.T",
     "2244.T", "2558.T", "2513.T", "2516.T",
     "1476.T",
 }
+
+# 日本個別株の最低購入単位。以前は証券会社の通常注文にあわせて100株単元(1単元)を
+# 前提にしていたが、SBI証券S株・楽天証券かぶミニ・マネックスワン株等の単元未満株
+# （ミニ株）サービスが一般化しているため、10株単位まで許容するよう変更した
+# （1株単位のサービスもあるが、まとめ買い時の約定価格のブレを考慮して10株を採用）。
+# 日本ETF（_JP_ETF_TICKERS）は元々1口単位のためこの定数の対象外。
+_JP_MINI_LOT_SIZE = 10
 
 # Claude オリジナル AI テーマバスケット（AIミックスモード専用候補銘柄）
 _CLAUDE_AI_BASKET = {
@@ -28050,8 +28057,8 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         # 購入可否チェック
         if _price > 0:
             if _tk.endswith(".T") and _tk not in _JP_ETF_TICKERS:
-                _min_cost = _price * 100  # 日本個別株: 100株単元
-                _lot_label = "1単元(100株)"
+                _min_cost = _price * _JP_MINI_LOT_SIZE  # 日本個別株: ミニ株10株単位
+                _lot_label = f"ミニ株{_JP_MINI_LOT_SIZE}株単位"
             elif _tk.endswith(".T"):
                 _min_cost = _price * 1    # 日本ETF: 1口から
                 _lot_label = "1口"
@@ -28097,7 +28104,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         _min_note = ""
         if _price > 0 and budget > 0:
             if _tk.endswith(".T") and _tk not in _JP_ETF_TICKERS:
-                _min_cost = _price * 100  # 個別株100株単元
+                _min_cost = _price * _JP_MINI_LOT_SIZE  # 日本個別株: ミニ株10株単位
             elif _tk.endswith(".T"):
                 _min_cost = _price        # 日本ETF 1口
             else:
@@ -28449,7 +28456,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             _px = _cperf_d.get("price", 0) or 0
             _min_note = ""
             if _px > 0 and budget > 0:
-                _mc = (_px * 100 if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+                _mc = (_px * _JP_MINI_LOT_SIZE if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
                        else _px if _tk.endswith(".T") else _px * 150)
                 _mp = int(_mc / budget * 100) + 1
                 if _mp >= 3:
@@ -28616,8 +28623,8 @@ else ""}
 ・各銘柄の比率合計は{_invest_pct}%（残り{_cash_reserve}%はキャッシュ保持）
 ・投資金額 = 予算 × 比率
 ・【重要】予算{budget_str}で実際に購入できる銘柄のみ選定:
-  米国株 1株・日本ETF 1口・日本個別株 100株単元
-  → 株価¥{int(budget*0.25/100):,}以下の日本個別株のみ選定可
+  米国株 1株・日本ETF 1口・日本個別株 ミニ株{_JP_MINI_LOT_SIZE}株単位
+  → 株価¥{int(budget*0.25/_JP_MINI_LOT_SIZE):,}以下の日本個別株のみ選定可
   → ⛔リスト銘柄は絶対に選定禁止
 ・各銘柄に rationale(20字)・merits(2〜3点)・demerits(1〜2点)・conclusion(60字)を必ず設ける
 ・meritsは上記【実株価モメンタムデータ】の価格・リターンのみを根拠にすること。
@@ -28676,7 +28683,7 @@ else ""}
                 if _pr2 <= 0:
                     continue
                 if _tk2.endswith(".T") and _tk2 not in _JP_ETF_TICKERS:
-                    _min_cost2 = _pr2 * 100   # 個別株100株単元
+                    _min_cost2 = _pr2 * _JP_MINI_LOT_SIZE   # 日本個別株: ミニ株10株単位
                 elif _tk2.endswith(".T"):
                     _min_cost2 = _pr2          # 日本ETF 1口
                 else:
@@ -30534,8 +30541,8 @@ def render_claude_trading_project():
                                     # 購入可能株数
                                     if _rp_cpr and _rp_cpr > 0:
                                         if _rp_ct.endswith(".T"):
-                                            _rp_lots = max(1, int(_rp_half / (_rp_cpr * 100)))
-                                            _rp_shr_str = f"{_rp_lots}単元({_rp_lots*100}株) ¥{_rp_cpr:,.0f}/株"
+                                            _rp_lots = max(1, int(_rp_half / (_rp_cpr * _JP_MINI_LOT_SIZE)))
+                                            _rp_shr_str = f"{_rp_lots*_JP_MINI_LOT_SIZE}株（ミニ株{_JP_MINI_LOT_SIZE}株単位） ¥{_rp_cpr:,.0f}/株"
                                         else:
                                             _rp_cpr_jpy = _rp_cpr * _rp_cprice_usdjpy
                                             _rp_shrs = max(1, int(_rp_half / _rp_cpr_jpy))
@@ -31040,17 +31047,17 @@ def render_claude_trading_project():
                                         _shares_str  = f"{_units:,}口"
                                         _price_str   = f"¥{_price:,.0f}/口"
                                 else:
-                                    _lot_cost = _price * 100
+                                    _lot_cost = _price * _JP_MINI_LOT_SIZE
                                     _lots     = int(_amt / _lot_cost)  # max(1)なし — 予算超過を強制しない
                                     if _lots == 0:
-                                        # 1単元が配分予算を超える場合は予算外表示
-                                        _shares_str  = f"⚠️ 予算外（1単元¥{_lot_cost:,.0f}）"
+                                        # ミニ株1単位(10株)が配分予算を超える場合は予算外表示
+                                        _shares_str  = f"⚠️ 予算外（{_JP_MINI_LOT_SIZE}株¥{_lot_cost:,.0f}）"
                                         _price_str   = f"¥{_price:,.0f}/株"
                                         _actual_cost = 0
                                     else:
-                                        _shares      = _lots * 100
+                                        _shares      = _lots * _JP_MINI_LOT_SIZE
                                         _actual_cost = int(_lots * _lot_cost)
-                                        _shares_str  = f"{_shares:,}株 ({_lots}単元)"
+                                        _shares_str  = f"{_shares:,}株（ミニ株{_JP_MINI_LOT_SIZE}株単位）"
                                         _price_str   = f"¥{_price:,.0f}/株"
                             else:
                                 _price_jpy = _price * _usdjpy
@@ -31261,7 +31268,7 @@ def render_claude_trading_project():
                         for _it in _ip_pf if float(_it.get("allocation", 0)) > 0
                     )
                     if _has_jp:
-                        _cash_reasons.append("日本株の100株単元ロット丸め")
+                        _cash_reasons.append(f"日本株のミニ株{_JP_MINI_LOT_SIZE}株単位ロット丸め")
                     _ai_comment = _ip_met.get("comment", "")
                     _cash_reason_str = " ／ ".join(_cash_reasons) if _cash_reasons else "単元ロット丸めによる端数"
                     _cash_color = "#ef4444" if _inv_pct < 60 else "#fbbf24" if _inv_pct < 85 else "#4ade80"
@@ -32150,9 +32157,9 @@ def render_claude_trading_project():
                                     # 株数計算
                                     if _rpr and _rpr > 0:
                                         if _rjp:
-                                            _rlots = max(1, int(_freed_jpy / (_rpr * 100)))
-                                            _rshares_str = f"{_rlots*100:,}株({_rlots}単元)"
-                                            _rcost_str   = f"≒¥{int(_rlots*_rpr*100):,}"
+                                            _rlots = max(1, int(_freed_jpy / (_rpr * _JP_MINI_LOT_SIZE)))
+                                            _rshares_str = f"{_rlots*_JP_MINI_LOT_SIZE:,}株（ミニ株{_JP_MINI_LOT_SIZE}株単位）"
+                                            _rcost_str   = f"≒¥{int(_rlots*_rpr*_JP_MINI_LOT_SIZE):,}"
                                         else:
                                             _rpjpy   = _rpr * _rep_usdjpy
                                             _rshares = max(1, int(_freed_jpy / _rpjpy))
