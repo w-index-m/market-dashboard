@@ -85,12 +85,13 @@ def _dd():
         print("drawdown model failed:", dd.get("reason"))
         return
     ev = dd["eval"]
-    print(f"  as_of={dd['as_of']} train={dd['train_start']}~ n={dd['n_train']} features={len(dd['features'])}")
-    print(f"  prob_now={dd['prob_now']}% base_rate={dd['base_rate']}% ratio={dd['ratio']}")
+    print(f"  as_of={dd['as_of']} train={dd['train_start']}~ n={dd['n_train']} vix={dd['vix_now']} pct={dd['vix_pct']}")
+    print(f"  prob_now={dd['prob_now']}% base_rate={dd['base_rate']}% ratio={dd['ratio']} bucket={dd['bucket_label']}")
+    for row in dd["table"]:
+        print("   ", row)
     print("  eval:", {k: ev.get(k) for k in ("prevalence", "pr_auc", "precision", "recall", "alert_rate", "auc")})
     print("  calibration:", ev.get("calibration"))
     print("  folds:", ev.get("folds"))
-    print("  top drivers:", dd["contrib"][:5])
 
 
 _show("US direction models (existing)", _us)

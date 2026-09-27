@@ -5586,93 +5586,84 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
 # ── 下落リスクモデル（今後20営業日でS&P500が5%以上下落するか） ─────────────
 _DD_HORIZON = 20       # 何営業日先までを見るか
 _DD_THRESHOLD = -0.05  # その間の最安値が今日の終値から何%下がったら「下落」とみなすか
-_DD_FEATURE_LABELS = {
-    "spy_ret20": "S&P500 20日リターン", "spy_ret60": "S&P500 60日リターン",
-    "spy_dist200": "S&P500 200日線乖離", "spy_vol20": "S&P500 20日ボラティリティ",
-    "vix": "VIX水準", "vix_term": "VIX/VIX3M（1超=短期不安）",
-    "curve": "イールドカーブ(10y-3m)", "curve_ch20": "カーブ 20日変化",
-    "tnx_ch20": "米10年債 20日変化", "credit_20": "HY債/IG債 20日", "credit_60": "HY債/IG債 60日",
-    "sb_corr60": "株と債券の60日相関", "usdjpy_ch20": "ドル円 20日変化",
-    "usjp_spread_ch60": "日米金利差 60日変化",
-}
+_DD_BUCKET_LABELS = ["非常に低い", "低い", "中程度", "高い", "非常に高い"]
+
+
+class _BucketRateModel:
+    """スコアを学習期間の5分位に区切り、各区分で実際にイベントが起きた割合をそのまま
+    確率として返す、最も単純で解釈しやすい「モデル」。係数を推定しないので時期によって
+    向きが反転することがなく、出力は構造上「過去の同じ水準での実際の発生率」になる。
+    sklearn互換（fit/predict_proba）なので_walk_forward_evalでそのまま検証できる。"""
+
+    def __init__(self, n_buckets: int = 5):
+        self.n_buckets = n_buckets
+
+    def fit(self, X, y):
+        sc = np.asarray(X)[:, 0]
+        self.edges_ = np.unique(np.quantile(sc, np.linspace(0, 1, self.n_buckets + 1)[1:-1]))
+        b = np.searchsorted(self.edges_, sc, side="right")
+        _prior = float(np.mean(y))
+        # 件数の少ない区分が極端な値にならないよう、全体の発生率へ少し引き寄せる
+        self.rates_ = np.array([(np.sum(y[b == k]) + _prior * 5) / (np.sum(b == k) + 5)
+                                for k in range(len(self.edges_) + 1)])
+        self.counts_ = np.array([int(np.sum(b == k)) for k in range(len(self.edges_) + 1)])
+        return self
+
+    def bucket(self, X):
+        return np.searchsorted(self.edges_, np.asarray(X)[:, 0], side="right")
+
+    def predict_proba(self, X):
+        p = self.rates_[self.bucket(X)]
+        return np.column_stack([1 - p, p])
 
 
 @st.cache_data(ttl=TTL_DAILY * 6, show_spinner=False)
 def compute_drawdown_risk_model() -> Dict[str, Any]:
-    """「今後20営業日のうちにS&P500が今日の終値から5%以上下落するか」を当てるモデル。
-    翌日の上げ下げと違い、金利・信用・相関・為替といったマクロ寄りの指標が効きやすい
-    時間軸を狙う。特徴量は全て日次・無料・事後改定のない市場データのみ（月次の経済指標は
-    発表日のずれと改定により未来情報が混入しやすいため使わない）。水準ではなく変化幅・
-    比率を中心にして、相場環境による水準の違いに引きずられにくくしている。
-    評価はウォークフォワード（学習と検証の間に20日の空白を置き、ラベル期間の重なりに
-    よる情報漏れを防ぐ）で、稀なイベントなので正解率ではなく適合率・再現率・PR-AUCを見る。
+    """「今後20営業日のうちにS&P500が今日の終値から5%以上下落するか」の確率を、
+    VIXが過去1年のどの位置にあるか（パーセンタイル）から推定する。
+
+    2026-09に2012〜2026年の実データで17の候補指標を検証した結果（scripts/debug_dd_experiment.py）、
+    5つの検証期間すべてで一貫した信号を持ったのはボラティリティ系だけだった。VIXの1年
+    パーセンタイル単独がAUC0.70（全期間0.64〜0.82）と最も良く、複数指標の合成やロジスティック
+    回帰は改善しなかった。信用スプレッド・イールドカーブ・10年債・ドル円・株債相関は、
+    期間によって向きが反転し（AUC0.18〜0.81）、20日先の下落予測には安定して使えなかった
+    （これらは中長期の割高度・シナリオ判断用として金利カード側で使う）。
     """
-    if not SKLEARN_AVAILABLE:
-        return {"ok": False, "reason": "scikit-learnが未インストールです。"}
     try:
-        _tickers = ["SPY", "^VIX", "^VIX3M", "^TNX", "^IRX", "HYG", "LQD", "TLT", "JPY=X"]
-        _raw = yf.download(_tickers, period="15y", interval="1d", progress=False,
+        _raw = yf.download(["SPY", "^VIX"], period="15y", interval="1d", progress=False,
                            auto_adjust=True, timeout=60)["Close"]
-        if "SPY" not in _raw or _raw["SPY"].dropna().empty:
-            return {"ok": False, "reason": "S&P500のデータを取得できませんでした。"}
-        _idx = _raw["SPY"].dropna().index
-        px = _raw.reindex(_idx).ffill(limit=5)
-        spy = px["SPY"]
+        spy = _raw["SPY"].dropna()
+        vix = _raw["^VIX"].reindex(spy.index).ffill(limit=5)
+        if len(spy) < 1000 or vix.dropna().empty:
+            return {"ok": False, "reason": "S&P500/VIXのデータを取得できませんでした。"}
 
-        f = pd.DataFrame(index=_idx)
-        _r = spy.pct_change()
-        f["spy_ret20"] = spy.pct_change(20)
-        f["spy_ret60"] = spy.pct_change(60)
-        f["spy_dist200"] = spy / spy.rolling(200).mean() - 1
-        f["spy_vol20"] = _r.rolling(20).std() * np.sqrt(252)
-        f["vix"] = px["^VIX"]
-        f["vix_term"] = px["^VIX"] / px["^VIX3M"]
-        f["curve"] = px["^TNX"] - px["^IRX"]
-        f["curve_ch20"] = f["curve"].diff(20)
-        f["tnx_ch20"] = px["^TNX"].diff(20)
-        _cr = px["HYG"] / px["LQD"]
-        f["credit_20"] = _cr.pct_change(20)
-        f["credit_60"] = _cr.pct_change(60)
-        f["sb_corr60"] = _r.rolling(60).corr(px["TLT"].pct_change())
-        f["usdjpy_ch20"] = px["JPY=X"].pct_change(20)
-        _jgb = _fetch_jgb10y_history(period="max")
-        if not _jgb.empty:
-            _jy = _jgb["yield"].copy()
-            if getattr(_jy.index, "tz", None) is not None:
-                _jy.index = _jy.index.tz_localize(None)
-            _spy_idx = _idx.tz_localize(None) if getattr(_idx, "tz", None) is not None else _idx
-            _jy = _jy[~_jy.index.duplicated()].reindex(_spy_idx, method="ffill", limit=5)
-            _jy.index = _idx
-            f["usjp_spread_ch60"] = (px["^TNX"] - _jy).diff(60)
-
-        # ラベル: 翌営業日〜20営業日後の終値の最安値が、今日の終値から5%以上下なら1
+        score = vix.rolling(252).rank(pct=True)
         _fwd_min = pd.concat([spy.shift(-k) for k in range(1, _DD_HORIZON + 1)], axis=1).min(axis=1)
-        _label = (_fwd_min / spy - 1 <= _DD_THRESHOLD).astype(float)
-        _label[_fwd_min.isna()] = np.nan  # 直近20日分はまだ答えが出ていない
+        _dd = (_fwd_min / spy - 1).where(_fwd_min.notna())
+        _label = (_dd <= _DD_THRESHOLD).astype(float).where(_dd.notna())
 
-        _cols = [c for c in _DD_FEATURE_LABELS if c in f.columns and f[c].notna().sum() > 1000]
-        _data = f[_cols].replace([np.inf, -np.inf], np.nan)
-        _latest_row = _data.dropna().iloc[-1:] if not _data.dropna().empty else None
-        _train = _data.join(_label.rename("y")).dropna()
-        if len(_train) < 750 or _latest_row is None:
+        _now = score.dropna()
+        if _now.empty:
+            return {"ok": False, "reason": "VIXのパーセンタイルを計算できませんでした。"}
+        _train = pd.DataFrame({"score": score, "y": _label}).dropna()
+        if len(_train) < 750:
             return {"ok": False, "reason": f"学習データ不足（{len(_train)}件）"}
-        X, y = _train[_cols].values, _train["y"].astype(int).values
+        X, y = _train[["score"]].values, _train["y"].astype(int).values
 
-        ev = _walk_forward_eval(X, y, lambda: _make_lr_pipeline(C=0.1), n_splits=5,
-                                gap=_DD_HORIZON, threshold_mult=2.0)
-        final = _make_lr_pipeline(C=0.1)
-        final.fit(X, y)
-        _p_now = float(final.predict_proba(_latest_row[_cols].values)[0, 1])
+        ev = _walk_forward_eval(X, y, _BucketRateModel, n_splits=5, gap=_DD_HORIZON, threshold_mult=1.5)
+        model = _BucketRateModel().fit(X, y)
+        _x_now = np.array([[float(_now.iloc[-1])]])
+        _p_now = float(model.predict_proba(_x_now)[0, 1])
+        _b_now = int(model.bucket(_x_now)[0])
         _base = float(y.mean())
 
-        # 今日の確率を押し上げ/押し下げている要因（標準化後の値×係数）
-        _scaler, _lr = final.named_steps["standardscaler"], final.named_steps["logisticregression"]
-        _z = _scaler.transform(_latest_row[_cols].values)[0]
-        _contrib = sorted(
-            ({"要因": _DD_FEATURE_LABELS[c], "今日の値": round(float(_latest_row[c].iloc[0]), 4),
-              "寄与": round(float(_z[i] * _lr.coef_[0][i]), 3)} for i, c in enumerate(_cols)),
-            key=lambda d: abs(d["寄与"]), reverse=True,
-        )
+        _lo = np.concatenate([[0.0], model.edges_])
+        _hi = np.concatenate([model.edges_, [1.0]])
+        _table = [{
+            "VIXの1年内の位置": f"{_lo[k] * 100:.0f}〜{_hi[k] * 100:.0f}%（{_DD_BUCKET_LABELS[k] if k < 5 else ''}）",
+            "20日以内に5%以上下落した割合": f"{model.rates_[k] * 100:.1f}%",
+            "件数": int(model.counts_[k]), "今日": "◀ 今日" if k == _b_now else "",
+        } for k in range(len(model.rates_))]
 
         _oof_n = len(ev.get("oof_p", [])) if ev.get("ok") else 0
         _hist = pd.DataFrame({"date": _train.index[-_oof_n:], "prob": ev["oof_p"], "event": ev["oof_y"]}) \
@@ -5680,9 +5671,10 @@ def compute_drawdown_risk_model() -> Dict[str, Any]:
         return {
             "ok": True, "prob_now": round(_p_now * 100, 1), "base_rate": round(_base * 100, 1),
             "ratio": round(_p_now / _base, 2) if _base > 0 else None,
-            "as_of": str(_latest_row.index[-1].date()), "n_train": len(y),
-            "train_start": str(_train.index[0].date()), "features": _cols,
-            "contrib": _contrib, "eval": ev, "history": _hist,
+            "vix_now": round(float(vix.dropna().iloc[-1]), 2), "vix_pct": round(float(_now.iloc[-1]) * 100, 1),
+            "bucket_label": _DD_BUCKET_LABELS[_b_now] if _b_now < 5 else "",
+            "as_of": str(_now.index[-1].date()), "n_train": len(y), "train_start": str(_train.index[0].date()),
+            "table": _table, "eval": ev, "history": _hist,
         }
     except Exception as e:
         logger.error(f"compute_drawdown_risk_model error: {e}", exc_info=True)
@@ -5692,48 +5684,47 @@ def compute_drawdown_risk_model() -> Dict[str, Any]:
 def render_drawdown_risk_model():
     st.markdown("#### ⚠️ 今後20営業日の下落リスク（S&P500が5%以上下落する確率）")
     st.caption(
-        "翌日の上げ下げではなく「近いうちに大きく下がる危険が高まっているか」を見るモデル。"
-        "金利・信用・株と債券の相関・為替などの日次の市場データのみを使い、"
-        "学習に使っていない期間での成績を正直に表示します。"
+        "翌日の上げ下げではなく「近いうちに大きく下がる危険が高まっているか」を見ます。"
+        "確率は「VIXが過去1年で今と同じくらいの位置にあったとき、実際に20営業日以内に5%以上下落した割合」"
+        "の実績です。"
     )
-    with st.spinner("下落リスクモデルを計算中（初回は15年分のデータ取得のため時間がかかります）..."):
+    with st.spinner("下落リスクを計算中..."):
         dd = compute_drawdown_risk_model()
     if not dd.get("ok"):
         st.error(f"計算できませんでした: {dd.get('reason')}")
         return
+    st.caption(f"集計期間: {dd['train_start']}〜（{dd['n_train']:,}営業日）")
 
     _ratio = dd.get("ratio") or 0
-    _color = "#f87171" if _ratio >= 2 else "#fbbf24" if _ratio >= 1.3 else "#4ade80"
-    _label = ("🔴 平常時の2倍以上" if _ratio >= 2 else "🟡 平常時よりやや高い" if _ratio >= 1.3
-              else "🟢 平常時並み以下")
+    _color = "#f87171" if _ratio >= 1.6 else "#fbbf24" if _ratio >= 1.15 else "#4ade80"
     st.markdown(
         f'<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px 18px;">'
-        f'<div style="font-size:12px;color:#94a3b8;">{dd["as_of"]}時点のモデル推定</div>'
+        f'<div style="font-size:12px;color:#94a3b8;">{dd["as_of"]}時点　VIX {dd["vix_now"]:.2f}'
+        f'（過去1年で下から{dd["vix_pct"]:.0f}%の位置＝{dd["bucket_label"]}）</div>'
         f'<div style="font-size:30px;font-weight:900;color:{_color};">{dd["prob_now"]:.1f}%'
-        f'<span style="font-size:14px;color:#94a3b8;font-weight:400;"> ／ 平常時の発生率 {dd["base_rate"]:.1f}%'
-        f'（{_ratio:.1f}倍）</span></div>'
-        f'<div style="font-size:14px;font-weight:700;color:{_color};">{_label}</div></div>',
+        f'<span style="font-size:14px;color:#94a3b8;font-weight:400;"> ／ 全期間の平均 {dd["base_rate"]:.1f}%'
+        f'（{_ratio:.1f}倍）</span></div></div>',
         unsafe_allow_html=True,
     )
+    st.dataframe(pd.DataFrame(dd["table"]), use_container_width=True, hide_index=True)
 
-    st.markdown("**📏 このモデルの実力（学習に使っていない期間での成績）**")
+    st.markdown("**📏 この方法の実力（各時点でそれ以前のデータだけから計算した場合の成績）**")
     _render_wf_eval_metrics(dd["eval"], rare_event=True)
-    st.caption("警報は「予測確率が学習期間の発生率の2倍以上」のときに出す設定で評価しています。")
+    st.caption("警報は「確率が学習期間の平均の1.5倍以上」のときに出す設定で評価しています。")
 
     _h = dd.get("history")
     if _h is not None and not _h.empty:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=_h["date"], y=_h["prob"] * 100, mode="lines", name="予測確率",
+        fig.add_trace(go.Scatter(x=_h["date"], y=_h["prob"] * 100, mode="lines", name="推定確率",
                                  line=dict(color="#60a5fa", width=1)))
         _ev = _h[_h["event"] == 1]
-        fig.add_trace(go.Scatter(x=_ev["date"], y=[0] * len(_ev), mode="markers", name="実際に5%以上下落した起点",
-                                 marker=dict(color="#f87171", size=4, symbol="line-ns-open")))
+        fig.add_trace(go.Scatter(x=_ev["date"], y=[0] * len(_ev), mode="markers",
+                                 name="実際に5%以上下落した起点", marker=dict(color="#f87171", size=4)))
         fig.add_hline(y=dd["base_rate"], line_dash="dot", line_color="#94a3b8",
-                      annotation_text="平常時の発生率", annotation_font_color="#94a3b8")
+                      annotation_text="全期間の平均", annotation_font_color="#94a3b8")
         fig.update_layout(
             height=300, margin=dict(l=10, r=10, t=30, b=10),
-            title=dict(text="検証期間の予測確率と実際の下落（学習に使っていない期間のみ）",
-                       font=dict(color="#e2e8f0", size=13)),
+            title=dict(text="検証期間の推定確率と実際の下落", font=dict(color="#e2e8f0", size=13)),
             paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"),
             yaxis=dict(title=dict(text="%", font=dict(color="#e2e8f0")), tickfont=dict(color="#e2e8f0"),
                        gridcolor="#334155"),
@@ -5743,9 +5734,16 @@ def render_drawdown_risk_model():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("🔍 今日の確率を押し上げ／押し下げている要因", expanded=False):
-        st.caption("寄与がプラスの要因ほど下落リスクを押し上げています（標準化した今日の値×モデルの係数）。")
-        st.dataframe(pd.DataFrame(dd["contrib"]), use_container_width=True, hide_index=True)
+    with st.expander("🔬 なぜVIXだけなのか（検証結果）", expanded=False):
+        st.markdown(
+            "2012〜2026年の実データで、17の候補指標を5つの期間に分けて検証しました（2026年9月）。\n\n"
+            "- **5期間すべてで安定して効いた**：VIXの1年内の位置（AUC 0.64〜0.82）、短期/長期ボラティリティ比\n"
+            "- **期間によって向きが反転した**：信用スプレッド、イールドカーブとその変化、10年債の変化、"
+            "ドル円、株と債券の相関（AUC 0.18〜0.81）\n"
+            "- 複数指標を組み合わせた機械学習モデルは、反転する指標に引きずられてVIX単独より悪化しました\n\n"
+            "金利・信用・為替は「20日先の急落」を当てる材料としては不安定ですが、"
+            "中長期の割高度やシナリオを考える材料としては有効です（金利カード側で使用）。"
+        )
         st.caption(f"学習期間: {dd['train_start']}〜（{dd['n_train']:,}営業日）。"
                    "過去の関係が今後も続くとは限らず、投資判断の推奨ではありません。")
 
