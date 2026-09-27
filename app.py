@@ -11856,7 +11856,9 @@ def _fetch_us_cpi_yoy(series_id: str = "CPIAUCSL") -> Optional[float]:
     try:
         r = requests.get(
             f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
-            timeout=25, headers={"User-Agent": "Mozilla/5.0"},
+            # FRED CSVが2026-09時点でGitHub Actions上からも25秒でタイムアウトする状態を確認済み。
+            # 正常時は数秒で返るため、長く待たずにBLSへ切り替える
+            timeout=10, headers={"User-Agent": "Mozilla/5.0"},
         )
         if r.status_code != 200:
             logger.warning(f"[rate_inflation] FRED CPI HTTP {r.status_code}({series_id})、BLSにフォールバック")
