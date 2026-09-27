@@ -12228,12 +12228,83 @@ def _build_stock_vs_bond_summary(r: dict) -> Optional[dict]:
             points.append(f"ハイイールド債と投資適格債の3ヶ月相対は{_c:+.2f}%で、信用市場は落ち着いています"
                           "（金利上昇がまだ企業の資金繰りを圧迫していない）。")
 
+    _corr = r.get("sb_corr_60d")
+    if _corr is not None:
+        if _corr >= 0.2:
+            points.append(f"株と長期債の60日相関は{_corr:+.2f}と同じ方向に動いており、債券は株の下落のクッションに"
+                          "なりにくい状態です（2022年型）。分散には現金・短期債・金などを組み合わせる必要があります。")
+        elif _corr <= -0.2:
+            points.append(f"株と長期債の60日相関は{_corr:+.2f}と逆方向に動いており、債券が株の下落のクッションとして機能しています。")
+        else:
+            points.append(f"株と長期債の60日相関は{_corr:+.2f}とほぼ無相関で、債券による分散効果は限定的です。")
+
     if _eg < 0 or (_ct and _ct["key"] == "bear_steep") or (_ecy is not None and _ecy < 1):
         favored = ["利益の伸びが確かな銘柄（割高さを利益成長で正当化できる）", "PERの低い割安株・高配当株",
                    "利回り5%前後が取れる短〜中期の債券・預金"]
     if _c is not None and _c <= -2.0:
         favored.append("ハイイールド債より投資適格債・国債（信用リスクを取らない）")
     return {"headline": headline, "points": points, "favored": favored}
+
+
+def _build_fx_summary(r: dict) -> Optional[dict]:
+    """円で米国株に投資する人向けに、ドル円と日米金利差の組み合わせを言語化する。"""
+    _fx, _fx1y, _fx3m = r.get("usdjpy"), r.get("usdjpy_1y"), r.get("usdjpy_3m")
+    _sp, _sp1y = r.get("us_jp_spread"), r.get("us_jp_spread_1y")
+    if _fx is None or _sp is None:
+        return None
+    _fx_chg = (_fx / _fx1y - 1) * 100 if _fx1y else None
+    _fx_chg3m = (_fx / _fx3m - 1) * 100 if _fx3m else None
+    _sp_chg = _sp - _sp1y if _sp1y is not None else None
+    points = [
+        f"ドル円{_fx:.2f}円（1年で{_fx_chg:+.1f}%、3ヶ月で{_fx_chg3m:+.1f}%）"
+        if (_fx_chg is not None and _fx_chg3m is not None) else f"ドル円{_fx:.2f}円",
+        f"日米10年金利差{_sp:.2f}pt（米{r['tnx_cur']:.2f}%−日{r['jgb_cur']:.2f}%）"
+        + (f"、1年で{_sp_chg:+.2f}pt" if _sp_chg is not None else ""),
+    ]
+    _narrowing = _sp_chg is not None and _sp_chg <= -0.3
+    _widening = _sp_chg is not None and _sp_chg >= 0.3
+    _yen_weak = _fx_chg is not None and _fx_chg > 0
+    if _narrowing and not _yen_weak:
+        headline = "金利差の縮小と円高が同時進行 → 円ベースの米国株リターンが目減りしやすい"
+    elif _narrowing and _yen_weak:
+        headline = "金利差は縮んでいるのに円安のまま → 巻き戻しが起きると円高が急になりやすい（2024年8月型に警戒）"
+    elif _widening:
+        headline = "日米金利差が拡大し円安方向を支える → 円ベースでは米国株リターンの追い風"
+    else:
+        headline = "日米金利差は大きく変わらず、為替からの追い風・向かい風は限定的"
+    points.append(
+        "円で投資する場合、米国株が+10%でも円高が10%進めば利益はほぼゼロになります。為替ヘッジをすると"
+        "為替変動は抑えられますが、概ね日米の短期金利差分のコスト（年率）がかかります。"
+    )
+    return {"headline": headline, "points": points, "favored": []}
+
+
+def _build_rate_scenarios(r: dict) -> list:
+    """「利上げ継続／様子見／利下げ転換」の3シナリオを、次回FOMCの市場織り込み確率
+    （FF先物から算出）と、それぞれのシナリオが現実になる条件（監視する数値と現在値）で表にする。
+    各シナリオの資産への影響は教科書的な方向感であり、価格予想ではない。"""
+    def _v(k, fmt):
+        return fmt.format(r[k]) if r.get(k) is not None else "—"
+
+    def _p(k):
+        return f"{r[k]:.0f}%" if r.get(k) is not None else "—"
+
+    return [
+        {"シナリオ": "📈 利上げ継続", "次回FOMCの織込み": _p("prob_hike"),
+         "起きる条件（現在値）": f"コアCPI3%超（{_v('cpi_core_yoy', '{:+.1f}%')}）・PPI再加速"
+                              f"（{_v('ppi_yoy', '{:+.1f}%')}）・賃金4%超（{_v('wage_yoy', '{:+.1f}%')}）",
+         "株": "↓ 高PER・グロース株に逆風", "債券(10年)": "利回り↑", "ドル円": "円安方向"},
+        {"シナリオ": "⏸ 様子見", "次回FOMCの織込み": _p("prob_hold"),
+         "起きる条件（現在値）": "物価・雇用とも大きく崩れず、現状維持（テイラールールとの差"
+                              f"{_v('taylor_gap', '{:+.2f}pt')}）",
+         "株": "→ 企業利益次第", "債券(10年)": "横ばい〜財政要因で上下", "ドル円": "横ばい"},
+        {"シナリオ": "📉 利下げ転換", "次回FOMCの織込み": _p("prob_cut"),
+         "起きる条件（現在値）": f"失業率が直近最低+0.5pt（{_v('unemp', '{:.1f}%')}、最低"
+                              f"{_v('unemp_12m_low', '{:.1f}%')}）・雇用者数が月5万人割れ"
+                              f"（{_v('nfp_3m_avg', '{:+,}千人')}）・信用市場の悪化（{_v('credit_3m', '{:+.2f}%')}）",
+         "株": "景気悪化による利下げなら一時↓→その後↑", "債券(10年)": "利回り↓（債券価格↑）",
+         "ドル円": "円高方向（円ベースでは目減り）"},
+    ]
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -12359,6 +12430,52 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         pass
     _curve_type = _classify_curve_move(_tnx_cur, _tnx_1y, _irx_cur, _irx_1y)
 
+    # ── 円で投資する視点: ドル円と日米10年金利差 ──────────────────────
+    # 円ベースの米国株リターン＝ドル建てリターン×為替。日米金利差の縮小は円高圧力になり、
+    # 金利差が縮んでいるのに円安が続いている状態は、低金利の円で借りて高金利資産を買う
+    # 「円キャリートレード」の巻き戻し（2024年8月型の円高・株安の同時進行）が起きやすい。
+    _usdjpy = _usdjpy_1y = _usdjpy_3m = None
+    try:
+        _fx = yf.download("JPY=X", period="1y", interval="1d",
+                          progress=False, auto_adjust=True, timeout=15)["Close"].dropna()
+        if hasattr(_fx, "columns"):
+            _fx = _fx.iloc[:, 0]
+        if len(_fx) > 200:
+            _usdjpy = round(float(_fx.iloc[-1]), 2)
+            _usdjpy_1y = round(float(_fx.iloc[0]), 2)
+            _usdjpy_3m = round(float(_fx.iloc[-64]), 2)
+    except Exception:
+        pass
+    _jgb_cur = _jgb_1y = None
+    try:
+        _jgb_df = _fetch_jgb10y_history(period="2y")
+        if not _jgb_df.empty:
+            _jy = _jgb_df["yield"].dropna()
+            if getattr(_jy.index, "tz", None) is not None:  # yfinanceのhistory()はtz付きindex
+                _jy.index = _jy.index.tz_localize(None)
+            _jgb_cur = round(float(_jy.iloc[-1]), 3)
+            _jy_old = _jy[_jy.index <= pd.Timestamp.now() - pd.DateOffset(years=1)]
+            if not _jy_old.empty:
+                _jgb_1y = round(float(_jy_old.iloc[-1]), 3)
+    except Exception:
+        pass
+    _us_jp_spread = round(_tnx_cur - _jgb_cur, 2) if (_tnx_cur is not None and _jgb_cur is not None) else None
+    _us_jp_spread_1y = round(_tnx_1y - _jgb_1y, 2) if (_tnx_1y is not None and _jgb_1y is not None) else None
+
+    # ── 株と債券の相関（60営業日・日次リターン） ──────────────────────
+    # マイナスなら債券が株の下落のクッションになる。2022年以降のようにプラスだと
+    # 株と債券が同時に下がりやすく、「債券で分散」の前提が崩れる。
+    _sb_corr_60d = _sb_corr_1y = None
+    try:
+        _sb = yf.download(["SPY", "TLT"], period="1y", interval="1d",
+                          progress=False, auto_adjust=True, timeout=15)["Close"].dropna()
+        _rets = _sb.pct_change().dropna()
+        if len(_rets) > 60:
+            _sb_corr_60d = round(float(_rets.tail(60)["SPY"].corr(_rets.tail(60)["TLT"])), 2)
+            _sb_corr_1y = round(float(_rets["SPY"].corr(_rets["TLT"])), 2)
+    except Exception:
+        pass
+
     if _ff_rate is None and _tnx_cur is None and _cpi_yoy is None:
         return {"ok": False, "reason": "金利・インフレのライブデータを取得できませんでした。"}
 
@@ -12401,6 +12518,12 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _live_lines.append(f"S&P500予想PER: {_spy_fpe:.1f}倍（実績PERから逆算した市場の利益成長期待{_implied_eps_growth}%）")
     if _credit_3m is not None:
         _live_lines.append(f"ハイイールド債/投資適格債 3ヶ月相対: {_credit_3m:+.2f}%（マイナス=信用スプレッド拡大方向）")
+    if _usdjpy is not None:
+        _live_lines.append(f"ドル円: {_usdjpy:.2f}円（1年前{_usdjpy_1y:.2f}円）")
+    if _us_jp_spread is not None:
+        _live_lines.append(f"日米10年金利差: {_us_jp_spread:.2f}pt（1年前{_us_jp_spread_1y}pt）")
+    if _sb_corr_60d is not None:
+        _live_lines.append(f"株(SPY)と長期債(TLT)の60日相関: {_sb_corr_60d:+.2f}（1年{_sb_corr_1y:+.2f}）")
     _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
 
     _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
@@ -12457,6 +12580,13 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         "cape": _cape, "excess_cape_yield": _excess_cape_yield,
         "forward_pe": _spy_fpe, "trailing_pe": _spy_pe, "fwd_earnings_yield": _fwd_earnings_yield,
         "implied_eps_growth": _implied_eps_growth, "credit_3m": _credit_3m,
+        "usdjpy": _usdjpy, "usdjpy_1y": _usdjpy_1y, "usdjpy_3m": _usdjpy_3m,
+        "jgb_cur": _jgb_cur, "us_jp_spread": _us_jp_spread, "us_jp_spread_1y": _us_jp_spread_1y,
+        "sb_corr_60d": _sb_corr_60d, "sb_corr_1y": _sb_corr_1y,
+        "fomc_date": _fed_prob.get("fomc_date") if _fed_prob.get("ok") else None,
+        "prob_hike": _fed_prob.get("prob_hike") if _fed_prob.get("ok") else None,
+        "prob_hold": _fed_prob.get("prob_hold") if _fed_prob.get("ok") else None,
+        "prob_cut": _fed_prob.get("prob_cut") if _fed_prob.get("ok") else None,
         "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
@@ -12541,6 +12671,22 @@ def render_rate_inflation_card():
             _v3.metric("HY債/IG債 3ヶ月相対", f"{_result['credit_3m']:+.2f}%",
                        help="マイナスが大きいほど信用スプレッド拡大（企業の資金繰り不安）")
 
+    # ── 為替（円で投資する視点）と分散（株と債券の相関） ──────────────
+    if any(_result.get(k) is not None for k in ("usdjpy", "us_jp_spread", "sb_corr_60d")):
+        st.caption("💱 円で投資する視点と分散効果")
+        _x1, _x2, _x3 = st.columns(3)
+        if _result.get("usdjpy") is not None:
+            _x1.metric("ドル円", f"{_result['usdjpy']:.2f}円",
+                       delta=(f"{(_result['usdjpy'] / _result['usdjpy_1y'] - 1) * 100:+.1f}%/1y"
+                              if _result.get("usdjpy_1y") else None), delta_color="off")
+        if _result.get("us_jp_spread") is not None:
+            _x2.metric("日米10年金利差", f"{_result['us_jp_spread']:.2f}pt",
+                       delta=(f"{_result['us_jp_spread'] - _result['us_jp_spread_1y']:+.2f}pt/1y"
+                              if _result.get("us_jp_spread_1y") is not None else None), delta_color="off")
+        if _result.get("sb_corr_60d") is not None:
+            _x3.metric("株と債券の相関(60日)", f"{_result['sb_corr_60d']:+.2f}",
+                       help="マイナスなら債券が株の下落のクッションになる。プラスだと株と債券が同時に下がりやすい")
+
     # ── 複数の視点で見る「金利の余地」表 ──────────────────────────
     _persp_rows = []
     if _result.get("real_yield_core") is not None:
@@ -12595,6 +12741,14 @@ def render_rate_inflation_card():
             "「判断が難しい局面」であることを示します（詳細はタブ内の解説文参照）。"
         )
 
+    # ── 3つのシナリオ（確率は次回FOMCの市場織り込み） ──────────────────
+    st.caption(
+        "🎯 3つのシナリオ — 確率は次回FOMC"
+        + (f"（{_result['fomc_date']}）" if _result.get("fomc_date") else "")
+        + "でのFF金利先物の市場織り込み。各資産の反応は教科書的な方向感で、価格予想ではありません"
+    )
+    st.dataframe(pd.DataFrame(_build_rate_scenarios(_result)), use_container_width=True, hide_index=True)
+
     # ── ダッシュボードの数値からのまとめ（決定論的に生成、AI不使用） ──────
     def _summary_section(title, sb):
         _pts = "".join(f"<li style='margin-bottom:4px'>{_p}</li>" for _p in sb["points"])
@@ -12616,6 +12770,9 @@ def render_rate_inflation_card():
     _sb = _build_stock_vs_bond_summary(_result)
     if _sb:
         _sections.append(_summary_section("📈 株式投資の妙味（債券・割高度・信用市場から）", _sb))
+    _fxs = _build_fx_summary(_result)
+    if _fxs:
+        _sections.append(_summary_section("💱 円で投資する視点（ドル円・日米金利差から）", _fxs))
     if _sections:
         st.markdown(
             '<div style="background:#0f2027;border:1px solid #0e7490;border-radius:8px;'
