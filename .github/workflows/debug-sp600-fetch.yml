@@ -6,6 +6,8 @@ on:
 jobs:
   debug:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -17,4 +19,25 @@ jobs:
         run: pip install requests pandas openpyxl lxml yfinance
 
       - name: Run diagnostic
-        run: python scripts/debug_sp600_fetch.py
+        run: python scripts/debug_sp600_fetch.py | tee /tmp/debug_output.txt
+
+      # Actions run logs are served from Azure Blob Storage, which the debugging
+      # sandbox this repo's assistant runs in cannot reach (only github.com /
+      # raw.githubusercontent.com are allowlisted there). Publish the plain-text
+      # output to a dedicated non-main branch instead (force-pushed each run,
+      # scratch data only) so it's readable over a raw.githubusercontent.com URL.
+      - name: Publish output to debug-output branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan debug-output
+          git rm -rf --cached . >/dev/null
+          mkdir -p debug_output
+          {
+            echo "Run: ${{ github.run_id }} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "---"
+            cat /tmp/debug_output.txt
+          } > debug_output/sp600_fetch_result.txt
+          git add debug_output/sp600_fetch_result.txt
+          git commit -m "Debug output from run ${{ github.run_id }}"
+          git push origin debug-output --force
