@@ -16,7 +16,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install requests pandas openpyxl lxml yfinance
+        run: pip install requests pandas openpyxl lxml yfinance beautifulsoup4
 
       - name: Run diagnostic
         run: |

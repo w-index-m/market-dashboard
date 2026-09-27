@@ -11842,6 +11842,7 @@ _RATE_INFLATION_CONTEXT_NOTES = {
     ],
 }
 _R_STAR_LATEST = 1.65  # NY連銀 Laubach-Williams r-star推定値（2026年Q2時点）
+_U_STAR = 4.2  # 自然失業率（FOMC参加者の長期見通し中央値。テイラールールの雇用項で使用）
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -11885,44 +11886,99 @@ def _fetch_us_cpi_yoy(series_id: str = "CPIAUCSL") -> Optional[float]:
         return _fetch_us_cpi_yoy_bls(series_id)
 
 
-# FREDのシリーズID → 同じ指標のBLSシリーズID（季節調整なし。前年同月比は季節調整の
-# 有無でほぼ変わらず、BLS公表の前年同月比もこちらが基準）
-_FRED_TO_BLS_CPI = {"CPIAUCSL": "CUUR0000SA0", "CPILFESL": "CUUR0000SA0L1E"}
+# BLS API v2（APIキー不要）で取得するFRBの2大目標（物価・雇用）関連の系列。
+# キーなしの上限は1日25回のため、全系列を1回のリクエストにまとめて24hキャッシュする。
+_BLS_MACRO_SERIES = {
+    "CUUR0000SA0":    "cpi",        # CPI総合（季節調整なし）
+    "CUUR0000SA0L1E": "core_cpi",   # コアCPI（食品・エネルギー除く、季節調整なし）
+    "WPUFD4":         "ppi",        # PPI最終需要（季節調整なし）。CPIに先行する川上の物価
+    "LNS14000000":    "unemp",      # 失業率（季節調整済み、%）
+    "CES0000000001":  "nfp",        # 非農業部門雇用者数（季節調整済み、千人）
+    "CES0500000003":  "wage",       # 民間平均時給（季節調整済み、ドル）
+}
 
 
-def _fetch_us_cpi_yoy_bls(fred_series_id: str) -> Optional[float]:
-    """BLS API v2（APIキー不要）から米CPIの前年同月比(%)を計算する。_fetch_us_cpi_yoy()の
-    FRED取得失敗時のフォールバック。"""
-    _bls_id = _FRED_TO_BLS_CPI.get(fred_series_id)
-    if not _bls_id:
-        return None
+@st.cache_data(ttl=3600 * 24, show_spinner=False)
+def _fetch_bls_macro_batch() -> dict:
+    """_BLS_MACRO_SERIESを1回のBLS APIリクエストでまとめて取得し、各系列を
+    {(year, month): value}に整形して返す（キーは_BLS_MACRO_SERIESの値側の短縮名）。
+    失敗時は空dict。"""
     try:
         _now = datetime.now()
         resp = requests.post(
             "https://api.bls.gov/publicAPI/v2/timeseries/data/",
-            json={"seriesid": [_bls_id], "startyear": str(_now.year - 2), "endyear": str(_now.year)},
+            json={"seriesid": list(_BLS_MACRO_SERIES), "startyear": str(_now.year - 2),
+                  "endyear": str(_now.year)},
             headers={"Content-Type": "application/json"}, timeout=25,
         )
-        _data = resp.json().get("Results", {}).get("series", [{}])[0].get("data", [])
-        _vals = {}
-        for _d in _data:
-            _p = _d.get("period", "")
-            if not _p.startswith("M") or _p == "M13":  # M13=年平均
+        _js = resp.json()
+        if _js.get("status") != "REQUEST_SUCCEEDED":
+            logger.warning(f"[bls_macro] BLS応答: {_js.get('status')} {_js.get('message')}")
+        out = {}
+        for _ser in _js.get("Results", {}).get("series", []):
+            _key = _BLS_MACRO_SERIES.get(_ser.get("seriesID"))
+            if not _key:
                 continue
-            try:
-                _vals[(int(_d["year"]), int(_p[1:]))] = float(_d["value"])
-            except (KeyError, ValueError):
-                continue
-        if not _vals:
-            return None
-        _y, _mo = max(_vals)
-        _prev = _vals.get((_y - 1, _mo))
-        if not _prev:
-            return None
-        return round((_vals[(_y, _mo)] / _prev - 1) * 100, 1)
+            _vals = {}
+            for _d in _ser.get("data", []):
+                _p = _d.get("period", "")
+                if not _p.startswith("M") or _p == "M13":  # M13=年平均
+                    continue
+                try:
+                    _vals[(int(_d["year"]), int(_p[1:]))] = float(_d["value"])
+                except (KeyError, ValueError):
+                    continue
+            if _vals:
+                out[_key] = _vals
+        return out
     except Exception as e:
-        logger.warning(f"[rate_inflation] BLS CPI取得失敗({_bls_id}): {e}")
+        logger.warning(f"[bls_macro] BLS一括取得失敗: {e}")
+        return {}
+
+
+def _bls_yoy(vals: dict, months_back: int = 0) -> Optional[float]:
+    """{(y,m): v}から、最新月（months_back>0ならその分さかのぼった月）の前年同月比(%)"""
+    if not vals:
         return None
+    _keys = sorted(vals)
+    if len(_keys) <= months_back:
+        return None
+    _y, _m = _keys[-1 - months_back]
+    _prev = vals.get((_y - 1, _m))
+    return round((vals[(_y, _m)] / _prev - 1) * 100, 1) if _prev else None
+
+
+def _summarize_bls_macro(b: dict) -> dict:
+    """_fetch_bls_macro_batch()の生データから、カードで使う要約値を計算する。"""
+    out = {}
+    if b.get("ppi"):
+        out["ppi_yoy"] = _bls_yoy(b["ppi"])
+        out["ppi_yoy_3m_ago"] = _bls_yoy(b["ppi"], 3)
+    if b.get("wage"):
+        out["wage_yoy"] = _bls_yoy(b["wage"])
+    if b.get("unemp"):
+        _u = [v for _, v in sorted(b["unemp"].items())]
+        out["unemp"] = _u[-1]
+        if len(_u) >= 13:
+            out["unemp_12m_low"] = min(_u[-13:-1])
+            out["unemp_1y_ago"] = _u[-13]
+    if b.get("nfp") and len(b["nfp"]) >= 4:
+        _n = [v for _, v in sorted(b["nfp"].items())]
+        out["nfp_3m_avg"] = round((_n[-1] - _n[-4]) / 3)  # 直近3ヶ月の月平均増加数（千人）
+    for _k in ("unemp", "nfp", "cpi"):
+        if b.get(_k):
+            _y, _m = max(b[_k])
+            out[f"{_k}_asof"] = f"{_y}年{_m}月"
+    return out
+
+
+def _fetch_us_cpi_yoy_bls(fred_series_id: str) -> Optional[float]:
+    """_fetch_us_cpi_yoy()のFRED取得失敗時のフォールバック。BLSの一括取得結果を使う
+    （CPIのためだけに別リクエストを消費しない）。"""
+    _key = {"CPIAUCSL": "cpi", "CPILFESL": "core_cpi"}.get(fred_series_id)
+    if not _key:
+        return None
+    return _bls_yoy(_fetch_bls_macro_batch().get(_key, {}))
 
 
 @st.cache_data(ttl=3600 * 24, show_spinner=False)
@@ -12015,6 +12071,76 @@ def _classify_curve_move(tnx_cur, tnx_1y, irx_cur, irx_1y) -> Optional[dict]:
             "detail": _d, "long_chg": _l, "short_chg": _s}
 
 
+def _build_fed_room_summary(r: dict) -> Optional[dict]:
+    """FRBの2大目標（物価・雇用）の数値から「まだ利上げできる状況か」を決定論的に言語化する。
+    Returns: {"headline": str, "points": [str, ...]} または None"""
+    _core, _ppi, _ppi3 = r.get("cpi_core_yoy"), r.get("ppi_yoy"), r.get("ppi_yoy_3m_ago")
+    _wage, _u, _ulow = r.get("wage_yoy"), r.get("unemp"), r.get("unemp_12m_low")
+    _nfp = r.get("nfp_3m_avg")
+    if _core is None and _u is None:
+        return None
+    points = []
+
+    # 物価側
+    _ppi_rising = _ppi is not None and _ppi3 is not None and _ppi > _ppi3 + 0.3
+    infl_hot = ((_core is not None and _core >= 3.0) or (_wage is not None and _wage >= 4.0)
+                or (_ppi is not None and _ppi >= 3.0 and _ppi_rising))
+    _infl = []
+    if _core is not None:
+        _infl.append(f"コアCPI{_core:+.1f}%")
+    if _ppi is not None:
+        _infl.append(f"PPI{_ppi:+.1f}%" + (f"（3ヶ月前{_ppi3:+.1f}%から加速）" if _ppi_rising
+                                          else f"（3ヶ月前{_ppi3:+.1f}%）" if _ppi3 is not None else ""))
+    if _wage is not None:
+        _infl.append(f"平均時給{_wage:+.1f}%")
+    if _infl:
+        _m = "・".join(_infl) + "。"
+        if _ppi_rising:
+            _m += "川上の物価（PPI）が加速しており、数ヶ月遅れてCPIが再加速するリスクがあります。"
+        if _wage is not None and _wage >= 4.0:
+            _m += "賃金の伸びが4%以上と高く、サービス価格が下がりにくい状態です。"
+        if not infl_hot:
+            _m += "物価は目標の2%に近く、インフレ面から追加利上げを急ぐ理由は強くありません。"
+        points.append("【物価】" + _m)
+
+    # 雇用側
+    labor_weak = ((_u is not None and _ulow is not None and _u - _ulow >= 0.5)
+                  or (_nfp is not None and _nfp < 50))
+    _lab = []
+    if _u is not None:
+        _lab.append(f"失業率{_u:.1f}%" + (f"（過去12ヶ月の最低{_ulow:.1f}%から{_u - _ulow:+.1f}pt）"
+                                        if _ulow is not None else ""))
+    if _nfp is not None:
+        _lab.append(f"雇用者数は月平均{_nfp:+,}千人（直近3ヶ月）")
+    if _lab:
+        _m = "・".join(_lab) + "。"
+        if _u is not None and _ulow is not None and _u - _ulow >= 0.5:
+            _m += "失業率が最低値から0.5pt以上上昇しており、景気後退の初期に典型的なパターン（サーム・ルール）です。"
+        elif _nfp is not None and _nfp < 50:
+            _m += "雇用の伸びがほぼ止まっています。"
+        else:
+            _m += "雇用は崩れておらず、利上げに耐えられる体力があります。"
+        points.append("【雇用】" + _m)
+
+    if r.get("taylor_gap") is not None:
+        points.append(
+            f"【ルール】テイラールール（{r.get('taylor_basis', '物価のみ')}）の推定は{r['taylor_rate']:.2f}%で、"
+            f"実際のFF金利はそれより{r['taylor_gap']:+.2f}pt"
+            + ("高い＝すでに引き締め気味。" if r["taylor_gap"] > 0.5
+               else "低い＝ルール上はまだ上げる余地あり。" if r["taylor_gap"] < -0.5 else "で、ほぼ適正水準。")
+        )
+
+    if infl_hot and not labor_weak:
+        headline = "物価・雇用ともに利上げを支持 → 追加利上げの余地あり（株には逆風）"
+    elif infl_hot and labor_weak:
+        headline = "物価は高いのに雇用が崩れ始め → FRBは板挟み（スタグフレーション警戒）"
+    elif not infl_hot and not labor_weak:
+        headline = "物価は落ち着き雇用は堅調 → 利上げを急ぐ必要は小さい（様子見が基本）"
+    else:
+        headline = "物価は落ち着き雇用が弱含み → 利下げ方向の条件が揃いつつある（株には追い風になりやすい）"
+    return {"headline": headline, "points": points}
+
+
 def _build_stock_vs_bond_summary(r: dict) -> Optional[dict]:
     """金利カードの数値だけから「今、株に投資する妙味はあるか」を決定論的に言語化する
     （AIを使わないので数値と必ず一致し、途中切れや捏造の心配がない）。
@@ -12046,7 +12172,23 @@ def _build_stock_vs_bond_summary(r: dict) -> Optional[dict]:
                                     else "で、実質でも株が劣後しています。")
         )
 
-    # ② イールドカーブの「中身」
+    # ② 長期基準の割高度（CAPE）と市場の成長期待（予想PER）
+    _cape, _ecy = r.get("cape"), r.get("excess_cape_yield")
+    if _cape and _ecy is not None:
+        points.append(
+            f"シラーPER{_cape:.1f}倍（長期平均は約17倍）、超過CAPE利回り{_ecy:+.2f}pt。"
+            + ("10年平均の利益で見ても割高で、今後10年の株の期待リターンは低めになりやすい水準です。" if _ecy < 1
+               else "長期基準ではやや割高〜中立です。" if _ecy <= 3 else "長期基準では妙味があります。")
+        )
+    _fpe, _g = r.get("forward_pe"), r.get("implied_eps_growth")
+    if _fpe and _g is not None:
+        points.append(
+            f"予想PER{_fpe:.1f}倍（予想益回り{r.get('fwd_earnings_yield'):.1f}%）。実績PERとの差から、市場は今後1年で"
+            f"約{_g:+.0f}%の利益成長を織り込み済み"
+            + ("。この成長が実現しないと割高感がさらに強まります。" if _g > 10 else "。")
+        )
+
+    # ③ イールドカーブの「中身」
     _ct, _yc = r.get("curve_type"), r.get("yield_curve")
     if _yc is not None and _yc < 0:
         points.append(f"逆イールド（{_yc:+.2f}pt）：市場は将来の利下げや景気後退を織り込んでいます。")
@@ -12061,15 +12203,27 @@ def _build_stock_vs_bond_summary(r: dict) -> Optional[dict]:
         }[_ct["key"]]
         points.append(f"イールドカーブ{_yc:+.2f}pt・{_ct['label']}（{_ct['detail']}）。{_msg}")
 
-    # ③ 金利上昇のスピード
+    # ④ 金利上昇のスピードと信用市場
     if r.get("tnx_1y") is not None:
         _chg = _tnx - r["tnx_1y"]
         if _chg >= 1.0:
             points.append(f"10年債利回りは1年で{_chg:+.2f}ptと速いペースで上昇中。水準より「スピード」が株価の重しになりやすい局面です。")
+    _c = r.get("credit_3m")
+    if _c is not None:
+        if _c <= -2.0:
+            points.append(f"ハイイールド債が投資適格債に3ヶ月で{_c:+.2f}%劣後：信用スプレッドが拡大し、企業の資金繰り不安が"
+                          "出始めています。株の急落に先行しやすい警戒サインです。")
+        elif _c < -0.5:
+            points.append(f"ハイイールド債が投資適格債に3ヶ月で{_c:+.2f}%やや劣後：信用市場に小さな緊張が見え始めています。")
+        else:
+            points.append(f"ハイイールド債と投資適格債の3ヶ月相対は{_c:+.2f}%で、信用市場は落ち着いています"
+                          "（金利上昇がまだ企業の資金繰りを圧迫していない）。")
 
-    if _eg < 0 or (_ct and _ct["key"] == "bear_steep"):
+    if _eg < 0 or (_ct and _ct["key"] == "bear_steep") or (_ecy is not None and _ecy < 1):
         favored = ["利益の伸びが確かな銘柄（割高さを利益成長で正当化できる）", "PERの低い割安株・高配当株",
                    "利回り5%前後が取れる短〜中期の債券・預金"]
+    if _c is not None and _c <= -2.0:
+        favored.append("ハイイールド債より投資適格債・国債（信用リスクを取らない）")
     return {"headline": headline, "points": points, "favored": favored}
 
 
@@ -12105,10 +12259,17 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         round(_tnx_cur - _cpi_core_yoy, 2) if (_tnx_cur is not None and _cpi_core_yoy is not None) else None
     )
 
-    # 簡易テイラールール（r* + インフレ + 0.5×(インフレ−目標2%)。産出ギャップ項は
-    # 失業率データの取得コストに見合わないため省略した簡略版）と、実際のFF金利との比較。
+    # FRBの2大目標（物価・雇用）のうち、CPI以外の指標（PPI・賃金・失業率・NFP）をBLSから
+    _bls = _summarize_bls_macro(_fetch_bls_macro_batch())
+    _unemp = _bls.get("unemp")
+
+    # テイラールール: r* + インフレ + 0.5×(インフレ−2%) + 1.0×(u*−失業率)。
+    # 失業率ギャップ項は産出ギャップ項をオークン則（係数≈2）で置き換えた標準的な形。
+    # 失業率が取れない場合は物価項だけの簡略版にフォールバックする。
+    _taylor_basis = "物価＋雇用" if _unemp is not None else "物価のみ"
     _taylor_rate = (
-        round(_R_STAR_LATEST + _cpi_core_yoy + 0.5 * (_cpi_core_yoy - 2.0), 2)
+        round(_R_STAR_LATEST + _cpi_core_yoy + 0.5 * (_cpi_core_yoy - 2.0)
+              + (1.0 * (_U_STAR - _unemp) if _unemp is not None else 0.0), 2)
         if _cpi_core_yoy is not None else None
     )
     _taylor_gap = round(_ff_rate - _taylor_rate, 2) if (_ff_rate is not None and _taylor_rate is not None) else None
@@ -12118,11 +12279,46 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
     # 株式が債券対比で割高＝金利上昇を吸収する「のりしろ」が乏しいと解釈できる。
     _equity_yield_gap = None
     _earnings_yield = None
+    _spy_pe = _spy_fpe = None
     try:
-        _spy_pe = yf.Ticker("SPY").info.get("trailingPE")
+        _spy_info = yf.Ticker("SPY").info
+        _spy_pe = _spy_info.get("trailingPE")
+        _spy_fpe = _spy_info.get("forwardPE")
         if _spy_pe and _spy_pe > 0 and _tnx_cur is not None:
             _earnings_yield = round(1 / _spy_pe * 100, 2)
             _equity_yield_gap = round(_earnings_yield - _tnx_cur, 2)
+    except Exception:
+        pass
+    # 予想PER: 実績PERとの差から「市場がどれだけ利益成長を見込んでいるか」が分かる
+    _fwd_earnings_yield = round(100 / _spy_fpe, 2) if (_spy_fpe and _spy_fpe > 0) else None
+    _implied_eps_growth = (
+        round((_spy_pe / _spy_fpe - 1) * 100, 1) if (_spy_pe and _spy_fpe and _spy_fpe > 0) else None
+    )
+
+    # シラーPER(CAPE): 10年平均の実質利益で割るため景気の山谷に左右されにくい。
+    # CAPE益回り−実質金利（Shillerの「超過CAPE利回り」）で長期基準の株の妙味を見る。
+    _cape = None
+    try:
+        _cape_tmp = {"_ok": [], "_errors": {}}
+        _fetch_macro_cape(_cape_tmp)
+        _cape = (_cape_tmp.get("cape") or {}).get("value")
+    except Exception:
+        pass
+    _excess_cape_yield = (
+        round(100 / _cape - _real_yield_core, 2)
+        if (_cape and _cape > 0 and _real_yield_core is not None) else None
+    )
+
+    # クレジットスプレッド: ハイイールド債(HYG)と投資適格債(LQD)の相対パフォーマンス
+    # （アプリ内の他のセンチメント指標と同じ代理指標）。HYGが3ヶ月でLQDに対し大きく
+    # 劣後していれば、金利上昇で企業の資金繰り不安が意識され始めているサイン。
+    _credit_3m = None
+    try:
+        _cr = yf.download(["HYG", "LQD"], period="6mo", interval="1d",
+                          progress=False, auto_adjust=True, timeout=15)["Close"].dropna()
+        if len(_cr) > 70:
+            _ratio = _cr["HYG"] / _cr["LQD"]
+            _credit_3m = round((float(_ratio.iloc[-1]) / float(_ratio.iloc[-64]) - 1) * 100, 2)
     except Exception:
         pass
     # 株の利益はインフレに連動して伸びるのに対し債券の利回りは名目で固定のため、名目の
@@ -12182,6 +12378,20 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _live_lines.append(f"直近1年のイールドカーブ変化の型: {_curve_type['label']}（{_curve_type['detail']}）")
     if _real_equity_gap is not None:
         _live_lines.append(f"株式益回り−実質10年金利(コアCPI基準): {_real_equity_gap:+.2f}pt")
+    if _bls.get("ppi_yoy") is not None:
+        _live_lines.append(f"PPI最終需要 前年比: {_bls['ppi_yoy']:+.1f}%（3ヶ月前は{_bls.get('ppi_yoy_3m_ago')}%）")
+    if _bls.get("wage_yoy") is not None:
+        _live_lines.append(f"平均時給 前年比: {_bls['wage_yoy']:+.1f}%")
+    if _unemp is not None:
+        _live_lines.append(f"失業率: {_unemp:.1f}%（過去12ヶ月の最低{_bls.get('unemp_12m_low')}%、自然失業率の目安{_U_STAR}%）")
+    if _bls.get("nfp_3m_avg") is not None:
+        _live_lines.append(f"非農業部門雇用者数 直近3ヶ月平均増加: {_bls['nfp_3m_avg']:+,}千人/月")
+    if _cape:
+        _live_lines.append(f"シラーPER(CAPE): {_cape:.1f}倍（超過CAPE利回り{_excess_cape_yield}pt）")
+    if _spy_fpe:
+        _live_lines.append(f"S&P500予想PER: {_spy_fpe:.1f}倍（実績PERから逆算した市場の利益成長期待{_implied_eps_growth}%）")
+    if _credit_3m is not None:
+        _live_lines.append(f"ハイイールド債/投資適格債 3ヶ月相対: {_credit_3m:+.2f}%（マイナス=信用スプレッド拡大方向）")
     _live_str = "\n".join(_live_lines) if _live_lines else "（ライブデータなし）"
 
     _notes_str = "\n".join(f"- {n}" for n in _RATE_INFLATION_CONTEXT_NOTES["notes"])
@@ -12234,6 +12444,10 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         "equity_yield_gap": _equity_yield_gap, "yield_curve": _yield_curve,
         "earnings_yield": _earnings_yield, "real_equity_gap": _real_equity_gap,
         "irx_cur": _irx_cur, "curve_type": _curve_type,
+        "taylor_basis": _taylor_basis, "u_star": _U_STAR, **_bls,
+        "cape": _cape, "excess_cape_yield": _excess_cape_yield,
+        "forward_pe": _spy_fpe, "trailing_pe": _spy_pe, "fwd_earnings_yield": _fwd_earnings_yield,
+        "implied_eps_growth": _implied_eps_growth, "credit_3m": _credit_3m,
         "tnx_series": _tnx, "ff_series": _ff_series,
         "as_of": _RATE_INFLATION_CONTEXT_NOTES["as_of"],
     }
@@ -12279,6 +12493,45 @@ def render_rate_inflation_card():
             "「境界線上にいる」というシグナルです。"
         )
 
+    # ── FRBの2大目標（物価・雇用）パネル ─────────────────────────
+    if any(_result.get(k) is not None for k in ("ppi_yoy", "wage_yoy", "unemp", "nfp_3m_avg")):
+        st.caption(f"🏛 FRBの2大目標 — 物価と雇用（BLS、雇用は{_result.get('unemp_asof', '')}時点）")
+        _f1, _f2, _f3, _f4, _f5 = st.columns(5)
+        if _result.get("cpi_core_yoy") is not None:
+            _f1.metric("コアCPI 前年比", f"{_result['cpi_core_yoy']:+.1f}%")
+        if _result.get("ppi_yoy") is not None:
+            _p3 = _result.get("ppi_yoy_3m_ago")
+            _f2.metric("PPI 前年比", f"{_result['ppi_yoy']:+.1f}%",
+                       delta=(f"{_result['ppi_yoy'] - _p3:+.1f}pt/3ヶ月" if _p3 is not None else None),
+                       delta_color="inverse")
+        if _result.get("wage_yoy") is not None:
+            _f3.metric("平均時給 前年比", f"{_result['wage_yoy']:+.1f}%")
+        if _result.get("unemp") is not None:
+            _u1 = _result.get("unemp_1y_ago")
+            _f4.metric("失業率", f"{_result['unemp']:.1f}%",
+                       delta=(f"{_result['unemp'] - _u1:+.1f}pt/1y" if _u1 is not None else None),
+                       delta_color="inverse")
+        if _result.get("nfp_3m_avg") is not None:
+            _f5.metric("雇用者数(3ヶ月平均)", f"{_result['nfp_3m_avg']:+,}千人")
+
+    # ── 株の割高度パネル ─────────────────────────────────────
+    if any(_result.get(k) is not None for k in ("cape", "forward_pe", "credit_3m")):
+        st.caption("📈 株の割高度と信用市場")
+        _v1, _v2, _v3 = st.columns(3)
+        if _result.get("cape"):
+            _v1.metric("シラーPER(CAPE)", f"{_result['cape']:.1f}倍",
+                       delta=(f"超過利回り{_result['excess_cape_yield']:+.2f}pt"
+                              if _result.get("excess_cape_yield") is not None else None),
+                       delta_color="off")
+        if _result.get("forward_pe"):
+            _v2.metric("S&P500 予想PER", f"{_result['forward_pe']:.1f}倍",
+                       delta=(f"織込み成長{_result['implied_eps_growth']:+.0f}%"
+                              if _result.get("implied_eps_growth") is not None else None),
+                       delta_color="off")
+        if _result.get("credit_3m") is not None:
+            _v3.metric("HY債/IG債 3ヶ月相対", f"{_result['credit_3m']:+.2f}%",
+                       help="マイナスが大きいほど信用スプレッド拡大（企業の資金繰り不安）")
+
     # ── 複数の視点で見る「金利の余地」表 ──────────────────────────
     _persp_rows = []
     if _result.get("real_yield_core") is not None:
@@ -12292,7 +12545,8 @@ def render_rate_inflation_card():
         _verdict = ("🔴 引き締め的" if _result["taylor_gap"] > 0.5
                      else "🟢 余地あり" if _result["taylor_gap"] < -0.5 else "🟡 中立")
         _persp_rows.append({
-            "観点": "簡易テイラールール比", "現在値": f"{_result['taylor_gap']:+.2f}pt",
+            "観点": f"テイラールール比（{_result.get('taylor_basis', '物価のみ')}）",
+            "現在値": f"{_result['taylor_gap']:+.2f}pt",
             "判定": _verdict,
             "補足": f"実際のFF金利 − テイラールール推定値({_result['taylor_rate']:.2f}%)",
         })
@@ -12332,24 +12586,36 @@ def render_rate_inflation_card():
             "「判断が難しい局面」であることを示します（詳細はタブ内の解説文参照）。"
         )
 
-    # ── 株式投資の観点からのまとめ（数値から決定論的に生成） ──────────
+    # ── ダッシュボードの数値からのまとめ（決定論的に生成、AI不使用） ──────
+    def _summary_section(title, sb):
+        _pts = "".join(f"<li style='margin-bottom:4px'>{_p}</li>" for _p in sb["points"])
+        _fav = (
+            "<div style='margin-top:6px;color:#94a3b8;font-size:12px'>こういう局面で相対的に有利になりやすいもの：</div>"
+            + "<ul style='margin:4px 0 0 18px;padding:0;color:#cbd5e1'>"
+            + "".join(f"<li>{_f}</li>" for _f in sb["favored"]) + "</ul>"
+        ) if sb.get("favored") else ""
+        return (
+            f'<div style="font-size:12px;color:#67e8f9;font-weight:700;margin:6px 0 2px">{title}</div>'
+            f'<div style="font-size:14px;font-weight:700;color:#a5f3fc;margin-bottom:6px">{sb["headline"]}</div>'
+            f'<ul style="margin:0 0 0 18px;padding:0">{_pts}</ul>{_fav}'
+        )
+
+    _sections = []
+    _fed = _build_fed_room_summary(_result)
+    if _fed:
+        _sections.append(_summary_section("🏛 利上げの余地（FRBの2大目標から）", _fed))
     _sb = _build_stock_vs_bond_summary(_result)
     if _sb:
-        _pts = "".join(f"<li style='margin-bottom:4px'>{_p}</li>" for _p in _sb["points"])
-        _fav = (
-            "<div style='margin-top:8px;color:#94a3b8;font-size:12px'>こういう局面で相対的に有利になりやすいもの：</div>"
-            + "<ul style='margin:4px 0 0 18px;padding:0;color:#cbd5e1'>"
-            + "".join(f"<li>{_f}</li>" for _f in _sb["favored"]) + "</ul>"
-        ) if _sb["favored"] else ""
+        _sections.append(_summary_section("📈 株式投資の妙味（債券・割高度・信用市場から）", _sb))
+    if _sections:
         st.markdown(
-            f'<div style="background:#0f2027;border:1px solid #0e7490;border-radius:8px;'
-            f'padding:12px 16px;font-size:13px;color:#e2e8f0;line-height:1.7;margin-top:8px">'
-            f'<div style="font-size:12px;color:#67e8f9;font-weight:700;margin-bottom:4px">'
-            f'📝 株式投資の観点からのまとめ（ダッシュボードの数値から自動生成）</div>'
-            f'<div style="font-size:14px;font-weight:700;color:#a5f3fc;margin-bottom:6px">{_sb["headline"]}</div>'
-            f'<ul style="margin:0 0 0 18px;padding:0">{_pts}</ul>{_fav}'
-            f'<div style="margin-top:8px;color:#64748b;font-size:11px">数値からの一般的な読み方であり、個別の投資判断の推奨ではありません。</div>'
-            f'</div>',
+            '<div style="background:#0f2027;border:1px solid #0e7490;border-radius:8px;'
+            'padding:12px 16px;font-size:13px;color:#e2e8f0;line-height:1.7;margin-top:8px">'
+            '<div style="font-size:12px;color:#94a3b8;margin-bottom:2px">'
+            '📝 ダッシュボードの数値からのまとめ（自動生成・AI不使用）</div>'
+            + '<hr style="border:none;border-top:1px solid #164e63;margin:8px 0">'.join(_sections)
+            + '<div style="margin-top:8px;color:#64748b;font-size:11px">数値からの一般的な読み方であり、'
+              '個別の投資判断の推奨ではありません。</div></div>',
             unsafe_allow_html=True,
         )
 
