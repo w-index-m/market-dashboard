@@ -8159,18 +8159,74 @@ def fetch_sp500_constituents() -> dict:
         return dict(_SP500_STOCKS)
 
 
-@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
-def fetch_sp600_constituents() -> dict:
-    """
-    S&P600（小型株指数）の全構成銘柄をWikipediaから取得する（{ticker: 企業名}）。
-    テンバガー候補スクリーニング（🌱長期育成モード）の母集団として使う ——
-    S&P500は時価総額の大きい大型株限定のためテンバガー狙いの候補母集団には
-    そもそも不向きで、S&P600は組み入れ基準自体が時価総額のレンジで区切られている
-    実在の小型株指数のため、手動でティッカーを選ぶより網羅的かつ正確。
-    構成銘柄は年数回程度しか入れ替わらないため7日キャッシュ。取得失敗時は空dictを返す
-    （フォールバック用の代表銘柄リストは持たない——小型株は代表銘柄という概念が
-    馴染まないため、失敗時は素直に候補0件として呼び出し元にフォールバックさせる）。
-    """
+_SP600_MIN_COUNT = 400  # S&P600は603銘柄（うち3社は種類株重複）程度。極端な減少は取得失敗とみなす
+
+
+def _fetch_sp600_from_spsm() -> dict:
+    """SPDR SPSM ETF（S&P600 SmallCap指数に完全連動）の公式日次保有銘柄XLSXから取得。
+    認証不要・Wikipediaスクレイピングより堅牢な一次ソース。"""
+    try:
+        _resp = requests.get(
+            "https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spsm.xlsx",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        _resp.raise_for_status()
+        _raw = pd.read_excel(io.BytesIO(_resp.content), header=None)
+        # ファイル冒頭数行はファンド概要のためヘッダー行（"Ticker"列を含む行）を探索
+        _header_row = next(
+            (i for i in range(min(10, len(_raw))) if _raw.iloc[i].astype(str).str.strip().eq("Ticker").any()),
+            None,
+        )
+        if _header_row is None:
+            raise ValueError("Ticker列のヘッダー行が見つかりません")
+        df = pd.read_excel(io.BytesIO(_resp.content), header=_header_row)
+        df.columns = [str(c).strip() for c in df.columns]
+        if "Ticker" not in df.columns or "Name" not in df.columns:
+            raise ValueError(f"想定した列が見つかりません: {list(df.columns)}")
+        result = {}
+        for _, row in df.iterrows():
+            ticker = str(row["Ticker"]).strip().replace(".", "-")
+            name = str(row["Name"]).strip()
+            if ticker and ticker.lower() not in ("nan", "") and "cash" not in ticker.lower():
+                result[ticker] = name
+        return result
+    except Exception as e:
+        logger.warning(f"[sp600_constituents:spsm] 取得失敗: {e}")
+        return {}
+
+
+def _fetch_sp600_from_ijr() -> dict:
+    """iShares IJR ETF（S&P600 SmallCap指数に連動）の公式CSVから取得。SPSMが失敗した場合の代替。"""
+    try:
+        _resp = requests.get(
+            "https://www.ishares.com/us/products/239774/ishares-core-sp-smallcap-etf/1467271812596.ajax"
+            "?fileType=csv&fileName=IJR_holdings&dataType=fund",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        _resp.raise_for_status()
+        _lines = _resp.text.splitlines()
+        _header_idx = next((i for i, ln in enumerate(_lines) if ln.strip().startswith("Ticker,")), None)
+        if _header_idx is None:
+            raise ValueError("Ticker列のヘッダー行が見つかりません")
+        # 末尾に免責事項の説明文が付くため、パース不能な行は無視する
+        df = pd.read_csv(io.StringIO("\n".join(_lines[_header_idx:])), on_bad_lines="skip")
+        df.columns = [str(c).strip() for c in df.columns]
+        if "Ticker" not in df.columns or "Name" not in df.columns:
+            raise ValueError(f"想定した列が見つかりません: {list(df.columns)}")
+        result = {}
+        for _, row in df.iterrows():
+            ticker = str(row["Ticker"]).strip().replace(".", "-")
+            name = str(row["Name"]).strip()
+            if ticker and ticker.lower() not in ("nan", "") and "cash" not in ticker.lower():
+                result[ticker] = name
+        return result
+    except Exception as e:
+        logger.warning(f"[sp600_constituents:ijr] 取得失敗: {e}")
+        return {}
+
+
+def _fetch_sp600_from_wikipedia() -> dict:
+    """Wikipedia「List of S&P 600 companies」のスクレイピング（ETF公式データが両方失敗した場合の最終フォールバック）。"""
     try:
         # pd.read_html(url)は内部で素のリクエストを送るため、ブラウザらしいUser-Agentが
         # 無いことでWikipedia側（またはCDN）に弾かれる可能性がある。requests.get()で
@@ -8193,12 +8249,38 @@ def fetch_sp600_constituents() -> dict:
             name = str(row[_name_col]).strip()
             if ticker and ticker.lower() != "nan":
                 result[ticker] = name
-        if len(result) < 400:
-            raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
         return result
     except Exception as e:
-        logger.warning(f"[sp600_constituents] 取得失敗: {e}")
+        logger.warning(f"[sp600_constituents:wikipedia] 取得失敗: {e}")
         return {}
+
+
+@st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def fetch_sp600_constituents() -> dict:
+    """
+    S&P600（小型株指数）の全構成銘柄を取得する（{ticker: 企業名}）。
+    テンバガー候補スクリーニング（🌱長期育成モード）の母集団として使う ——
+    S&P500は時価総額の大きい大型株限定のためテンバガー狙いの候補母集団には
+    そもそも不向きで、S&P600は組み入れ基準自体が時価総額のレンジで区切られている
+    実在の小型株指数のため、手動でティッカーを選ぶより網羅的かつ正確
+    （S&P500と紛らわしいがtypoではなく、意図的に別の小型株指数を指している）。
+
+    データソースは優先順に3段構え: ① SPDR SPSM ETF（S&P600に完全連動）の公式日次
+    保有銘柄XLSX → ② iShares IJR ETFの公式CSV → ③ Wikipedia「List of S&P 600
+    companies」のスクレイピング。ETF発行体の公式ホールディングスファイルは
+    Wikipediaの表構造変更やスクレイピングブロックの影響を受けないため、①②を
+    優先することでWikipedia単独依存より堅牢にしている。
+    構成銘柄は年数回程度しか入れ替わらないため7日キャッシュ。全ソース失敗時は
+    空dictを返す（フォールバック用の代表銘柄リストは持たない——小型株は代表銘柄
+    という概念が馴染まないため、失敗時は素直に候補0件として呼び出し元にフォール
+    バックさせる）。
+    """
+    for _fetch_fn in (_fetch_sp600_from_spsm, _fetch_sp600_from_ijr, _fetch_sp600_from_wikipedia):
+        result = _fetch_fn()
+        if len(result) >= _SP600_MIN_COUNT:
+            return result
+    logger.warning("[sp600_constituents] 全ソース（SPSM/IJR/Wikipedia）で取得失敗")
+    return {}
 
 
 @st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
@@ -27349,14 +27431,15 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     if not tickers:
         _reason = "対象銘柄を取得できませんでした。"
         if mode_key == "growth":
-            # 長期育成(テンバガー)モードは①S&P600銘柄一覧の取得(Wikipediaスクレイピング)→
-            # ②その約600銘柄に.info()を個別に叩く、の2段階。①が空ならWikipedia側の問題、
-            # ①は取れているのに0件なら②のYahoo側レート制限、と切り分けて表示する
-            # （2回対応してもなお発生したため、原因の当たりをつけやすくする）。
+            # 長期育成(テンバガー)モードは①S&P600銘柄一覧の取得(SPSM/IJR ETF公式データ→
+            # Wikipediaスクレイピングの順にフォールバック)→②その約600銘柄に.info()を
+            # 個別に叩く、の2段階。①が空なら3ソース全滅、①は取れているのに0件なら
+            # ②のYahoo側レート制限、と切り分けて表示する（原因の当たりをつけやすくする）。
             _sp600 = fetch_sp600_constituents()
             if not _sp600:
-                _reason = ("S&P600銘柄一覧の取得に失敗しました（Wikipediaページ構造の変更、"
-                           "またはアクセス制限の可能性）。銘柄一覧の取得自体ができていません。")
+                _reason = ("S&P600銘柄一覧の取得に失敗しました（SPSM/IJR ETF公式データ、"
+                           "Wikipediaいずれのソースからも取得できませんでした）。銘柄一覧の"
+                           "取得自体ができていません。")
             else:
                 _reason = (f"S&P600銘柄一覧は{len(_sp600)}件取得できましたが、財務データ取得"
                            "（時価総額5〜50億ドル等の条件判定）が0件でした（Yahoo側の一時的な"
