@@ -8172,7 +8172,16 @@ def fetch_sp600_constituents() -> dict:
     馴染まないため、失敗時は素直に候補0件として呼び出し元にフォールバックさせる）。
     """
     try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies")
+        # pd.read_html(url)は内部で素のリクエストを送るため、ブラウザらしいUser-Agentが
+        # 無いことでWikipedia側（またはCDN）に弾かれる可能性がある。requests.get()で
+        # 明示的なUser-Agentを付けてHTML文字列を取得してからpd.read_html()に渡す方式に
+        # 変更（このコードベースの他のスクレイピング処理と同じ防御パターン）。
+        _resp = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies",
+            timeout=15, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        _resp.raise_for_status()
+        tables = pd.read_html(_resp.text)
         df = tables[0]
         _sym_col = next((c for c in df.columns if "Symbol" in str(c)), None)
         _name_col = next((c for c in df.columns if "Company" in str(c) or "Security" in str(c)), None)
@@ -27340,15 +27349,29 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     if not tickers:
         _reason = "対象銘柄を取得できませんでした。"
         if mode_key == "growth":
-            # 長期育成(テンバガー)モードはS&P600の約600銘柄に.info()を個別に叩く
-            # 都合上、Yahoo側の一時的なレート制限で候補が0件になることがある。
-            # 原因を切り分けやすいよう他モードと違うメッセージにしておく。
-            _reason = ("S&P600の財務データ取得に失敗しました（Yahoo側の一時的なレート制限の"
-                       "可能性）。時間を置いてページを再読み込みしてください。")
+            # 長期育成(テンバガー)モードは①S&P600銘柄一覧の取得(Wikipediaスクレイピング)→
+            # ②その約600銘柄に.info()を個別に叩く、の2段階。①が空ならWikipedia側の問題、
+            # ①は取れているのに0件なら②のYahoo側レート制限、と切り分けて表示する
+            # （2回対応してもなお発生したため、原因の当たりをつけやすくする）。
+            _sp600 = fetch_sp600_constituents()
+            if not _sp600:
+                _reason = ("S&P600銘柄一覧の取得に失敗しました（Wikipediaページ構造の変更、"
+                           "またはアクセス制限の可能性）。銘柄一覧の取得自体ができていません。")
+            else:
+                _reason = (f"S&P600銘柄一覧は{len(_sp600)}件取得できましたが、財務データ取得"
+                           "（時価総額5〜50億ドル等の条件判定）が0件でした（Yahoo側の一時的な"
+                           "レート制限の可能性）。時間を置いてページを再読み込みしてください。")
         elif mode_key == "jp_tenbagger":
-            _reason = ("東証グロース/スタンダード銘柄一覧またはその財務データの取得に失敗しました"
-                       "（JPXファイル形式の変更、またはYahoo側の一時的なレート制限の可能性）。"
-                       "時間を置いてページを再読み込みしてください。")
+            # 同様に①JPX銘柄一覧→②財務データの2段階で切り分ける。
+            _jp_universe = fetch_jp_smallcap_universe()
+            if not _jp_universe:
+                _reason = ("東証グロース/スタンダード銘柄一覧の取得に失敗しました"
+                           "（JPXファイル形式の変更、またはアクセス制限の可能性）。"
+                           "銘柄一覧の取得自体ができていません。")
+            else:
+                _reason = (f"東証グロース/スタンダード銘柄一覧は{len(_jp_universe)}件取得できましたが、"
+                           "財務データ取得（STEP1条件判定）が0件でした（Yahoo側の一時的な"
+                           "レート制限の可能性）。時間を置いてページを再読み込みしてください。")
         return {"ok": False, "reason": _reason}
 
     bench = "^GSPC"
