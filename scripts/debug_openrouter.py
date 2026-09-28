@@ -24,3 +24,13 @@ for mid in [m["id"] for m in free[:4]] + ["meta-llama/llama-3.3-70b-instruct:fre
                              "max_tokens": 50}, timeout=30)
     body = rr.text[:250].replace("\n", " ")
     print(f"POST {mid}: {rr.status_code} {body}")
+
+# アプリ本体の呼び出し経路（モデルの選び方・上限時の打ち切りを含む）でも確認する
+try:
+    import app
+    print("app model order:", app._fetch_openrouter_free_models()[:4])
+    text, model = app.summarize_with_openrouter("日本の首都はどこ？一語で答えて", max_tokens=200)
+    print(f"app.summarize_with_openrouter -> model={model!r} text={text[:200]!r}")
+    print("app._call_single_ai_provider ->", app._call_single_ai_provider("openrouter", "1+1は？数字だけ答えて", 200, 0.1))
+except Exception as e:
+    print("app path error:", e)
