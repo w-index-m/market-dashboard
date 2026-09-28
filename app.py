@@ -28678,7 +28678,8 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
 
     bench = "^GSPC"
     end   = datetime.now()
-    start = end - timedelta(days=365 * 3 + 30)
+    # 3年リターンには756営業日+1日が必要。休場日の多い市場（日本株）でも足りるよう余裕を持たせる
+    start = end - timedelta(days=365 * 3 + 90)
     try:
         raw = yf.download(tickers + [bench], start=start, end=end,
                            progress=False, auto_adjust=True, threads=True)
@@ -28706,13 +28707,13 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
 
     basket_ret = pd.concat(rets, axis=1).mean(axis=1)  # 日次で均等加重平均（欠損日は自動除外）
     bench_ret  = close_all[bench].dropna().pct_change().dropna()
+    if len(basket_ret) < 30 or len(bench_ret) < 30:
+        return {"ok": False, "reason": "取引日が不足しています。"}
 
-    idx = basket_ret.index.intersection(bench_ret.index)
-    if len(idx) < 30:
-        return {"ok": False, "reason": "共通の取引日が不足しています。"}
-    basket_ret = basket_ret.loc[idx]
-    bench_ret  = bench_ret.loc[idx]
-
+    # バスケットとベンチマーク（S&P500）は、それぞれ自分の市場の取引日で複利計算する。
+    # 以前は両方が取引した日だけに絞っていたため、日本株のバスケットでは日米の祝日の違いで
+    # 年10〜15日分の日本株の値動きが計算から抜け落ち、1年リターンが不正確なうえ、
+    # 3年リターンに必要な日数が足りず「—」になっていた。
     cum       = (1 + basket_ret).cumprod()
     bench_cum = (1 + bench_ret).cumprod()
 
@@ -28727,6 +28728,9 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     _dd          = (_cum_1y / _running_max - 1) * 100
     max_dd_1y    = float(_dd.min()) if not _dd.empty else None
 
+    # グラフ用: ベンチマークの累積値をバスケットの日付に合わせる（休場日は前日の値を引き継ぐ）
+    _bench_on_basket = bench_cum.reindex(cum.index, method="ffill").bfill()
+
     return {
         "ok":              True,
         "n_tickers":       n_ok,
@@ -28738,7 +28742,7 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
         "max_dd_1y":       max_dd_1y,
         "dates":           [d.strftime("%Y-%m-%d") for d in cum.index],
         "cum":             ((cum - 1) * 100).round(2).tolist(),
-        "bench_cum":       ((bench_cum - 1) * 100).round(2).tolist(),
+        "bench_cum":       ((_bench_on_basket - 1) * 100).round(2).tolist(),
     }
 
 
