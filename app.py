@@ -781,7 +781,19 @@ def _fetch_openrouter_free_models() -> list:
         resp.raise_for_status()
         _data = resp.json().get("data", [])
         _free = [m["id"] for m in _data if isinstance(m.get("id"), str) and m["id"].endswith(":free")]
-        return _free
+        # 一覧の並び順のまま先頭4つを使うと、2.6Bの小型モデルやプレビュー版・用途特化モデル
+        # （安全性判定・コード専用）が選ばれていた（2026-09に確認）。汎用の対話に使える
+        # モデルだけに絞り、パラメータ数の大きいものを優先する。
+        _skip = ("safety", "code", "guard", "embed", "preview", "vision", "omni", "ocr")
+        _usable = [m for m in _free if not any(k in m.lower() for k in _skip)]
+
+        def _size(mid: str) -> float:
+            _m = re.findall(r"(\d+(?:\.\d+)?)b\b", mid.lower())
+            return max((float(x) for x in _m), default=0.0)
+
+        # NVIDIAのモデルは別途NVIDIA APIでも使っているため、AIの多様性（別のAIに審査・予想させる
+        # 機能）のためにOpenRouterでは他社モデルを優先する
+        return sorted(_usable, key=lambda m: (m.startswith("nvidia/"), -_size(m))) or _free
     except Exception as e:
         logger.warning(f"OpenRouter無料モデル一覧の取得失敗: {e}")
         return []
@@ -822,6 +834,10 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
             )
             if resp.status_code == 429:
                 _reasons.append(f"{model_name}: 429 {resp.text[:150]}")
+                # 「free-models-per-day」はアカウント全体の1日上限（無料アカウントは50回）なので、
+                # 他のモデルを試しても同じ429になり、枠の消費を早めるだけ。ここで打ち切る。
+                if "per-day" in resp.text:
+                    break
                 continue
             if resp.status_code in (404, 400):
                 _reasons.append(f"{model_name}: {resp.status_code} {resp.text[:150]}")
@@ -1058,6 +1074,8 @@ def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int,
             return (_text, f"NVIDIA ({_model2})") if _model2 else (None, None)
         if provider == "openrouter" and OPENROUTER_API_KEY:
             _text, _model2 = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            if not _model2:
+                logger.warning(f"[ai_consensus] openrouter応答なし: {(_text or '')[:300]}")
             return (_text, f"OpenRouter ({_model2})") if _model2 else (None, None)
     except Exception as e:
         logger.warning(f"[ai_consensus] {provider}呼び出し失敗: {e}")
