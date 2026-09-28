@@ -57,7 +57,7 @@ def main():
         for prov in app._AI_FORECAST_PROVIDERS:
             if any(r["date"] == today and app._provider_of(r.get("model", "")) == prov for r in recs):
                 continue
-            text, model = app._call_single_ai_provider(prov, prompt, 1500, 0.3)
+            text, model = app._call_single_ai_provider(prov, prompt, 3000, 0.3)
             parsed = app._parse_ai_forecast(text) if text else None
             if parsed:
                 recs.append({"id": f"{today}-{prov}", "date": today, "model": model, "snapshot": snap, **parsed})
