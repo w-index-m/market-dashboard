@@ -20,16 +20,25 @@ jobs:
 
       - name: Run diagnostic
         run: |
-          echo "=== JP tenbagger precompute (dry run) ===" | tee /tmp/debug_output.txt
-          timeout 1200 python scripts/precompute_jp_tenbagger.py 2>&1 | grep -v "^HTTP Error\|possibly delisted" | tail -40 | tee -a /tmp/debug_output.txt
-          ls -la data/jp_tenbagger_raw.json 2>&1 | tee -a /tmp/debug_output.txt
-          python scripts/debug_sp600_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
+          python scripts/debug_sp600_fetch.py 2>&1 | tee /tmp/debug_output.txt
           echo "=== CPI fetch (FRED -> BLS fallback) ===" | tee -a /tmp/debug_output.txt
           python scripts/debug_cpi_fetch.py 2>&1 | tee -a /tmp/debug_output.txt
           echo "=== ML evaluation ===" | tee -a /tmp/debug_output.txt
           python scripts/debug_ml_eval.py 2>&1 | tee -a /tmp/debug_output.txt
           echo "=== Drawdown feature experiment ===" | tee -a /tmp/debug_output.txt
           python scripts/debug_dd_experiment.py 2>&1 | tee -a /tmp/debug_output.txt
+
+      - name: JP tenbagger end-to-end (real app code + real AI)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          pip install -q -r requirements.txt
+          echo "=== JP tenbagger end-to-end ===" | tee -a /tmp/debug_output.txt
+          python scripts/debug_jp_tenbagger.py 2>&1 | grep -v "No runtime found\|to view a Streamlit app\|streamlit run\|Warning: to view" | tee -a /tmp/debug_output.txt
 
       # Actions run logs are served from Azure Blob Storage, which the debugging
       # sandbox this repo's assistant runs in cannot reach (only github.com /

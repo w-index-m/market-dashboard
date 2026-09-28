@@ -29316,37 +29316,48 @@ def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
 ・単なるPER上昇頼みのシナリオは10倍化余地として評価しないこと
 ・情報が乏しく判断できない場合は低めのスコアにすること
 
-以下のJSON形式のみで回答（前後のテキスト不要）:
-{{"scores": [{{"ticker": "銘柄コード", "score_moat": 0〜20の数値, "score_10x": 0〜20の数値,
-  "comment": "根拠を40字以内で"}}]}}"""
+以下のJSON形式のみで回答（前後のテキスト不要。tickerは上記の銘柄コードを「.T」付きでそのまま書く）:
+{{"scores": [{{"ticker": "1234.T", "score_moat": 0〜20の数値, "score_10x": 0〜20の数値,
+  "comment": "根拠を30字以内で"}}]}}"""
 
     try:
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=2500, temperature=0.3)
+        # 20銘柄分の日本語コメント付きJSONは2,500トークンでは途中で切れることがあり、
+        # 解析失敗→全銘柄AI点0→70点に届く銘柄が0件、になっていたため余裕を持たせる
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=5000, temperature=0.3)
     except Exception as e:
         logger.warning(f"[trading] JP10倍株候補AI評価失敗: {e}")
         return {}
 
+    # 途中で切れていても、閉じている銘柄オブジェクトは1件ずつ拾う（全体をjson.loadsすると
+    # 1文字でも欠けたら全滅するため）
     import json as _json_jt
-    _m = re.search(r'\{[\s\S]*\}', _text)
-    if not _m:
-        logger.warning(f"[trading] JP10倍株候補AI評価: JSON未検出: {_text[:200]}")
-        return {}
-    try:
-        _parsed = _json_jt.loads(_m.group())
-    except ValueError:
-        logger.warning("[trading] JP10倍株候補AI評価: JSON解析失敗")
+    _objs = []
+    for _m in re.finditer(r'\{[^{}]*"ticker"[^{}]*\}', _text or ""):
+        try:
+            _objs.append(_json_jt.loads(_m.group()))
+        except ValueError:
+            continue
+    if not _objs:
+        logger.warning(f"[trading] JP10倍株候補AI評価: 採点を読み取れず: {(_text or '')[:200]}")
         return {}
 
+    # AIがコードを「6150」「6150.T」「6150.T タケダ機械」等の表記ゆれで返しても一致させる
+    _code_map = {str(_c["ticker"]).split(".")[0]: _c["ticker"] for _c in candidates}
     _result = {}
-    for _s in _parsed.get("scores", []):
-        _tk = _s.get("ticker", "")
+    for _s in _objs:
+        _m_code = re.search(r"\d{4}|[0-9][0-9A-Z]{3}", str(_s.get("ticker", "")))
+        _tk = _code_map.get(_m_code.group()) if _m_code else None
         if not _tk:
             continue
-        _result[_tk] = {
-            "score_moat": min(max(float(_s.get("score_moat", 0) or 0), 0), 20),
-            "score_10x":  min(max(float(_s.get("score_10x", 0) or 0), 0), 20),
-            "comment": _s.get("comment", ""),
-        }
+        try:
+            _result[_tk] = {
+                "score_moat": min(max(float(_s.get("score_moat", 0) or 0), 0), 20),
+                "score_10x":  min(max(float(_s.get("score_10x", 0) or 0), 0), 20),
+                "comment": _s.get("comment", ""),
+            }
+        except (TypeError, ValueError):
+            continue
+    logger.info(f"[trading] JP10倍株候補AI評価: {len(_result)}/{len(candidates)}銘柄の採点を取得（{_model}）")
     return _result
 
 
