@@ -1,0 +1,73 @@
+{
+ "records": [
+  {
+   "id": "2026-09-28-groq",
+   "date": "2026-09-28",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7683.69,
+     "chg20_pct": -0.36,
+     "date": "2026-09-28"
+    },
+    "nikkei": {
+     "value": 66364.203,
+     "chg20_pct": 0.77,
+     "date": "2026-09-25"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 11.02,
+     "date": "2026-09-28"
+    },
+    "usdjpy": {
+     "value": 157.395,
+     "chg20_pct": -1.7,
+     "date": "2026-09-28"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国金利上昇と日銀緩和継続で円安圧力が弱まり、米国株は利回り上昇を受け上昇。"
+  },
+  {
+   "id": "2026-09-28-nvidia",
+   "date": "2026-09-28",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7683.69,
+     "chg20_pct": -0.36,
+     "date": "2026-09-28"
+    },
+    "nikkei": {
+     "value": 66364.203,
+     "chg20_pct": 0.77,
+     "date": "2026-09-25"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 11.02,
+     "date": "2026-09-28"
+    },
+    "usdjpy": {
+     "value": 157.395,
+     "chg20_pct": -1.7,
+     "date": "2026-09-28"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米金利上昇一服で株安、日銀利上げ・介入警戒で円高進行、輸出関連売りで日経下落"
+  }
+ ],
+ "updated_at": "2026-09-28T20:50:02Z"
+}
