@@ -29295,7 +29295,15 @@ def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
     with _cf_ai.ThreadPoolExecutor(max_workers=max(len(_chunks), 1)) as _ex:
         for _part in _ex.map(_score_jp_tenbagger_qualitative_batch, _chunks):
             _result.update(_part)
-    logger.info(f"[trading] JP10倍株候補AI評価: 合計{len(_result)}/{len(candidates)}銘柄を採点")
+    # 5銘柄ずつでもGeminiは1銘柄で回答が終わることがあった（実AIで確認）ため、採点が
+    # 返らなかった銘柄だけ1銘柄ずつ聞き直す（1銘柄分の回答なら途中で終わりにくい）
+    _missing = [[_c] for _c in candidates if _c["ticker"] not in _result]
+    if _missing:
+        with _cf_ai.ThreadPoolExecutor(max_workers=min(len(_missing), 5)) as _ex:
+            for _part in _ex.map(_score_jp_tenbagger_qualitative_batch, _missing):
+                _result.update(_part)
+    logger.info(f"[trading] JP10倍株候補AI評価: 合計{len(_result)}/{len(candidates)}銘柄を採点"
+                f"（うち{len(_missing)}銘柄は1銘柄ずつ再試行）")
     return _result
 
 
