@@ -29281,9 +29281,27 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
     return _result
 
 
+_JP_TENBAGGER_AI_CHUNK = 5  # 1回のAI呼び出しで採点させる銘柄数
+
+
 def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
+    """STEP2のAI採点を、少数ずつに分けて並列に呼び出す。20銘柄を1回で頼むと、Gemini 2.5 Flash
+    では内部の思考にも出力枠を使うため回答が途中で終わり、2026-09の実AIでの検証では20銘柄中
+    2〜3銘柄しか採点が返らなかった（残りはAI点0で70点に届かず、候補がほぼ0件になっていた）。"""
+    import concurrent.futures as _cf_ai
+    _chunks = [candidates[i:i + _JP_TENBAGGER_AI_CHUNK]
+               for i in range(0, len(candidates), _JP_TENBAGGER_AI_CHUNK)]
+    _result = {}
+    with _cf_ai.ThreadPoolExecutor(max_workers=max(len(_chunks), 1)) as _ex:
+        for _part in _ex.map(_score_jp_tenbagger_qualitative_batch, _chunks):
+            _result.update(_part)
+    logger.info(f"[trading] JP10倍株候補AI評価: 合計{len(_result)}/{len(candidates)}銘柄を採点")
+    return _result
+
+
+def _score_jp_tenbagger_qualitative_batch(candidates: list) -> dict:
     """🚀 日本株10倍株候補モードSTEP2: 決定論的スコア上位の候補について、AIに
-    ③競争優位性(20pt)・⑤10倍化余地(20pt)を採点させる（1回のバッチ呼び出し）。
+    ③競争優位性(20pt)・⑤10倍化余地(20pt)を採点させる（1回のAI呼び出し分）。
     渡すのはセクター・業種・事業概要・実測の成長率/PER等の実データのみで、財務指標の
     具体的な数値をAIに創作させない（他モードと同じ捏造対策）。
     Returns: {ticker: {"score_moat": float, "score_10x": float, "comment": str}}
@@ -29323,7 +29341,7 @@ def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
     try:
         # 20銘柄分の日本語コメント付きJSONは2,500トークンでは途中で切れることがあり、
         # 解析失敗→全銘柄AI点0→70点に届く銘柄が0件、になっていたため余裕を持たせる
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=5000, temperature=0.3)
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=3000, temperature=0.3)
     except Exception as e:
         logger.warning(f"[trading] JP10倍株候補AI評価失敗: {e}")
         return {}
@@ -29357,7 +29375,7 @@ def _score_jp_tenbagger_qualitative(candidates: list) -> dict:
             }
         except (TypeError, ValueError):
             continue
-    logger.info(f"[trading] JP10倍株候補AI評価: {len(_result)}/{len(candidates)}銘柄の採点を取得（{_model}）")
+    logger.info(f"[trading] JP10倍株候補AI評価(分割): {len(_result)}/{len(candidates)}銘柄の採点を取得（{_model}）")
     return _result
 
 
