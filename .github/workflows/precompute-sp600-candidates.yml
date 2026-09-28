@@ -60,3 +60,49 @@ jobs:
             sleep $((i * 5))
           done
           exit 1
+
+  # 2つのデータ更新が終わった後、サイトで実際に数字が出る状態かを本番と同じコードで確認する。
+  # 問題があればこのジョブを失敗させる（GitHubからリポジトリの持ち主に失敗通知が届く）。
+  health_check:
+    needs: [sp600, jp_standard]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q -r requirements.txt
+      - name: Check both tenbagger modes end-to-end
+        id: check
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set +e
+          PYTHONPATH=. python scripts/check_tenbagger_health.py 2>/dev/null | tee /tmp/health.txt
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          cat /tmp/health.txt >> "$GITHUB_STEP_SUMMARY"
+      # 実行ログ本体はこのリポジトリのアシスタントの作業環境から読めないため、結果をhealth-report
+      # ブランチにも置く（毎回上書き、中身はこの結果ファイルだけ）
+      - name: Publish report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan health-report
+          git rm -rf --cached . >/dev/null
+          { echo "Run: ${{ github.run_id }} (${{ github.event_name }})"; cat /tmp/health.txt; } > health_report.txt
+          git add health_report.txt
+          git commit -m "Health report from run ${{ github.run_id }}"
+          git push origin health-report --force
+      - name: Fail if unhealthy
+        if: steps.check.outputs.code != '0'
+        run: exit 1
