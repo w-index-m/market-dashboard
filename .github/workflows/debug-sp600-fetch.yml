@@ -38,6 +38,8 @@ jobs:
         run: |
           pip install -q -r requirements.txt
           echo "=== JP tenbagger end-to-end ===" | tee -a /tmp/debug_output.txt
+          echo "=== AI forecast grading test ===" | tee -a /tmp/debug_output.txt
+          PYTHONPATH=. python scripts/debug_ai_forecast_grade.py 2>/dev/null | tee -a /tmp/debug_output.txt
           PYTHONPATH=. python scripts/debug_jp_tenbagger.py 2>&1 | grep -v "No runtime found\|to view a Streamlit app\|streamlit run\|Warning: to view" | tee -a /tmp/debug_output.txt
 
       # Actions run logs are served from Azure Blob Storage, which the debugging

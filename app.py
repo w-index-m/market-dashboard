@@ -5816,6 +5816,198 @@ def render_drawdown_risk_model():
                    "過去の関係が今後も続くとは限らず、投資判断の推奨ではありません。")
 
 
+# ── 🏁 AIの予想の答え合わせ（複数AIの相場予想を記録し、約4週間後に採点する） ─────────────
+# 記録と採点はGitHub Actions（scripts/ai_forecast_log.py、平日毎朝）が行い、data/ai_forecasts.jsonに
+# 蓄積する。ここにはその判定ロジックと画面表示を置く（判定ロジックをapp.py1か所に保つため）。
+_AI_FORECAST_ASSETS = {
+    # key: (yfinanceティッカー, 表示名, 上がる方向の言い方, 下がる方向の言い方)
+    "sp500":  ("^GSPC", "S&P500", "上昇", "下落"),
+    "nikkei": ("^N225", "日経平均", "上昇", "下落"),
+    "tnx":    ("^TNX", "米10年債利回り", "上昇", "低下"),
+    "usdjpy": ("JPY=X", "ドル円", "円安", "円高"),
+}
+_AI_FORECAST_HORIZON_DAYS = 28   # 採点までの暦日数（約20営業日）
+_AI_FORECAST_PROVIDERS = ("gemini", "groq", "nvidia", "openrouter")
+_AI_FORECAST_PATH = os.path.join(os.path.dirname(__file__), "data", "ai_forecasts.json")
+
+
+def _ai_forecast_snapshot() -> Optional[dict]:
+    """予想の前提として各AIに見せる市場データ（現在値と直近20営業日の変化）。"""
+    try:
+        _raw = yf.download([v[0] for v in _AI_FORECAST_ASSETS.values()], period="3mo", interval="1d",
+                           progress=False, auto_adjust=True, timeout=30)["Close"]
+        snap = {}
+        for _k, (_sym, _nm, _up, _dn) in _AI_FORECAST_ASSETS.items():
+            _s = _raw[_sym].dropna()
+            if len(_s) < 22:
+                return None
+            snap[_k] = {"value": round(float(_s.iloc[-1]), 3), "chg20_pct": round((float(_s.iloc[-1]) / float(_s.iloc[-21]) - 1) * 100, 2),
+                        "date": str(_s.index[-1].date())}
+        return snap
+    except Exception as e:
+        logger.warning(f"[ai_forecast] スナップショット取得失敗: {e}")
+        return None
+
+
+def _ai_forecast_prompt(snap: dict) -> str:
+    _lines = "\n".join(f"・{_AI_FORECAST_ASSETS[k][1]}: {v['value']}（直近20営業日で{v['chg20_pct']:+.2f}%）"
+                       for k, v in snap.items())
+    _choices = "\n".join(f'  "{k}": "{a[2]} か {a[3]}"' for k, a in _AI_FORECAST_ASSETS.items())
+    return f"""あなたはマクロ経済と相場に詳しいストラテジストです。以下の最新の市場データを踏まえ、
+今から約20営業日後（約4週間後）に、各指標が現在値より上か下かを予想してください。
+
+【最新の市場データ】
+{_lines}
+
+以下のJSONのみで回答（前後のテキスト不要）:
+{{"calls": {{
+{_choices}
+}},
+ "scenario": "予想の根拠となるシナリオを80字以内で（何が起きてどう動くか）"}}"""
+
+
+def _parse_ai_forecast(text: str) -> Optional[dict]:
+    """AIの回答から各指標の方向とシナリオを取り出す。1つでも方向が読めなければNone。"""
+    _calls = {}
+    for _k, (_sym, _nm, _up, _dn) in _AI_FORECAST_ASSETS.items():
+        _m = re.search(rf'"{_k}"\s*:\s*"([^"]*)"', text or "")
+        if not _m:
+            return None
+        _v = _m.group(1)
+        if _up in _v and _dn not in _v:
+            _calls[_k] = "up"
+        elif _dn in _v and _up not in _v:
+            _calls[_k] = "down"
+        else:
+            return None
+    _sc = re.search(r'"scenario"\s*:\s*"([^"]*)', text or "")
+    return {"calls": _calls, "scenario": (_sc.group(1) if _sc else "")[:120]}
+
+
+def _grade_ai_forecast(rec: dict, closes: dict) -> Optional[dict]:
+    """記録日から_AI_FORECAST_HORIZON_DAYS後以降の最初の終値で、方向の当たり外れを機械的に判定する。
+    比較用の基準: 株価指数は「常に上昇」、金利・ドル円は「直近20営業日と同じ方向が続く」。
+    closes: {asset_key: pd.Series(終値)}。まだ期日前・データ不足ならNone。"""
+    _target = pd.Timestamp(rec["date"]) + pd.Timedelta(days=_AI_FORECAST_HORIZON_DAYS)
+    actual, hits, base_hits = {}, {}, {}
+    for _k, _call in rec["calls"].items():
+        _s = closes.get(_k)
+        if _s is None or _s.empty:
+            return None
+        _after = _s[_s.index >= _target]
+        if _after.empty:
+            return None
+        _v0 = rec["snapshot"][_k]["value"]
+        _chg = (float(_after.iloc[0]) / _v0 - 1) * 100
+        _dir = "up" if _chg > 0 else "down"
+        actual[_k] = round(_chg, 2)
+        hits[_k] = _call == _dir
+        _base_call = "up" if _k in ("sp500", "nikkei") else ("up" if rec["snapshot"][_k]["chg20_pct"] > 0 else "down")
+        base_hits[_k] = _base_call == _dir
+    return {"graded_on": str(pd.Timestamp.now().date()), "actual_chg_pct": actual, "hits": hits,
+            "baseline_hits": base_hits}
+
+
+def _judge_ai_forecast_scenario(rec: dict) -> Optional[dict]:
+    """予想のシナリオ（文章）が実際の値動きと整合したかを、予想したのとは別のAIに審査させる。
+    方向の当たり外れは_grade_ai_forecastで機械的に判定済みで、ここでは文章の妥当性だけを見る。"""
+    _g = rec["grade"]
+    _moves = "\n".join(f"・{_AI_FORECAST_ASSETS[k][1]}: 予想 {_AI_FORECAST_ASSETS[k][2] if c == 'up' else _AI_FORECAST_ASSETS[k][3]}"
+                       f" → 実際 {_g['actual_chg_pct'][k]:+.2f}%" for k, c in rec["calls"].items())
+    _prompt = f"""あなたは相場予想の答え合わせをする審査役です。約4週間前に、あるAIが次のシナリオで予想しました。
+
+【予想時のシナリオ】{rec.get('scenario') or '（なし）'}
+
+【各指標の予想方向と、実際の約4週間の変化】
+{_moves}
+
+シナリオで述べた「何が起きてどう動くか」の筋書きが、実際の値動きと整合していたかを審査してください。
+方向が偶然当たっただけで筋書きと矛盾する場合は「外れ」、一部だけ整合する場合は「一部当たり」とします。
+以下のJSONのみで回答: {{"verdict": "当たり / 一部当たり / 外れ のどれか", "reason": "40字以内"}}"""
+    _skip = _provider_of(rec.get("model", ""))
+    for _prov in _JUDGE_PROVIDER_ORDER:
+        if _prov == _skip:
+            continue
+        _text, _model = _call_single_ai_provider(_prov, _prompt, 1200, 0.1)
+        _m = re.search(r'"verdict"\s*:\s*"([^"]*)"', _text or "")
+        if not _m:
+            continue
+        _v = next((v for v in ("一部当たり", "当たり", "外れ") if v in _m.group(1)), None)
+        if _v:
+            _r = re.search(r'"reason"\s*:\s*"([^"]*)', _text)
+            return {"verdict": _v, "reason": (_r.group(1) if _r else "")[:60], "judge_model": _model}
+    return None
+
+
+def _load_ai_forecasts() -> list:
+    try:
+        import json as _json_fc
+        with open(_AI_FORECAST_PATH, encoding="utf-8") as f:
+            return _json_fc.load(f).get("records", [])
+    except Exception:
+        return []
+
+
+def render_ai_forecast_scoreboard():
+    st.markdown("#### 🏁 AIの予想の答え合わせ")
+    st.caption(
+        "複数のAIに毎朝同じ市場データを見せて「約4週間後に上か下か」を予想させ、期日が来たら採点します。"
+        "方向の当たり外れは実際の値動きで機械的に判定し（「株は常に上昇」「金利・ドル円は直近の流れが続く」"
+        "という単純な予想とも比較）、予想の理由（シナリオ）が実際の動きと整合していたかは、"
+        "予想したのとは別のAIが審査します。"
+    )
+    recs = _load_ai_forecasts()
+    if not recs:
+        st.info("記録を開始したばかりです。平日毎朝AIの予想を記録し、最初の採点は約4週間後に表示されます。")
+        return
+    graded = [r for r in recs if r.get("grade")]
+    pending = [r for r in recs if not r.get("grade")]
+    st.caption(f"記録 {len(recs)}件（採点済み {len(graded)}件・期日待ち {len(pending)}件）"
+               f"　最初の記録: {min(r['date'] for r in recs)}")
+
+    if graded:
+        rows = []
+        for _prov in sorted({_provider_of(r.get("model", "")) or "?" for r in graded}):
+            _g = [r for r in graded if (_provider_of(r.get("model", "")) or "?") == _prov]
+            _hits = [h for r in _g for h in r["grade"]["hits"].values()]
+            _base = [h for r in _g for h in r["grade"]["baseline_hits"].values()]
+            _judged = [r["judge"]["verdict"] for r in _g if r.get("judge")]
+            _row = {"AI": _prov, "採点済み": len(_g),
+                    "方向の的中率": f"{sum(_hits) / len(_hits) * 100:.0f}%",
+                    "単純な予想の的中率": f"{sum(_base) / len(_base) * 100:.0f}%",
+                    "差": f"{(sum(_hits) - sum(_base)) / len(_hits) * 100:+.0f}pt"}
+            for _k, _a in _AI_FORECAST_ASSETS.items():
+                _hk = [r["grade"]["hits"][_k] for r in _g if _k in r["grade"]["hits"]]
+                _row[_a[1]] = f"{sum(_hk)}/{len(_hk)}" if _hk else "—"
+            _row["シナリオ審査（当たり/一部/外れ）"] = (
+                f"{_judged.count('当たり')}/{_judged.count('一部当たり')}/{_judged.count('外れ')}" if _judged else "—")
+            rows.append(_row)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        with st.expander("📋 採点済みの予想（新しい順）", expanded=False):
+            _lst = []
+            for r in sorted(graded, key=lambda x: x["date"], reverse=True)[:40]:
+                _lst.append({
+                    "予想日": r["date"], "AI": _provider_of(r.get("model", "")),
+                    "予想": " / ".join(f"{_AI_FORECAST_ASSETS[k][1]}{'↑' if c == 'up' else '↓'}"
+                                     f"{'○' if r['grade']['hits'][k] else '×'}" for k, c in r["calls"].items()),
+                    "シナリオ": r.get("scenario", ""),
+                    "シナリオ審査": (f"{r['judge']['verdict']}（{r['judge']['reason']}）" if r.get("judge") else "—"),
+                })
+            st.dataframe(pd.DataFrame(_lst), use_container_width=True, hide_index=True)
+
+    if pending:
+        with st.expander(f"⏳ 期日待ちの予想（{len(pending)}件）", expanded=not graded):
+            _lst = [{"予想日": r["date"], "採点予定": str((pd.Timestamp(r["date"]) + pd.Timedelta(days=_AI_FORECAST_HORIZON_DAYS)).date()),
+                     "AI": _provider_of(r.get("model", "")),
+                     "予想": " / ".join(f"{_AI_FORECAST_ASSETS[k][1]}{'↑' if c == 'up' else '↓'}" for k, c in r["calls"].items()),
+                     "シナリオ": r.get("scenario", "")}
+                    for r in sorted(pending, key=lambda x: x["date"], reverse=True)[:40]]
+            st.dataframe(pd.DataFrame(_lst), use_container_width=True, hide_index=True)
+    st.caption("4週間の相場予想は偶然の要素が大きく、採点件数が少ないうちは成績の差に意味はありません。"
+               "数十件以上たまってから、単純な予想との差を見てください。")
+
+
 # 2026-09に実施した下落予測の特徴量検証の結果（scripts/debug_dd_experiment.py、2012-09〜2026-09の
 # 実データを5期間に分け、学習なしで各指標をそのままスコアにした場合の検証期間ごとのAUC）。
 # 一度きりの実験結果なので定数として持つ（再検証したら更新する）。
@@ -37613,8 +37805,9 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ===================================================
     # ★ 方向性予測スコア（日本株・米国株）
     # ===================================================
-    tab_jp_pred, tab_us_pred, tab_dd_pred, tab_report = st.tabs(
-        ["🇯🇵 日本株（日経平均）", "🇺🇸 米国株（S&P500/NASDAQ/ダウ）", "⚠️ 下落リスク（20日）", "📚 検証レポート"])
+    tab_jp_pred, tab_us_pred, tab_dd_pred, tab_report, tab_fc = st.tabs(
+        ["🇯🇵 日本株（日経平均）", "🇺🇸 米国株（S&P500/NASDAQ/ダウ）", "⚠️ 下落リスク（20日）", "📚 検証レポート",
+         "🏁 AIの答え合わせ"])
     with tab_jp_pred:
         render_nikkei_prediction()
     with tab_us_pred:
@@ -37623,6 +37816,8 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         render_drawdown_risk_model()
     with tab_report:
         render_model_validation_report()
+    with tab_fc:
+        render_ai_forecast_scoreboard()
     st.divider()
 
     # ★ マーケットリサーチAI

@@ -1,0 +1,39 @@
+name: AI forecast log (record & grade)
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC（米国市場の引け後）= 翌朝7:30 JST
+  workflow_dispatch: {}
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q -r requirements.txt
+      - name: Grade due forecasts and record today's
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: PYTHONPATH=. python scripts/ai_forecast_log.py 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ai_forecasts.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update AI forecast log"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
