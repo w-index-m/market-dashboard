@@ -31,4 +31,8 @@ for r in rows[:20]:
 print(f">=70: {sum(t >= 70 for t in totals)}")
 
 res = app._fetch_jp_tenbagger_candidates()
-print(f"_fetch_jp_tenbagger_candidates(): {len(res)} candidates -> {list(res)[:10]}")
+print(f"_fetch_jp_tenbagger_candidates(): {len(res)} candidates")
+for t, d in res.items():
+    print(f"  {t:8s} {d['name'][:10]:10s} 合計={d['score_total']:5.1f} 採点={d.get('ai_scored_by', '')[:30]}")
+    print(f"      理由: {d.get('ai_comment', '')}")
+    print(f"      審査: {d.get('judge_verdict') or '—'}（{d.get('judge_reason', '')}） by {d.get('judge_model', '')}")

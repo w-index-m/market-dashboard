@@ -29235,6 +29235,7 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
         _row["score_moat"] = _ai.get("score_moat", 0.0)
         _row["score_10x"] = _ai.get("score_10x", 0.0)
         _row["ai_comment"] = _ai.get("comment", "")
+        _row["ai_scored_by"] = _ai.get("scored_by", "")
         _row["score_total"] = round(
             _row["_det_score"] + _row["score_moat"] + _row["score_10x"], 1
         )
@@ -29269,6 +29270,15 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
     except Exception as e:
         logger.warning(f"[trading] JP10倍株候補価格取得失敗: {e}")
 
+    # 採点したのとは別のAIに、採点の根拠が妥当かを審査させる（LLM-as-a-judge）。
+    # 順位は変えず、根拠が弱い銘柄に印を付けるだけ（Agent Cと画面の両方に伝える）。
+    _judged = _judge_jp_tenbagger_scores(_qualified[:top_n])
+    for _row in _qualified[:top_n]:
+        _j = _judged.get(_row["ticker"], {})
+        _row["judge_verdict"] = _j.get("verdict", "")
+        _row["judge_reason"] = _j.get("reason", "")
+        _row["judge_model"] = _j.get("judge_model", "")
+
     _result = {}
     for _row in _qualified[:top_n]:
         _tk = _row.pop("ticker")
@@ -29283,6 +29293,115 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
         f"（STEP1通過{len(_rows)}銘柄/母集団{len(_tickers)}銘柄、70点以上{len(_qualified)}銘柄）"
     )
     return _result
+
+
+# 審査役に使うAIの優先順（採点したAIと同じ会社のモデルは使わない）
+_JUDGE_PROVIDER_ORDER = ("groq", "openrouter", "gemini", "nvidia", "deepseek")
+_JUDGE_VERDICTS = ("妥当", "要注意", "根拠不足")
+
+
+def _provider_of(model_label: str) -> str:
+    """"Gemini (gemini-2.5-flash)" のようなモデル表記から、プロバイダー名（gemini等）を取り出す。"""
+    _l = (model_label or "").lower()
+    return next((p for p in _AI_CONSENSUS_PROVIDERS if _l.startswith(p)), "")
+
+
+def _judge_one_jp_tenbagger(row: dict) -> Optional[dict]:
+    """1銘柄分のAI採点を、採点したのとは別のAIに審査させる。"""
+    _prompt = f"""あなたは株式アナリストの評価をチェックする審査役です。
+別のAIが、以下の「提供データ」だけを根拠に日本の小型株を採点しました。その採点が妥当かを審査してください。
+
+【提供データ（採点したAIに渡した情報はこれだけ）】
+銘柄: {row['ticker']} {row['name']}
+セクター: {row.get('sector') or '不明'} / 業種: {row.get('industry') or '不明'}
+PER: {row.get('per')}倍 / 売上成長率: {row.get('rev_growth')}% / 営業利益成長率: {row.get('earnings_growth')}% / 営業利益率: {row.get('op_margin')}%
+事業概要: {row.get('summary') or '（取得できず）'}
+
+【採点結果】
+競争優位性: {row.get('score_moat')}/20点　10倍化余地: {row.get('score_10x')}/20点
+採点理由: {row.get('ai_comment') or '（なし）'}
+
+【審査の観点】
+1. 採点理由は提供データの範囲に収まっているか（データにない事実・数値を持ち込んでいないか）
+2. 点数の高さと理由の中身は釣り合っているか（根拠が薄いのに高得点になっていないか）
+
+以下のJSONのみで回答:
+{{"verdict": "妥当 / 要注意 / 根拠不足 のどれか", "reason": "判断理由を40字以内で"}}"""
+    _skip = _provider_of(row.get("ai_scored_by", ""))
+    for _prov in _JUDGE_PROVIDER_ORDER:
+        if _prov == _skip:
+            continue
+        _text, _model = _call_single_ai_provider(_prov, _prompt, 1500, 0.1)
+        if not _text:
+            continue
+        _m = re.search(r'\{[^{}]*"verdict"[^{}]*\}', _text)
+        if not _m:
+            continue
+        try:
+            import json as _json_judge
+            _j = _json_judge.loads(_m.group())
+        except ValueError:
+            continue
+        _v = next((v for v in _JUDGE_VERDICTS if v in str(_j.get("verdict", ""))), None)
+        if _v:
+            return {"verdict": _v, "reason": str(_j.get("reason", ""))[:60], "judge_model": _model}
+    return None
+
+
+def _judge_jp_tenbagger_scores(rows: list) -> dict:
+    """最終候補のAI採点を、銘柄ごとに別のAIで並列に審査する（LLM-as-a-judge）。
+    判定の前に、採点理由が渡していない財務指標（ROE・PBR等の数値）に触れていないかを
+    正規表現でも確認し、該当すればAIの判定より優先して「要注意」とする（数値で確かめられる
+    部分は機械的に判定し、LLMには文章の妥当性だけを見させる）。
+    Returns: {ticker: {"verdict", "reason", "judge_model"}}"""
+    import concurrent.futures as _cf_judge
+    out = {}
+    if not rows:
+        return out
+    with _cf_judge.ThreadPoolExecutor(max_workers=min(len(rows), 5)) as _ex:
+        for _row, _res in zip(rows, _ex.map(_judge_one_jp_tenbagger, rows)):
+            if _AGENT_C_FABRICATED_METRIC_RE_JP_TENBAGGER.search(_row.get("ai_comment") or ""):
+                out[_row["ticker"]] = {"verdict": "要注意", "reason": "提供していない財務指標の数値に言及",
+                                       "judge_model": "ルールチェック"}
+            elif _res:
+                out[_row["ticker"]] = _res
+    _counts = {v: sum(1 for r in out.values() if r["verdict"] == v) for v in _JUDGE_VERDICTS}
+    logger.info(f"[trading] JP10倍株候補AI審査: {len(out)}/{len(rows)}銘柄 {_counts}")
+    return out
+
+
+def _render_jp_tenbagger_judge_table() -> None:
+    """🚀日本株10倍株候補の最終候補について、AIの採点と別AIによる審査結果を一覧表示する。"""
+    _c = _fetch_jp_tenbagger_candidates()
+    if not _c:
+        return
+    _mark = {"妥当": "✅ 妥当", "要注意": "⚠️ 要注意", "根拠不足": "❌ 根拠不足"}
+    _rows = [{
+        "銘柄": f"{_tk.replace('.T', '')} {(_d.get('name') or '')[:10]}",
+        "合計": _d.get("score_total"),
+        "定量(60)": round((_d.get("score_growth") or 0) + (_d.get("score_value") or 0)
+                         + (_d.get("score_finance") or 0), 1),
+        "競争優位(20)": _d.get("score_moat"), "10倍余地(20)": _d.get("score_10x"),
+        "AIの採点理由": _d.get("ai_comment") or "",
+        "別AIの審査": _mark.get(_d.get("judge_verdict"), "—"),
+        "審査の理由": _d.get("judge_reason") or "",
+        "採点AI → 審査AI": f"{(_d.get('ai_scored_by') or '—').split(' (')[0]} → "
+                         f"{(_d.get('judge_model') or '—').split(' (')[0]}",
+    } for _tk, _d in _c.items()]
+    st.markdown(
+        '<div style="font-size:12px;font-weight:600;color:#94a3b8;margin:10px 0 4px">'
+        '🧑‍⚖️ AI採点の審査（採点したのとは別のAIが、根拠の妥当性をチェック）</div>',
+        unsafe_allow_html=True,
+    )
+    st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+    _n_bad = sum(1 for _d in _c.values() if _d.get("judge_verdict") in ("要注意", "根拠不足"))
+    st.caption(
+        "競争優位性・10倍化余地はAIが事業概要などから採点したもので、同じ銘柄でも実行ごとに点がぶれます。"
+        "そこで採点に使ったのとは別のAIに「理由が渡したデータの範囲に収まっているか」「点数と理由が釣り合って"
+        "いるか」を審査させています（渡していない財務指標の数値への言及は機械的にも検出）。"
+        + (f"今回は{_n_bad}銘柄に注意が付いています。" if _n_bad else "")
+        + "審査は順位を変えず、推奨ポートフォリオを組むAIにも結果を伝えています。"
+    )
 
 
 _JP_TENBAGGER_AI_CHUNK = 5  # 1回のAI呼び出しで採点させる銘柄数
@@ -29384,6 +29503,7 @@ def _score_jp_tenbagger_qualitative_batch(candidates: list) -> dict:
                 "score_moat": min(max(float(_s.get("score_moat", 0) or 0), 0), 20),
                 "score_10x":  min(max(float(_s.get("score_10x", 0) or 0), 0), 20),
                 "comment": _s.get("comment", ""),
+                "scored_by": _model,
             }
         except (TypeError, ValueError):
             continue
@@ -29499,6 +29619,8 @@ def _build_jp_tenbagger_fundamentals_table(cand_perf: dict) -> str:
         _eg  = _d.get("earnings_growth")
         _st  = _d.get("score_total")
         _cm  = _d.get("ai_comment") or ""
+        if _d.get("judge_verdict"):
+            _cm += f"［別AIの審査: {_d['judge_verdict']}（{_d.get('judge_reason', '')}）］"
         _per_str = f"{_per:.1f}倍" if _per is not None else "—"
         _rg_str  = f"{_rg:+.1f}%" if _rg is not None else "—"
         _eg_str  = f"{_eg:+.1f}%" if _eg is not None else "—"
@@ -29988,7 +30110,8 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "結果】に記載のPER・成長率・総合スコア・事前コメントは実際の計算結果なので、"
             "merits/demeritsの根拠として積極的に引用してよい。nameフィールドには必ず"
             "【実財務データ＋事前スコアリング結果】に記載の「会社名:」の値をそのまま使うこと"
-            "（セクター名や自分で考えた名前を使わない）"
+            "（セクター名や自分で考えた名前を使わない）。［別AIの審査］が「根拠不足」の銘柄は"
+            "組み入れの優先度を下げ、組み入れる場合はdemeritsにその旨を書くこと"
             if trading_mode == "jp_tenbagger"
             else ""
         )
@@ -31232,6 +31355,9 @@ def render_claude_trading_project():
         )
 
         # ── 選択中モードのバックテスト詳細（1年・3年） ────────────────
+        if _cur_mode == "jp_tenbagger":
+            _render_jp_tenbagger_judge_table()
+
         _bt = _bt_all.get(_cur_mode, {"ok": False, "reason": "計算エラー"})
         if not _bt.get("ok"):
             st.caption(f"📉 {_bt.get('reason', 'バックテストは利用できません。')}")
