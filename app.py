@@ -29365,6 +29365,13 @@ def _judge_jp_tenbagger_scores(rows: list) -> dict:
                                        "judge_model": "ルールチェック"}
             elif _res:
                 out[_row["ticker"]] = _res
+    # 並列で呼ぶと審査役のAIが混み合って応答しないことがあった（実AIで10銘柄中2銘柄）ため、
+    # 審査が付かなかった銘柄だけ少し待ってから1銘柄ずつ聞き直す
+    for _row in [r for r in rows if r["ticker"] not in out]:
+        time.sleep(2)
+        _res = _judge_one_jp_tenbagger(_row)
+        if _res:
+            out[_row["ticker"]] = _res
     _counts = {v: sum(1 for r in out.values() if r["verdict"] == v) for v in _JUDGE_VERDICTS}
     logger.info(f"[trading] JP10倍株候補AI審査: {len(out)}/{len(rows)}銘柄 {_counts}")
     return out
