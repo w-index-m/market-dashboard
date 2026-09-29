@@ -703,6 +703,135 @@ MARKETS = {
 # ===========================
 # Groq API（フォールバック第2候補）
 # ===========================
+# ===========================
+# 📊 AI利用状況の記録（サーバーのメモリ上。デプロイ・再起動で消える）
+# ===========================
+_AI_USAGE_MAX_EVENTS = 20000
+
+
+@st.cache_resource
+def _ai_usage_store() -> dict:
+    """AI呼び出しの記録置き場。st.cache_resourceにすることで、画面の再実行ではリセットされず
+    サーバープロセスが生きている間は保持される（再デプロイ・再起動で消える）。"""
+    import collections
+    import threading
+    return {"lock": threading.Lock(), "events": collections.deque(maxlen=_AI_USAGE_MAX_EVENTS),
+            "started_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M")}
+
+
+def _classify_ai_failure(reason: str) -> str:
+    """失敗理由の文章を、集計しやすい短い分類にまとめる。"""
+    _r = (reason or "").lower()
+    for _keys, _label in (
+        (("per-day", "quota", "resource_exhausted", "429", "rate limit", "rate-limit"), "上限・混雑(429)"),
+        (("402", "payment required", "insufficient balance"), "残高不足(402)"),
+        (("401", "403", "認証", "api_key", "invalid api key"), "認証エラー"),
+        (("404", "not found", "unavailable for free", "deprecated", "利用不可", "decommission"), "モデル廃止・未提供"),
+        (("503", "500", "502", "504", "unavailable", "overloaded", "internal", "deadline"), "サーバー側エラー"),
+        (("timeout", "timed out", "タイムアウト"), "タイムアウト"),
+        (("空レスポンス", "empty"), "空の回答"),
+        (("設定されていません", "not configured"), "キー未設定"),
+    ):
+        if any(k in _r for k in _keys):
+            return _label
+    return "その他"
+
+
+def _record_ai_call(provider: str, model: str, ok: bool, reason: str = "") -> None:
+    """AI呼び出し1回分を記録する。記録の失敗でAI呼び出し自体が失敗しないよう、例外は握りつぶす。"""
+    try:
+        _st = _ai_usage_store()
+        with _st["lock"]:
+            _st["events"].append({
+                "ts": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"), "provider": provider,
+                "model": model or "", "ok": ok,
+                "category": "" if ok else _classify_ai_failure(reason),
+                "reason": "" if ok else (reason or "")[:200],
+            })
+    except Exception:
+        pass
+
+
+def _track_summarize(provider: str):
+    """summarize_with_*（戻り値が(text, model)で、失敗時はmodelが空・textに失敗理由）の呼び出しを記録する。"""
+    def _deco(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def _wrapped(*args, **kwargs):
+            try:
+                text, model = fn(*args, **kwargs)
+            except Exception as e:
+                _record_ai_call(provider, "", False, str(e))
+                raise
+            _ok = bool(model) and model != "none"
+            _record_ai_call(provider, model if _ok else "", _ok, "" if _ok else text)
+            return text, model
+        return _wrapped
+    return _deco
+
+
+def _gemini_generate(client, **kwargs):
+    """Geminiのgenerate_contentを呼び、結果を記録する（呼び出し元の例外処理はそのまま働く）。"""
+    _model = kwargs.get("model", "")
+    try:
+        resp = client.models.generate_content(**kwargs)
+    except Exception as e:
+        _record_ai_call("gemini", _model, False, str(e))
+        raise
+    try:
+        _has_text = bool(resp.text)
+    except Exception:
+        _has_text = False
+    _record_ai_call("gemini", _model, _has_text, "" if _has_text else "空レスポンス")
+    return resp
+
+
+_AI_USAGE_LABELS = {"gemini": "Gemini", "groq": "Groq", "nvidia": "NVIDIA", "openrouter": "OpenRouter",
+                    "deepseek": "DeepSeek"}
+
+
+def render_ai_usage_panel() -> None:
+    """サイドバー用: AIごとの呼び出し回数・成功率・失敗理由を日別に集計して表示する。"""
+    with st.expander("📊 AI利用状況", expanded=False):
+        _st = _ai_usage_store()
+        with _st["lock"]:
+            _ev = list(_st["events"])
+        st.caption(f"記録開始: {_st['started_at']}（このサーバーが起動した時点。再デプロイ・再起動で"
+                   "リセットされます）。サイトを見た全員分のAI呼び出しを数えています。")
+        if not _ev:
+            st.info("まだAIの呼び出しはありません。")
+            return
+        _df = pd.DataFrame(_ev)
+        _df["日付"] = _df["ts"].str[:10]
+        _df["AI"] = _df["provider"].map(_AI_USAGE_LABELS).fillna(_df["provider"])
+        _rows = []
+        for (_d, _ai), _g in _df.groupby(["日付", "AI"], sort=False):
+            _fail = _g[~_g["ok"]]
+            _top = _fail["category"].value_counts()
+            _rows.append({
+                "日付": _d, "AI": _ai, "呼び出し": len(_g), "成功": int(_g["ok"].sum()), "失敗": len(_fail),
+                "成功率": f"{_g['ok'].mean() * 100:.0f}%",
+                "主な失敗理由": "、".join(f"{k}×{v}" for k, v in _top.head(2).items()) if len(_top) else "—",
+            })
+        _sum = pd.DataFrame(_rows).sort_values(["日付", "呼び出し"], ascending=[False, False])
+        st.dataframe(_sum, use_container_width=True, hide_index=True)
+
+        _ok_models = _df[_df["ok"]].groupby(["AI", "model"]).size().reset_index(name="成功回数")
+        if not _ok_models.empty:
+            st.caption("実際に回答したモデル")
+            st.dataframe(_ok_models.sort_values("成功回数", ascending=False), use_container_width=True,
+                         hide_index=True)
+        _recent = _df[~_df["ok"]].tail(15).iloc[::-1]
+        if not _recent.empty:
+            st.caption("直近の失敗（新しい順）")
+            st.dataframe(_recent[["ts", "AI", "category", "reason"]].rename(
+                columns={"ts": "時刻", "category": "分類", "reason": "詳細"}), use_container_width=True, hide_index=True)
+        st.caption("Geminiは内部でモデルを順に試すため、1回の依頼でも複数回と数えることがあります。"
+                   "他のAIは1回の依頼を1回と数えます。")
+
+
+@_track_summarize("groq")
 def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not GROQ_API_KEY:
         return "⚠️ GROQ_API_KEY が設定されていません", ""
@@ -803,6 +932,7 @@ def _fetch_openrouter_free_models() -> list:
         return []
 
 
+@_track_summarize("openrouter")
 def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not OPENROUTER_API_KEY:
         return "⚠️ OPENROUTER_API_KEY が設定されていません", ""
@@ -866,6 +996,7 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
 # ===========================
 # NVIDIA build.nvidia.com（NIM API、フォールバック第4候補）
 # ===========================
+@_track_summarize("nvidia")
 def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not NVIDIA_API_KEY:
         return "⚠️ NVIDIA_API_KEY が設定されていません", ""
@@ -925,6 +1056,7 @@ def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: floa
 # ===========================
 # DeepSeek（フォールバック第5候補、OpenAI互換API）
 # ===========================
+@_track_summarize("deepseek")
 def summarize_with_deepseek(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not DEEPSEEK_API_KEY:
         return "⚠️ DEEPSEEK_API_KEY が設定されていません", ""
@@ -984,7 +1116,7 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
         )
         for model_name in MODEL_FALLBACKS:
             try:
-                response = _gclient.models.generate_content(
+                response = _gemini_generate(_gclient, 
                     model=model_name,
                     contents=prompt,
                     config=genai.types.GenerateContentConfig(
@@ -1057,7 +1189,7 @@ def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int,
             api_key=GEMINI_API_KEY,
             http_options=genai.types.HttpOptions(timeout=_GEMINI_TIMEOUT_MS),
         )
-            _resp = _gclient.models.generate_content(
+            _resp = _gemini_generate(_gclient, 
                 model=MODEL_FALLBACKS[0],
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
@@ -1252,7 +1384,7 @@ def _call_ai_for_trading(
         )
             for model_name in MODEL_FALLBACKS:
                 try:
-                    resp = _gclient.models.generate_content(
+                    resp = _gemini_generate(_gclient, 
                         model=model_name,
                         contents=prompt,
                         config=genai.types.GenerateContentConfig(
@@ -1314,7 +1446,7 @@ def _extract_holdings_from_screenshot(image_bytes: bytes, mime_type: str = "imag
     )
     for model_name in MODEL_FALLBACKS:
         try:
-            resp = _gclient.models.generate_content(
+            resp = _gemini_generate(_gclient, 
                 model=model_name,
                 contents=[prompt, genai.types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
                 config=genai.types.GenerateContentConfig(
@@ -37273,6 +37405,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         _render_provider_test("DeepSeek", DEEPSEEK_API_KEY, summarize_with_deepseek)
         _render_provider_test("NVIDIA", NVIDIA_API_KEY, summarize_with_nvidia)
         _render_provider_test("OpenRouter", OPENROUTER_API_KEY, summarize_with_openrouter)
+        render_ai_usage_panel()
 
     # ===================================================
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）

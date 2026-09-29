@@ -36,3 +36,13 @@ for t, d in res.items():
     print(f"  {t:8s} {d['name'][:10]:10s} 合計={d['score_total']:5.1f} 採点={d.get('ai_scored_by', '')[:30]}")
     print(f"      理由: {d.get('ai_comment', '')}")
     print(f"      審査: {d.get('judge_verdict') or '—'}（{d.get('judge_reason', '')}） by {d.get('judge_model', '')}")
+
+import pandas as pd  # noqa: E402
+
+ev = pd.DataFrame(list(app._ai_usage_store()["events"]))
+print("=== AI usage recorded during this run ===")
+if ev.empty:
+    print("(no events)")
+else:
+    print(ev.groupby(["provider", "ok"]).size().to_string())
+    print(ev[~ev["ok"]].groupby(["provider", "category"]).size().to_string())
