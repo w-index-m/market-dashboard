@@ -726,6 +726,7 @@ def _classify_ai_failure(reason: str) -> str:
     for _keys, _label in (
         (("per-day", "quota", "resource_exhausted", "429", "rate limit", "rate-limit"), "上限・混雑(429)"),
         (("402", "payment required", "insufficient balance"), "残高不足(402)"),
+        (("tier_not_allowed", "subscription tier"), "プラン外のモデル"),
         (("401", "403", "認証", "api_key", "invalid api key"), "認証エラー"),
         (("404", "not found", "unavailable for free", "deprecated", "利用不可", "decommission"), "モデル廃止・未提供"),
         (("503", "500", "502", "504", "unavailable", "overloaded", "internal", "deadline"), "サーバー側エラー"),
@@ -1111,8 +1112,10 @@ def summarize_with_deepseek(prompt: str, max_tokens: int = 1500, temperature: fl
 def summarize_with_mistral(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
     if not MISTRAL_API_KEY:
         return "⚠️ MISTRAL_API_KEY が設定されていません", ""
-    # 軽いモデルを先に、混雑・上限のときだけ大きいモデルを試す
-    MISTRAL_MODELS = ["mistral-small-latest", "mistral-large-latest"]
+    # 無料プラン(Experiment)で使えることを2026-09に実際に確認したモデルだけを使う。
+    # mistral-large-latestは403(tier_not_allowed=無料プランでは使えない)、smallは毎秒の上限に
+    # 当たりやすい(429)ため、別枠のopen-mistral-nemoを2番目に置く。
+    MISTRAL_MODELS = ["mistral-small-latest", "open-mistral-nemo", "mistral-medium-latest"]
     headers = {
         "Authorization": f"Bearer {MISTRAL_API_KEY}",
         "Content-Type": "application/json",
@@ -1133,7 +1136,8 @@ def summarize_with_mistral(prompt: str, max_tokens: int = 1500, temperature: flo
             if resp.status_code == 429:
                 _reasons.append(f"{model_name}: 429 {resp.text[:150]}")
                 continue
-            if resp.status_code in (404, 400, 422):
+            if resp.status_code in (404, 400, 422) or (resp.status_code == 403 and "tier" in resp.text):
+                # 403でも"tier_not_allowed"はキーの不正ではなく「このモデルは今のプランでは使えない」
                 _reasons.append(f"{model_name}: {resp.status_code} {resp.text[:150]}")
                 continue
             if resp.status_code in (401, 403):
