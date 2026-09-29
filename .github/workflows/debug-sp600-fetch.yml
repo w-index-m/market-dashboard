@@ -39,6 +39,8 @@ jobs:
         run: |
           pip install -q -r requirements.txt
           echo "=== JP tenbagger end-to-end ===" | tee -a /tmp/debug_output.txt
+          echo "=== Mistral check ===" | tee -a /tmp/debug_output.txt
+          PYTHONPATH=. python scripts/debug_mistral.py 2>/dev/null | tee -a /tmp/debug_output.txt
           echo "=== OpenRouter diagnosis ===" | tee -a /tmp/debug_output.txt
           PYTHONPATH=. python scripts/debug_openrouter.py 2>&1 | grep -v "No runtime found\|streamlit run\|to view a Streamlit" | tee -a /tmp/debug_output.txt
           echo "=== AI forecast grading test ===" | tee -a /tmp/debug_output.txt
