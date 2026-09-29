@@ -37,7 +37,7 @@ AI推奨ポートフォリオは共通のまま、保有銘柄アクション判
     LINE_CHANNEL_ACCESS_TOKEN  任意。LINE Developersで発行するMessaging APIチャネルアクセストークン。
     SLACK_WEBHOOK_URL          任意。SlackのIncoming Webhook URL。
     ※ LINE_CHANNEL_ACCESS_TOKEN / SLACK_WEBHOOK_URL の少なくとも1つは必須。
-    GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY  いずれか（AIフォールバックチェーン）
+    GEMINI_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY / OPENROUTER_API_KEY  いずれか（AIフォールバックチェーン）
     FMP_API_KEY, FINNHUB_API_KEY, ALPHA_VANTAGE_KEY, TIINGO_API_KEY  任意（市場データ取得に使用）
     GOOGLE_SHEETS_ID, GOOGLE_SERVICE_ACCOUNT_JSON  取引記録読込・推奨履歴記録に必要
     TRADING_USERNAME      任意。取引記録シートのユーザー名（"admin"ならclaude_tradesタブ）。デフォルト admin

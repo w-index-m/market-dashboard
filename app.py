@@ -314,6 +314,7 @@ GROQ_API_KEY       = get_env_var("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = get_env_var("OPENROUTER_API_KEY", "")
 NVIDIA_API_KEY      = get_env_var("NVIDIA_API_KEY", "")
 DEEPSEEK_API_KEY    = get_env_var("DEEPSEEK_API_KEY", "")
+MISTRAL_API_KEY     = get_env_var("MISTRAL_API_KEY", "")
 FINNHUB_API_KEY    = get_env_var("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY  = get_env_var("ALPHA_VANTAGE_KEY", "")
 FMP_API_KEY        = get_env_var("FMP_API_KEY", "")
@@ -787,7 +788,7 @@ def _gemini_generate(client, **kwargs):
     return resp
 
 
-_AI_USAGE_LABELS = {"gemini": "Gemini", "groq": "Groq", "nvidia": "NVIDIA", "openrouter": "OpenRouter",
+_AI_USAGE_LABELS = {"gemini": "Gemini", "groq": "Groq", "mistral": "Mistral", "nvidia": "NVIDIA", "openrouter": "OpenRouter",
                     "deepseek": "DeepSeek"}
 
 
@@ -1104,6 +1105,55 @@ def summarize_with_deepseek(prompt: str, max_tokens: int = 1500, temperature: fl
 
 
 # ===========================
+# Mistral（La Plateforme、無料のExperimentプラン。OpenAI互換のchat/completions）
+# ===========================
+@_track_summarize("mistral")
+def summarize_with_mistral(prompt: str, max_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
+    if not MISTRAL_API_KEY:
+        return "⚠️ MISTRAL_API_KEY が設定されていません", ""
+    # 軽いモデルを先に、混雑・上限のときだけ大きいモデルを試す
+    MISTRAL_MODELS = ["mistral-small-latest", "mistral-large-latest"]
+    headers = {
+        "Authorization": f"Bearer {MISTRAL_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    _reasons = []
+    for model_name in MISTRAL_MODELS:
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        try:
+            resp = requests.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers=headers, json=payload, timeout=30,
+            )
+            if resp.status_code == 429:
+                _reasons.append(f"{model_name}: 429 {resp.text[:150]}")
+                continue
+            if resp.status_code in (404, 400, 422):
+                _reasons.append(f"{model_name}: {resp.status_code} {resp.text[:150]}")
+                continue
+            if resp.status_code in (401, 403):
+                return "⚠️ Mistral認証エラー。MISTRAL_API_KEY を確認してください。", ""
+            resp.raise_for_status()
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            if text:
+                return text, model_name
+            _reasons.append(f"{model_name}: 空レスポンス")
+        except requests.exceptions.Timeout:
+            _reasons.append(f"{model_name}: タイムアウト")
+            continue
+        except Exception as e:
+            logger.error(f"Mistral error ({model_name}): {e}")
+            _reasons.append(f"{model_name}: {str(e)[:150]}")
+            continue
+    return "⚠️ Mistral: 全モデルで応答を取得できませんでした（" + " / ".join(_reasons) + "）", ""
+
+
+# ===========================
 # AI呼び出し統合関数
 # ===========================
 def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperature: float = 0.3) -> Tuple[str, str]:
@@ -1158,7 +1208,7 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
             # 固定文言を返していたが、実際に設定済みかどうかも確認せず決め打ちしていた上、
             # 個々の本当の失敗理由（429か400かタイムアウトか）が一切分からなかった。
             _text, _model = _try_providers_in_order(
-                ["groq", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
+                ["groq", "mistral", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
             )
             if _model != "none":
                 return _text, f"{_model} ※Gemini: {last_error_msg}"
@@ -1167,11 +1217,11 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
         return (f"⚠️ Gemini APIエラー。\n詳細: {last_error_msg}", "none")
 
     return _try_providers_in_order(
-        ["groq", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
+        ["groq", "mistral", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
     )
 
 
-_AI_CONSENSUS_PROVIDERS = ["gemini", "groq", "deepseek", "nvidia", "openrouter"]
+_AI_CONSENSUS_PROVIDERS = ["gemini", "groq", "mistral", "deepseek", "nvidia", "openrouter"]
 _AI_CONSENSUS_STANCE_SCORE = {"強気": 2, "中立強気": 1, "中立": 0, "中立弱気": -1, "弱気": -2}
 
 
@@ -1208,6 +1258,9 @@ def _call_single_ai_provider(provider: str, prompt: str, max_output_tokens: int,
         if provider == "nvidia" and NVIDIA_API_KEY:
             _text, _model2 = summarize_with_nvidia(prompt, max_tokens=max_output_tokens, temperature=temperature)
             return (_text, f"NVIDIA ({_model2})") if _model2 else (None, None)
+        if provider == "mistral" and MISTRAL_API_KEY:
+            _text, _model2 = summarize_with_mistral(prompt, max_tokens=max_output_tokens, temperature=temperature)
+            return (_text, f"Mistral ({_model2})") if _model2 else (None, None)
         if provider == "openrouter" and OPENROUTER_API_KEY:
             _text, _model2 = summarize_with_openrouter(prompt, max_tokens=max_output_tokens, temperature=temperature)
             if not _model2:
@@ -1312,9 +1365,11 @@ RRG改善セクター: {_improving}
 _PROVIDER_CALLERS = {
     "groq": summarize_with_groq, "deepseek": summarize_with_deepseek,
     "nvidia": summarize_with_nvidia, "openrouter": summarize_with_openrouter,
+    "mistral": summarize_with_mistral,
 }
 _PROVIDER_LABELS = {
     "groq": "Groq", "deepseek": "DeepSeek", "nvidia": "NVIDIA", "openrouter": "OpenRouter",
+    "mistral": "Mistral",
 }
 
 
@@ -1363,15 +1418,16 @@ def _call_ai_for_trading(
     temperature: float = 0.3,
 ) -> tuple:
     """トレーディング分析用AI呼び出し。model_pref でプロバイダーを指定できる。
-    model_pref: "auto" | "gemini" | "groq" | "nvidia" | "deepseek" | "openrouter"
+    model_pref: "auto" | "gemini" | "groq" | "nvidia" | "deepseek" | "openrouter" | "mistral"
     Returns: (text: str, model_label: str)
     """
-    if model_pref in ("groq", "nvidia", "deepseek", "openrouter"):
+    if model_pref in ("groq", "nvidia", "deepseek", "openrouter", "mistral"):
         _orders = {
-            "groq":       ["groq", "deepseek", "nvidia", "openrouter"],
-            "nvidia":     ["nvidia", "groq", "deepseek", "openrouter"],
-            "deepseek":   ["deepseek", "groq", "nvidia", "openrouter"],
-            "openrouter": ["openrouter", "groq", "deepseek", "nvidia"],
+            "groq":       ["groq", "mistral", "deepseek", "nvidia", "openrouter"],
+            "nvidia":     ["nvidia", "groq", "mistral", "deepseek", "openrouter"],
+            "deepseek":   ["deepseek", "groq", "mistral", "nvidia", "openrouter"],
+            "openrouter": ["openrouter", "groq", "mistral", "deepseek", "nvidia"],
+            "mistral":    ["mistral", "groq", "deepseek", "nvidia", "openrouter"],
         }
         return _try_providers_in_order(_orders[model_pref], prompt, max_output_tokens, temperature)
 
@@ -5981,7 +6037,7 @@ _AI_FORECAST_ASSETS = {
     "usdjpy": ("JPY=X", "ドル円", "円安", "円高"),
 }
 _AI_FORECAST_HORIZON_DAYS = 28   # 採点までの暦日数（約20営業日）
-_AI_FORECAST_PROVIDERS = ("gemini", "groq", "nvidia", "openrouter")
+_AI_FORECAST_PROVIDERS = ("gemini", "groq", "mistral", "nvidia", "openrouter")
 _AI_FORECAST_PATH = os.path.join(os.path.dirname(__file__), "data", "ai_forecasts.json")
 
 
@@ -29642,7 +29698,7 @@ def _fetch_jp_tenbagger_candidates(top_n: int = 10) -> dict:
 
 
 # 審査役に使うAIの優先順（採点したAIと同じ会社のモデルは使わない）
-_JUDGE_PROVIDER_ORDER = ("groq", "openrouter", "gemini", "nvidia", "deepseek")
+_JUDGE_PROVIDER_ORDER = ("groq", "mistral", "openrouter", "gemini", "nvidia", "deepseek")
 _JUDGE_VERDICTS = ("妥当", "要注意", "根拠不足")
 
 
@@ -37289,6 +37345,7 @@ def main():
             "DeepSeek": "✅" if DEEPSEEK_API_KEY else "❌",
             "NVIDIA": "✅" if NVIDIA_API_KEY else "❌",
             "OpenRouter": "✅" if OPENROUTER_API_KEY else "❌",
+            "Mistral": "✅" if MISTRAL_API_KEY else "❌",
             t("FMP (経済指標実績)", "FMP (Eco. actuals)"): "✅" if FMP_API_KEY else t("❌ 未設定（無料登録可）", "❌ Not set (free signup)"),
             t("SendGrid (メール認証)", "SendGrid (email verification)"): "✅" if (SENDGRID_API_KEY and SENDGRID_FROM_EMAIL) else "❌",
         }
@@ -37305,6 +37362,8 @@ def main():
             active_ai.append("NVIDIA")
         if OPENROUTER_API_KEY:
             active_ai.append("OpenRouter")
+        if MISTRAL_API_KEY:
+            active_ai.append("Mistral")
         chain_str = " → ".join(active_ai) if active_ai else t("未設定", "Not configured")
         st.caption(f"🤖 AI chain: {chain_str}")
         with st.expander(t("📝 設定方法", "📝 How to configure")):
@@ -37318,6 +37377,7 @@ GROQ_API_KEY = "gsk_..."
 DEEPSEEK_API_KEY = "sk-..."
 NVIDIA_API_KEY = "nvapi-..."
 OPENROUTER_API_KEY = "sk-or-..."
+MISTRAL_API_KEY = "..."
 SENDGRID_API_KEY = "SG...."
 SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification済みのアドレス
             """, language="toml")
@@ -37405,6 +37465,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         _render_provider_test("DeepSeek", DEEPSEEK_API_KEY, summarize_with_deepseek)
         _render_provider_test("NVIDIA", NVIDIA_API_KEY, summarize_with_nvidia)
         _render_provider_test("OpenRouter", OPENROUTER_API_KEY, summarize_with_openrouter)
+        _render_provider_test("Mistral", MISTRAL_API_KEY, summarize_with_mistral)
         render_ai_usage_panel()
 
     # ===================================================
