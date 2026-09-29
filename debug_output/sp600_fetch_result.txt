@@ -1,0 +1,310 @@
+Run: 36585591780 at 2026-09-29T14:55:24Z
+---
+============================================================
+S&P600 universe fetch chain diagnostic
+============================================================
+[SPSM] columns: ['Name', 'Ticker', 'Identifier', 'SEDOL', 'Weight', 'Sector', 'Shares Held', 'Local Currency']
+[SPSM] 606 tickers
+
+>>> Universe source used: SPSM, size=606
+
+============================================================
+Sampling yfinance .info() calls for market-cap filter stage
+============================================================
+[yfinance] AXTI: marketCap=5263561728 in_range=False price=80.27
+[yfinance] HAYW: marketCap=2635585792 in_range=True price=12.425
+[yfinance] MAN: marketCap=2581523968 in_range=True price=55.51
+[yfinance] MSEX: marketCap=995148800 in_range=True price=52.81
+[yfinance] PLMR: marketCap=3192598272 in_range=True price=121.31
+[yfinance] KOP: marketCap=867284544 in_range=True price=45.86
+[yfinance] EPRT: marketCap=5713174016 in_range=False price=26.35
+[yfinance] PRGS: marketCap=1610578304 in_range=True price=39.27
+[yfinance] BOOT: marketCap=3680062720 in_range=True price=121.515
+[yfinance] IBP: marketCap=5218555392 in_range=False price=196.34
+[yfinance] ENPH: marketCap=4132533248 in_range=True price=31.355
+[yfinance] BJRI: marketCap=1262172416 in_range=True price=59.435
+[yfinance] HSTM: marketCap=882844352 in_range=True price=28.855
+[yfinance] ABR: marketCap=806858432 in_range=True price=3.98
+[yfinance] LAUR: marketCap=5199349248 in_range=False price=37.745
+[yfinance] REX: marketCap=1405320192 in_range=True price=42.36
+[yfinance] DEA: marketCap=1114882176 in_range=True price=22.75
+[yfinance] EFC: marketCap=1605431168 in_range=True price=12.225
+[yfinance] LNN: marketCap=1153600000 in_range=True price=113.4441
+[yfinance] AWI: marketCap=6919269376 in_range=False price=163.72
+[yfinance] EPAC: marketCap=1797052672 in_range=True price=34.865
+[yfinance] WGO: marketCap=762129280 in_range=True price=26.96
+[yfinance] NMIH: marketCap=3056477184 in_range=True price=40.635
+[yfinance] STAA: marketCap=1131749760 in_range=True price=22.57
+[yfinance] RHI: marketCap=3700982272 in_range=True price=36.18
+[yfinance] OSIS: marketCap=3050654976 in_range=True price=191.36
+[yfinance] LYFT: marketCap=5708386816 in_range=False price=15.08
+[yfinance] WD: marketCap=1270739072 in_range=True price=37.02
+[yfinance] NOG: marketCap=2436778752 in_range=True price=22.87
+[yfinance] CBRL: marketCap=1197196160 in_range=True price=53.56
+[yfinance] ALRM: marketCap=2614300160 in_range=True price=53.255
+[yfinance] PRDO: marketCap=1881379200 in_range=True price=30.065
+[yfinance] CWST: marketCap=5127796736 in_range=False price=80.575
+[yfinance] WSC: marketCap=3174465792 in_range=True price=17.52
+[yfinance] XHR: marketCap=1801483904 in_range=True price=18.21
+[yfinance] ACA: marketCap=7190218752 in_range=False price=146.42
+[yfinance] RELY: marketCap=4561790976 in_range=True price=21.55
+[yfinance] ECPG: marketCap=2027509376 in_range=True price=95.595
+[yfinance] HOPE: marketCap=1733456768 in_range=True price=13.57
+[yfinance] KALU: marketCap=2444516352 in_range=True price=149.52
+
+[yfinance summary] 40/40 info() calls succeeded, 32/40 within $50M-$5B range
+[yfinance summary] marketCap sample stats: min=762,129,280 max=7,190,218,752 median=2,444,516,352
+=== CPI fetch (FRED -> BLS fallback) ===
+WARNING:debug_rate_card:[rate_inflation] FF金利推移取得失敗: HTTPSConnectionPool(host='fred.stlouisfed.org', port=443): Read timed out. (read timeout=15)
+WARNING:debug_rate_card:[rate_inflation] FRED CPI取得失敗(CPIAUCSL): HTTPSConnectionPool(host='fred.stlouisfed.org', port=443): Read timed out. (read timeout=10)、BLSにフォールバック
+WARNING:debug_rate_card:[rate_inflation] FRED CPI取得失敗(CPILFESL): HTTPSConnectionPool(host='fred.stlouisfed.org', port=443): Read timed out. (read timeout=10)、BLSにフォールバック
+ERROR:yfinance:HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ^JGB10Y"}}}
+ERROR:yfinance:$^JGB10Y: No data found, symbol may be delisted
+=== BLS batch (raw series found) ===
+{'cpi': '31 months, latest (2026, 8)', 'core_cpi': '31 months, latest (2026, 8)', 'ppi': '32 months, latest (2026, 8)', 'unemp': '31 months, latest (2026, 8)', 'nfp': '32 months, latest (2026, 8)', 'wage': '32 months, latest (2026, 8)'}
+=== Result values ===
+  ff_rate: 3.89
+  tnx_cur: 5.249000072479248
+  tnx_1y: 4.140999794006348
+  irx_cur: 4.090000152587891
+  cpi_yoy: 3.4
+  cpi_core_yoy: 2.4
+  ppi_yoy: 5.4
+  ppi_yoy_3m_ago: 5.9
+  wage_yoy: 3.1
+  unemp: 4.1
+  unemp_12m_low: 4.1
+  unemp_1y_ago: 4.3
+  nfp_3m_avg: 71
+  unemp_asof: 2026年8月
+  taylor_basis: 物価＋雇用
+  taylor_rate: 4.35
+  taylor_gap: -0.46
+  trailing_pe: 24.727715
+  forward_pe: None
+  implied_eps_growth: None
+  equity_yield_gap: -1.21
+  real_equity_gap: 1.19
+  cape: 41.16
+  excess_cape_yield: -0.42
+  credit_3m: 3.35
+  yield_curve: 1.16
+  usdjpy: 157.4
+  usdjpy_1y: 149.4
+  usdjpy_3m: 162.54
+  jgb_cur: 3.082
+  us_jp_spread: 2.17
+  us_jp_spread_1y: 2.48
+  sb_corr_60d: 0.49
+  sb_corr_1y: 0.27
+  curve_type: ベア・スティープ（長期金利の上昇主導）
+=== 利上げの余地 ===
+■ コアの物価は落ち着き、雇用も崩れていない → 利上げを急ぐ必要は小さい（様子見が基本）
+  - 【物価】総合CPI+3.4%・コアCPI+2.4%・PPI+5.4%（3ヶ月前+5.9%）・平均時給+3.1%。PPIは高水準ですが減速中で、川上のコスト圧力は和らぎつつあります。FRBが重視するコアの物価は目標の2%に近く、インフレ面から追加利上げを急ぐ理由は強くありません（ただし総合CPI・PPIは高めで、エネルギー等のコスト要因はまだ残っています）。
+  - 【雇用】失業率4.1%（過去12ヶ月の最低4.1%から+0.0pt）・雇用者数は月平均+71千人（直近3ヶ月）。雇用の伸びは鈍化気味ですが、失業率は低位で安定しており崩れてはいません。
+  - 【ルール】テイラールール（物価＋雇用）が示す適正なFF金利は4.35%、実際は3.89%（差-0.46pt）。ほぼ適正水準で、ルール上は大きく動かす必要がありません。
+=== 株式投資の妙味 ===
+■ 株は債券に対して割高。ただしインフレ調整後はまだ僅かに優位 → 妙味は薄く、今後のリターンは利益成長頼み
+  - S&P500の益回り4.0%に対し10年債利回り5.25%（差-1.21pt）。今の利益水準だけで見れば、ほぼ確実な国債のほうが利回りが高い状態です。
+  - 株の利益はインフレに連動して伸びるため、実質10年金利（+2.85%）と比べると差は+1.19ptで、株はまだ上回っています（妙味はゼロではない）。
+  - シラーPER41.2倍（長期平均は約17倍）、超過CAPE利回り-0.42pt。10年平均の利益で見ても割高で、今後10年の株の期待リターンは低めになりやすい水準です。
+  - イールドカーブ+1.16pt・ベア・スティープ（長期金利の上昇主導）（10年債+1.11pt・3ヶ月+0.23pt/1年）。順イールドだが、短期金利ではなく長期金利の上昇で傾いた形。インフレ・財政懸念による長期金利上昇は、株の割高感をさらに強める向かい風で「順イールド＝安心」とは言えません。
+  - 10年債利回りは1年で+1.11ptと速いペースで上昇中。水準より「スピード」が株価の重しになりやすい局面です。
+  - ハイイールド債と投資適格債の3ヶ月相対は+3.35%で、信用市場は落ち着いています（金利上昇がまだ企業の資金繰りを圧迫していない）。
+  - 株と長期債の60日相関は+0.49と同じ方向に動いており、債券は株の下落のクッションになりにくい状態です（2022年型）。分散には現金・短期債・金などを組み合わせる必要があります。
+  有利: ['利益の伸びが確かな銘柄（割高さを利益成長で正当化できる）', 'PERの低い割安株・高配当株', '利回り5%前後が取れる短〜中期の債券・預金']
+=== 円で投資する視点 ===
+■ 金利差の縮小に続き、直近3ヶ月で円高に転じ始めた → 円キャリーの巻き戻しが始まりつつある可能性（2024年8月型に警戒）
+  - ドル円157.40円（1年で+5.4%、3ヶ月で-3.2%）
+  - 日米10年金利差2.17pt（米5.25%−日3.08%）、1年で-0.31pt
+  - 円で投資する場合、米国株が+10%でも円高が10%進めば利益はほぼゼロになります。為替ヘッジをすると為替変動は抑えられますが、概ね日米の短期金利差分のコスト（年率）がかかります。
+=== 3シナリオ ===
+  {'シナリオ': '📈 利上げ継続', '次回FOMCの織込み': '10%', '起きる条件（現在値）': 'コアCPI3%超（+2.4%）・PPI再加速（+5.4%、3ヶ月前+5.9%）・賃金4%超（+3.1%）', '株': '↓ 高PER・グロース株に逆風', '債券(10年)': '利回り↑', 'ドル円': '円安方向'}
+  {'シナリオ': '⏸ 様子見', '次回FOMCの織込み': '85%', '起きる条件（現在値）': '物価・雇用とも大きく崩れず、現状維持（テイラールールとの差-0.46pt）', '株': '→ 企業利益次第', '債券(10年)': '横ばい〜財政要因で上下', 'ドル円': '横ばい'}
+  {'シナリオ': '📉 利下げ転換', '次回FOMCの織込み': '5%', '起きる条件（現在値）': '失業率が直近最低+0.5pt（4.1%、最低4.1%）・雇用者数が月5万人割れ（+71千人）・信用市場の悪化（+3.35%）', '株': '景気悪化による利下げなら一時↓→その後↑', '債券(10年)': '利回り↓（債券価格↑）', 'ドル円': '円高方向（円ベースでは目減り）'}
+=== ML evaluation ===
+=== US direction models (existing) ===
+  ^GSPC: n=743 up_rate=56.1% -> {'accuracy': 52.5, 'baseline': 56.1, 'lift': -3.6, 'auc': 0.508, 'brier_skill': -2.6} | prob_up_now: 44.6
+  ^IXIC: n=743 up_rate=57.2% -> {'accuracy': 55.1, 'baseline': 56.9, 'lift': -1.8, 'auc': 0.498, 'brier_skill': -1.8} | prob_up_now: 51.6
+=== Nikkei direction model (existing) ===
+  ^N225: n=475 -> {'accuracy': 53.2, 'baseline': 53.9, 'lift': -0.8, 'auc': 0.542, 'brier_skill': -5.7}
+=== Drawdown risk model (new) ===
+  as_of=2026-09-29 train=2012-09-27~ n=3519 vix=15.88 pct=25.4
+  prob_now=9.1% base_rate=13.1% ratio=0.69 bucket=低い
+    {'VIXの1年内の位置': '0〜12%（非常に低い）', '20日以内に5%以上下落した割合': '4.5%', '件数': 697, '今日': ''}
+    {'VIXの1年内の位置': '12〜33%（低い）', '20日以内に5%以上下落した割合': '9.1%', '件数': 707, '今日': '◀ 今日'}
+    {'VIXの1年内の位置': '33〜57%（中程度）', '20日以内に5%以上下落した割合': '11.5%', '件数': 706, '今日': ''}
+    {'VIXの1年内の位置': '57〜78%（高い）', '20日以内に5%以上下落した割合': '17.2%', '件数': 696, '今日': ''}
+    {'VIXの1年内の位置': '78〜100%（非常に高い）', '20日以内に5%以上下落した割合': '23.2%', '件数': 713, '今日': ''}
+  eval: {'prevalence': 14.6, 'pr_auc': 0.224, 'precision': 25.7, 'recall': 38.2, 'alert_rate': 21.8, 'auc': 0.66}
+  calibration: [{'予測確率(平均)': 3.5, '実際の発生率': 4.6, '件数': 675}, {'予測確率(平均)': 6.4, '実際の発生率': 12.0, '件数': 542}, {'予測確率(平均)': 8.5, '実際の発生率': 13.4, '件数': 568}, {'予測確率(平均)': 11.0, '実際の発生率': 21.1, '件数': 608}, {'予測確率(平均)': 20.0, '実際の発生率': 24.0, '件数': 537}]
+  folds: [{'fold': 1, 'train_n': 569, 'test_n': 586, 'accuracy': 78.8, 'baseline': 91.6, 'auc': 0.581}, {'fold': 2, 'train_n': 1155, 'test_n': 586, 'accuracy': 73.7, 'baseline': 84.1, 'auc': 0.686}, {'fold': 3, 'train_n': 1741, 'test_n': 586, 'accuracy': 78.0, 'baseline': 86.3, 'auc': 0.702}, {'fold': 4, 'train_n': 2327, 'test_n': 586, 'accuracy': 72.0, 'baseline': 77.0, 'auc': 0.694}, {'fold': 5, 'train_n': 2913, 'test_n': 586, 'accuracy': 71.3, 'baseline': 87.7, 'auc': 0.695}]
+=== Direction-score skill banners ===
+  ^GSPC: {'ok': True, 'n': 743, 'n_feats': 16, 'up_rate': 56.3, 'baseline': 56.3, 'hit': 49.5, 'lift': -6.8, 'auc': 0.482, 'skill': False, 'ml_lift': -3.9, 'ml_auc': 0.506}
+  ^NDX: {'ok': True, 'n': 743, 'n_feats': 16, 'up_rate': 57.5, 'baseline': 57.5, 'hit': 48.6, 'lift': -8.9, 'auc': 0.47, 'skill': False, 'ml_lift': -2.3, 'ml_auc': 0.509}
+  ^DJI: {'ok': True, 'n': 743, 'n_feats': 16, 'up_rate': 54.5, 'baseline': 54.5, 'hit': 48.6, 'lift': -5.9, 'auc': 0.478, 'skill': False, 'ml_lift': -1.9, 'ml_auc': 0.482}
+  ^N225: {'ok': True, 'n': 475, 'n_feats': 9, 'up_rate': 53.5, 'baseline': 53.5, 'hit': 49.9, 'lift': -3.6, 'auc': 0.505, 'skill': False, 'ml_lift': -0.8, 'ml_auc': 0.542}
+=== Dollar index ticker ===
+  DX-Y.NYB rows=21 last=101.37
+=== Drawdown feature experiment ===
+samples=3519 2012-09-27~2026-09-28 prevalence=0.131
+test periods: ['2015-02-03~2017-05-31 ev=0.08', '2017-06-01~2019-09-27 ev=0.16', '2019-09-30~2022-01-25 ev=0.14', '2022-01-26~2024-05-24 ev=0.23', '2024-05-28~2026-09-28 ev=0.12']
+
+=== 単一特徴量をそのままスコアにした場合のAUC（学習なし・検証期間ごと。>0.5=値が大きいほど下落しやすい）===
+  vix_pct1y    mean=0.685 min=0.63 max=0.75 folds=[np.float64(0.63), np.float64(0.65), np.float64(0.75), np.float64(0.69), np.float64(0.69)]
+  vol_ratio    mean=0.651 min=0.61 max=0.74 folds=[np.float64(0.63), np.float64(0.61), np.float64(0.74), np.float64(0.62), np.float64(0.65)]
+  vix_term     mean=0.628 min=0.51 max=0.75 folds=[np.float64(0.66), np.float64(0.57), np.float64(0.65), np.float64(0.51), np.float64(0.75)]
+  spy_vol20    mean=0.624 min=0.50 max=0.73 folds=[np.float64(0.68), np.float64(0.5), np.float64(0.66), np.float64(0.73), np.float64(0.56)]
+  vix          mean=0.623 min=0.58 max=0.69 folds=[np.float64(0.64), np.float64(0.58), np.float64(0.58), np.float64(0.69), np.float64(0.61)]
+  spy_dist200  mean=0.378 min=0.22 max=0.61 folds=[np.float64(0.22), np.float64(0.61), np.float64(0.42), np.float64(0.31), np.float64(0.33)]
+  spy_dd252    mean=0.391 min=0.33 max=0.50 folds=[np.float64(0.35), np.float64(0.5), np.float64(0.42), np.float64(0.36), np.float64(0.33)]
+  spy_ret20    mean=0.395 min=0.28 max=0.53 folds=[np.float64(0.3), np.float64(0.53), np.float64(0.43), np.float64(0.43), np.float64(0.28)]
+  credit_20    mean=0.422 min=0.19 max=0.65 folds=[np.float64(0.19), np.float64(0.65), np.float64(0.47), np.float64(0.55), np.float64(0.24)]
+  spy_ret60    mean=0.431 min=0.29 max=0.54 folds=[np.float64(0.44), np.float64(0.54), np.float64(0.51), np.float64(0.37), np.float64(0.29)]
+  curve_ch20   mean=0.433 min=0.18 max=0.61 folds=[np.float64(0.29), np.float64(0.61), np.float64(0.53), np.float64(0.56), np.float64(0.18)]
+  curve        mean=0.558 min=0.37 max=0.81 folds=[np.float64(0.72), np.float64(0.51), np.float64(0.37), np.float64(0.81), np.float64(0.37)]
+  spy_ret5     mean=0.445 min=0.37 max=0.48 folds=[np.float64(0.44), np.float64(0.48), np.float64(0.47), np.float64(0.46), np.float64(0.37)]
+  tnx_ch20     mean=0.448 min=0.22 max=0.66 folds=[np.float64(0.31), np.float64(0.66), np.float64(0.4), np.float64(0.65), np.float64(0.22)]
+  credit_60    mean=0.449 min=0.21 max=0.65 folds=[np.float64(0.21), np.float64(0.63), np.float64(0.38), np.float64(0.65), np.float64(0.38)]
+  usdjpy_ch20  mean=0.481 min=0.36 max=0.59 folds=[np.float64(0.45), np.float64(0.48), np.float64(0.53), np.float64(0.59), np.float64(0.36)]
+  sb_corr60    mean=0.499 min=0.25 max=0.79 folds=[np.float64(0.52), np.float64(0.79), np.float64(0.25), np.float64(0.36), np.float64(0.58)]
+
+=== モデル比較 ===
+  現行14特徴量(JGB除く)                         AUC=0.445 PR-AUC=0.125 (基準0.146) folds=[np.float64(0.64), np.float64(0.35), np.float64(0.32), np.float64(0.27), np.float64(0.51)]
+  全特徴量 C=0.01                            AUC=0.499 PR-AUC=0.140 (基準0.146) folds=[np.float64(0.6), np.float64(0.33), np.float64(0.51), np.float64(0.29), np.float64(0.59)]
+  ボラ系のみ(vol20,vix,vix_term,vol_ratio)    AUC=0.578 PR-AUC=0.205 (基準0.146) folds=[np.float64(0.34), np.float64(0.5), np.float64(0.77), np.float64(0.6), np.float64(0.65)]
+  ボラ系のみ(vol20,vix,vix_term,vol_ratio) C=0.01 AUC=0.598 PR-AUC=0.211 (基準0.146) folds=[np.float64(0.31), np.float64(0.55), np.float64(0.72), np.float64(0.61), np.float64(0.67)]
+  ボラ+信用(credit_20,60)                    AUC=0.510 PR-AUC=0.159 (基準0.146) folds=[np.float64(0.58), np.float64(0.32), np.float64(0.62), np.float64(0.43), np.float64(0.63)]
+  ボラ+信用(credit_20,60) C=0.01             AUC=0.534 PR-AUC=0.172 (基準0.146) folds=[np.float64(0.61), np.float64(0.34), np.float64(0.63), np.float64(0.48), np.float64(0.63)]
+  ボラ+トレンド(dist200,dd252)                 AUC=0.483 PR-AUC=0.174 (基準0.146) folds=[np.float64(0.44), np.float64(0.39), np.float64(0.68), np.float64(0.48), np.float64(0.65)]
+  ボラ+トレンド(dist200,dd252) C=0.01          AUC=0.572 PR-AUC=0.207 (基準0.146) folds=[np.float64(0.36), np.float64(0.4), np.float64(0.66), np.float64(0.58), np.float64(0.67)]
+  ボラ+トレンド+信用                             AUC=0.452 PR-AUC=0.165 (基準0.146) folds=[np.float64(0.57), np.float64(0.27), np.float64(0.6), np.float64(0.41), np.float64(0.63)]
+  ボラ+トレンド+信用 C=0.01                      AUC=0.540 PR-AUC=0.186 (基準0.146) folds=[np.float64(0.51), np.float64(0.33), np.float64(0.6), np.float64(0.53), np.float64(0.64)]
+  レベル依存を除く(pct/比率/変化のみ)                  AUC=0.485 PR-AUC=0.144 (基準0.146) folds=[np.float64(0.7), np.float64(0.34), np.float64(0.37), np.float64(0.54), np.float64(0.63)]
+  レベル依存を除く(pct/比率/変化のみ) C=0.01           AUC=0.538 PR-AUC=0.162 (基準0.146) folds=[np.float64(0.57), np.float64(0.38), np.float64(0.46), np.float64(0.59), np.float64(0.65)]
+
+=== 安定した指標だけの単純合成スコア（学習なし・1年パーセンタイルの平均）===
+  A: VIXのみ                 AUC=0.697 PR-AUC=0.265 (基準0.149) folds=[np.float64(0.83), np.float64(0.67), np.float64(0.71), np.float64(0.63), np.float64(0.74)] 5分位別の発生率=[0.038, 0.087, 0.136, 0.207, 0.28]
+  B: VIX+ボラ比               AUC=0.680 PR-AUC=0.274 (基準0.149) folds=[np.float64(0.74), np.float64(0.72), np.float64(0.72), np.float64(0.52), np.float64(0.75)] 5分位別の発生率=[0.072, 0.075, 0.103, 0.217, 0.28]
+  C: B+VIX期間構造             AUC=0.681 PR-AUC=0.268 (基準0.149) folds=[np.float64(0.74), np.float64(0.7), np.float64(0.69), np.float64(0.55), np.float64(0.76)] 5分位別の発生率=[0.053, 0.109, 0.098, 0.199, 0.287]
+  D: C+トレンド割れ              AUC=0.679 PR-AUC=0.272 (基準0.149) folds=[np.float64(0.72), np.float64(0.66), np.float64(0.69), np.float64(0.58), np.float64(0.8)] 5分位別の発生率=[0.073, 0.083, 0.113, 0.193, 0.285]
+  E: D+高値からの下落             AUC=0.681 PR-AUC=0.277 (基準0.149) folds=[np.float64(0.7), np.float64(0.65), np.float64(0.7), np.float64(0.61), np.float64(0.79)] 5分位別の発生率=[0.07, 0.081, 0.124, 0.175, 0.297]
+  F: VIX+ボラ比+トレンド割れ        AUC=0.676 PR-AUC=0.278 (基準0.149) folds=[np.float64(0.7), np.float64(0.66), np.float64(0.7), np.float64(0.58), np.float64(0.81)] 5分位別の発生率=[0.083, 0.072, 0.11, 0.191, 0.29]
+=== JP tenbagger end-to-end ===
+=== Mistral check ===
+summarize_with_mistral: ('東京', 'open-mistral-nemo')
+forecast call: Mistral (open-mistral-nemo) -> {'calls': {'sp500': 'up', 'nikkei': 'up', 'tnx': 'down', 'usdjpy': 'up'}, 'scenario': '米利下げ期待強まり（FOMC7月議定書）で長期金利低下、リスク資産回復。日米景気差縮小とドル売り基調継続。ただし米10年利回りは5.0%を下回らず、円安は160円を超えにくい。'}
+judge: {'verdict': '要注意', 'reason': '成長率高いが競争優位性・10倍化余地の根拠不足（業界規模・市場占有率・技術差別化等データ欠落）', 'judge_model': 'Mistral (open-mistral-nemo)'}
+=== OpenRouter diagnosis ===
+2026-09-29 14:53:17.809 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+WARNING:app:[ai_consensus] openrouter応答なし: ⚠️ OpenRouter: 全モデルで応答を取得できませんでした（google/gemma-4-31b-it:free: 429 {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"head）
+key set: True (length 73)
+GET /key: 200 {"data":{"label":"sk-or-v1-895...b59","is_management_key":false,"is_provisioning_key":false,"limit":null,"limit_reset":null,"limit_remaining":null,"include_byok_in_limit":false,"usage":0,"usage_daily":0,"usage_weekly":0,"usage_monthly":0,"byok_usage":0,"byok_usage_daily":0,"byok_usage_weekly":0,"byok_usage_monthly":0,"is_free_tier":true,"expires_at":"2027-03-22T12:50:10.443Z","creator_user_id":"us
+models total=460 free=16
+first 4 free (what the app uses): ['inclusionai/ling-3.0-flash-sante:free', 'qwen/qwen3.8-27b:free', 'dots-studio/dots-3-note-preview:free', 'liquid/lfm-2.5-2.6b:free']
+free models: ['inclusionai/ling-3.0-flash-sante:free', 'qwen/qwen3.8-27b:free', 'dots-studio/dots-3-note-preview:free', 'liquid/lfm-2.5-2.6b:free', 'nvidia/nemotron-3.5-lightning:free', 'thinkingmachines/inkling-small:free', 'poolside/laguna-s-2.1:free', 'thinkingmachines/inkling:free', 'poolside/laguna-xs-2.1:free', 'cohere/north-mini-code:free', 'nvidia/nemotron-3.5-content-safety:free', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'google/gemma-4-26b-a4b-it:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free']
+app model order: ['google/gemma-4-31b-it:free', 'qwen/qwen3.8-27b:free', 'google/gemma-4-26b-a4b-it:free', 'inclusionai/ling-3.0-flash-sante:free']
+app.summarize_with_openrouter -> model='' text='⚠️ OpenRouter: 全モデルで応答を取得できませんでした（google/gemma-4-31b-it:free: 429 {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"'
+app._call_single_ai_provider -> (None, None)
+=== AI forecast grading test ===
+grade: {'graded_on': '2026-09-29', 'actual_chg_pct': {'sp500': 1.14, 'nikkei': -0.52, 'tnx': 7.09, 'usdjpy': -1.11}, 'hits': {'sp500': True, 'nikkei': False, 'tnx': False, 'usdjpy': True}, 'baseline_hits': {'sp500': True, 'nikkei': False, 'tnx': True, 'usdjpy': True}}
+judge: {'verdict': '外れ', 'reason': '利下げ・円高・株上昇の筋書きと実際の金利上昇・円安・日経下落が矛盾', 'judge_model': 'Groq (openai/gpt-oss-20b)'}
+snapshot now: {'sp500': {'value': 7681.95, 'chg20_pct': -0.05, 'date': '2026-09-29'}, 'nikkei': {'value': 65481.27, 'chg20_pct': -0.98, 'date': '2026-09-29'}, 'tnx': {'value': 5.255, 'chg20_pct': 10.45, 'date': '2026-09-29'}, 'usdjpy': {'value': 157.456, 'chg20_pct': -1.43, 'date': '2026-09-29'}}
+gemini: None -> None
+groq: Groq (openai/gpt-oss-20b) -> {'calls': {'sp500': 'up', 'nikkei': 'down', 'tnx': 'up', 'usdjpy': 'down'}, 'scenario': '米国金利上昇とインフレ懸念で株価は短期的に調整。日経は弱気が続き、円は安全資産として上昇。'}
+mistral: Mistral (open-mistral-nemo) -> {'calls': {'sp500': 'up', 'nikkei': 'up', 'tnx': 'down', 'usdjpy': 'up'}, 'scenario': '米利下げ期待強まり、米景気減速懸念で長期金利低下。日米株安定基調、円高押し戻し。米国政局不透明性がリスクオフを抑制し、アジア株が追随上昇。'}
+nvidia: None -> None
+openrouter: None -> None
+WARNING Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+2026-09-29 14:54:13.552 Thread 'ThreadPoolExecutor-0_3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Gemini (gemini-2.5-flash)）
+INFO [trading] JP10倍株候補AI評価: 合計20/20銘柄を採点（うち0銘柄は1銘柄ずつ再試行）
+INFO [trading] JP10倍株候補: 事前計算データ（生成: 2026-09-28T22:27:34Z、1518銘柄）からSTEP1通過759件
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+ERROR DeepSeek error (deepseek-chat): 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Groq (openai/gpt-oss-20b) ※Gemini: quota超過: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and ）
+INFO [trading] JP10倍株候補AI評価(分割): 5/5銘柄の採点を取得（Gemini (gemini-2.5-flash)）
+INFO [trading] JP10倍株候補AI評価: 合計20/20銘柄を採点（うち0銘柄は1銘柄ずつ再試行）
+INFO [trading] JP10倍株候補AI審査: 10/10銘柄 {'妥当': 0, '要注意': 10, '根拠不足': 0}
+INFO [trading] JP10倍株候補: 10銘柄選定（STEP1通過759銘柄/母集団1518銘柄、70点以上13銘柄）
+precomputed: generated=2026-09-28T22:27:34Z tickers=1518
+STEP1 passed: 759  top20 STEP1 range: 46.1〜51.8
+AI scored: 20/20
+  7877.T   永大化工         STEP1= 51.8 競争優位=12.0 10倍余地=14.0 合計= 77.8 国内シェア拡大と電動車需要で成長
+  6150.T   タケダ機械        STEP1= 51.4 競争優位=15.0 10倍余地=16.0 合計= 82.4 高付加価値機械で参入障壁高い
+  3157.T   ジオリーブグループ    STEP1= 50.9 競争優位= 8.0 10倍余地=10.0 合計= 68.9 DIY需要増だが利益率低い
+  8704.T   トレイダーズホールディン STEP1= 50.9 競争優位=13.0 10倍余地=15.0 合計= 78.9 FX市場拡大と手数料収入増
+  3913.T   ＧｒｅｅｎＢｅｅ     STEP1= 50.7 競争優位=14.0 10倍余地=18.0 合計= 82.7 EV・蓄電需要で高成長ドライバー
+  4625.T   アトミクス        STEP1= 49.5 競争優位=12.0 10倍余地=14.0 合計= 75.5 国内外での塗料シェアと専門性が優位。TAM拡大と海外展開で成長余地あり。
+  6927.T   ヘリオス　テクノ　ホール STEP1= 48.9 競争優位=10.0 10倍余地=18.0 合計= 76.9 LED需要急増で利益率改善期待。参入障壁は低いが成長ドライバー強。
+  7619.T   田中商事         STEP1= 48.8 競争優位= 8.0 10倍余地=12.0 合計= 68.8 電材流通は競争激しいが成長率高。海外展開は限定的。
+  8147.T   トミタ          STEP1= 48.7 競争優位= 9.0 10倍余地=13.0 合計= 70.7 機械工具流通は安定した顧客基盤。海外展開で拡大余地。
+  1827.T   ナカノフドー建設     STEP1= 48.6 競争優位=11.0 10倍余地=15.0 合計= 74.6 建設・不動産で多国展開。規模拡大とデータセンター需要で成長期待。
+  6144.T   西部電機         STEP1= 47.9 競争優位=12.0 10倍余地=15.0 合計= 74.9 物流自動化の専門技術と高い成長性。
+  9955.T   ヨンキュウ        STEP1= 47.5 競争優位= 8.0 10倍余地=10.0 合計= 65.5 高成長も利益率低く、競争優位性不明。
+  5576.T   オービーシステム     STEP1= 47.3 競争優位=10.0 10倍余地=10.0 合計= 67.3 堅調な成長も利益率低く、差別化が不明。
+  5304.T   ＳＥＣカーボン      STEP1= 47.1 競争優位=14.0 10倍余地=16.0 合計= 77.1 特殊素材の技術力と高い利益率、グローバル展開。
+  9820.T   エムティジェネックス   STEP1= 47.1 競争優位=12.0 10倍余地=17.0 合計= 76.1 驚異的な成長率と高い利益率、安定した事業基盤。
+  4629.T   大伸化学         STEP1= 47.0 競争優位=12.0 10倍余地=15.0 合計= 74.0 多品種で国内シェア高、成長率高い
+  6042.T   ニッキ          STEP1= 47.0 競争優位=10.0 10倍余地=13.0 合計= 70.0 燃料部品でニッチだが成長率好調
+  7018.T   内海造船         STEP1= 46.8 競争優位= 9.0 10倍余地=12.0 合計= 67.8 船舶需要増、海外展開が鍵
+  1909.T   日本ドライケミカル    STEP1= 46.7 競争優位= 8.0 10倍余地=11.0 合計= 65.7 災害装置で安定需要、成長余地あり
+  8891.T   ＡＭＧホールディングス  STEP1= 46.1 競争優位= 7.0 10倍余地=10.0 合計= 63.1 不動産需要は限定的、成長は限定
+>=70: 13
+_fetch_jp_tenbagger_candidates(): 10 candidates
+  3913.T   ＧｒｅｅｎＢｅｅ   合計= 83.7 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: EV・再生エネルギー需要増、技術優位
+      審査: 要注意（需要増・技術優位は根拠ありだが、成長率の異常値（432.3%）とPER9.3倍のバリュエーションのギャップが指摘点） by Mistral (open-mistral-nemo)
+  8704.T   トレイダーズホールデ 合計= 80.9 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: FXサービスで高利益率、ブランド力強い
+      審査: 要注意（利益率高いが、成長率の実現性不明（FX市場飽和リスク）、ブランド力はデータ不足。競争優位性の根拠薄弱。） by Mistral (open-mistral-nemo)
+  7877.T   永大化工       合計= 77.8 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: 国内自動車部品需要でシェア確保、成長率高い
+      審査: 要注意（自動車部品需要は推測で、成長率高いだけで競争優位性・10倍化余地の根拠不足。） by Mistral (open-mistral-nemo)
+  6150.T   タケダ機械      合計= 77.4 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: 高成長機械需要、海外展開可能
+      審査: 要注意（「高成長機械需要」はデータ外推、海外展開可能性も不明確。成長率高いが競争優位性根拠不足。） by Mistral (open-mistral-nemo)
+  6927.T   ヘリオス　テクノ　ホ 合計= 76.9 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: LED照明需要増で高成長。技術優位と製造拡張で利益率改善期待。
+      審査: 要注意（成長率数値は異常に高く（営業利益成長率2882.7%）、データ不足で信頼性不明。競争優位性の根拠不足。） by Mistral (open-mistral-nemo)
+  4625.T   アトミクス      合計= 76.5 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: 国内外での塗料シェア拡大と高付加価値製品で参入障壁あり。TAM拡大と海外展開が成長ドライバー。
+      審査: 要注意（「参入障壁」や「TAM拡大」はデータ不足で根拠薄弱。高得点の15/20は成長率のみで過大評価。） by Mistral (open-mistral-nemo)
+  5304.T   ＳＥＣカーボン    合計= 76.1 採点=Gemini (gemini-2.5-flash)
+      理由: 高機能素材の技術力、グローバル展開と用途拡大
+      審査: 要注意（競争優位性・10倍化余地の高得点は、提供データのみでは十分根拠が示されていない） by Groq (openai/gpt-oss-20b)
+  6144.T   西部電機       合計= 74.9 採点=Gemini (gemini-2.5-flash)
+      理由: 専門技術と物流自動化ニーズ、高い成長率
+      審査: 要注意（成長率は示されているが競争優位性の高得点は根拠不足） by Groq (openai/gpt-oss-20b)
+  4629.T   大伸化学       合計= 74.0 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: 国内シェア高、成長率高いが競合多い
+      審査: 要注意（「国内シェア高」はデータなし、競合多さは「成長率高い」と矛盾。12点は低めだが15点は根拠不足。） by Mistral (open-mistral-nemo)
+  6042.T   ニッキ        合計= 74.0 採点=Groq (openai/gpt-oss-20b) ※Gem
+      理由: 燃料技術で差別化、海外展開期待
+      審査: 要注意（燃料技術差別化はデータに記載ありだが、海外展開の具体性・成長率の持続性不明。点数高すぎる） by Mistral (open-mistral-nemo)
+=== AI usage recorded during this run ===
+provider    ok   
+deepseek    False     6
+gemini      False    14
+            True      2
+groq        True      8
+mistral     True     14
+nvidia      False     3
+            True      1
+openrouter  False     6
+provider    category  
+deepseek    残高不足(402)     6
+gemini      サーバー側エラー      6
+            モデル廃止・未提供     2
+            上限・混雑(429)    6
+nvidia      タイムアウト        3
+openrouter  上限・混雑(429)    6
