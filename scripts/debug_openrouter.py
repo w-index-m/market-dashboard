@@ -17,14 +17,6 @@ print(f"models total={len(models)} free={len(free)}")
 print("first 4 free (what the app uses):", [m["id"] for m in free[:4]])
 print("free models:", [m["id"] for m in free][:40])
 
-for mid in [m["id"] for m in free[:4]] + ["meta-llama/llama-3.3-70b-instruct:free", "openai/gpt-oss-20b:free"]:
-    rr = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                       headers={**h, "Content-Type": "application/json"},
-                       json={"model": mid, "messages": [{"role": "user", "content": "1+1は？数字だけ答えて"}],
-                             "max_tokens": 50}, timeout=30)
-    body = rr.text[:250].replace("\n", " ")
-    print(f"POST {mid}: {rr.status_code} {body}")
-
 # アプリ本体の呼び出し経路（モデルの選び方・上限時の打ち切りを含む）でも確認する
 try:
     import app
