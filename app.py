@@ -751,7 +751,7 @@ def summarize_with_groq(prompt: str, max_tokens: int = 1500, temperature: float 
                 _last_reason = f"{model_name}: 404 モデル利用不可"
                 continue
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if text:
                 return text, model_name
             _last_reason = f"{model_name}: 空レスポンス"
@@ -793,6 +793,10 @@ def _fetch_openrouter_free_models() -> list:
 
         # NVIDIAのモデルは別途NVIDIA APIでも使っているため、AIの多様性（別のAIに審査・予想させる
         # 機能）のためにOpenRouterでは他社モデルを優先する
+        # パラメータ数が分かっていて7B未満の小型モデルは、審査・相場予想などの用途では質が
+        # 低すぎるため使わない（大型モデルが混雑中のときは、OpenRouterは「応答なし」扱いにして
+        # 他のプロバイダーに任せる方がよい）
+        _usable = [m for m in _usable if _size(m) == 0.0 or _size(m) >= 7]
         return sorted(_usable, key=lambda m: (m.startswith("nvidia/"), -_size(m))) or _free
     except Exception as e:
         logger.warning(f"OpenRouter無料モデル一覧の取得失敗: {e}")
@@ -845,7 +849,7 @@ def summarize_with_openrouter(prompt: str, max_tokens: int = 1500, temperature: 
             if resp.status_code in (401, 403):
                 return "⚠️ OpenRouter認証エラー。OPENROUTER_API_KEY を確認してください。", ""
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if text:
                 return text, model_name
             _reasons.append(f"{model_name}: 空レスポンス")
@@ -904,7 +908,7 @@ def summarize_with_nvidia(prompt: str, max_tokens: int = 1500, temperature: floa
             if resp.status_code in (401, 403):
                 return "⚠️ NVIDIA認証エラー。NVIDIA_API_KEY を確認してください。", ""
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if text:
                 return text, model_name
             _last_reason = f"{model_name}: 空レスポンス"
@@ -953,7 +957,7 @@ def summarize_with_deepseek(prompt: str, max_tokens: int = 1500, temperature: fl
             if resp.status_code in (401, 403):
                 return "⚠️ DeepSeek認証エラー。DEEPSEEK_API_KEY を確認してください。", ""
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if text:
                 return text, model_name
             _last_reason = f"{model_name}: 空レスポンス"
