@@ -67,7 +67,75 @@
     "usdjpy": "down"
    },
    "scenario": "米金利上昇一服で株安、日銀利上げ・介入警戒で円高進行、輸出関連売りで日経下落"
+  },
+  {
+   "id": "2026-09-29-groq",
+   "date": "2026-09-29",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7683.69,
+     "chg20_pct": -0.36,
+     "date": "2026-09-28"
+    },
+    "nikkei": {
+     "value": 65205.02,
+     "chg20_pct": -1.4,
+     "date": "2026-09-29"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 11.02,
+     "date": "2026-09-28"
+    },
+    "usdjpy": {
+     "value": 157.453,
+     "chg20_pct": -1.44,
+     "date": "2026-09-29"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国金利上昇でリスクオフが続き、株価は一時的に下落。日経は米国株の影響で弱含み。10年債利回りは引き上げ、ドル円は円高へ転換"
+  },
+  {
+   "id": "2026-09-29-openrouter",
+   "date": "2026-09-29",
+   "model": "OpenRouter (inclusionai/ling-3.0-flash-sante:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7683.69,
+     "chg20_pct": -0.36,
+     "date": "2026-09-28"
+    },
+    "nikkei": {
+     "value": 65205.02,
+     "chg20_pct": -1.4,
+     "date": "2026-09-29"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 11.02,
+     "date": "2026-09-28"
+    },
+    "usdjpy": {
+     "value": 157.453,
+     "chg20_pct": -1.44,
+     "date": "2026-09-29"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "FRB利下げ観測強まり米利回り低下、円高進行。日経は輸出企業への円高影響で下落、S&P500は決算好調で小幅上昇。"
   }
  ],
- "updated_at": "2026-09-28T20:50:02Z"
+ "updated_at": "2026-09-29T02:14:34Z"
 }
