@@ -6161,6 +6161,55 @@ def _analyze_earnings_review(t: str, it: dict) -> dict:
             "status": status, "level": level}
 
 
+def _earnings_review_lines(tickers) -> dict:
+    """AIのプロンプトに渡すための、銘柄ごとの決算後レビュー（機械判定）を1行ずつにまとめる。
+    {ticker: "🟡注意 | 決算2026-09-30 | EPS上振れ+5.0%（過去3回平均+25%）| 株価の反応+0.4%（時間外、S&P500比+0.4pt）| ..."}
+    データが無い・古い(4日超)・対象外の銘柄は含めない。"""
+    data = _load_earnings_reviews()
+    if not data or not data.get("items"):
+        return {}
+    try:
+        _age = (datetime.now(timezone.utc) - datetime.strptime(data["generated_at"], "%Y-%m-%dT%H:%M:%SZ")
+                .replace(tzinfo=timezone.utc)).total_seconds() / 86400
+        if _age > 4:
+            return {}
+    except Exception:
+        return {}
+    out = {}
+    for t in tickers:
+        it = data["items"].get(t)
+        if not it:
+            continue
+        try:
+            r = _analyze_earnings_review(t, it)
+        except Exception:
+            continue
+        bits = [r["status"], f"決算{r['date']}"]
+        if r["surprise"] is not None:
+            bits.append(f"EPS上振れ{r['surprise']:+.1f}%" + (f"（過去3回平均{r['prev_avg']:+.0f}%）" if r["prev_avg"] is not None else ""))
+        if r["reaction"] is not None:
+            bits.append(f"株価の反応{r['reaction']:+.1f}%（{r['reaction_kind']}"
+                        + (f"、S&P500比{r['rel']:+.1f}pt" if r["rel"] is not None else "") + "）")
+        if r["runup"] is not None:
+            bits.append(f"決算前10日{r['runup']:+.0f}%")
+        if r["tgt"] and r["upside"] is not None:
+            bits.append(f"目標株価平均${r['tgt']:,.0f}（現値比{r['upside']:+.0f}%）")
+        _attn = [txt for k, txt in r["flags"] if k in ("warn", "bad")]
+        if _attn:
+            bits.append("注意点: " + " / ".join(_attn))
+        out[t] = " | ".join(bits)
+    return out
+
+
+def _earnings_review_prompt_block(tickers) -> str:
+    """新規ポートフォリオ生成(Agent C)のプロンプトに差し込む決算後レビューのブロック。"""
+    lines = _earnings_review_lines(tickers)
+    if not lines:
+        return ""
+    return ("\n【直近の決算後レビュー（数字のしきい値による機械判定。AIの推測ではない）】\n"
+            + "\n".join(f"  {t}: {line}" for t, line in lines.items()) + "\n")
+
+
 def render_earnings_review():
     st.markdown("#### 📅 決算後レビュー — 決算が出た銘柄の結果と市場の反応")
     st.caption(
@@ -30649,6 +30698,14 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         f'"entry_note": "MA50付近の押し目。直近サポート$125-130を下回ったら撤退。"}}'
     )
 
+    # 決算が出て間もない銘柄の決算後レビュー（機械判定）。短縮プロンプト・フォールバックの両方で使う
+    _er_block = _earnings_review_prompt_block(list((candidate_perf or {}).keys()))
+    _er_rule = (
+        "\n・【決算後レビュー】に🔴要見直しと記載された銘柄は選定の優先度を下げ、選定する場合は"
+        "demeritsに記載の機械判定の内容を書くこと。🟡注意の銘柄は注意点をdemeritsに反映すること。"
+        "記載された数値以外の決算の数字を作らないこと" if _er_block else ""
+    )
+
     # ── Agent A+B が揃っている場合は短縮プロンプト（Agent C モード）─────────
     if agent_a and agent_b:
         # Agent B の結果をスコア順にソートして文字列化
@@ -30747,14 +30804,14 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 
 【Agent B: 銘柄別分析結果（キャッシュ済・スコア順）】
 {_ab_str}
-{_tb_fund_table}
+{_tb_fund_table}{_er_block}
 
 【配分ルール（必須）】
 ・銘柄数: {_n_stocks}銘柄（{_budget_note}）
 ・合計配分: {_invest_pct}% （残り{_cash_reserve}%はキャッシュ）
 ・{_cash_note}
 ・Agent Bの conclusion「買い」銘柄を優先。「除外」は選定しない
-・予算超過銘柄（最低%記載あり）はその割合以上の配分必須
+・予算超過銘柄（最低%記載あり）はその割合以上の配分必須{_er_rule}
 ・⛔銘柄は選定禁止: {_momentum_table_str.split(chr(10))[1] if chr(10) in _momentum_table_str else ""}{_ab_flag_constraint}
 ・各銘柄: rationale(20字), merits(2〜3点), demerits(1〜2点), conclusion(60字)を必ず含める
 ・meritsはAgent Bの分析（スコア・thesis・merits/demerits）と実株価モメンタムデータのみを根拠にすること。{
@@ -30800,7 +30857,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 ・RRGインプルービングセクター: {improving_str}
 
 {_momentum_table_str}
-
+{_er_block}
 【銘柄選定範囲と評価軸（モード別優先順位）】
 ・銘柄選定は【実株価モメンタムデータ】に記載のティッカーのみから選ぶこと（データにないティッカーは使用禁止）
 ・ティッカーシンボルはデータ記載の英数字を一字一句そのまま使用（例: 6702.T / NVDA）。自分で番号を作らない
@@ -31127,6 +31184,9 @@ def _generate_full_portfolio_recommendation(
             block += "  直近四半期EPS実績vs予想:\n" + "\n".join(f"    ・{h}" for h in eps_hist) + "\n"
         if news_lines:
             block += "  最新IR・ニュース:\n" + "\n".join(news_lines) + "\n"
+        _er_line = _earnings_review_lines([ticker]).get(ticker)
+        if _er_line:
+            block += ("  直近の決算後レビュー（数字のしきい値による機械判定）: " + _er_line + "\n")
         stock_blocks.append(block)
 
     total_gain = total_mkt - total_cost
@@ -31157,7 +31217,7 @@ Fear&Greed指数・NAAIM・セクターRRG・Nikkei/US予測モデルの具体�
 ### [実際の銘柄名（ティッカー）を記入]
 - **推奨**: [🔴 売却 / 🟡 一部利確 / 🟢 保有継続 / 💙 追加買い のいずれかを選択]
 - **テクニカル評価**: RSI=[保有銘柄データのRSI実数値]（70↑過熱/30↓売られ過ぎ）| MA25=[実数値]に対して株価は上/下 | 5日リターン=[実数値]%
-- **IR・ニュース評価**: 上記データに「決算・ファンダメンタルズ」「直近四半期EPS実績vs予想」があれば、見出しの雰囲気だけでなく売上高成長率・純利益成長率・EPSサプライズ等の実際の数値に触れながら、最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文で評価すること（無ければニュース見出しのみで評価）
+- **IR・ニュース評価**: 上記データに「直近の決算後レビュー」があれば、その判定（🔴🟡🟢）と、上振れ幅・株価の反応・目標株価の数値を必ず引用して、決算が株価にとって織り込み済みか・見直しが必要かを評価すること（記載の数値以外の決算の数字は作らない）。あわせて、上記データに「決算・ファンダメンタルズ」「直近四半期EPS実績vs予想」があれば、見出しの雰囲気だけでなく売上高成長率・純利益成長率・EPSサプライズ等の実際の数値に触れながら、最新の開示・ニュースが株価にとってポジティブ/ネガティブかを1〜2文で評価すること（無ければニュース見出しのみで評価）
 - **市場環境との整合性**: Fear&Greed・RRGセクター位置・予測モデルシグナルと当銘柄の方向性が一致しているか
 - **アクション水準**: [この銘柄が「現在値: ○○USD」なら必ずUSDで、「現在値: ○○円」なら必ず円で価格を記載すること（上記データの通貨単位と厳密に一致させる。米国株に「円」を使うなど単位を間違えないこと）。あくまで条件付きの発動水準であり、現時点でその条件を満たしていない限り即座に実行すべき指示ではないことが分かる書き方にすること（例:「208USDを上回れば一部利確を検討」）。⚠️ 水準の価格は必ず「現在値」を基準に、MA25/MA75やRSIなど上記データのテクニカル指標から現実的なレンジ（目安として現在値の±20%以内）で算出すること。上記データの「取得単価」の数値をそのままここに転記することは絶対禁止（取得単価は保有者ごとに異なる個人的なコストであり、市場の売買判断の水準ではないため）]
 """
