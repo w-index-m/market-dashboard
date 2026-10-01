@@ -38,7 +38,7 @@ for label, a, b in (("Agent C short prompt (agent A+B)", agent_a, agent_b), ("fa
     try:
         app._generate_investment_portfolio_rec(1_000_000, "individual", "aggressive", ctx, [], "auto", "ai_mix", perf, a, b)
         show(label, captured[-1], "【直近の決算後レビュー")
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
 
