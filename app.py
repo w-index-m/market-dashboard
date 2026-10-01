@@ -6030,6 +6030,202 @@ def render_drawdown_risk_model():
                    "過去の関係が今後も続くとは限らず、投資判断の推奨ではありません。")
 
 
+# ── 📅 決算後レビュー（決算が出た銘柄について、結果と市場の反応を機械的に検証する） ─────────
+# 生データはGitHub Actions（scripts/precompute_earnings_review.py、平日毎朝）がdata/earnings_reviews.jsonに
+# 保存する。判定ロジックはここ1か所に置く（AIは使わず、数字の比較だけで決める）。
+_ER_ETF_SKIP = {"QQQ", "VYM", "SCHD", "HDV", "SMH", "SOXX"}
+_ER_EXTRA = ["MU", "AMAT", "LRCX", "KLAC", "INTC", "TXN", "WDC", "STX", "DELL", "SMCI", "NFLX", "ADI", "MPWR"]
+_ER_PATH = os.path.join(os.path.dirname(__file__), "data", "earnings_reviews.json")
+
+
+def _earnings_review_universe() -> list:
+    """決算後レビューの対象銘柄（アプリの米国株リスト）。公開リポジトリに載せる前提のため、ユーザーの
+    保有銘柄（取引記録）は使わず、アプリ内に固定で持っている銘柄だけにする。"""
+    _all = ([t for t in _TRADING_CANDIDATES if not t.endswith(".T")]
+            + [t for t, _ in _SEMI_BASKET + _OPTICAL_BASKET if not t.endswith(".T")] + _ER_EXTRA)
+    _seen, _out = set(), []
+    for _t in _all:
+        if _t not in _ER_ETF_SKIP and _t not in _seen:
+            _seen.add(_t)
+            _out.append(_t)
+    return _out
+
+
+def _load_earnings_reviews() -> Optional[dict]:
+    try:
+        import json as _json_er
+        with open(_ER_PATH, encoding="utf-8") as f:
+            return _json_er.load(f)
+    except Exception:
+        return None
+
+
+def _analyze_earnings_review(t: str, it: dict) -> dict:
+    """1銘柄分の生データから、EPSの上振れ幅・過去との比較・市場の反応・売上の伸びの鈍化・
+    目標株価の動きを計算し、見直しの要否を判定する（判定は数値のしきい値のみ）。"""
+    rep, hist = it["report"], it.get("history", [])
+
+    def _surp(r):
+        e, a = r.get("est"), r.get("actual")
+        return None if (e is None or a is None or e == 0) else (a - e) / abs(e) * 100
+
+    surprise = _surp(rep)
+    prev = [s for s in (_surp(h) for h in hist[:3]) if s is not None]
+    prev_avg = sum(prev) / len(prev) if prev else None
+
+    # 売上の前期比（yfinanceの四半期データは決算発表直後は最新期を含まないことがある）
+    rq = it.get("rev_q", [])
+    qoq = [(rq[i][1] / rq[i - 1][1] - 1) * 100 for i in range(1, len(rq)) if rq[i - 1][1] > 0]
+    qoq_asof = rq[-1][0] if rq else None
+
+    # 株価の反応（決算の前日終値 → 決算後の最初の終値。まだ無ければ時間外の最新値）
+    def _series(key):
+        return pd.Series({pd.Timestamp(d): v for d, v in it.get("closes", {}).get(key, [])}).sort_index()
+
+    px, spy = _series(t), _series("SPY")
+    rd, after_close = pd.Timestamp(rep["date"]), rep.get("hour_et", 16) >= 12
+    reaction = spy_reaction = runup = price_now = None
+    kind, post_date = None, None
+    if not px.empty:
+        pre_s = px[px.index <= rd] if after_close else px[px.index < rd]
+        post_s = px[px.index > rd] if after_close else px[px.index >= rd]
+        if not pre_s.empty:
+            pre, pre_d = float(pre_s.iloc[-1]), pre_s.index[-1]
+            if len(pre_s) > 10:
+                runup = (pre / float(pre_s.iloc[-11]) - 1) * 100
+            if not post_s.empty:
+                reaction, kind, post_date = (float(post_s.iloc[0]) / pre - 1) * 100, "終値", post_s.index[0]
+                price_now = float(post_s.iloc[-1])
+                if not spy.empty and pre_d in spy.index and post_date in spy.index:
+                    spy_reaction = (float(spy[post_date]) / float(spy[pre_d]) - 1) * 100
+            elif it.get("ext"):
+                reaction, kind = (float(it["ext"]["price"]) / pre - 1) * 100, "時間外"
+                price_now = float(it["ext"]["price"])
+            else:
+                price_now = pre
+    rel = (reaction - (spy_reaction or 0.0)) if reaction is not None else None
+
+    # 目標株価と、決算後のアナリスト対応
+    info = it.get("info", {})
+    tgt = info.get("targetMeanPrice")
+    price_now = price_now or info.get("currentPrice")
+    upside = (tgt / price_now - 1) * 100 if (tgt and price_now) else None
+    rev = it.get("revisions", [])
+    raises = sum(1 for r in rev if r.get("pt_action") == "Raises" and r["date"] >= rep["date"])
+    lowers = sum(1 for r in rev if r.get("pt_action") == "Lowers" and r["date"] >= rep["date"])
+
+    et = it.get("eps_trend", {}).get("0q", {})
+    eps_rev7 = ((et["current"] / et["7daysAgo"] - 1) * 100
+                if et.get("current") and et.get("7daysAgo") else None)
+
+    flags, level = [], 0
+
+    def _add(kind_, text, lv=0):
+        nonlocal level
+        flags.append((kind_, text))
+        level = max(level, lv)
+
+    if surprise is not None:
+        if surprise >= 3:
+            _add("good", f"EPSは予想を{surprise:+.1f}%上回った")
+        elif surprise <= -3:
+            _add("bad", f"EPSは予想を{surprise:+.1f}%下回った", 2)
+        else:
+            _add("info", f"EPSはほぼ予想どおり（{surprise:+.1f}%）")
+    if surprise is not None and prev_avg is not None and prev_avg >= 5 and surprise < prev_avg * 0.5:
+        _add("warn", f"上振れ幅が過去3回の平均（{prev_avg:+.0f}%）から縮小", 1)
+    if rel is not None:
+        if rel <= -5:
+            _add("bad", f"市場の反応は{reaction:+.1f}%（S&P500比{rel:+.1f}pt）と大きく売られた", 2)
+        elif rel >= 5:
+            _add("good", f"市場の反応は{reaction:+.1f}%（S&P500比{rel:+.1f}pt）と好感された")
+        elif surprise is not None and surprise > 0 and rel < 1.0 and runup is not None and runup >= 8:
+            _add("warn", f"好決算でも反応は{reaction:+.1f}%と弱い。決算前の10営業日で{runup:+.0f}%上昇しており、"
+                         "期待が織り込み済みだった可能性", 1)
+    if len(qoq) >= 2 and qoq[-2] >= 10 and qoq[-1] < qoq[-2] * 0.6:
+        _add("warn", f"売上の前期比の伸びが鈍化（{qoq[-2]:+.0f}% → {qoq[-1]:+.0f}%）", 1)
+    if lowers >= 2 and lowers > raises:
+        _add("warn", f"決算後の目標株価は引き下げが多い（↑{raises}・↓{lowers}）", 1)
+    elif raises >= 2 and raises > lowers:
+        _add("good", f"決算後の目標株価は引き上げが多い（↑{raises}・↓{lowers}）")
+    if eps_rev7 is not None and eps_rev7 <= -3:
+        _add("warn", f"今期のEPS予想が1週間で{eps_rev7:+.1f}%下方修正", 1)
+
+    status = "🔴 要見直し" if level >= 2 else "🟡 注意" if level == 1 else (
+        "🟢 良好" if any(k == "good" for k, _ in flags) else "⚪ 中立")
+    return {"ticker": t, "name": it.get("name", t), "date": rep["date"], "est": rep.get("est"),
+            "actual": rep.get("actual"), "surprise": surprise, "prev_avg": prev_avg, "qoq": qoq, "qoq_asof": qoq_asof,
+            "reaction": reaction, "reaction_kind": kind, "rel": rel, "runup": runup, "tgt": tgt, "price": price_now,
+            "upside": upside, "raises": raises, "lowers": lowers, "eps_rev7": eps_rev7, "flags": flags,
+            "status": status, "level": level}
+
+
+def render_earnings_review():
+    st.markdown("#### 📅 決算後レビュー — 決算が出た銘柄の結果と市場の反応")
+    st.caption(
+        "直近3週間以内に決算を発表した米国株について、EPSの上振れ幅、過去との比較、決算前後の株価の反応（S&P500比）、"
+        "売上の伸び、決算後の目標株価の動きを集計し、見直しが必要そうな銘柄に印を付けます。判定は数字のしきい値だけで"
+        "行い、AIの推測は使っていません。対象はアプリの米国株リスト（保有銘柄は公開リポジトリのため使っていません）。"
+    )
+    data = _load_earnings_reviews()
+    if not data:
+        st.info("データがまだありません。平日毎朝（日本時間7:30ごろ）GitHub Actionsが更新します。")
+        return
+    st.caption(f"データ更新: {data.get('generated_at')}（対象{data.get('universe_size')}銘柄のうち決算発表済み{len(data['items'])}銘柄）")
+    if not data["items"]:
+        st.info("直近3週間以内に決算を発表した対象銘柄はありません。")
+        return
+    res = [_analyze_earnings_review(t, it) for t, it in data["items"].items()]
+    res.sort(key=lambda r: (r["date"], r["level"]), reverse=True)
+
+    _n_red = sum(1 for r in res if r["level"] >= 2)
+    _n_yel = sum(1 for r in res if r["level"] == 1)
+    st.markdown(f"**🔴 要見直し {_n_red}件 ／ 🟡 注意 {_n_yel}件 ／ 全{len(res)}件**")
+    _only = st.checkbox("🔴🟡のみ表示", value=False, key="er_only_attn")
+    rows = []
+    for r in res:
+        if _only and r["level"] == 0:
+            continue
+        rows.append({
+            "判定": r["status"], "銘柄": f"{r['ticker']} {r['name'][:14]}", "決算日": r["date"],
+            "EPS(実績/予想)": (f"{r['actual']:.2f} / {r['est']:.2f}" if r["est"] is not None else f"{r['actual']:.2f} / —"),
+            "上振れ": f"{r['surprise']:+.1f}%" if r["surprise"] is not None else "—",
+            "過去3回平均": f"{r['prev_avg']:+.0f}%" if r["prev_avg"] is not None else "—",
+            "株価の反応": (f"{r['reaction']:+.1f}%（{r['reaction_kind']}）" if r["reaction"] is not None else "—"),
+            "S&P500比": f"{r['rel']:+.1f}pt" if r["rel"] is not None else "—",
+            "決算前10日": f"{r['runup']:+.0f}%" if r["runup"] is not None else "—",
+            "目標株価(平均)": (f"${r['tgt']:,.0f}（現値比{r['upside']:+.0f}%）" if r["tgt"] and r["upside"] is not None else "—"),
+            "目標変更": f"↑{r['raises']} ↓{r['lowers']}",
+        })
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("**銘柄ごとの詳細**")
+    _icon = {"good": "✅", "warn": "⚠️", "bad": "🔻", "info": "➖"}
+    for r in res:
+        if _only and r["level"] == 0:
+            continue
+        with st.expander(f"{r['status']}　{r['ticker']} {r['name']}　（決算日 {r['date']}）", expanded=r["level"] >= 2):
+            st.markdown("\n".join(f"- {_icon[k]} {txt}" for k, txt in r["flags"]) or "- 特記事項なし")
+            _bits = []
+            if r["qoq"]:
+                _bits.append("売上の前期比: " + " → ".join(f"{q:+.0f}%" for q in r["qoq"][-4:])
+                             + (f"（{r['qoq_asof']}期まで。決算直後は最新期が未反映のことがあります）" if r["qoq_asof"] else ""))
+            if r["eps_rev7"] is not None:
+                _bits.append(f"次期EPS予想の1週間の変化: {r['eps_rev7']:+.1f}%")
+            if _bits:
+                st.caption(" ／ ".join(_bits))
+            _rev = data["items"][r["ticker"]].get("revisions", [])
+            if _rev:
+                st.dataframe(pd.DataFrame([{
+                    "日付": x["date"], "証券会社": x["firm"], "格付け": x["to"],
+                    "目標株価": f"${x['target']:,.0f}" if x.get("target") else "—",
+                    "前回": f"${x['prior']:,.0f}" if x.get("prior") else "—", "変更": x.get("pt_action", ""),
+                } for x in _rev[:10]]), use_container_width=True, hide_index=True)
+    st.caption("決算の反応は数日かけて変わります。しきい値による機械的な判定なので、見直しの「きっかけ」として使い、"
+               "個別の判断は業績の中身も合わせて確認してください。投資判断の推奨ではありません。")
+
+
 # ── 🏁 AIの予想の答え合わせ（複数AIの相場予想を記録し、約4週間後に採点する） ─────────────
 # 記録と採点はGitHub Actions（scripts/ai_forecast_log.py、平日毎朝）が行い、data/ai_forecasts.jsonに
 # 蓄積する。ここにはその判定ロジックと画面表示を置く（判定ロジックをapp.py1か所に保つため）。
@@ -36945,6 +37141,17 @@ def render_claude_trading_project():
 
 _CHANGELOG = [
     {
+        "date": "2026-10-01",
+        "title": "📅 決算後レビューを追加",
+        "items": [
+            "直近3週間以内に決算を出した米国株について、EPSの上振れ幅・過去との比較・決算後の株価の反応（S&P500比）・"
+            "売上の伸びの鈍化・決算後の目標株価の動きを集計し、見直しが必要そうな銘柄に🔴🟡を表示",
+            "判定は数字のしきい値のみ（AIの推測なし）。データは平日毎朝GitHub Actionsが更新",
+        ],
+        "tag": "新機能",
+        "color": "#06b6d4",
+    },
+    {
         "date": "2026-09-28",
         "title": "🏁 AIの予想の答え合わせを開始",
         "items": [
@@ -38047,9 +38254,9 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ===================================================
     # ★ 方向性予測スコア（日本株・米国株）
     # ===================================================
-    tab_jp_pred, tab_us_pred, tab_dd_pred, tab_report, tab_fc = st.tabs(
+    tab_jp_pred, tab_us_pred, tab_dd_pred, tab_report, tab_fc, tab_er = st.tabs(
         ["🇯🇵 日本株（日経平均）", "🇺🇸 米国株（S&P500/NASDAQ/ダウ）", "⚠️ 下落リスク（20日）", "📚 検証レポート",
-         "🏁 AIの答え合わせ"])
+         "🏁 AIの答え合わせ", "📅 決算後レビュー"])
     with tab_jp_pred:
         render_nikkei_prediction()
     with tab_us_pred:
@@ -38060,6 +38267,8 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         render_model_validation_report()
     with tab_fc:
         render_ai_forecast_scoreboard()
+    with tab_er:
+        render_earnings_review()
     st.divider()
 
     # ★ マーケットリサーチAI

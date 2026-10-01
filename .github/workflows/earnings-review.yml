@@ -1,0 +1,33 @@
+name: Earnings review data
+
+on:
+  schedule:
+    - cron: "40 22 * * 1-5"   # 22:40 UTC（米国市場の引け後）= 翌朝7:40 JST。AI予想の記録(22:30)の後
+  workflow_dispatch: {}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q -r requirements.txt
+      - name: Collect earnings data for recently reported US stocks
+        run: PYTHONPATH=. python scripts/precompute_earnings_review.py 2>&1 | grep -v "possibly delisted\|HTTP Error\|No runtime found\|streamlit run\|to view a Streamlit" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/earnings_reviews.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update earnings review data"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
