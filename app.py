@@ -6143,7 +6143,8 @@ def _analyze_earnings_review(t: str, it: dict) -> dict:
             _add("warn", f"好決算でも反応は{reaction:+.1f}%と弱い。決算前の10営業日で{runup:+.0f}%上昇しており、"
                          "期待が織り込み済みだった可能性", 1)
     if len(qoq) >= 2 and qoq[-2] >= 10 and qoq[-1] < qoq[-2] * 0.6:
-        _add("warn", f"売上の前期比の伸びが鈍化（{qoq[-2]:+.0f}% → {qoq[-1]:+.0f}%）", 1)
+        _add("warn", f"売上の前期比の伸びが鈍化（{qoq[-2]:+.0f}% → {qoq[-1]:+.0f}%）。"
+                     "季節性のある企業では参考値", 1)
     if lowers >= 2 and lowers > raises:
         _add("warn", f"決算後の目標株価は引き下げが多い（↑{raises}・↓{lowers}）", 1)
     elif raises >= 2 and raises > lowers:
