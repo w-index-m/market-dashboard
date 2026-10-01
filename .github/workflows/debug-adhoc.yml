@@ -1,0 +1,34 @@
+name: Debug ad-hoc script
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "scripts/ 配下のスクリプト名（例: debug_mu.py）"
+        required: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q requests pandas yfinance lxml
+      - name: Run script
+        run: python "scripts/${{ github.event.inputs.script }}" 2>&1 | grep -v "possibly delisted\|HTTP Error" | tee /tmp/adhoc.txt
+      # 実行ログはアシスタントの作業環境から読めないため、結果をadhoc-outputブランチに置く（毎回上書き）
+      - name: Publish output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan adhoc-output
+          git rm -rf --cached . >/dev/null
+          { echo "Run: ${{ github.run_id }} script=${{ github.event.inputs.script }}"; cat /tmp/adhoc.txt; } > adhoc_output.txt
+          git add adhoc_output.txt
+          git commit -m "Ad-hoc output from run ${{ github.run_id }}"
+          git push origin adhoc-output --force
