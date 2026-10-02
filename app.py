@@ -29475,6 +29475,7 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     return {
         "ok":              True,
         "n_tickers":       n_ok,
+        "tickers":         [t for t in tickers if t in close_all.columns][:10],
         "selection_kind":  "ranked" if is_ranked else "theme",
         "ret_1y":          _ret_over(cum, 252),
         "ret_3y":          _ret_over(cum, 756),
@@ -32094,18 +32095,52 @@ def render_claude_trading_project():
             '📊 全モード比較（1年・3年リターン）</div>',
             unsafe_allow_html=True,
         )
-        _cmp_rows = []
+        import html as _html_mod
+        _cmp_body = []
         for _md in _MODE_DEFS:
             _k, _r = _md["key"], _bt_all.get(_md["key"], {})
-            _cmp_rows.append({
-                "モード": f'{_md["emoji"]} {_md["label"]}' + ("  ← 選択中" if _k == _cur_mode else ""),
-                "1年リターン":  f'{_r["ret_1y"]:+.1f}%' if _r.get("ok") and _r.get("ret_1y") is not None else "—",
-                "3年リターン":  f'{_r["ret_3y"]:+.1f}%' if _r.get("ok") and _r.get("ret_3y") is not None else "—",
-                "直近1年最大DD": f'{_r["max_dd_1y"]:+.1f}%' if _r.get("ok") and _r.get("max_dd_1y") is not None else "—",
-                "選定方法":     ("スコア選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
-                                else "テーマ固定" if _r.get("ok") else _r.get("reason", "—")),
-            })
-        st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
+            _ok = bool(_r.get("ok"))
+            _label = _html_mod.escape(f'{_md["emoji"]} {_md["label"]}' + ("  ← 選択中" if _k == _cur_mode else ""))
+            _top = _r.get("tickers") or []
+            if _top:
+                _tip_lines = "".join(
+                    f'<div>{_i}. {_html_mod.escape(_tk)}　<span style="color:#94a3b8">'
+                    f'{_html_mod.escape(str(_get_stock_display_name(_tk)))}</span></div>'
+                    for _i, _tk in enumerate(_top, 1)
+                )
+                _tip = ('<div class="mc-tip"><div style="color:#94a3b8;margin-bottom:4px">'
+                        + ("主な銘柄（スコア上位10）" if _r.get("selection_kind") == "ranked" else "主な銘柄（構成バスケットの先頭10）")
+                        + f'</div>{_tip_lines}</div>')
+                _label_cell = f'<td class="mc-has" tabindex="0">{_label} <span style="color:#64748b">ⓘ</span>{_tip}</td>'
+            else:
+                _label_cell = f'<td>{_label}</td>'
+            _method = ("スコア選定（後知恵あり）" if _r.get("selection_kind") == "ranked"
+                       else "テーマ固定" if _ok else _html_mod.escape(str(_r.get("reason", "—"))))
+            _vals = [
+                f'{_r["ret_1y"]:+.1f}%' if _ok and _r.get("ret_1y") is not None else "—",
+                f'{_r["ret_3y"]:+.1f}%' if _ok and _r.get("ret_3y") is not None else "—",
+                f'{_r["max_dd_1y"]:+.1f}%' if _ok and _r.get("max_dd_1y") is not None else "—",
+            ]
+            _cmp_body.append(
+                "<tr>" + _label_cell + "".join(f"<td>{_v}</td>" for _v in _vals)
+                + f'<td style="font-weight:600">{_method}</td></tr>'
+            )
+        st.markdown(
+            "<style>"
+            ".mc-tbl{width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0}"
+            ".mc-tbl th{text-align:left;color:#94a3b8;font-weight:500;padding:8px 10px;border-bottom:1px solid #334155}"
+            ".mc-tbl td{padding:8px 10px;border-bottom:1px solid #1e293b;position:relative}"
+            ".mc-has{cursor:help;font-weight:600}"
+            ".mc-tip{display:none;position:absolute;left:10px;top:100%;z-index:50;background:#1e293b;"
+            "border:1px solid #475569;border-radius:8px;padding:8px 12px;min-width:260px;font-weight:400;"
+            "font-size:12px;line-height:1.6;box-shadow:0 4px 14px rgba(0,0,0,.5);white-space:nowrap}"
+            ".mc-has:hover .mc-tip,.mc-has:focus .mc-tip{display:block}"
+            "</style>"
+            '<table class="mc-tbl"><thead><tr><th>モード（ⓘ=タップ/ホバーで主な銘柄）</th><th>1年リターン</th>'
+            "<th>3年リターン</th><th>直近1年最大DD</th><th>選定方法</th></tr></thead><tbody>"
+            + "".join(_cmp_body) + "</tbody></table>",
+            unsafe_allow_html=True,
+        )
         st.caption(
             "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
             "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
