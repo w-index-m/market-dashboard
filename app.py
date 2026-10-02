@@ -26925,6 +26925,10 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     if price_df.empty:
         logger.warning(f"[alloc_history] start_date={start_date}以降のデータが無い")
         return pd.DataFrame()
+    if getattr(price_df.index, "tz", None) is not None:
+        price_df.index = price_df.index.tz_localize(None)
+    price_df.index = price_df.index.normalize()
+    price_df = price_df[~price_df.index.duplicated(keep="last")]
 
     try:
         fx_raw   = yf.download("USDJPY=X", start=start_date, auto_adjust=True, progress=False)
@@ -26937,9 +26941,13 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
 
     # 銘柄別の保有株数（累積）を日次で復元
     df["signed_qty"] = df["quantity"] * df["action"].map({"BUY": 1.0, "SELL": -1.0}).fillna(0.0)
+    # 営業日(price_dfの日付)に無い日の取引（週末・休場日・時刻付き）がreindexで捨てられて
+    # 保有株数が0になるのを防ぐため、取引日と営業日の和集合で累積してから営業日に揃える
+    df["date"] = df["date"].dt.normalize()
     daily_delta = df.groupby(["date", "ticker"])["signed_qty"].sum().unstack(fill_value=0.0)
-    daily_delta = daily_delta.reindex(price_df.index, fill_value=0.0).fillna(0.0)
-    qty_hist = daily_delta.cumsum().clip(lower=0.0)
+    _all_idx = daily_delta.index.union(price_df.index)
+    qty_hist = daily_delta.reindex(_all_idx, fill_value=0.0).fillna(0.0).cumsum().clip(lower=0.0)
+    qty_hist = qty_hist.reindex(price_df.index)
 
     value_hist = pd.DataFrame(index=price_df.index, columns=tickers, dtype=float)
     for tk in tickers:
