@@ -36111,6 +36111,14 @@ def render_claude_trading_project():
                     else:
                         _alloc_cols  = [c for c in _alloc_hist.columns if _alloc_hist[c].sum() > 0]
                         _alloc_names = {c: _get_stock_display_name(c) for c in _alloc_cols}
+                        # 現在の保有比率が大きい順に並べる（売却済みは期間中の最大額順で末尾）。
+                        # 先頭のトレースがグラフの最下段・凡例の最上段になる
+                        _last_row = _alloc_hist.iloc[-1]
+                        _last_tot = float(_last_row.sum()) or 1.0
+                        _alloc_cols = sorted(
+                            _alloc_cols,
+                            key=lambda c: (_last_row[c] <= 0, -_last_row[c], -_alloc_hist[c].max()),
+                        )
 
                         # 株価を取得できなかった保有銘柄は静かに脱落し、残りで100%に正規化されて
                         # しまうため、チャートに載っていない現保有銘柄を明示する
@@ -36130,7 +36138,8 @@ def render_claude_trading_project():
                         for c in _alloc_cols:
                             fig_alloc.add_trace(go.Scatter(
                                 x=_alloc_hist.index, y=_alloc_hist[c],
-                                name=f"{_alloc_names[c]}（{c}）",
+                                name=(f"{_alloc_names[c]}（{c}）"
+                                      + (f" {_last_row[c] / _last_tot * 100:.1f}%" if _last_row[c] > 0 else " 売却済")),
                                 mode="lines", stackgroup="one", groupnorm="percent",
                                 hovertemplate="%{x|%Y-%m-%d}<br>" + _alloc_names[c] + ": %{y:.1f}%<extra></extra>",
                             ))
