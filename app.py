@@ -24746,7 +24746,8 @@ def _normalize_fund_name(s: str) -> str:
     _JP_FUND_MAPの半角表記と食い違ってしまうため。
     """
     import unicodedata as _ud
-    return _ud.normalize("NFKC", s or "").replace(" ", "").replace("　", "").strip()
+    # 取引フォームはティッカー欄を.upper()してから渡すため、大文字小文字も無視して比較する
+    return _ud.normalize("NFKC", s or "").replace(" ", "").replace("　", "").strip().casefold()
 
 
 def _strip_ticker_quote_prefix(s: str) -> str:
