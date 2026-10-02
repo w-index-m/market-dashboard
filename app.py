@@ -26956,6 +26956,23 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
         native_value = qty_hist[tk] * price_df[tk]
         value_hist[tk] = native_value if tk.endswith(".T") else native_value * fx_series
 
+    # 投資信託: 日次の基準価額履歴が取れないため、取引時の約定価格を次の取引まで据え置いた
+    # 近似値で評価し、最新日だけ現在の基準価額（みんかぶ）に置き換える。基準価額は1万口あたり。
+    for tk in [t for t in tickers if t in _JP_FUND_MAP and t in qty_hist.columns]:
+        try:
+            _tp = df[df["ticker"] == tk].copy()
+            _tp["price"] = pd.to_numeric(_tp["price"], errors="coerce")
+            _tp = _tp.dropna(subset=["price"]).groupby("date")["price"].last()
+            if _tp.empty:
+                continue
+            _px = _tp.reindex(_tp.index.union(price_df.index)).ffill().reindex(price_df.index)
+            _nav = (_fetch_jp_fund_nav(tk) or {}).get("nav")
+            if _nav:
+                _px.iloc[-1] = float(_nav)
+            value_hist[tk] = qty_hist[tk] * _px / _JP_FUND_NAV_UNIT
+        except Exception as e:
+            logger.warning(f"[alloc_history] 投信{tk}の評価に失敗: {e}")
+
     value_hist = value_hist.fillna(0.0)
     value_hist = value_hist[value_hist.sum(axis=1) > 0]
     return value_hist
@@ -36099,7 +36116,7 @@ def render_claude_trading_project():
                         # しまうため、チャートに載っていない現保有銘柄を明示する
                         _alloc_missing = sorted(
                             tk for tk in (_get_open_positions() or {})
-                            if tk not in _alloc_cols and tk not in _JP_FUND_MAP
+                            if tk not in _alloc_cols
                         )
                         if _alloc_missing:
                             st.warning(
@@ -36134,7 +36151,7 @@ def render_claude_trading_project():
                         )
                         st.plotly_chart(fig_alloc, use_container_width=True, key="alloc_fig_pnl_tab")
                         st.caption(
-                            "※ 評価額は円換算（USD建て銘柄は日次USDJPYレートで換算）。"
+                            "※ 評価額は円換算（USD建て銘柄は日次USDJPYレートで換算）。投資信託は日次の基準価額が取れないため、取引時の約定価格を据え置いた近似値（最新日のみ現在の基準価額）。"
                             "売却済みで保有額が0の銘柄は非表示。全期間表示です。"
                         )
 
