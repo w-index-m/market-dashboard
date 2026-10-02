@@ -5110,9 +5110,10 @@ def compute_ensemble_us(target: str = "SP500") -> Dict[str, Any]:
             tnx_ma20 = float(tnx.rolling(20).mean().iloc[-1])
             fed["tnx_level"]  = (np.tanh(-(tnx_v - 3.5) / 1.0), 2.0)
             fed["tnx_vs_ma"]  = (np.tanh(-(tnx_v / tnx_ma20 - 1) * 100 / 3), 1.5)
-        irx = _h("^IRX")
+        irx = _official_3m_yield(_h("^IRX"))
         if len(irx) >= 2 and len(tnx) >= 2:
-            spread = float(tnx.iloc[-1]) - float(irx.iloc[-1]) / 10
+            # ^TNXと^IRXは同じ単位(5.24=5.24%)。以前は^IRXだけを10で割っており、スプレッドが約4倍に過大だった
+            spread = float(tnx.iloc[-1]) - float(irx.iloc[-1])
             fed["yield_curve"] = (np.tanh(spread / 1.0), 2.0)
 
         # アンサンブル合成
@@ -5516,7 +5517,7 @@ def compute_us_prediction(target: str = "SP500") -> Dict[str, Any]:
             # 2年金利代替（^IRX = 13週T-Bill）
             irx_df = _h("^IRX")
             if not irx_df.empty:
-                irx_c = irx_df["Close"].dropna()
+                irx_c = _official_3m_yield(irx_df["Close"].dropna()) if "Close" in irx_df else _official_3m_yield(irx_df.dropna())
                 irx_val = float(irx_c.iloc[-1])
                 # ^IRX・^TNX はともに同単位（例: 5.25 = 5.25%）なので割り算不要
                 spread_2_10 = tnx_val - irx_val
@@ -7072,7 +7073,7 @@ def detect_macro_regime() -> Dict[str, Any]:
                 return pd.Series(dtype=float)
 
         tnx  = _c("^TNX")   # 米10年
-        irx  = _c("^IRX")   # 米3ヶ月
+        irx  = _official_3m_yield(_c("^IRX"))   # 米3ヶ月（米財務省の公式値。取得失敗時は^IRX）
         vix  = _c("^VIX")
         spy  = _c("SPY")
         iwm  = _c("IWM")    # 小型株
@@ -7091,7 +7092,7 @@ def detect_macro_regime() -> Dict[str, Any]:
             common = tnx.index.intersection(irx.index)
             if len(common) >= 20:
                 tnx_a = tnx.loc[common]
-                irx_a = irx.loc[common] / 10
+                irx_a = irx.loc[common]  # ^TNXと同じ単位(%)。以前は/10しており10Y-3Mが約4倍に過大だった
                 spread = float(tnx_a.iloc[-1]) - float(irx_a.iloc[-1])
                 spread_ma20 = float((tnx_a - irx_a).rolling(20).mean().iloc[-1])
                 signals["yield_curve"]   = spread > 0          # 正=拡張
@@ -10337,7 +10338,7 @@ def compute_bear_market_risk() -> Dict[str, Any]:
         hyg   = _g("HYG")
         lqd   = _g("LQD")
         tnx   = _g("^TNX")
-        irx   = _g("^IRX")
+        irx   = _official_3m_yield(_g("^IRX"))
 
         signals: List[Dict] = []
 
@@ -10657,6 +10658,58 @@ def fetch_macro_indicators() -> Dict[str, Any]:
     return result
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _fetch_treasury_3m_series(years: int = 3) -> pd.Series:
+    """米財務省の公式デイリー・イールドカーブから3ヶ月物の利回り(%)の日次系列を取得する（キー不要）。
+    Yahooの^IRXは割引債ベースの利回りで、公式の3ヶ月利回り（FREDのDGS3MOやT10Y3Mの元データ）より
+    2026-09時点で常に約0.17pt低く、「10年−3ヶ月」のイールドカーブが約0.2pt過大に見えていた。
+    取得失敗時は空のSeries（呼び出し側は^IRXにフォールバックする）。"""
+    import io as _io_tr
+    frames = []
+    _now = datetime.now()
+    for _yr in range(_now.year - years + 1, _now.year + 1):
+        try:
+            _r = requests.get(
+                f"https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
+                f"daily-treasury-rates.csv/{_yr}/all",
+                params={"type": "daily_treasury_yield_curve", "field_tdr_date_value": _yr, "page": "", "_format": "csv"},
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=20,
+            )
+            if _r.status_code != 200:
+                continue
+            _df = pd.read_csv(_io_tr.StringIO(_r.text))
+            if "Date" in _df.columns and "3 Mo" in _df.columns:
+                _s = pd.Series(pd.to_numeric(_df["3 Mo"], errors="coerce").values,
+                               index=pd.to_datetime(_df["Date"], format="%m/%d/%Y", errors="coerce"))
+                frames.append(_s[_s.index.notna()].dropna())
+        except Exception as e:
+            logger.warning(f"[treasury_3m] {_yr}年の取得失敗: {e}")
+    if not frames:
+        return pd.Series(dtype=float)
+    _out = pd.concat(frames).sort_index()
+    return _out[~_out.index.duplicated(keep="last")]
+
+
+def _official_3m_yield(irx: pd.Series) -> pd.Series:
+    """Yahoo ^IRXの系列を、同じ日付の米財務省公式3ヶ月利回りに置き換えて返す（index・単位(%)は^IRXと同じ）。
+    公式データが取れない・対応する日付が少ない場合は、^IRXをそのまま返す（従来どおりの動作）。"""
+    try:
+        if irx is None or len(irx) == 0:
+            return irx
+        _off = _fetch_treasury_3m_series()
+        if _off.empty:
+            return irx
+        _idx = pd.DatetimeIndex(irx.index)
+        if _idx.tz is not None:
+            _idx = _idx.tz_localize(None)
+        _vals = _off.reindex(_idx.normalize(), method="ffill", tolerance=pd.Timedelta(days=5)).values
+        _out = pd.Series(_vals, index=irx.index).dropna()
+        return _out if len(_out) >= max(2, int(len(irx) * 0.8)) else irx
+    except Exception as e:
+        logger.warning(f"[treasury_3m] 公式値への置換失敗、^IRXを使用: {e}")
+        return irx
+
+
 def _fetch_macro_cape(result: Dict[str, Any]) -> None:
     """① CAPE — multpl.com (BS4 → pd.read_html フォールバック)"""
     try:
@@ -10752,7 +10805,7 @@ def _fetch_macro_lei(result: Dict[str, Any]) -> None:
             _yc = yf.download(["^TNX", "^IRX"], period="2y",
                                auto_adjust=True, progress=False)["Close"]
             _tnx = _yc["^TNX"].dropna()
-            _irx = _yc["^IRX"].dropna()
+            _irx = _official_3m_yield(_yc["^IRX"].dropna())
             _spread = (_tnx - _irx).dropna()
             if len(_spread) >= 2:
                 latest_v = float(_spread.iloc[-1])
@@ -13642,6 +13695,7 @@ def generate_rate_inflation_narrative(date_str: str) -> dict:
         _irx = _irx_raw["Close"].dropna() if not _irx_raw.empty else pd.Series(dtype=float)
         if hasattr(_irx, "columns"):
             _irx = _irx.iloc[:, 0]
+        _irx = _official_3m_yield(_irx)
         if len(_irx):
             _irx_cur = float(_irx.iloc[-1])
             if len(_irx) >= 200:
