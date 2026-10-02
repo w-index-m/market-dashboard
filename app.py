@@ -26839,12 +26839,34 @@ def _compute_portfolio_history() -> pd.DataFrame:
         logger.warning(f"[pf_history] start_date={start_date}以降のデータが無い")
         return pd.DataFrame()
 
-    # 各営業日のポートフォリオ評価額・投資元本を計算
+    # USD建て銘柄は日次USDJPYで円換算する（以前は円建て・ドル建てを換算せず足していたため、
+    # 米国株の比重が高いと評価額・投資元本が大幅に過小になっていた）
+    try:
+        _fx_raw   = yf.download("USDJPY=X", start=start_date, auto_adjust=True, progress=False)
+        _fx_close = _fx_raw["Close"]
+        if isinstance(_fx_close, pd.DataFrame):
+            _fx_close = _fx_close.iloc[:, 0]
+        _fx_full = _fx_close.dropna()
+        if getattr(_fx_full.index, "tz", None) is not None:
+            _fx_full.index = _fx_full.index.tz_localize(None)
+        _fx_full.index = _fx_full.index.normalize()
+    except Exception:
+        _fx_full = pd.Series(dtype=float)
+
+    def _fx_for(tk: str, d) -> float:
+        if tk.endswith(".T"):
+            return 1.0
+        if _fx_full.empty:
+            return 150.0
+        v = _fx_full.asof(pd.Timestamp(d).normalize())
+        return float(v) if pd.notna(v) else float(_fx_full.iloc[0])
+
+    # 各営業日のポートフォリオ評価額・投資元本（いずれも円換算）を計算
     rows = []
     for date in price_df.index:
         trades_so_far = df[df["date"] <= date]
         positions = {}
-        invested  = 0.0
+        costs     = {}   # 銘柄別の取得コスト（円換算、取引日のレート）
         for _, row in trades_so_far.iterrows():
             tk  = row["ticker"]
             if tk in _JP_FUND_MAP:
@@ -26855,20 +26877,24 @@ def _compute_portfolio_history() -> pd.DataFrame:
             qty = float(row["quantity"])
             prc = float(row["price"])
             fee = float(row["fee"])
+            fx  = _fx_for(tk, row["date"])
             if row["action"] == "BUY":
                 positions[tk] = positions.get(tk, 0.0) + qty
-                invested += qty * prc + fee
+                costs[tk]     = costs.get(tk, 0.0) + (qty * prc + fee) * fx
             elif row["action"] == "SELL":
-                avg_cost = invested / sum(positions.values()) if sum(positions.values()) > 0 else prc
-                positions[tk] = positions.get(tk, 0.0) - qty
-                invested -= qty * avg_cost  # 売却した分の取得コストを差し引く
+                held = positions.get(tk, 0.0)
+                if held > 0:
+                    # 売却した分の取得コストを銘柄ごとの平均取得コストで差し引く
+                    costs[tk] = costs.get(tk, 0.0) * max(held - qty, 0.0) / held
+                positions[tk] = held - qty
+        invested = sum(costs.values())
 
         port_value = 0.0
         for tk, qty in positions.items():
             if qty > 0 and tk in price_df.columns:
                 p = price_df.loc[date, tk]
                 if not pd.isna(p):
-                    port_value += qty * float(p)
+                    port_value += qty * float(p) * _fx_for(tk, date)
 
         if port_value > 0:
             rows.append({
