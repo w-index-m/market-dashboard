@@ -36077,6 +36077,20 @@ def render_claude_trading_project():
                         _alloc_cols  = [c for c in _alloc_hist.columns if _alloc_hist[c].sum() > 0]
                         _alloc_names = {c: _get_stock_display_name(c) for c in _alloc_cols}
 
+                        # 株価を取得できなかった保有銘柄は静かに脱落し、残りで100%に正規化されて
+                        # しまうため、チャートに載っていない現保有銘柄を明示する
+                        _alloc_missing = sorted(
+                            tk for tk in (_get_open_positions() or {})
+                            if tk not in _alloc_cols and tk not in _JP_FUND_MAP
+                        )
+                        if _alloc_missing:
+                            st.warning(
+                                "⚠️ 株価を取得できず、以下の保有銘柄がこのチャートに含まれていません"
+                                "（残りの銘柄で100%に再計算されるため、配分が実際とずれます）: "
+                                + "、".join(_alloc_missing)
+                                + "。時間をおいて再読み込みしてください。"
+                            )
+
                         fig_alloc = go.Figure()
                         for c in _alloc_cols:
                             fig_alloc.add_trace(go.Scatter(
