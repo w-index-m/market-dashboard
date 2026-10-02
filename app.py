@@ -11261,6 +11261,114 @@ def render_macro_indicators(macro: dict | None = None):
     else:
         st.info("日本10年国債利回りのデータを取得できませんでした。")
 
+    render_reit_card()
+
+
+# J-REIT（日本の上場不動産投資信託）。ETFは分配金込みの調整後終値で比較する。
+# 住宅特化型は合併・再編が多いため、取得できない銘柄は表示から静かに外す。
+_REIT_CARD_TICKERS = [
+    ("1343.T", "東証REIT指数ETF(1343)", "全体"),
+    ("8953.T", "日本都市ファンド", "総合型"),
+    ("3282.T", "コンフォリア・レジデンシャル", "住宅"),
+    ("3269.T", "アドバンス・レジデンス", "住宅"),
+    ("8986.T", "大和証券リビング", "住宅"),
+    ("3226.T", "三井不動産アコモデーション", "住宅"),
+    ("3459.T", "サムティ・レジデンシャル", "住宅"),
+]
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _fetch_reit_overview() -> dict:
+    """J-REIT（東証REIT指数ETF＋住宅特化型数銘柄）の分配金込み(調整後)終値と期間リターンを取得する。
+    Returns: {"series": {ticker: pd.Series}, "returns": {ticker: {"1m","3m","1y","3y"}}}
+    """
+    tickers = [t for t, _, _ in _REIT_CARD_TICKERS]
+    price_dict = _fetch_ticker_close_prices(tickers, period="4y")
+    series, returns = {}, {}
+    for t, s in price_dict.items():
+        s = s.dropna()
+        if len(s) < 30:
+            continue
+        if getattr(s.index, "tz", None) is not None:
+            s.index = s.index.tz_localize(None)
+        series[t] = s
+
+        def _ret(days, _s=s):
+            return float(_s.iloc[-1] / _s.iloc[-days - 1] - 1) * 100 if len(_s) > days else None
+
+        returns[t] = {"1m": _ret(21), "3m": _ret(63), "1y": _ret(252), "3y": _ret(756)}
+    return {"series": series, "returns": returns}
+
+
+def render_reit_card():
+    """🏢 J-REIT（東証REIT指数ETF・住宅特化型）の値動きカード。マクロ指標（金利）の下に置く。"""
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '🏢 J-REIT（不動産）の値動き</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "REITは金利上昇に敏感です。上の日本10年国債利回りと見比べて、金利が上がる局面でREITが"
+        "どう動いたかを確認できます。価格は分配金を再投資した調整後終値で、分配金落ちによる"
+        "見かけの下落を除いています。現物不動産（23区の土地・マンション等）の価格そのものでは"
+        "ありません。"
+    )
+    _d = _fetch_reit_overview()
+    _series, _rets = _d["series"], _d["returns"]
+    if not _series:
+        st.info("REITのデータを取得できませんでした。時間をおいて再読み込みしてください。")
+        return
+
+    _fig = go.Figure()
+    _palette = ["#f59e0b", "#60a5fa", "#4ade80", "#f472b6", "#a78bfa", "#34d399", "#fb7185"]
+    for _i, (_t, _nm, _kind) in enumerate(_REIT_CARD_TICKERS):
+        if _t not in _series:
+            continue
+        _s = _series[_t][_series[_t].index >= pd.Timestamp.now() - pd.DateOffset(years=1)]
+        if len(_s) < 2:
+            continue
+        _fig.add_trace(go.Scatter(
+            x=_s.index, y=(_s / _s.iloc[0] * 100).round(2), name=_nm, mode="lines",
+            line=dict(color=_palette[_i % len(_palette)], width=3 if _t == "1343.T" else 1.6),
+            hovertemplate="%{x|%Y-%m-%d}<br>" + _nm + ": %{y:.1f}<extra></extra>",
+        ))
+    _fig.update_layout(
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=300,
+        margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
+        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                   title=dict(text="1年前=100", font=dict(color="#94a3b8"))),
+        legend=dict(font=dict(color="#e2e8f0")),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+    )
+    st.plotly_chart(_fig, use_container_width=True)
+
+    def _fmt(v):
+        if v is None:
+            return '<td style="color:#64748b">—</td>'
+        _c = "#4ade80" if v >= 0 else "#f87171"
+        return f'<td style="color:{_c}">{v:+.1f}%</td>'
+
+    _rows = []
+    for _t, _nm, _kind in _REIT_CARD_TICKERS:
+        if _t not in _rets:
+            continue
+        _r = _rets[_t]
+        _rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="font-weight:600;padding:6px 8px">{_nm}</td>'
+            f'<td style="color:#94a3b8">{_kind}</td>'
+            + "".join(_fmt(_r[k]) for k in ("1m", "3m", "1y", "3y")) + "</tr>"
+        )
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>区分</th>'
+        "<th>1ヶ月</th><th>3ヶ月</th><th>1年</th><th>3年</th></tr></thead><tbody>"
+        + "".join(_rows) + "</tbody></table>",
+        unsafe_allow_html=True,
+    )
+    st.caption("※ 住宅REITの都内(23区)比率は各投資法人の開示資料で確認してください。データ: yfinance（調整後終値）")
+
 
 def render_bear_market_checker(data: dict | None = None):
     """🐻 弱気相場リスク判定セクション。
