@@ -29345,6 +29345,21 @@ _MODE_FIXED_BASKETS = {
     "dividend_stable": _CLAUDE_DIVIDEND_BASKET,
 }
 
+# 固定バスケットは集合で順序を持たないため、全モード比較表の「主な銘柄」ツールチップ用に
+# 代表的な銘柄を先頭に並べる表示順を持つ（バックテスト自体は均等加重で順序に依存しない）。
+# ここに無い銘柄はティッカー順で後ろに続く。
+_MODE_BASKET_DISPLAY_ORDER = {
+    "ai_mix": ["NVDA", "MSFT", "GOOGL", "AMZN", "META", "AVGO", "TSM", "AMD", "ASML", "PLTR"],
+    "optical_mix": ["LITE", "COHR", "GLW", "VRT", "CIEN", "MRVL", "CSCO", "APH", "5803.T", "AAOI"],
+    "dividend_stable": ["JNJ", "PG", "KO", "PEP", "MCD", "XOM", "CVX", "VZ", "8058.T", "8306.T"],
+}
+_KNOWN_NAMES.setdefault("2244.T", "グローバルX NASDAQ100 ETF(円)")
+
+
+def _order_for_display(mode_key: str, tickers: list) -> list:
+    pri = [t for t in _MODE_BASKET_DISPLAY_ORDER.get(mode_key, []) if t in tickers]
+    return pri + [t for t in tickers if t not in pri]
+
 
 def _get_mode_backtest_tickers(mode_key: str) -> tuple[list, bool]:
     """指定モードのバックテスト対象ティッカーリストを返す。
@@ -29475,7 +29490,7 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     return {
         "ok":              True,
         "n_tickers":       n_ok,
-        "tickers":         [t for t in tickers if t in close_all.columns][:10],
+        "tickers":         _order_for_display(mode_key, [t for t in tickers if t in close_all.columns])[:10],
         "selection_kind":  "ranked" if is_ranked else "theme",
         "ret_1y":          _ret_over(cum, 252),
         "ret_3y":          _ret_over(cum, 756),
@@ -32096,6 +32111,10 @@ def render_claude_trading_project():
             unsafe_allow_html=True,
         )
         import html as _html_mod
+
+        def _short_name(n: str, limit: int = 18) -> str:
+            return n if len(n) <= limit else n[:limit] + "…"
+
         _cmp_body = []
         for _md in _MODE_DEFS:
             _k, _r = _md["key"], _bt_all.get(_md["key"], {})
@@ -32105,7 +32124,7 @@ def render_claude_trading_project():
             if _top:
                 _tip_lines = "".join(
                     f'<div>{_i}. {_html_mod.escape(_tk)}　<span style="color:#94a3b8">'
-                    f'{_html_mod.escape(str(_get_stock_display_name(_tk)))}</span></div>'
+                    f'{_html_mod.escape(_short_name(str(_get_stock_display_name(_tk))))}</span></div>'
                     for _i, _tk in enumerate(_top, 1)
                 )
                 _tip = ('<div class="mc-tip"><div style="color:#94a3b8;margin-bottom:4px">'
