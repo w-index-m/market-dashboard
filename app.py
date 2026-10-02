@@ -24607,6 +24607,7 @@ _JP_FUND_MAP = {
     "04312181": "iFreeNEXT NASDAQバイオテクノロジー・インデックス",
     "04315213": "iFreeNEXT ATMX+",
     "04311181": "iFreeNEXT FANG+インデックス",
+    "0431218A": "iFreeレバレッジ NASDAQ100",
     # eMAXIS Slimシリーズ（三菱UFJアセットマネジメント）
     "03311187": "eMAXIS Slim 米国株式(S&P500)",
     "0331418A": "eMAXIS Slim 全世界株式(オール・カントリー)",
