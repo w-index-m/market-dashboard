@@ -34752,6 +34752,32 @@ def render_claude_trading_project():
         else:
             st.markdown("#### 約定後の取引記録入力")
 
+            # 記録の抜け漏れを確認できるよう、現在の保有銘柄（取引記録から復元）を一覧表示
+            _held_now = _get_open_positions()
+            with st.expander(f"📋 現在の保有銘柄（{len(_held_now)}銘柄・取引記録ベース）", expanded=True):
+                if _held_now:
+                    _held_rows = [
+                        {
+                            "コード": _tk,
+                            "銘柄名": _get_stock_display_name(_tk),
+                            "保有数量": _p["qty"],
+                            "平均取得単価": _p["avg_cost"],
+                            "取得額": _p["cost"],
+                        }
+                        for _tk, _p in sorted(_held_now.items(), key=lambda kv: -kv[1]["cost"])
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(_held_rows), hide_index=True, use_container_width=True,
+                        column_config={
+                            "保有数量": st.column_config.NumberColumn(format="%,.2f"),
+                            "平均取得単価": st.column_config.NumberColumn(format="%,.2f"),
+                            "取得額": st.column_config.NumberColumn(format="%,.0f"),
+                        },
+                    )
+                    st.caption("※ 取得額・平均取得単価は各銘柄の現地通貨建て（米国株はUSD）。取引記録から復元した値で、入力漏れがあるとここにも出ません。")
+                else:
+                    st.info("保有中の銘柄はまだありません。")
+
             # エラー/成功メッセージを session_state で永続化
             _tr_status = st.session_state.pop("_trade_status", None)
             _tr_msg    = st.session_state.pop("_trade_msg", None)
