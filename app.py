@@ -26910,6 +26910,16 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     if not price_dict:
         logger.warning(f"[alloc_history] price_dict空。対象ticker={tickers}")
         return pd.DataFrame()
+    # 一括取得・個別download双方で取れなかった銘柄は、別経路(Ticker.history)で再取得する。
+    # 取れないままだとチャートから静かに脱落し、残りの銘柄で100%に再計算されて配分がずれる
+    for tk in [t for t in tickers if t not in price_dict and t not in _JP_FUND_MAP]:
+        try:
+            h = yf.Ticker(tk).history(period="max", auto_adjust=True)["Close"].dropna()
+            if not h.empty:
+                h.index = h.index.tz_localize(None)
+                price_dict[tk] = h.rename(tk)
+        except Exception as e:
+            logger.warning(f"[alloc_history] {tk}の再取得に失敗: {e}")
     price_df = pd.concat(price_dict.values(), axis=1).ffill()
     price_df = price_df[price_df.index >= start_date]
     if price_df.empty:
