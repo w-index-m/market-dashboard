@@ -22,6 +22,7 @@ def main() -> None:
     trades_df, err = app._load_trades(username)
     if trades_df.empty:
         print(f"取引記録なし: {err}")
+        print("::notice title=fundamentals::取引記録なし")
         return
     positions = app._calc_positions_from_df(trades_df)
     tickers = [t for t in positions if t not in app._JP_FUND_MAP]
@@ -37,6 +38,8 @@ def main() -> None:
         sys.exit(1)
     n = app._save_fundamentals_cache(items)
     print(f"Sheetsへ保存 {n} 銘柄")
+    # 実行ログはアシスタントの作業環境から読めないため、件数だけアノテーション（API経由で取得可能）にも出す
+    print(f"::notice title=fundamentals::対象{len(tickers)}銘柄 / 取得{len(items)} / 保存{n}")
     if n == 0:
         sys.exit(1)
 
