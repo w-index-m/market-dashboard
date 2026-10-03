@@ -793,6 +793,131 @@ _AI_USAGE_LABELS = {"gemini": "Gemini", "groq": "Groq", "mistral": "Mistral", "n
                     "deepseek": "DeepSeek"}
 
 
+def _read_server_metrics() -> dict:
+    """このサーバー（コンテナ）のメモリ・CPU使用量を標準ライブラリだけで読む（Linuxの/proc・cgroup）。
+    読めない項目はNone。メモリ上限はcgroup（コンテナの制限）から取る。"""
+    m = {"rss_mb": None, "cg_used_mb": None, "cg_limit_mb": None, "cpu_time_s": None, "ncpu": None}
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    m["rss_mb"] = int(line.split()[1]) / 1024
+                    break
+    except Exception:
+        pass
+    for used_p, lim_p in (("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.max"),
+                          ("/sys/fs/cgroup/memory/memory.usage_in_bytes", "/sys/fs/cgroup/memory/memory.limit_in_bytes")):
+        try:
+            with open(used_p) as f:
+                m["cg_used_mb"] = int(f.read().strip()) / 1048576
+            with open(lim_p) as f:
+                raw = f.read().strip()
+            if raw.isdigit() and int(raw) < (1 << 50):  # "max" や巨大値は上限なし扱い
+                m["cg_limit_mb"] = int(raw) / 1048576
+            break
+        except Exception:
+            continue
+    try:
+        with open("/proc/self/stat") as f:
+            parts = f.read().rsplit(")", 1)[1].split()
+        m["cpu_time_s"] = (int(parts[11]) + int(parts[12])) / os.sysconf("SC_CLK_TCK")
+    except Exception:
+        pass
+    try:
+        ncpu = len(os.sched_getaffinity(0))
+        try:
+            with open("/sys/fs/cgroup/cpu.max") as f:
+                q, per = f.read().split()
+            if q != "max":
+                ncpu = float(q) / float(per)
+        except Exception:
+            pass
+        m["ncpu"] = ncpu
+    except Exception:
+        m["ncpu"] = os.cpu_count()
+    return m
+
+
+@st.cache_resource
+def _server_metrics_store() -> dict:
+    """メモリ・CPUの履歴をサーバープロセス内に保持する（30秒おきに自動記録、最大約6時間分）。
+    記録は常駐スレッドで行うので、誰もサイトを開いていない間も溜まる。再デプロイ・再起動でリセット。"""
+    import collections
+    import threading
+    store = {"samples": collections.deque(maxlen=720), "lock": threading.Lock(),
+             "started_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M")}
+
+    def _loop():
+        last_cpu, last_t = None, None
+        while True:
+            try:
+                now = time.time()
+                m = _read_server_metrics()
+                cpu_pct = None
+                if m["cpu_time_s"] is not None and last_cpu is not None and now > last_t:
+                    cpu_pct = max(0.0, (m["cpu_time_s"] - last_cpu) / (now - last_t) * 100)  # 100%=1コア
+                last_cpu, last_t = m["cpu_time_s"], now
+                with store["lock"]:
+                    store["samples"].append({"t": datetime.now(JST), "rss_mb": m["rss_mb"],
+                                             "cg_used_mb": m["cg_used_mb"], "cpu_pct": cpu_pct})
+            except Exception:
+                pass
+            time.sleep(30)
+
+    threading.Thread(target=_loop, daemon=True, name="server-metrics").start()
+    return store
+
+
+def render_server_metrics_panel() -> None:
+    """サイドバー用: Streamlitサーバーのメモリ・CPU使用量をゲージと推移グラフで表示する。"""
+    with st.expander("🖥️ サーバー使用状況（メモリ・CPU）", expanded=False):
+        _store = _server_metrics_store()
+        _now = _read_server_metrics()
+        with _store["lock"]:
+            _smp = list(_store["samples"])
+        _used = _now["cg_used_mb"] if _now["cg_used_mb"] is not None else _now["rss_mb"]
+        _limit = _now["cg_limit_mb"]
+        if _used is None:
+            st.info("この環境ではメモリ使用量を取得できませんでした。")
+            return
+        _fig = go.Figure(go.Indicator(
+            mode="gauge+number", value=_used,
+            number={"suffix": " MB", "font": {"color": "#e2e8f0", "size": 26}},
+            title={"text": "メモリ（コンテナ全体）" + (f" / 上限 {_limit:,.0f} MB" if _limit else ""),
+                   "font": {"color": "#94a3b8", "size": 12}},
+            gauge={"axis": {"range": [0, _limit or max(_used * 2, 1024)], "tickcolor": "#94a3b8"},
+                   "bar": {"color": "#f87171" if _limit and _used / _limit > 0.85
+                           else "#fbbf24" if _limit and _used / _limit > 0.65 else "#4ade80"},
+                   "bgcolor": "#1e293b", "bordercolor": "#334155"},
+        ))
+        _fig.update_layout(paper_bgcolor="#0f172a", height=190, margin=dict(l=10, r=10, t=40, b=0),
+                           font=dict(color="#e2e8f0"))
+        st.plotly_chart(_fig, use_container_width=True, key="srv_mem_gauge")
+        _c = st.columns(2)
+        _c[0].metric("アプリのプロセス", f"{_now['rss_mb']:,.0f} MB" if _now["rss_mb"] is not None else "—")
+        _cpu_last = next((x["cpu_pct"] for x in reversed(_smp) if x["cpu_pct"] is not None), None)
+        _c[1].metric("CPU（直近30秒）", f"{_cpu_last:.0f}%" if _cpu_last is not None else "—",
+                     help="100% = 1コアをフルに使用。コア数が複数あれば100%を超えることがあります。")
+        _df = pd.DataFrame(_smp)
+        if len(_df) >= 2:
+            _g = go.Figure()
+            _mem_col = "cg_used_mb" if _df["cg_used_mb"].notna().any() else "rss_mb"
+            _g.add_trace(go.Scatter(x=_df["t"], y=_df[_mem_col], name="メモリ(MB)", line=dict(color="#60a5fa")))
+            if _df["cpu_pct"].notna().any():
+                _g.add_trace(go.Scatter(x=_df["t"], y=_df["cpu_pct"], name="CPU(%)", yaxis="y2",
+                                        line=dict(color="#f59e0b", width=1.2)))
+            _g.update_layout(
+                paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=200, margin=dict(l=5, r=5, t=10, b=10),
+                font=dict(color="#e2e8f0"), legend=dict(orientation="h", y=1.15, font=dict(size=10)),
+                xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#f59e0b"), showgrid=False),
+            )
+            st.plotly_chart(_g, use_container_width=True, key="srv_hist")
+        st.caption(f"記録開始: {_store['started_at']}（30秒おき・最大約6時間。再デプロイ/再起動でリセット）。"
+                   "サイトを見た全員分の使用量の合計です。上限に近づくとアプリが落ちることがあります。")
+
+
 def render_ai_usage_panel() -> None:
     """サイドバー用: AIごとの呼び出し回数・成功率・失敗理由を日別に集計して表示する。"""
     with st.expander("📊 AI利用状況", expanded=False):
@@ -38154,6 +38279,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
         _render_provider_test("OpenRouter", OPENROUTER_API_KEY, summarize_with_openrouter)
         _render_provider_test("Mistral", MISTRAL_API_KEY, summarize_with_mistral)
         render_ai_usage_panel()
+        render_server_metrics_panel()
 
     # ===================================================
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）
