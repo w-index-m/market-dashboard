@@ -1,0 +1,33 @@
+name: Precompute valuation inputs (Marks mode)
+
+on:
+  schedule:
+    - cron: "20 22 * * 1-5"   # 22:20 UTC = 07:20 JST 平日。予想EPSと株価は日次で十分
+  workflow_dispatch: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q -r requirements.txt
+      - name: Fetch analyst EPS estimates
+        run: PYTHONPATH=. python scripts/precompute_marks_valuation.py 2>&1 | grep -v "No runtime found\|streamlit run\|to view a Streamlit"
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/marks_valuation.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update Marks-mode valuation inputs"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1

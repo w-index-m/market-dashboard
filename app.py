@@ -6382,13 +6382,38 @@ _MARKS_PRINCIPLES = """
 """
 
 
-@st.cache_data(ttl=3600 * 3, show_spinner=False)
-def _marks_valuation_lines(tickers: tuple) -> dict:
-    """候補銘柄の予想PER・来期EPS成長率・割高/利益ピークの機械判定（アナリスト予想から計算。AIの推測ではない）。
-    Returns: {ticker: "予想PER 今期X倍/来期Y倍、来期EPS成長+Z% 🟠割高警戒"}。データが無い銘柄は含まない。"""
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_marks_valuation_file() -> dict:
+    """scripts/precompute_marks_valuation.py がGitHub Actionsで毎日生成する
+    data/marks_valuation.json（候補銘柄のアナリスト予想EPSと株価）を読む。{ticker: {...}}。無ければ{}。"""
+    import json as _json_mv
+    path = os.path.join(os.path.dirname(__file__), "data", "marks_valuation.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return (_json_mv.load(f) or {}).get("items") or {}
+    except Exception:
+        return {}
+
+
+def _marks_eps_input(ticker: str, allow_live: bool = True) -> dict:
+    """予想PER計算の入力（price, cy, ny）。事前計算ファイル優先、無ければallow_live時のみその場で取得。"""
+    f = _load_marks_valuation_file().get(ticker)
+    if f and f.get("price") and f.get("cy"):
+        return {"price": f["price"], "cy": {"avg": f["cy"], "year_ago": f.get("yago")},
+                "ny": {"avg": f["ny"]} if f.get("ny") else None}
+    return _fetch_eps_estimates(ticker) if allow_live else {}
+
+
+def _marks_valuation_metrics(tickers, allow_live: bool = True) -> dict:
+    """予想PER・来期EPS成長率・割高/利益ピークの機械判定（構造化）。
+    Returns: {ticker: {"per_cy","per_ny","g","eps_jump","flag","kind"}}（kind: expensive/peak/ok/unknown）。"""
     out = {}
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        res = dict(zip(tickers, ex.map(_fetch_eps_estimates, list(tickers))))
+    tickers = list(tickers)
+    if allow_live:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            res = dict(zip(tickers, ex.map(lambda t: _marks_eps_input(t, True), tickers)))
+    else:
+        res = {t: _marks_eps_input(t, False) for t in tickers}
     for t, e in res.items():
         if not e or not e.get("price"):
             continue
@@ -6402,15 +6427,47 @@ def _marks_valuation_lines(tickers: tuple) -> dict:
         eps_jump = (cy["avg"] / yago - 1) * 100 if yago and yago > 0 else None
         peg = (per_ny / g) if per_ny and g and g > 0 else None
         if per_ny and (per_ny > 40 or (peg and peg > 2.5 and per_ny > 25)):
-            flag = "🟠割高警戒"
+            flag, kind = "🟠割高警戒", "expensive"
         elif per_cy < 8 and eps_jump is not None and eps_jump > 80:
-            flag = "🟣利益急増中でPERが低い（利益ピークの可能性に注意）"
+            flag, kind = "🟣利益急増中でPERが低い（利益ピークの可能性に注意）", "peak"
         elif per_ny and per_ny <= 25:
-            flag = "✅予想PERは妥当な範囲"
+            flag, kind = "✅予想PERは妥当な範囲", "ok"
         else:
-            flag = "⚪判定材料不足"
-        out[t] = (f"予想PER 今期{per_cy:.1f}倍" + (f"/来期{per_ny:.1f}倍" if per_ny else "")
-                  + (f"、来期EPS成長{g:+.0f}%" if g is not None else "") + f" {flag}")
+            flag, kind = "⚪判定材料不足", "unknown"
+        out[t] = {"per_cy": per_cy, "per_ny": per_ny, "g": g, "eps_jump": eps_jump, "flag": flag, "kind": kind}
+    return out
+
+
+def _marks_mode_score(ticker: str, d: dict, vm: dict) -> float:
+    """💎 マークスモードの並べ替えスコア（高いほど良い）。価格が価値に対して妥当か、下落耐性、過熱の有無を見る。
+    モメンタムは評価しない（上昇しているだけでは加点しない）。vm: _marks_valuation_metrics()の結果。"""
+    sc = 50.0
+    m = vm.get(ticker)
+    if m and m["per_ny"]:
+        sc -= min(abs(m["per_ny"] - 18) * 1.2, 40)          # 予想PER18倍前後を妥当な基準にする
+        if m["g"] is not None:
+            sc += max(-20.0, min(m["g"], 30.0)) * 0.5       # 来期の利益成長
+        if m["kind"] == "expensive":
+            sc -= 25
+        elif m["kind"] == "peak":
+            sc -= 10
+    else:
+        sc -= 15                                           # 価格水準を判断できない銘柄は優先しない
+    sc += (d.get("max_dd_3y") or 0) * 0.25                 # 過去3年の最大下落（負値）が大きいほど減点＝誤りの許容範囲
+    r1y = d.get("ret_1y") or 0
+    if r1y > 100:
+        sc -= (r1y - 100) * 0.15                           # 1年で2倍超の急騰は過熱として減点
+    return sc
+
+
+@st.cache_data(ttl=3600 * 3, show_spinner=False)
+def _marks_valuation_lines(tickers: tuple) -> dict:
+    """候補銘柄の予想PER・来期EPS成長率・割高/利益ピークの機械判定（アナリスト予想から計算。AIの推測ではない）。
+    Returns: {ticker: "予想PER 今期X倍/来期Y倍、来期EPS成長+Z% 🟠割高警戒"}。データが無い銘柄は含まない。"""
+    out = {}
+    for t, m in _marks_valuation_metrics(tickers).items():
+        out[t] = (f"予想PER 今期{m['per_cy']:.1f}倍" + (f"/来期{m['per_ny']:.1f}倍" if m["per_ny"] else "")
+                  + (f"、来期EPS成長{m['g']:+.0f}%" if m["g"] is not None else "") + f" {m['flag']}")
     return out
 
 
@@ -26188,6 +26245,7 @@ def _generate_replacement_rec(
         "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り3%以上の銘柄のみ選定）",
         "stable_growth":   "財務指標不使用・5年チャートが滑らかに右肩上がりの銘柄のみ（日経225・S&P500全銘柄からスクリーニング）",
         "jp_tenbagger":    "日本株10倍株候補（東証スタンダード小型株、成長性・割安度・競争優位性・10倍化余地を100点満点で評価）",
+        "marks":           "価格と価値の関係を最重視（予想PER・成長・下落耐性・過熱の有無。上昇しているだけでは選ばない）",
     }.get(trading_mode, "ファンダメンタルズ重視")
     freed_str = f"約¥{freed_jpy:,}"
     prompt = f"""あなたは日米株式の投資アドバイザーです。
@@ -30412,6 +30470,22 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
             if len(_out) >= n:
                 break
         return _out
+    if trading_mode == "marks":
+        # 💎 マークスモード: モメンタムではなく「価格と価値の関係」で並べる（ETFは予想EPSが無いため対象外）
+        _vm = _marks_valuation_metrics(list(cand_perf), allow_live=False)
+        _sc_list = []
+        for _tk, _d in cand_perf.items():
+            _px = _d.get("price", 0) or 0
+            if _px <= 0 or (_d.get("ret_1y") or 0) < -20 or _tk not in _vm:
+                continue
+            _min = (_px * _JP_MINI_LOT_SIZE if (_tk.endswith(".T") and _tk not in _JP_ETF_TICKERS)
+                    else _px if _tk.endswith(".T") else _px * _usdjpy)
+            if _min > _max_per:
+                continue
+            _sc_list.append((_tk, _marks_mode_score(_tk, _d, _vm), _d.get("ret_3m") or 0, _d.get("ret_6m") or 0,
+                             _d.get("ret_1y") or 0, _px))
+        _sc_list.sort(key=lambda x: x[1], reverse=True)
+        return [(_tk, _r3, _r6, _r1, _px) for _tk, _sc, _r3, _r6, _r1, _px in _sc_list[:n]]
     if trading_mode == "ai_mix":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_AI_BASKET}
     elif trading_mode == "optical_mix":
@@ -31770,6 +31844,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
     else:
         weights = (0.2, 0.3, 0.5)  # growth/ai_mix等: 1y重視
+    _mk_vm = _marks_valuation_metrics(list(cand_perf), allow_live=False) if trading_mode == "marks" else {}
     # 予算内で購入不可能な銘柄を特定
     _max_per_stock = budget * 0.3  # 1銘柄最大30%配分
     _unaffordable = []
@@ -31793,7 +31868,12 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         _r3 = _d.get("ret_3m") or 0
         _r6 = _d.get("ret_6m") or 0
         _r1y = _d.get("ret_1y") or 0
-        _sc = _r3 * weights[0] + _r6 * weights[1] + _r1y * weights[2]
+        if trading_mode == "marks":
+            if _tk not in _mk_vm:
+                continue
+            _sc = _marks_mode_score(_tk, _d, _mk_vm)
+        else:
+            _sc = _r3 * weights[0] + _r6 * weights[1] + _r1y * weights[2]
         _scored.append((_tk, _sc, _d))
     _scored.sort(key=lambda x: x[1], reverse=True)
     _top = _scored[:18]
@@ -31815,6 +31895,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         else "AI露出度+1y重視" if trading_mode == "ai_mix"
         else "光通信需要+1y重視" if trading_mode == "optical_mix"
         else "3y安定性+配当重視" if trading_mode == "dividend_stable"
+        else "価格と価値の関係（予想PER・成長・下落耐性）重視" if trading_mode == "marks"
         else "1y重視"
     )
     _lines.append(f"▲ 上昇ランキング（予算内・{_rank_label}スコア順）:")
@@ -32031,6 +32112,12 @@ def _generate_investment_portfolio_rec(
             "銘柄のみを機械的にスクリーニング済み。保有期間は長め（1年以上）を想定。"
             "損切-15〜20%・目標=トレンド継続前提の緩やかな上昇。",
         ),
+        "marks": (
+            "💎 マークスモード",
+            "ハワード・マークスの考え方を参考に、「いくらで買うか」を最重視。予想PER・来期の利益成長・過去3年の最大下落（誤りの許容範囲）・"
+            "急騰による過熱を見て、価格が価値に対して妥当な銘柄を選ぶ。上昇しているだけの銘柄は加点しない。"
+            "攻めと守りのバランスを示し、割高な局面ではキャッシュも選択肢にする。損切-10〜15%。",
+        ),
         "jp_tenbagger": (
             "🚀 日本株10倍株候補モード",
             "東証スタンダード市場の小型株から、5〜10年で株価10倍を狙える割安成長株を"
@@ -32114,6 +32201,18 @@ def _generate_investment_portfolio_rec(
   ③ 財務指標は不問（このモードでは意図的にファンダメンタルズを評価軸に含めない）
   ※ 「地味だが着実」なポジショニングを重視し、高PER・値動きの荒い銘柄は避けること""",
 
+        "marks": """\
+評価軸の優先順位（💎 マークスモード — 価格と価値の関係を最重視）:
+  ① 価格水準【最重要・40%ウェイト】
+     【予想PERと成長率】の機械判定（✅妥当／🟠割高警戒／🟣利益ピーク注意）を根拠にする。数字が無い銘柄の割高・割安は断定しない
+  ② 誤りの許容範囲【25%ウェイト】
+     過去3年の最大下落が小さい、財務が健全、想定が外れても耐えられる銘柄を優先
+  ③ 利益成長の質【20%ウェイト】
+     来期EPS成長が見込めること。ただし利益が景気で振れる銘柄は、PERの低さを安さと断定しない
+  ④ 過熱の有無【15%ウェイト】
+     1年で2倍超の急騰・人気テーマの集中は減点。上昇していることだけを選ぶ理由にしない
+  ※ 攻めと守りの比重、サイクルの現在地、割高な局面ではキャッシュも選択肢であることをmetricsのcommentで触れること""",
+
         "jp_tenbagger": """\
 評価軸の優先順位（🚀 日本株10倍株候補モード — STEP1定量60点+STEP2 AI定性40点で事前選定済み）:
   候補は既に東証スタンダードの小型株から、PER・成長率・財務健全性（実データ）と
@@ -32168,9 +32267,13 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         "記載された数値以外の決算の数字を作らないこと" if _er_block else ""
     )
     # 判断の原則（マークスの考え方）と、候補銘柄の予想PERの機械判定
-    _mk_principles, _mk_val = _marks_prompt_blocks(
-        [t for t, _ in sorted((candidate_perf or {}).items(), key=lambda kv: -(kv[1].get("ret_1y") or -999))]
-    )
+    if trading_mode == "marks":
+        _mk_vm0 = _marks_valuation_metrics(list(candidate_perf or {}), allow_live=False)
+        _mk_order = [t for t, _ in sorted(((t, d) for t, d in (candidate_perf or {}).items() if t in _mk_vm0),
+                                          key=lambda kv: -_marks_mode_score(kv[0], kv[1], _mk_vm0))]
+    else:
+        _mk_order = [t for t, _ in sorted((candidate_perf or {}).items(), key=lambda kv: -(kv[1].get("ret_1y") or -999))]
+    _mk_principles, _mk_val = _marks_prompt_blocks(_mk_order)
     _er_block = _er_block + _mk_val + _mk_principles
     _er_rule = _er_rule + _MARKS_RULE
 
@@ -32225,6 +32328,10 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "光トランシーバ(CIEN/COHR/LITE等)・光ファイバー(GLW/5803.T等)・"
             "光NW装置(VIAV/INFN等)・インフラ(VRT/APH等)から幅広く配分すること"
             if trading_mode == "optical_mix"
+            else "\n・【マークスモード専用】銘柄はAgent Bリストのティッカーのみから選定。【予想PERと成長率】の機械判定が🟠の銘柄は原則選ばず、"
+            "選ぶ場合は価格水準の高さをdemeritsに必ず書く。人気テーマの材料だけを選定理由にしない。キャッシュ比率を高めに保つ選択肢も示す。"
+            "損切ラインは-10〜15%で統一"
+            if trading_mode == "marks"
             else "\n・【配当安定モード専用】銘柄はAgent Bリストのティッカーのみから選定。"
             "3yMDDが-25%以内の銘柄を最優先。配当利回り・連続増配年数をmeritsに必ず記載すること。"
             "損切ラインは-10〜15%（通常より短め）に設定すること"
@@ -32345,6 +32452,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 {
 "・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix"
 else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
+else "・【マークスモード専用】価格水準（予想PER）と下落耐性を根拠に選ぶ。モメンタムの強さだけでは選ばない。損切ライン-10〜15%で統一" if trading_mode == "marks"
 else "・【配当安定モード専用】3yMDD -35%以内の銘柄のみ選定可。日米ともに配当利回り3%以上を必須条件とする。損切ライン-10〜15%で統一" if trading_mode == "dividend_stable"
 else "・【安定成長モード専用】財務指標は評価に使わず、5年チャートの滑らかさ（stability_r2）と最大ドローダウンの小ささのみを根拠にすること" if trading_mode == "stable_growth"
 else "・【日本株10倍株候補モード専用】候補は既にSTEP1(実データ60点)+STEP2(AI定性40点)で70点以上に絞り込み済み。PER・成長率・総合スコアは実データとして引用可" if trading_mode == "jp_tenbagger"
@@ -33374,6 +33482,20 @@ def render_claude_trading_project():
                 ),
                 "color":  "#94a3b8", "sub_color": "#cbd5e1",
                 "border": "#64748b", "bg": "#161e2b",
+            },
+            {
+                "key":    "marks",
+                "emoji":  "💎",
+                "label":  "マークスモード",
+                "sub":    "価格と価値を最重視 · 予想PER・下落耐性 · 過熱を避ける · 保有期間1年以上",
+                "detail": (
+                    "・ハワード・マークスの考え方を参考に、「いくらで買うか」を最優先<br>"
+                    "・予想PER（アナリスト予想）・来期の利益成長・過去3年の最大下落（誤りの許容範囲）で採点<br>"
+                    "・1年で2倍超の急騰や割高（🟠）は減点。上昇しているだけの銘柄は加点しない<br>"
+                    "・攻めと守りの比重を示し、割高な局面ではキャッシュも選択肢 · 損切り-10〜15%"
+                ),
+                "color":  "#f472b6", "sub_color": "#f9a8d4",
+                "border": "#db2777", "bg": "#2a0a1c",
             },
             {
                 "key":    "jp_tenbagger",
