@@ -6357,6 +6357,76 @@ def _earnings_review_lines(tickers) -> dict:
     return out
 
 
+# ハワード・マークスの考え方を参考にした「判断の原則」（書籍の文章ではなく、要点を言い換えたもの）。
+# AIによる銘柄選定・保有銘柄の判定プロンプトに差し込む。
+_MARKS_PRINCIPLES = """
+【判断の原則（ハワード・マークスの考え方を参考にした枠組み）】
+1. 良い企業と良い投資は別。評価は「何を買うか」より「いくらで買うか」。価格が価値を大きく上回る銘柄は、優れた企業でも優先度を下げる。
+2. 価格と価値の関係は、渡された数字（予想PER・成長率など）だけで判断する。数字が無い銘柄の割高・割安を断定しない。
+3. 多数派と同じ見方では平均的な成績しか出ない。皆が知っている人気テーマの材料だけが選ぶ理由なら、その点をdemeritsに書く。
+4. 「絶対に損しない」「どんな価格でも買い手がいる」「まだ上がる」という空気は過熱のサイン。上昇が続いていることだけを理由に選ばない。
+5. 利益が景気で大きく振れる銘柄は、PERが低い時は利益のピーク、高い時は谷の可能性がある。PERだけで安い・高いと断定しない。
+6. リスクは値動きの大きさではなく、永久に損をする可能性。財務の健全性と分散を重視する。
+7. 将来は予測できない前提で、確率と幅で考える。「必ず上がる」などの断定表現は使わない。
+"""
+
+
+@st.cache_data(ttl=3600 * 3, show_spinner=False)
+def _marks_valuation_lines(tickers: tuple) -> dict:
+    """候補銘柄の予想PER・来期EPS成長率・割高/利益ピークの機械判定（アナリスト予想から計算。AIの推測ではない）。
+    Returns: {ticker: "予想PER 今期X倍/来期Y倍、来期EPS成長+Z% 🟠割高警戒"}。データが無い銘柄は含まない。"""
+    out = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        res = dict(zip(tickers, ex.map(_fetch_eps_estimates, list(tickers))))
+    for t, e in res.items():
+        if not e or not e.get("price"):
+            continue
+        cy, ny, px = e.get("cy"), e.get("ny"), e["price"]
+        if not cy or cy["avg"] <= 0:
+            continue
+        per_cy = px / cy["avg"]
+        per_ny = px / ny["avg"] if ny and ny["avg"] > 0 else None
+        g = (ny["avg"] / cy["avg"] - 1) * 100 if ny and ny["avg"] > 0 else None
+        yago = cy.get("year_ago")
+        eps_jump = (cy["avg"] / yago - 1) * 100 if yago and yago > 0 else None
+        peg = (per_ny / g) if per_ny and g and g > 0 else None
+        if per_ny and (per_ny > 40 or (peg and peg > 2.5 and per_ny > 25)):
+            flag = "🟠割高警戒"
+        elif per_cy < 8 and eps_jump is not None and eps_jump > 80:
+            flag = "🟣利益急増中でPERが低い（利益ピークの可能性に注意）"
+        elif per_ny and per_ny <= 25:
+            flag = "✅予想PERは妥当な範囲"
+        else:
+            flag = "⚪判定材料不足"
+        out[t] = (f"予想PER 今期{per_cy:.1f}倍" + (f"/来期{per_ny:.1f}倍" if per_ny else "")
+                  + (f"、来期EPS成長{g:+.0f}%" if g is not None else "") + f" {flag}")
+    return out
+
+
+def _marks_prompt_blocks(tickers, limit: int = 25) -> tuple[str, str]:
+    """(原則ブロック, 予想PERブロック)を返す。予想PERブロックはデータが取れた銘柄だけ。
+    戻り値の2つ目が空でも原則ブロックは常に返す。"""
+    tk = tuple(dict.fromkeys(t for t in tickers if isinstance(t, str)))[:limit]
+    lines = {}
+    try:
+        if tk:
+            lines = _marks_valuation_lines(tk)
+    except Exception as e:
+        logger.warning(f"[marks] 予想PER取得失敗: {e}")
+    val_block = ""
+    if lines:
+        val_block = ("\n【予想PERと成長率（アナリスト予想から機械計算。AIの推測ではない）】\n"
+                     + "\n".join(f"  {t}: {ln}" for t, ln in lines.items()) + "\n")
+    return _MARKS_PRINCIPLES, val_block
+
+
+_MARKS_RULE = (
+    "\n・【判断の原則】と【予想PERと成長率】に従うこと。🟠割高警戒の銘柄は選定の優先度を下げ、選ぶ場合はdemeritsに"
+    "「価格水準が高い（予想PERの数字）」を必ず書く。🟣の銘柄は利益ピークの可能性に触れる。"
+    "記載された数字以外のPER・成長率を作らない"
+)
+
+
 def _earnings_review_prompt_block(tickers) -> str:
     """新規ポートフォリオ生成(Agent C)のプロンプトに差し込む決算後レビューのブロック。"""
     lines = _earnings_review_lines(tickers)
@@ -25256,6 +25326,11 @@ def _fetch_eps_estimates(ticker: str) -> dict:
             out["trail"] = float(_t) if _t is not None else None
         except Exception:
             out["trail"] = None
+        try:
+            fi = tk.fast_info
+            out["price"] = float(fi.get("lastPrice") or fi.get("last_price") or 0) or None
+        except Exception:
+            out["price"] = None
         return out if out["cy"] else {}
     except Exception as e:
         logger.warning(f"[eps_est] {ticker} 取得失敗: {e}")
@@ -32046,6 +32121,12 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
         "demeritsに記載の機械判定の内容を書くこと。🟡注意の銘柄は注意点をdemeritsに反映すること。"
         "記載された数値以外の決算の数字を作らないこと" if _er_block else ""
     )
+    # 判断の原則（マークスの考え方）と、候補銘柄の予想PERの機械判定
+    _mk_principles, _mk_val = _marks_prompt_blocks(
+        [t for t, _ in sorted((candidate_perf or {}).items(), key=lambda kv: -(kv[1].get("ret_1y") or -999))]
+    )
+    _er_block = _er_block + _mk_val + _mk_principles
+    _er_rule = _er_rule + _MARKS_RULE
 
     # ── Agent A+B が揃っている場合は短縮プロンプト（Agent C モード）─────────
     if agent_a and agent_b:
@@ -32528,6 +32609,12 @@ def _generate_full_portfolio_recommendation(
         _er_line = _earnings_review_lines([ticker]).get(ticker)
         if _er_line:
             block += ("  直近の決算後レビュー（数字のしきい値による機械判定）: " + _er_line + "\n")
+        try:
+            _mv_line = _marks_valuation_lines((ticker,)).get(ticker)
+        except Exception:
+            _mv_line = None
+        if _mv_line:
+            block += ("  価格水準（アナリスト予想からの機械計算）: " + _mv_line + "\n")
         stock_blocks.append(block)
 
     total_gain = total_mkt - total_cost
@@ -32535,6 +32622,9 @@ def _generate_full_portfolio_recommendation(
 
     prompt1 = f"""あなたはプロの株式アナリストです。以下の市場モデルデータと各企業のIR・テクニカル情報を総合分析し、具体的な推奨アクションを提示してください。
 投資戦略モード: {mode_desc}
+{_MARKS_PRINCIPLES}
+保有銘柄の判定では、「価格水準」の行に🟠割高警戒とある銘柄は、含み益があっても「一部利確」を検討対象に入れ、🟣の銘柄は利益ピークの可能性に触れること。
+記載された数字以外のPER・成長率は作らないこと。
 
 ━━━ 市場環境（windexモデル）━━━
 {_format_market_ctx_for_prompt(market_ctx)}
@@ -34342,6 +34432,14 @@ def render_claude_trading_project():
         _ip_force = _ip_c4.checkbox(
             "🔄 再生成（キャッシュ無視）", key="ip_force_regen",
         )
+
+        with st.expander("🧭 AIが銘柄を選ぶときの判断の原則（ハワード・マークスの考え方を参考）", expanded=False):
+            st.markdown(_MARKS_PRINCIPLES.replace("【判断の原則（ハワード・マークスの考え方を参考にした枠組み）】", "").strip())
+            st.caption(
+                "この原則は、AIの銘柄選定（推奨ポートフォリオ）と、保有銘柄のアクション判定のプロンプトに組み込まれています。"
+                "あわせて、候補銘柄の予想PER・来期EPS成長率をアナリスト予想から機械計算し（🟠割高警戒／🟣利益ピーク注意／✅妥当）、"
+                "AIに渡しています。原則は書籍の要点を言い換えたもので、特定の銘柄の売買を指示するものではありません。"
+            )
 
         if st.button("💼 推奨ポートフォリオを生成", type="primary", key="btn_invest_portfolio"):
             _ip_budget_val  = 1_000_000 if "100" in _ip_budget else 5_000_000
