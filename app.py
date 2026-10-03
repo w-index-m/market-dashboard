@@ -27749,9 +27749,17 @@ def render_portfolio_risk_simulation():
     _exp = _a.slider("想定する年平均リターン（%）", 0, 20, 7, 1, key="pr_exp",
                      help="過去の実績は、保有銘柄が急騰した分だけ良く見えます。そこで、月ごとのばらつき方だけを過去から借り、平均は、ここで指定した値に合わせます。")
     _yrs = _b.radio("期間", [5, 10, 20], index=1, horizontal=True, key="pr_yrs", format_func=lambda v: f"{v}年")
+    _mode = st.radio("想定リターンの意味", ["複利ベース（中央値が年○%で増える）", "算術平均（毎月の平均が年○%）"], horizontal=True,
+                     key="pr_mode", help="値動きが荒いほど、算術平均が同じでも複利の成長は低くなります（概算：複利≒算術平均−ボラ²÷2）。"
+                                         "「年7%で増える」イメージに近いのは複利ベースです。")
     import numpy as _np
     _rng = _np.random.default_rng(42)
-    _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)   # 平均だけ指定値に合わせる
+    if _mode.startswith("複利"):
+        # 月次の対数リターンの平均を、指定した年率（複利）に合わせる（ばらつき方は過去のまま）
+        _lg = _np.log1p(_m.to_numpy())
+        _arr = _np.expm1(_lg - _lg.mean() + _np.log1p(_exp / 100) / 12)
+    else:
+        _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)   # 算術平均だけ指定値に合わせる
     _n, _steps, _blk = 2000, _yrs * 12, 3
     _idx = _rng.integers(0, max(len(_arr) - _blk, 1), size=(_n, (_steps // _blk) + 1))
     _paths = _np.concatenate([_arr[_idx + k][:, :, None] for k in range(_blk)], axis=2).reshape(_n, -1)[:, :_steps]
@@ -27781,7 +27789,9 @@ def render_portfolio_risk_simulation():
     d[1].metric(f"{_yrs}年後に今より減っている確率", f"{_p_loss:.0f}%")
     d[2].metric("途中で30%以上下落する確率", f"{_p_dd30:.0f}%")
     st.caption(
-        f"過去5年（{len(_m)}か月分、計算に使えた履歴は{st_['history_start']}以降）の月次リターンを3か月ずつ並べ替えて{_n:,}通りを作成。税金・手数料・追加投資・取り崩しは含みません。"
+        f"今の保有銘柄（円換算ウェイト）の過去5年（{len(_m)}か月分、計算に使えた履歴は{st_['history_start']}以降）の月次リターンの"
+        f"ばらつき方（年率ボラ約{st_['ann_vol']:.0f}%）を借り、3か月ずつ並べ替えて{_n:,}通りを作成。値動きが荒いほど、算術平均が同じでも"
+        "複利の成長は低くなり、途中の大きな下落も起きやすくなります。税金・手数料・追加投資・取り崩しは含みません。"
         "投資信託は日次データが無いため計算から除いています。"
         "あくまで過去のばらつき方を借りた試算で、将来を予測・保証するものではありません。"
     )
