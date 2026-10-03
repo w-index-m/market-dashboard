@@ -25171,6 +25171,63 @@ def _classify_asset_category(ticker: str, is_jp_pos: bool, is_jp_fund: bool, nam
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_dividend_growth_profile(ticker: str) -> dict:
+    """増配予想用に、配当の長期履歴と予想配当を取得する（TTL=24h）。
+    Returns: {"trail": 直近12か月の1株配当, "fwd": 予想の年間1株配当(yfinance dividendRate、無ければNone),
+              "cagr3": 直近3暦年の年平均成長率(%、4暦年分の履歴が無ければNone), "streak": 連続増配の年数,
+              "payout": 配当性向(0〜1、無ければNone)}。配当が無い/取得失敗時は{}。"""
+    try:
+        tk = yf.Ticker(ticker)
+        d = tk.dividends
+        if d is None or len(d) == 0:
+            return {}
+        d = d.copy()
+        if getattr(d.index, "tz", None) is not None:
+            d.index = d.index.tz_localize(None)
+        trail = float(d[d.index >= pd.Timestamp.now() - pd.DateOffset(months=12)].sum())
+        ann = d.groupby(d.index.year).sum()
+        _cur = pd.Timestamp.now().year
+        full = ann[ann.index < _cur]               # 途中の年（今年）は除く
+        cagr3 = None
+        if len(full) >= 4 and float(full.iloc[-4]) > 0 and float(full.iloc[-1]) > 0:
+            cagr3 = ((float(full.iloc[-1]) / float(full.iloc[-4])) ** (1 / 3) - 1) * 100
+        streak = 0
+        _v = [float(x) for x in full.values]
+        for i in range(len(_v) - 1, 0, -1):
+            if _v[i] > _v[i - 1] * 1.0001:
+                streak += 1
+            else:
+                break
+        info = {}
+        try:
+            info = tk.info or {}
+        except Exception:
+            pass
+        fwd = info.get("dividendRate")
+        payout = info.get("payoutRatio")
+        return {"trail": trail, "fwd": float(fwd) if fwd else None, "cagr3": cagr3, "streak": streak,
+                "payout": float(payout) if payout is not None else None}
+    except Exception as e:
+        logger.warning(f"[div_growth] {ticker} 取得失敗: {e}")
+        return {}
+
+
+def _estimate_dividend_growth(prof: dict) -> dict | None:
+    """プロファイルから「今後12か月の1株配当」と想定増配率を決める。
+    予想配当(forward)があり、直近12か月比が-30%〜+60%に収まれば、それを採用（根拠: 予想）。
+    それ以外は、過去3年の年平均成長率を-10%〜+15%に丸めて直近12か月に掛ける（根拠: 過去実績）。"""
+    if not prof or not prof.get("trail") or prof["trail"] <= 0:
+        return None
+    trail, fwd, cagr3 = prof["trail"], prof.get("fwd"), prof.get("cagr3")
+    if fwd and fwd > 0 and -30 <= (fwd / trail - 1) * 100 <= 60:
+        return {"next": fwd, "g": (fwd / trail - 1) * 100, "basis": "予想配当"}
+    if cagr3 is not None:
+        g = max(-10.0, min(15.0, cagr3))
+        return {"next": trail * (1 + g / 100), "g": g, "basis": "過去3年の実績"}
+    return {"next": trail, "g": 0.0, "basis": "据え置き（根拠データ不足）"}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def _load_nisa_growth_quota_fund_master() -> dict:
     """金融庁の成長投資枠対象商品リスト（TSV、data/nisa_growth_quota_funds.tsv）を
     読み込み、投信協会コード→ファンド名の辞書を返す。同じコードが複数回（追加・変更）
@@ -37774,6 +37831,64 @@ def render_claude_trading_project():
                         )
                 else:
                     st.info("配当履歴がありません（過去6ヶ月）。")
+
+                # ── 増配予想（参考値）：今後12か月の配当が、直近12か月からどう変わりそうか ──
+                _gr_pos = {t: p for t, p in positions.items() if t not in _JP_FUND_MAP}
+                if _gr_pos:
+                    with st.expander("📈 増配予想（今後12か月・参考値）", expanded=False):
+                        with ThreadPoolExecutor(max_workers=min(8, len(_gr_pos))) as _gr_ex:
+                            _gr_prof = dict(zip(_gr_pos, _gr_ex.map(_fetch_dividend_growth_profile, list(_gr_pos))))
+                        _gr_rows, _tot_trail, _tot_next = [], 0.0, 0.0
+                        for _tk, _p in _gr_pos.items():
+                            _prof = _gr_prof.get(_tk) or {}
+                            _est = _estimate_dividend_growth(_prof)
+                            if not _est:
+                                continue
+                            _tr = _to_display(_prof["trail"] * _p["qty"], _p["is_jp"])
+                            _nx = _to_display(_est["next"] * _p["qty"], _p["is_jp"])
+                            _tot_trail += _tr
+                            _tot_next += _nx
+                            _gc = "#4ade80" if _est["g"] > 0.05 else "#f87171" if _est["g"] < -0.05 else "#94a3b8"
+                            _pay = _prof.get("payout")
+                            _pay_s = f"{_pay * 100:.0f}%" if _pay is not None and 0 <= _pay < 3 else "—"
+                            _gr_rows.append((
+                                _tr, f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">'
+                                f'{_get_stock_display_name(_tk)}</td>'
+                                f'<td>{_prof["trail"]:,.2f}</td><td>{_est["next"]:,.2f}</td>'
+                                f'<td style="color:{_gc};font-weight:700">{_est["g"]:+.1f}%</td>'
+                                f'<td style="color:#94a3b8;font-size:11px">{_est["basis"]}</td>'
+                                f'<td>{_prof.get("streak", 0)}年</td><td>{_pay_s}</td>'
+                                f'<td style="color:#f59e0b">{_mvs(f"{_nx:,.0f} {cur_label}" if use_jpy else f"{cur_label} {_nx:,.2f}")}</td></tr>',
+                            ))
+                        if _gr_rows:
+                            _gr_rows.sort(key=lambda x: -x[0])
+                            _diff = _tot_next - _tot_trail
+                            _fmt_tot = (lambda v: f"{v:,.0f} {cur_label}") if use_jpy else (lambda v: f"{cur_label} {v:,.2f}")
+                            st.markdown(
+                                '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+                                '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th>'
+                                "<th>直近12か月<br>(1株)</th><th>今後12か月<br>予想(1株)</th><th>想定<br>増配率</th><th>根拠</th>"
+                                "<th>連続<br>増配</th><th>配当<br>性向</th><th>今後12か月<br>の受取見込</th></tr></thead><tbody>"
+                                + "".join(r[1] for r in _gr_rows) + "</tbody></table>",
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                f'<div style="text-align:right;font-size:13px;margin-top:8px">'
+                                f'受取配当の見込（現在の保有数ベース）: 直近12か月 <b>{_mvs(_fmt_tot(_tot_trail))}</b> → '
+                                f'今後12か月 <b style="color:#f59e0b">{_mvs(_fmt_tot(_tot_next))}</b>'
+                                f'（<span style="color:{"#4ade80" if _diff >= 0 else "#f87171"}">'
+                                f'{"+" if _diff >= 0 else ""}{_mvs(_fmt_tot(_diff))}</span>）</div>',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption(
+                                "※ 「予想配当」はYahoo Financeが持つ予想の年間配当（会社予想・アナリスト予想に基づく）で、直近12か月比が"
+                                "-30%〜+60%に収まる場合に採用。範囲外や予想が無い場合は、過去3年の増配ペース（-10%〜+15%に丸め）で、"
+                                "配当が無い期間が長い銘柄は据え置きで計算します。1株配当は各銘柄の現地通貨、受取見込は表示通貨に換算。"
+                                "税金は考慮していません。会社が発表する配当予想とは一致しないことがあり、業績悪化による減配・無配は織り込めません。"
+                                "投資信託は対象外です。"
+                            )
+                        else:
+                            st.info("増配予想に使える配当データがありません。")
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
