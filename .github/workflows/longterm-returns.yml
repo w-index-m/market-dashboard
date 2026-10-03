@@ -1,0 +1,33 @@
+name: Update long-term total return data
+
+on:
+  schedule:
+    - cron: "15 21 2 * *"   # 毎月2日 21:15 UTC。月次データなので月1回で十分
+  workflow_dispatch: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install requests pandas yfinance
+      - name: Build long-term total return indices
+        run: python scripts/precompute_longterm_returns.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/longterm_returns.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update long-term total return data"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
