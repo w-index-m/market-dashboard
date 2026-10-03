@@ -838,6 +838,18 @@ def _read_server_metrics() -> dict:
     return m
 
 
+def _release_memory() -> None:
+    """不要なオブジェクトを回収し、Pythonが確保済みで未使用のメモリをOSへ返す（glibcのmalloc_trim）。
+    pandas等の大きなデータを扱った後は、解放しても常駐メモリ(RSS)が下がらないことが多いため。"""
+    import ctypes
+    import gc
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 @st.cache_resource
 def _server_metrics_store() -> dict:
     """メモリ・CPUの履歴をサーバープロセス内に保持する（30秒おきに自動記録、最大約6時間分）。
@@ -849,8 +861,12 @@ def _server_metrics_store() -> dict:
 
     def _loop():
         last_cpu, last_t = None, None
+        _n = 0
         while True:
             try:
+                _n += 1
+                if _n % 20 == 0:   # 約10分おきに未使用メモリをOSへ返す
+                    _release_memory()
                 now = time.time()
                 m = _read_server_metrics()
                 cpu_pct = None
@@ -894,10 +910,17 @@ def render_server_metrics_panel() -> None:
                            font=dict(color="#e2e8f0"))
         st.plotly_chart(_fig, use_container_width=True, key="srv_mem_gauge")
         _c = st.columns(2)
-        _c[0].metric("アプリのプロセス", f"{_now['rss_mb']:,.0f} MB" if _now["rss_mb"] is not None else "—")
+        _c[0].metric("プロセス", f"{_now['rss_mb'] / 1024:.2f} GB" if _now["rss_mb"] is not None else "—")
         _cpu_last = next((x["cpu_pct"] for x in reversed(_smp) if x["cpu_pct"] is not None), None)
         _c[1].metric("CPU（直近30秒）", f"{_cpu_last:.0f}%" if _cpu_last is not None else "—",
                      help="100% = 1コアをフルに使用。コア数が複数あれば100%を超えることがあります。")
+        if st.button("🧹 メモリを整理する", key="srv_mem_trim",
+                     help="不要なデータを回収し、使っていないメモリをOSへ返します（キャッシュは消えません）。"):
+            _before = _now["cg_used_mb"] if _now["cg_used_mb"] is not None else _now["rss_mb"]
+            _release_memory()
+            _after_m = _read_server_metrics()
+            _after = _after_m["cg_used_mb"] if _after_m["cg_used_mb"] is not None else _after_m["rss_mb"]
+            st.success(f"{_before:,.0f} MB → {_after:,.0f} MB（{_before - _after:+,.0f} MB）")
         _df = pd.DataFrame(_smp)
         if len(_df) >= 2:
             _g = go.Figure()
