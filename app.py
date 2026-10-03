@@ -27761,8 +27761,9 @@ def render_portfolio_risk_simulation():
     else:
         _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)   # 算術平均だけ指定値に合わせる
     _n, _steps, _blk = 2000, _yrs * 12, 3
-    _idx = _rng.integers(0, max(len(_arr) - _blk, 1), size=(_n, (_steps // _blk) + 1))
-    _paths = _np.concatenate([_arr[_idx + k][:, :, None] for k in range(_blk)], axis=2).reshape(_n, -1)[:, :_steps]
+    # 円環ブートストラップ（末尾の月も先頭と同じ頻度で選ばれるようにし、平均がずれないようにする）
+    _idx = _rng.integers(0, len(_arr), size=(_n, (_steps // _blk) + 1))
+    _paths = _np.concatenate([_arr[(_idx + k) % len(_arr)][:, :, None] for k in range(_blk)], axis=2).reshape(_n, -1)[:, :_steps]
     _val = r["total_jpy"] * _np.cumprod(1 + _paths, axis=1)
     _val = _np.concatenate([_np.full((_n, 1), r["total_jpy"]), _val], axis=1)
     _p10, _p50, _p90 = (_np.percentile(_val, q, axis=0) for q in (10, 50, 90))
