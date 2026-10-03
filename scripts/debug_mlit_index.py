@@ -1,23 +1,26 @@
-"""国交省 不動産価格指数のデータ(CSV/Excel)の所在を確認する（Actions上で実行）。"""
+"""国交省 不動産価格指数のExcelの中身を確認する（Actions上で実行）。"""
+import io
 import re
 
+import pandas as pd
 import requests
 
 H = {"User-Agent": "Mozilla/5.0"}
-PAGES = [
-    "https://www.mlit.go.jp/totikensangyo/totikensangyo_tk5_000085.html",
-    "https://www.mlit.go.jp/totikensangyo/real_estate_price_index.html",
-    "https://www.mlit.go.jp/statistics/details/t-kakaku_tk5_000085.html",
-]
-for u in PAGES:
+BASE = "https://www.mlit.go.jp"
+PAGE = BASE + "/totikensangyo/totikensangyo_tk5_000085.html"
+r = requests.get(PAGE, headers=H, timeout=30)
+r.encoding = r.apparent_encoding
+for m in re.finditer(r'<a[^>]+href="([^"]+\.xlsx?)"[^>]*>(.*?)</a>', r.text, re.S | re.I):
+    print("LINK", m.group(1), re.sub(r"<[^>]+>|\s+", " ", m.group(2)).strip()[:80])
+for href in sorted(set(re.findall(r'href="([^"]+\.xlsx?)"', r.text, re.I))):
     try:
-        r = requests.get(u, headers=H, timeout=30)
-        print("==", u, r.status_code, len(r.text))
-        if r.status_code == 200:
-            t = re.search(r"<title>(.*?)</title>", r.text, re.S)
-            print("title:", t.group(1).strip() if t else None)
-            links = sorted(set(re.findall(r'href="([^"]+\.(?:csv|xlsx?|zip))"', r.text, re.I)))
-            for link in links[:40]:
-                print("  ", link)
+        x = requests.get(BASE + href, headers=H, timeout=60)
+        print("==", href, x.status_code, len(x.content))
+        xl = pd.ExcelFile(io.BytesIO(x.content))
+        print("sheets:", xl.sheet_names[:20])
+        for sn in xl.sheet_names[:4]:
+            df = xl.parse(sn, header=None, nrows=8)
+            print("--", sn, df.shape)
+            print(df.iloc[:8, :8].to_string()[:900])
     except Exception as e:
-        print("ERR", u, e)
+        print("ERR", href, e)
