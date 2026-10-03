@@ -28048,20 +28048,32 @@ def render_portfolio_fundamentals():
         c[3].metric("ポートフォリオPBR / ROE",
                     (f"{total_val / b_now:.1f}倍 / {e_now / b_now * 100:.0f}%" if b_now and b_now > 0 else "—"),
                     help="PBR=評価額÷持分純資産、ROE=持分利益÷持分純資産。")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=[str(i) for i in e.index], y=(e / 1e4).round(0), name="持分利益(TTM・万円)",
-                             marker_color="#4ade80"))
+        def _growth_chart(series, name, color, key):
+            """金額の棒グラフ（左軸）と、前年同期比の成長率の線（右軸）。EPSとBPSは桁が違うので別々に描く。"""
+            yoy = (series.pct_change(4) * 100).where(series.shift(4) > 0)
+            f = go.Figure()
+            f.add_trace(go.Bar(x=[str(i) for i in series.index], y=(series / 1e4).round(0), name=f"{name}（万円）",
+                               marker_color=color))
+            if yoy.notna().any():
+                f.add_trace(go.Scatter(x=[str(i) for i in yoy.index], y=yoy.round(0), name="前年同期比（%）", mode="lines+markers",
+                                       line=dict(color="#f59e0b", width=2), yaxis="y2"))
+            f.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=280, margin=dict(l=10, r=10, t=10, b=20),
+                            font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.14),
+                            xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                            yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", tickformat=",",
+                                       title=dict(text="万円", font=dict(color="#94a3b8"))),
+                            yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#f59e0b"), showgrid=False,
+                                        ticksuffix="%", zeroline=False),
+                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+            st.plotly_chart(f, use_container_width=True, key=key)
+
+        st.markdown("<div style='font-size:13px;font-weight:700;color:#4ade80;margin-top:6px'>📈 利益（EPS）の成長：持分利益（TTM）</div>",
+                    unsafe_allow_html=True)
+        _growth_chart(e, "持分利益(TTM)", "#4ade80", "pf_fund_earn")
         if len(b):
-            fig.add_trace(go.Scatter(x=[str(i) for i in b.index], y=(b / 1e4).round(0), name="持分純資産(万円)",
-                                     mode="lines+markers", line=dict(color="#60a5fa", width=2.4)))
-        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=300,
-                          margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
-                          legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
-                          xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
-                          yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", tickformat=",",
-                                     title=dict(text="万円", font=dict(color="#94a3b8"))),
-                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
-        st.plotly_chart(fig, use_container_width=True, key="pf_fund_total")
+            st.markdown("<div style='font-size:13px;font-weight:700;color:#60a5fa;margin-top:6px'>🏦 純資産（BPS）の成長：持分純資産</div>",
+                        unsafe_allow_html=True)
+            _growth_chart(b, "持分純資産", "#60a5fa", "pf_fund_book")
         st.caption(
             f"持分利益は{lt['n_earn']}銘柄、持分純資産は{lt['n_book']}銘柄分（取れた銘柄のみ）。**今の保有株数を過去に当てはめた**"
             f"値で、実際にその株数で持っていたわけではありません。為替は現在のレート（1ドル={fx:.1f}円）で固定。"
