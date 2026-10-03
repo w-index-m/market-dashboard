@@ -27884,18 +27884,53 @@ def _load_fundamentals_cache_all() -> dict:
         return {}
 
 
+def _merge_fundamentals(old: dict, new: dict, max_q: int = 40, max_a: int = 20, max_eps: int = 60) -> dict:
+    """既存のキャッシュに今回の取得結果を重ねる。Yahoo Financeは直近5〜6四半期（年次は4〜5期）しか返さないため、
+    上書きすると履歴が伸びない。決算期末日をキーに、同じ日付は新しい値で更新し、古い期は残す
+    （保存を重ねるほど履歴が長くなる）。Sheetsの1セル上限(50,000文字)に収まるよう、最大期数で古い方から切る。"""
+    if not old:
+        return new
+    out = dict(new)
+    for tag, cap in (("q", max_q), ("a", max_a)):
+        merged = {**(old.get(tag) or {}), **(new.get(tag) or {})}
+        for d, row in list(merged.items()):
+            o = (old.get(tag) or {}).get(d) or {}
+            # 今回取れなかった項目（None）は、以前の値を残す
+            merged[d] = {k: (row.get(k) if row.get(k) is not None else o.get(k)) for k in {**o, **row}}
+        out[tag] = {d: merged[d] for d in sorted(merged)[-cap:]}
+    eps = {x["d"]: x for x in (old.get("eps_hist") or [])}
+    eps.update({x["d"]: x for x in (new.get("eps_hist") or [])})
+    out["eps_hist"] = [eps[d] for d in sorted(eps)[-max_eps:]]
+    return out
+
+
 def _save_fundamentals_cache(items: dict) -> int:
-    """{ticker: 業績dict}をfundamentals_cacheシートへ保存（既存tickerは上書き、新規は追加）。保存件数を返す。"""
+    """{ticker: 業績dict}をfundamentals_cacheシートへ保存する。既存tickerは過去分を残して重ね書き
+    （_merge_fundamentals）、新規は追加。保存件数を返す。"""
     import json as _json_f
     ws = _trading_ws("fundamentals_cache", _FUND_CACHE_HEADERS)
     if not ws:
         return 0
-    existing = {str(r.get("ticker")): i + 2 for i, r in enumerate(ws.get_all_records()) if r.get("ticker")}
+    existing, old_data = {}, {}
+    for i, r in enumerate(ws.get_all_records()):
+        tk = r.get("ticker")
+        if not tk:
+            continue
+        existing[str(tk)] = i + 2
+        try:
+            old_data[str(tk)] = _json_f.loads(r.get("data_json") or "{}")
+        except Exception:
+            old_data[str(tk)] = {}
     new_rows, n = [], 0
     for tk, d in items.items():
-        row = [tk, d.get("updated_at", ""), _json_f.dumps(d, ensure_ascii=False, separators=(",", ":"))]
-        if len(row[2]) > 49000:
-            continue                                # Sheetsの1セル上限(50,000文字)を超えるものは保存しない
+        d = _merge_fundamentals(old_data.get(tk) or {}, d)
+        txt = _json_f.dumps(d, ensure_ascii=False, separators=(",", ":"))
+        while len(txt) > 49000 and len(d.get("q", {})) > 8:      # 念のため、古い四半期から削って収める
+            d["q"].pop(sorted(d["q"])[0])
+            txt = _json_f.dumps(d, ensure_ascii=False, separators=(",", ":"))
+        if len(txt) > 49000:
+            continue
+        row = [tk, d.get("updated_at", ""), txt]
         if tk in existing:
             r = existing[tk]
             ws.update([row], f"A{r}:C{r}", value_input_option="RAW")
