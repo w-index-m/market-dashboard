@@ -11300,6 +11300,91 @@ def _fetch_reit_overview() -> dict:
     return {"series": series, "returns": returns}
 
 
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _load_tokyo_re_index() -> dict | None:
+    """scripts/precompute_tokyo_re_index.py がGitHub Actionsで週1回生成する
+    data/tokyo_re_index.json（国交省・不動産価格指数 東京都の住宅、季節調整値・月次）を読む。"""
+    import json as _json_re
+    path = os.path.join(os.path.dirname(__file__), "data", "tokyo_re_index.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_re.load(f)
+        return d if (d.get("series") or {}).get("residential") else None
+    except Exception as e:
+        logger.warning(f"[tokyo_re_index] 読込失敗: {e}")
+        return None
+
+
+def _render_tokyo_re_index():
+    """東京都の不動産価格指数（住宅総合・住宅地・戸建・マンション）のチャートと期間変化率の表。"""
+    d = _load_tokyo_re_index()
+    st.markdown(
+        '<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:14px 0 2px">'
+        '🏙️ 東京都の住宅価格指数（国土交通省・月次）</div>',
+        unsafe_allow_html=True,
+    )
+    if not d:
+        st.info("東京都の不動産価格指数のデータがまだ生成されていません（GitHub Actionsの週次更新待ち）。")
+        return
+    _names = {"residential": "住宅総合", "land": "住宅地", "house": "戸建住宅", "condo": "マンション（区分所有）"}
+    _colors = {"residential": "#f59e0b", "land": "#4ade80", "house": "#60a5fa", "condo": "#f472b6"}
+    _series = {}
+    for k in _names:
+        _m = d["series"].get(k) or {}
+        if _m:
+            _s = pd.Series(_m)
+            _s.index = pd.to_datetime(_s.index + "-01")
+            _series[k] = _s.sort_index()
+    if not _series:
+        st.info("東京都の不動産価格指数のデータを読み込めませんでした。")
+        return
+    _since = max(s.index[-1] for s in _series.values()) - pd.DateOffset(years=10)
+    _fig = go.Figure()
+    for k, _s in _series.items():
+        _s = _s[_s.index >= _since]
+        _fig.add_trace(go.Scatter(
+            x=_s.index, y=_s.values, name=_names[k], mode="lines",
+            line=dict(color=_colors[k], width=3 if k == "residential" else 1.8),
+            hovertemplate="%{x|%Y-%m}<br>" + _names[k] + ": %{y:.1f}<extra></extra>",
+        ))
+    _fig.update_layout(
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=280,
+        margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
+        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b",
+                   title=dict(text="指数（2010年平均=100）", font=dict(color="#94a3b8"))),
+        legend=dict(font=dict(color="#e2e8f0")),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+    )
+    st.plotly_chart(_fig, use_container_width=True)
+
+    def _chg(s, months):
+        return (float(s.iloc[-1] / s.iloc[-months - 1] - 1) * 100) if len(s) > months else None
+
+    def _fmt(v):
+        if v is None:
+            return '<td style="color:#64748b">—</td>'
+        return f'<td style="color:{"#4ade80" if v >= 0 else "#f87171"}">{v:+.1f}%</td>'
+
+    _rows = [
+        f'<tr style="border-top:1px solid #1e293b"><td style="font-weight:600;padding:6px 8px">{_names[k]}</td>'
+        f'<td>{_s.iloc[-1]:.1f}</td>' + "".join(_fmt(_chg(_s, m)) for m in (3, 12, 36, 60)) + "</tr>"
+        for k, _s in _series.items()
+    ]
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">区分</th><th>最新指数</th>'
+        "<th>3ヶ月</th><th>1年</th><th>3年</th><th>5年</th></tr></thead><tbody>" + "".join(_rows) + "</tbody></table>",
+        unsafe_allow_html=True,
+    )
+    _latest = max(s.index[-1] for s in _series.values())
+    st.caption(
+        f"※ 最新データは{_latest.year}年{_latest.month}月分です（国土交通省の公表は数か月遅れ。このファイルが"
+        "公表ページで最新のものとは限りません）。東京都全体の指数で、23区だけの値ではありません。"
+        "季節調整値・取引価格ベース。出典: 国土交通省「不動産価格指数（住宅）」"
+    )
+
+
 def render_reit_card():
     """🏢 J-REIT（東証REIT指数ETF・住宅特化型）の値動きカード。マクロ指標（金利）の下に置く。"""
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -11368,6 +11453,8 @@ def render_reit_card():
         unsafe_allow_html=True,
     )
     st.caption("※ 住宅REITの都内(23区)比率は各投資法人の開示資料で確認してください。データ: yfinance（調整後終値）")
+
+    _render_tokyo_re_index()
 
 
 def render_bear_market_checker(data: dict | None = None):
