@@ -25227,6 +25227,41 @@ def _estimate_dividend_growth(prof: dict) -> dict | None:
     return {"next": trail, "g": 0.0, "basis": "据え置き（根拠データ不足）"}
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _fetch_eps_estimates(ticker: str) -> dict:
+    """アナリスト予想の1株利益(EPS)を取得する（yfinanceのearnings_estimate、TTL=6h）。
+    Returns: {"cy": {"avg","low","high","n","year_ago"}, "ny": {同左}, "trail": 実績EPS(直近12か月)}。取得できなければ{}。
+    日本株ではinfoのforwardEpsが実態とずれることがあるため使わず、earnings_estimateの今期(0y)・来期(+1y)だけを使う。"""
+    try:
+        tk = yf.Ticker(ticker)
+        ee = tk.earnings_estimate
+        if ee is None or ee.empty or "0y" not in ee.index:
+            return {}
+
+        def _row(k):
+            if k not in ee.index:
+                return None
+            r = ee.loc[k]
+            if pd.isna(r.get("avg")):
+                return None
+            return {"avg": float(r["avg"]),
+                    "low": None if pd.isna(r.get("low")) else float(r["low"]),
+                    "high": None if pd.isna(r.get("high")) else float(r["high"]),
+                    "n": None if pd.isna(r.get("numberOfAnalysts")) else int(r["numberOfAnalysts"]),
+                    "year_ago": None if pd.isna(r.get("yearAgoEps")) else float(r["yearAgoEps"])}
+
+        out = {"cy": _row("0y"), "ny": _row("+1y")}
+        try:
+            _t = (tk.info or {}).get("trailingEps")
+            out["trail"] = float(_t) if _t is not None else None
+        except Exception:
+            out["trail"] = None
+        return out if out["cy"] else {}
+    except Exception as e:
+        logger.warning(f"[eps_est] {ticker} 取得失敗: {e}")
+        return {}
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _load_nisa_growth_quota_fund_master() -> dict:
     """金融庁の成長投資枠対象商品リスト（TSV、data/nisa_growth_quota_funds.tsv）を
@@ -37889,6 +37924,60 @@ def render_claude_trading_project():
                             )
                         else:
                             st.info("増配予想に使える配当データがありません。")
+
+                # ── 一株利益(EPS)のアナリスト予想 ──────────────────────────
+                _eps_pos = {t: p for t, p in positions.items() if t not in _JP_FUND_MAP}
+                if _eps_pos:
+                    with st.expander("💹 一株利益（EPS）のアナリスト予想", expanded=False):
+                        with ThreadPoolExecutor(max_workers=min(8, len(_eps_pos))) as _eps_ex:
+                            _eps_data = dict(zip(_eps_pos, _eps_ex.map(_fetch_eps_estimates, list(_eps_pos))))
+
+                        def _fmt_eps(v, jp):
+                            return "—" if v is None else (f"{v:,.0f}" if jp or abs(v) >= 100 else f"{v:,.2f}")
+
+                        _eps_rows = []
+                        for _tk, _p in _eps_pos.items():
+                            _e = _eps_data.get(_tk) or {}
+                            if not _e:
+                                continue
+                            _jp = _p["is_jp"]
+                            _cy, _ny = _e.get("cy"), _e.get("ny")
+                            _px = _p.get("cur_price")
+                            _g = ((_ny["avg"] / _cy["avg"] - 1) * 100) if _cy and _ny and _cy["avg"] > 0 else None
+                            _per_cy = (_px / _cy["avg"]) if _px and _cy and _cy["avg"] > 0 else None
+                            _per_ny = (_px / _ny["avg"]) if _px and _ny and _ny["avg"] > 0 else None
+                            _rng = (f'<div style="font-size:10px;color:#64748b">{_fmt_eps(_cy["low"], _jp)}〜{_fmt_eps(_cy["high"], _jp)}</div>'
+                                    if _cy and _cy.get("low") is not None else "")
+                            _gcol = "#4ade80" if (_g or 0) > 0 else "#f87171"
+                            _eps_rows.append(
+                                f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">'
+                                f'{_get_stock_display_name(_tk)}</td>'
+                                f'<td>{_fmt_eps(_e.get("trail"), _jp)}</td>'
+                                f'<td>{_fmt_eps(_cy["avg"], _jp) if _cy else "—"}{_rng}</td>'
+                                f'<td>{_fmt_eps(_ny["avg"], _jp) if _ny else "—"}</td>'
+                                f'<td style="color:{_gcol};font-weight:700">{f"{_g:+.0f}%" if _g is not None else "—"}</td>'
+                                f'<td>{f"{_per_cy:.1f}倍" if _per_cy else "—"}</td>'
+                                f'<td>{f"{_per_ny:.1f}倍" if _per_ny else "—"}</td>'
+                                f'<td style="color:#94a3b8">{(_cy or {}).get("n") or "—"}</td></tr>'
+                            )
+                        if _eps_rows:
+                            st.markdown(
+                                '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+                                '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th>'
+                                "<th>実績EPS<br>(直近12か月)</th><th>今期予想EPS<br>(平均・幅)</th><th>来期予想EPS<br>(平均)</th>"
+                                "<th>来期の<br>成長率</th><th>予想PER<br>(今期)</th><th>予想PER<br>(来期)</th><th>予想<br>人数</th></tr></thead><tbody>"
+                                + "".join(_eps_rows) + "</tbody></table>",
+                                unsafe_allow_html=True,
+                            )
+                            st.caption(
+                                "※ Yahoo Financeが集計するアナリスト予想（平均）。EPSは各銘柄の現地通貨建て（米国株はUSD、日本株は円）。"
+                                "予想PER=現在株価÷予想EPS。今期は各社の会計年度（決算期）で、会社ごとに期末月が違います。"
+                                "予想人数が少ない銘柄（日本の小型株など）は精度が低く、予想は後から大きく改定されることがあります。"
+                                "メモリ半導体のように、利益が景気の波で大きく振れる銘柄は、予想PERが低く見えても、利益のピークを織り込んでいる"
+                                "可能性があります。"
+                            )
+                        else:
+                            st.info("アナリスト予想を取得できた銘柄がありません。")
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
