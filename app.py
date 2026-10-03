@@ -27794,7 +27794,7 @@ def _fetch_fundamentals_history(ticker: str) -> dict:
     """銘柄の業績の推移（四半期・年次）をyfinanceから取得してJSON化できるdictで返す。
     GitHub Actions（scripts/precompute_fundamentals.py）と、キャッシュが無い時のアプリ内フォールバックの
     両方から使う（st.*は呼ばない）。
-      eps_hist: 決算ごとの実績EPSと予想（古い→新しい、最大24件。約6年分）
+      eps_hist: 決算ごとの実績EPSと予想（古い→新しい、最大48件。約12年分。株式分割は調整済み）
       q / a   : 四半期（直近5〜6期）/ 年次（直近4〜5期）の売上・純利益・EPS・研究開発費・純資産・株数・BPS・
                 設備投資・営業CF・フリーCF。キー=決算期末日。値は各銘柄の現地通貨。
     取得できない項目はNone。全く取れなければ{}。"""
@@ -27817,12 +27817,12 @@ def _fetch_fundamentals_history(ticker: str) -> dict:
         tk = yf.Ticker(ticker)
         out = {"ticker": ticker, "eps_hist": [], "q": {}, "a": {}}
         try:
-            ed = tk.get_earnings_dates(limit=40)
+            ed = tk.get_earnings_dates(limit=60)
             if ed is not None and not ed.empty and "Reported EPS" in ed.columns:
                 done = ed[ed["Reported EPS"].notna()].sort_index()
                 out["eps_hist"] = [
                     {"d": ts.strftime("%Y-%m-%d"), "a": _f(r["Reported EPS"]), "e": _f(r.get("EPS Estimate"))}
-                    for ts, r in done.tail(24).iterrows()
+                    for ts, r in done.tail(48).iterrows()
                 ]
         except Exception:
             pass
@@ -28067,7 +28067,7 @@ def render_portfolio_fundamentals():
             f"値で、実際にその株数で持っていたわけではありません。為替は現在のレート（1ドル={fx:.1f}円）で固定。"
             "保有額の85%以上の銘柄でデータが揃う期間だけを表示しています（始まりが違う銘柄が混ざると、途中で急に増減して見えるため）。"
             f"持分利益は{lt['from_earn'] or '—'}から、持分純資産は{lt['from_book'] or '—'}から。"
-            "EPSの履歴は決算ごとの実績（約6年分）、純資産は直近5〜6期（四半期）と年次4〜5期から作るため、古い期間は純資産が欠けます。"
+            "EPSの履歴は決算ごとの実績（最大約12年分）、純資産は直近5〜6期（四半期）と年次4〜5期から作るため、古い期間は純資産が欠けます。"
             "利益がマイナスの銘柄も合算されます。投資信託・ETFは対象外です。"
         )
 
