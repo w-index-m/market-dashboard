@@ -543,7 +543,143 @@
     "usdjpy": "up"
    },
    "scenario": "米金利上昇が継続し、S&Pは下落。円安が輸出株を押し上げ日経は上昇。金利上昇でドル高円安も継続。"
+  },
+  {
+   "id": "2026-10-03-groq",
+   "date": "2026-10-03",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7722.72,
+     "chg20_pct": -0.32,
+     "date": "2026-10-02"
+    },
+    "nikkei": {
+     "value": 68956.719,
+     "chg20_pct": 3.99,
+     "date": "2026-10-01"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 10.81,
+     "date": "2026-10-02"
+    },
+    "usdjpy": {
+     "value": 157.83,
+     "chg20_pct": 1.05,
+     "date": "2026-10-03"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利上昇と日経の堅調成長期待で株価上昇、ドル高圧力で円安進行"
+  },
+  {
+   "id": "2026-10-03-mistral",
+   "date": "2026-10-03",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7722.72,
+     "chg20_pct": -0.32,
+     "date": "2026-10-02"
+    },
+    "nikkei": {
+     "value": 68956.719,
+     "chg20_pct": 3.99,
+     "date": "2026-10-01"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 10.81,
+     "date": "2026-10-02"
+    },
+    "usdjpy": {
+     "value": 157.83,
+     "chg20_pct": 1.05,
+     "date": "2026-10-03"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fedの利下げ期待高まり（インフレ軟化、雇用鈍化）で米長期金利低下、S&P下落。日経は日本の金融緩和継続と米円安で上昇。ドル円は米利下げ遅れと日銀の金融緩和維持で円安。"
+  },
+  {
+   "id": "2026-10-03-nvidia",
+   "date": "2026-10-03",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7722.72,
+     "chg20_pct": -0.32,
+     "date": "2026-10-02"
+    },
+    "nikkei": {
+     "value": 68956.719,
+     "chg20_pct": 3.99,
+     "date": "2026-10-01"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 10.81,
+     "date": "2026-10-02"
+    },
+    "usdjpy": {
+     "value": 157.83,
+     "chg20_pct": 1.05,
+     "date": "2026-10-03"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米金利上昇で米株調整、160円目前で介入警戒から円高・日経も連れ安"
+  },
+  {
+   "id": "2026-10-03-openrouter",
+   "date": "2026-10-03",
+   "model": "OpenRouter (qwen/qwen3.8-27b:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7722.72,
+     "chg20_pct": -0.32,
+     "date": "2026-10-02"
+    },
+    "nikkei": {
+     "value": 68956.719,
+     "chg20_pct": 3.99,
+     "date": "2026-10-01"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 10.81,
+     "date": "2026-10-02"
+    },
+    "usdjpy": {
+     "value": 157.83,
+     "chg20_pct": 1.05,
+     "date": "2026-10-03"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米金利上昇が継続し、ドル高・円安でS&Pは下落。日経は円安追い風で上昇、10年債は上昇。"
   }
  ],
- "updated_at": "2026-10-02T01:49:03Z"
+ "updated_at": "2026-10-03T01:21:31Z"
 }
