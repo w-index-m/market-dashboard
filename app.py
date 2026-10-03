@@ -27969,16 +27969,23 @@ def _look_through_series(positions: dict, fundamentals: dict, fx: float) -> dict
                     pts[pd.Timestamp(d).to_period("Q")] = row["bps"]
         if pts:
             book[tk] = pd.Series(pts).sort_index() * mult
+    w = {t: float(p["qty"]) * float(p.get("price") or 0) * (1.0 if p.get("is_jp") else fx) for t, p in positions.items()}
     out = {}
     for name, d in (("earnings", earn), ("book", book)):
         if not d:
-            out[name], out["n_" + name[:4]] = pd.Series(dtype=float), 0
+            out[name], out["n_" + name[:4]], out["from_" + name[:4]] = pd.Series(dtype=float), 0, None
             continue
         df = pd.DataFrame(d).sort_index()
         full = pd.period_range(df.index.min(), df.index.max(), freq="Q")
         df = df.reindex(full).ffill()
-        out[name] = df.dropna(how="all").sum(axis=1, min_count=1)
+        # 銘柄ごとにデータの始まりが違うと、古い期間は一部の銘柄だけの合計になり、途中で急に跳ね上がって見える。
+        # データが揃っている銘柄の保有額（現在値ベース）が85%以上になる期間だけを使う。
+        tot_w = sum(w.get(t, 0.0) for t in df.columns) or 1.0
+        cov = df.notna().mul(pd.Series({t: w.get(t, 0.0) for t in df.columns}), axis=1).sum(axis=1) / tot_w
+        df = df[cov >= 0.85]
+        out[name] = df.sum(axis=1, min_count=1).dropna()
         out["n_" + name[:4]] = df.shape[1]
+        out["from_" + name[:4]] = str(df.index[0]) if len(df) else None
     return out
 
 
@@ -28002,7 +28009,7 @@ def render_portfolio_fundamentals():
     """📊 保有銘柄の業績推移（EPS・BPS・設備投資）。利益と投資の裏付けがあって株価が上がってきたかを見る。
     データはGitHub Actionsが週次でfundamentals_cacheシート（非公開）に保存したものを読む（無ければその場で取得）。"""
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**📊 業績の推移（EPS・BPS・投資）：利益の裏付けがあって上がってきたか**")
+    st.markdown("**📊 ポートフォリオ全体の業績の推移（EPS・BPS・投資）：利益の裏付けがあって上がってきたか**")
     open_pos = {t: p for t, p in _get_open_positions().items() if t not in _JP_FUND_MAP}
     if not open_pos:
         st.info("保有銘柄がありません。")
@@ -28058,11 +28065,14 @@ def render_portfolio_fundamentals():
         st.caption(
             f"持分利益は{lt['n_earn']}銘柄、持分純資産は{lt['n_book']}銘柄分（取れた銘柄のみ）。**今の保有株数を過去に当てはめた**"
             f"値で、実際にその株数で持っていたわけではありません。為替は現在のレート（1ドル={fx:.1f}円）で固定。"
+            "保有額の85%以上の銘柄でデータが揃う期間だけを表示しています（始まりが違う銘柄が混ざると、途中で急に増減して見えるため）。"
+            f"持分利益は{lt['from_earn'] or '—'}から、持分純資産は{lt['from_book'] or '—'}から。"
             "EPSの履歴は決算ごとの実績（約6年分）、純資産は直近5〜6期（四半期）と年次4〜5期から作るため、古い期間は純資産が欠けます。"
             "利益がマイナスの銘柄も合算されます。投資信託・ETFは対象外です。"
         )
 
     # ── 銘柄ごと ──────────────────────────────────────────────
+    st.markdown("**🔍 銘柄ごとの業績の推移**")
     tk_sel = st.selectbox("銘柄を選ぶ", list(open_pos), format_func=lambda t: f"{_get_stock_display_name(t)}（{t}）",
                           key="pf_fund_sel")
     f = funds.get(tk_sel) or {}
