@@ -1,0 +1,25 @@
+name: Cache holdings fundamentals to Google Sheets
+
+on:
+  schedule:
+    - cron: "40 21 * * 0,3"   # 日曜・水曜 21:40 UTC（月・木 6:40 JST）。決算は四半期ごとなので週2回で十分
+  workflow_dispatch: {}
+
+# 保有銘柄の業績（四半期EPS・BPSなど）を取得し、非公開のGoogle Sheets（fundamentals_cacheタブ）へ保存する。
+# 保有銘柄名はログに出さない（公開リポジトリのため）。
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Fetch and save fundamentals
+        env:
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TRADING_USERNAME: "admin"
+        run: python scripts/precompute_fundamentals.py

@@ -27787,6 +27787,342 @@ def render_portfolio_risk_simulation():
     )
 
 
+_FUND_CACHE_HEADERS = ["ticker", "updated_at", "data_json"]
+
+
+def _fetch_fundamentals_history(ticker: str) -> dict:
+    """銘柄の業績の推移（四半期・年次）をyfinanceから取得してJSON化できるdictで返す。
+    GitHub Actions（scripts/precompute_fundamentals.py）と、キャッシュが無い時のアプリ内フォールバックの
+    両方から使う（st.*は呼ばない）。
+      eps_hist: 決算ごとの実績EPSと予想（古い→新しい、最大24件。約6年分）
+      q / a   : 四半期（直近5〜6期）/ 年次（直近4〜5期）の売上・純利益・EPS・研究開発費・純資産・株数・BPS・
+                設備投資・営業CF・フリーCF。キー=決算期末日。値は各銘柄の現地通貨。
+    取得できない項目はNone。全く取れなければ{}。"""
+    def _f(v):
+        try:
+            v = float(v)
+            return None if v != v else round(v, 4)
+        except (TypeError, ValueError):
+            return None
+
+    def _rows(df, key, alt=()):
+        if df is None or getattr(df, "empty", True):
+            return {}
+        for k in (key, *alt):
+            if k in df.index:
+                return {c.strftime("%Y-%m-%d"): _f(v) for c, v in df.loc[k].items() if _f(v) is not None}
+        return {}
+
+    try:
+        tk = yf.Ticker(ticker)
+        out = {"ticker": ticker, "eps_hist": [], "q": {}, "a": {}}
+        try:
+            ed = tk.get_earnings_dates(limit=40)
+            if ed is not None and not ed.empty and "Reported EPS" in ed.columns:
+                done = ed[ed["Reported EPS"].notna()].sort_index()
+                out["eps_hist"] = [
+                    {"d": ts.strftime("%Y-%m-%d"), "a": _f(r["Reported EPS"]), "e": _f(r.get("EPS Estimate"))}
+                    for ts, r in done.tail(24).iterrows()
+                ]
+        except Exception:
+            pass
+        for tag, inc, bal, cf in (
+            ("q", getattr(tk, "quarterly_income_stmt", None), getattr(tk, "quarterly_balance_sheet", None),
+             getattr(tk, "quarterly_cashflow", None)),
+            ("a", getattr(tk, "income_stmt", None), getattr(tk, "balance_sheet", None), getattr(tk, "cashflow", None)),
+        ):
+            series = {
+                "rev": _rows(inc, "Total Revenue"), "ni": _rows(inc, "Net Income"),
+                "eps": _rows(inc, "Diluted EPS", ("Basic EPS",)), "rd": _rows(inc, "Research And Development"),
+                "equity": _rows(bal, "Stockholders Equity", ("Common Stock Equity",)),
+                "shares": _rows(bal, "Ordinary Shares Number", ("Share Issued",)),
+                "capex": _rows(cf, "Capital Expenditure"), "ocf": _rows(cf, "Operating Cash Flow"),
+                "fcf": _rows(cf, "Free Cash Flow"),
+            }
+            dates = sorted({d for s in series.values() for d in s})
+            table = {}
+            for d in dates:
+                eq, sh = series["equity"].get(d), series["shares"].get(d)
+                cx = series["capex"].get(d)
+                table[d] = {
+                    "rev": series["rev"].get(d), "ni": series["ni"].get(d), "eps": series["eps"].get(d),
+                    "rd": series["rd"].get(d), "equity": eq, "shares": sh,
+                    "bps": round(eq / sh, 3) if eq and sh else None,
+                    "capex": abs(cx) if cx is not None else None,
+                    "ocf": series["ocf"].get(d), "fcf": series["fcf"].get(d),
+                }
+            out[tag] = table
+        if not out["eps_hist"] and not out["q"] and not out["a"]:
+            return {}
+        out["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return out
+    except Exception as e:
+        logger.warning(f"[fundamentals] {ticker} 取得失敗: {e}")
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_fundamentals_cache_all() -> dict:
+    """fundamentals_cacheシート（GitHub Actionsが週次で更新）を全件読み、ticker→業績dictを返す。"""
+    import json as _json_f
+    try:
+        ws = _trading_ws("fundamentals_cache", _FUND_CACHE_HEADERS)
+        if not ws:
+            return {}
+        out = {}
+        for r in ws.get_all_records():
+            tk = r.get("ticker")
+            if not tk:
+                continue
+            try:
+                out[str(tk)] = _json_f.loads(r.get("data_json") or "{}")
+            except Exception:
+                continue
+        return out
+    except Exception as e:
+        logger.warning(f"[fundamentals] cache読込失敗: {e}")
+        return {}
+
+
+def _save_fundamentals_cache(items: dict) -> int:
+    """{ticker: 業績dict}をfundamentals_cacheシートへ保存（既存tickerは上書き、新規は追加）。保存件数を返す。"""
+    import json as _json_f
+    ws = _trading_ws("fundamentals_cache", _FUND_CACHE_HEADERS)
+    if not ws:
+        return 0
+    existing = {str(r.get("ticker")): i + 2 for i, r in enumerate(ws.get_all_records()) if r.get("ticker")}
+    new_rows, n = [], 0
+    for tk, d in items.items():
+        row = [tk, d.get("updated_at", ""), _json_f.dumps(d, ensure_ascii=False, separators=(",", ":"))]
+        if len(row[2]) > 49000:
+            continue                                # Sheetsの1セル上限(50,000文字)を超えるものは保存しない
+        if tk in existing:
+            r = existing[tk]
+            ws.update([row], f"A{r}:C{r}", value_input_option="RAW")
+        else:
+            new_rows.append(row)
+        n += 1
+    if new_rows:
+        ws.append_rows(new_rows, value_input_option="RAW")
+    return n
+
+
+def _quarter_label(d) -> str:
+    p = pd.Timestamp(d).to_period("Q")
+    return f"{p.year}Q{p.quarter}"
+
+
+def _look_through_series(positions: dict, fundamentals: dict, fx: float) -> dict:
+    """保有株数を掛けて、ポートフォリオ全体の「持分利益(TTM)」「持分純資産」の四半期推移（円換算）を作る。
+    持分利益 = Σ 保有株数 × 各銘柄のTTM EPS（直近4決算の実績EPSの合計）、持分純資産 = Σ 保有株数 × BPS。
+    いずれも「今の保有株数を過去に当てはめた」値。Returns: {"earnings": Series, "book": Series, "n_earn", "n_book"}"""
+    earn, book = {}, {}
+    for tk, p in positions.items():
+        f = fundamentals.get(tk) or {}
+        mult = float(p["qty"]) * (1.0 if p.get("is_jp") else fx)
+        eh = [(pd.Timestamp(x["d"]), x["a"]) for x in f.get("eps_hist", []) if x.get("a") is not None]
+        if len(eh) >= 4:
+            s = pd.Series([a for _, a in eh], index=pd.PeriodIndex([d.to_period("Q") for d, _ in eh], freq="Q"))
+            s = s[~s.index.duplicated(keep="last")]
+            ttm = s.rolling(4).sum().dropna()
+            if len(ttm):
+                earn[tk] = ttm * mult
+        pts = {}
+        for tag in ("a", "q"):                       # 年次→四半期の順に上書き（四半期を優先）
+            for d, row in (f.get(tag) or {}).items():
+                if row.get("bps") is not None:
+                    pts[pd.Timestamp(d).to_period("Q")] = row["bps"]
+        if pts:
+            book[tk] = pd.Series(pts).sort_index() * mult
+    out = {}
+    for name, d in (("earnings", earn), ("book", book)):
+        if not d:
+            out[name], out["n_" + name[:4]] = pd.Series(dtype=float), 0
+            continue
+        df = pd.DataFrame(d).sort_index()
+        full = pd.period_range(df.index.min(), df.index.max(), freq="Q")
+        df = df.reindex(full).ffill()
+        out[name] = df.dropna(how="all").sum(axis=1, min_count=1)
+        out["n_" + name[:4]] = df.shape[1]
+    return out
+
+
+def _fund_series_ratio(cur, prev):
+    return (cur / prev - 1) * 100 if cur is not None and prev not in (None, 0) and prev > 0 else None
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _close_history_5y(ticker: str) -> pd.Series:
+    try:
+        s = yf.Ticker(ticker).history(period="5y", auto_adjust=True)["Close"].dropna()
+        if getattr(s.index, "tz", None) is not None:
+            s.index = s.index.tz_localize(None)
+        return s
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+@st.fragment
+def render_portfolio_fundamentals():
+    """📊 保有銘柄の業績推移（EPS・BPS・設備投資）。利益と投資の裏付けがあって株価が上がってきたかを見る。
+    データはGitHub Actionsが週次でfundamentals_cacheシート（非公開）に保存したものを読む（無ければその場で取得）。"""
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**📊 業績の推移（EPS・BPS・投資）：利益の裏付けがあって上がってきたか**")
+    open_pos = {t: p for t, p in _get_open_positions().items() if t not in _JP_FUND_MAP}
+    if not open_pos:
+        st.info("保有銘柄がありません。")
+        return
+    cache = _load_fundamentals_cache_all()
+    miss = [t for t in open_pos if t not in cache]
+    funds = dict(cache)
+    if miss:
+        with st.spinner(f"{len(miss)}銘柄の業績データをその場で取得中（週次の自動保存が済むと不要になります）..."):
+            with ThreadPoolExecutor(max_workers=min(6, len(miss))) as ex:
+                for t, d in zip(miss, ex.map(_fetch_fundamentals_history, miss)):
+                    if d:
+                        funds[t] = d
+    pr = _fetch_portfolio_prices(tuple(open_pos))
+    fx = float(pr.get("_usdjpy") or 150.0)
+    pos2 = {}
+    for t, p in open_pos.items():
+        px = (pr.get(t) or {}).get("price")
+        pos2[t] = {"qty": p["qty"], "is_jp": t.endswith(".T"), "price": px}
+    total_val = sum(v["qty"] * v["price"] * (1.0 if v["is_jp"] else fx) for v in pos2.values() if v["price"])
+
+    # ── ポートフォリオ全体（Σ 保有株数 × 各銘柄の値） ──────────────────
+    lt = _look_through_series(pos2, funds, fx)
+    e, b = lt["earnings"], lt["book"]
+    if len(e) >= 1 and total_val > 0:
+        e_now = float(e.iloc[-1])
+        b_now = float(b.iloc[-1]) if len(b) else None
+        e_prev = float(e.iloc[-5]) if len(e) >= 5 else None
+        c = st.columns(4)
+        c[0].metric("持分利益（TTM）", f"{e_now / 1e4:,.0f}万円",
+                    f"{_fund_series_ratio(e_now, e_prev):+.0f}%（前年比）" if _fund_series_ratio(e_now, e_prev) is not None else None,
+                    help="Σ 保有株数×各銘柄の直近4決算の実績EPS（円換算）。今の保有株数を過去に当てはめた値。")
+        c[1].metric("ポートフォリオPER", f"{total_val / e_now:.1f}倍" if e_now > 0 else "—",
+                    help="現在の評価額 ÷ 持分利益(TTM)。マイナス利益の銘柄も合算しています。")
+        c[2].metric("持分純資産（BPS×株数）", f"{b_now / 1e4:,.0f}万円" if b_now else "—")
+        c[3].metric("ポートフォリオPBR / ROE",
+                    (f"{total_val / b_now:.1f}倍 / {e_now / b_now * 100:.0f}%" if b_now and b_now > 0 else "—"),
+                    help="PBR=評価額÷持分純資産、ROE=持分利益÷持分純資産。")
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=[str(i) for i in e.index], y=(e / 1e4).round(0), name="持分利益(TTM・万円)",
+                             marker_color="#4ade80"))
+        if len(b):
+            fig.add_trace(go.Scatter(x=[str(i) for i in b.index], y=(b / 1e4).round(0), name="持分純資産(万円)",
+                                     mode="lines+markers", line=dict(color="#60a5fa", width=2.4)))
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=300,
+                          margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
+                          legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+                          xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                          yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", tickformat=",",
+                                     title=dict(text="万円", font=dict(color="#94a3b8"))),
+                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(fig, use_container_width=True, key="pf_fund_total")
+        st.caption(
+            f"持分利益は{lt['n_earn']}銘柄、持分純資産は{lt['n_book']}銘柄分（取れた銘柄のみ）。**今の保有株数を過去に当てはめた**"
+            f"値で、実際にその株数で持っていたわけではありません。為替は現在のレート（1ドル={fx:.1f}円）で固定。"
+            "EPSの履歴は決算ごとの実績（約6年分）、純資産は直近5〜6期（四半期）と年次4〜5期から作るため、古い期間は純資産が欠けます。"
+            "利益がマイナスの銘柄も合算されます。投資信託・ETFは対象外です。"
+        )
+
+    # ── 銘柄ごと ──────────────────────────────────────────────
+    tk_sel = st.selectbox("銘柄を選ぶ", list(open_pos), format_func=lambda t: f"{_get_stock_display_name(t)}（{t}）",
+                          key="pf_fund_sel")
+    f = funds.get(tk_sel) or {}
+    if not f:
+        st.info("この銘柄の業績データを取得できませんでした（ETFなど、財務諸表のない銘柄は対象外です）。")
+        return
+    jp = tk_sel.endswith(".T")
+    cur = "円" if jp else "USD"
+    eh = [x for x in f.get("eps_hist", []) if x.get("a") is not None]
+    qd = f.get("q") or {}
+    qs = sorted(qd)
+    fig2 = go.Figure()
+    if eh:
+        fig2.add_trace(go.Bar(x=[x["d"] for x in eh], y=[x["a"] for x in eh], name=f"実績EPS（{cur}）", marker_color="#4ade80"))
+        est = [(x["d"], x["e"]) for x in eh if x.get("e") is not None]
+        if est:
+            fig2.add_trace(go.Scatter(x=[d for d, _ in est], y=[v for _, v in est], name="アナリスト予想", mode="markers",
+                                      marker=dict(color="#f59e0b", size=7, symbol="diamond")))
+    bp = {**{d: r["bps"] for d, r in (f.get("a") or {}).items() if r.get("bps") is not None},
+          **{d: r["bps"] for d, r in qd.items() if r.get("bps") is not None}}
+    if bp:
+        ks = sorted(bp)
+        fig2.add_trace(go.Scatter(x=ks, y=[bp[k] for k in ks], name=f"BPS（1株純資産・{cur}）", mode="lines+markers",
+                                  line=dict(color="#60a5fa", width=2.4), yaxis="y2"))
+    fig2.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=320, margin=dict(l=10, r=10, t=10, b=20),
+                       font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.14),
+                       xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                       yaxis=dict(tickfont=dict(color="#4ade80"), gridcolor="#1e293b", title=dict(text="EPS", font=dict(color="#4ade80"))),
+                       yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#60a5fa"), showgrid=False,
+                                   title=dict(text="BPS", font=dict(color="#60a5fa"))),
+                       hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig2, use_container_width=True, key="pf_fund_one")
+
+    # 直近の四半期の「利益と投資」の表
+    def _m(v):
+        if v is None:
+            return "—"
+        a = abs(v)
+        return f"{v / 1e8:,.0f}億" if a >= 1e8 else f"{v / 1e4:,.0f}万" if a >= 1e5 else f"{v:,.1f}"
+
+    rows = []
+    for d in qs[-6:][::-1]:
+        r = qd[d]
+        rev, cx = r.get("rev"), r.get("capex")
+        cx_pct = f'<div style="font-size:10px;color:#64748b">{cx / rev * 100:.0f}%</div>' if cx is not None and rev else ""
+        eps_s = r["eps"] if r.get("eps") is not None else "—"
+        bps_s = r["bps"] if r.get("bps") is not None else "—"
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{_quarter_label(d)}'
+            f'<div style="font-size:10px;color:#64748b;font-weight:400">{d}</div></td>'
+            f'<td>{_m(rev)}</td><td>{_m(r.get("ni"))}</td><td>{eps_s}</td><td>{bps_s}</td>'
+            f'<td>{_m(cx)}{cx_pct}</td><td>{_m(r.get("rd"))}</td><td>{_m(r.get("fcf"))}</td></tr>'
+        )
+    if rows:
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">四半期</th><th>売上</th><th>純利益</th>'
+            "<th>EPS</th><th>BPS</th><th>設備投資<br>(対売上)</th><th>研究開発</th><th>フリーCF</th></tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table>", unsafe_allow_html=True)
+
+    # 株価の上昇を「利益の増加」と「PER拡大（期待）」に分解（直近1年）
+    notes = []
+    if len(eh) >= 8:
+        ttm_now = sum(x["a"] for x in eh[-4:])
+        ttm_prev = sum(x["a"] for x in eh[-8:-4])
+        px = _close_history_5y(tk_sel)
+        if len(px) > 260 and ttm_prev > 0 and ttm_now > 0:
+            p_now, p_prev = float(px.iloc[-1]), float(px.iloc[-253])
+            g_px, g_eps = (p_now / p_prev - 1) * 100, (ttm_now / ttm_prev - 1) * 100
+            per_chg = ((p_now / ttm_now) / (p_prev / ttm_prev) - 1) * 100
+            notes.append(f"過去1年：株価 **{g_px:+.0f}%** ＝ 利益（TTM EPS）**{g_eps:+.0f}%** と、PER（利益に対する評価）の変化 **{per_chg:+.0f}%** の合成"
+                         f"（PER {p_prev / ttm_prev:.1f}倍 → {p_now / ttm_now:.1f}倍）。")
+            if g_eps > 0 and per_chg > 30:
+                notes.append("→ 利益の増加以上に、PER拡大（期待先行）で上がっています。業績が期待に届かないと下がりやすい局面です。")
+            elif g_eps > 0 and per_chg <= 10:
+                notes.append("→ 株価の上昇は、おおむね利益の増加で説明できます。")
+        elif ttm_now <= 0 or ttm_prev <= 0:
+            notes.append("直近または1年前のTTM EPSがマイナスのため、PERの分解はできません。")
+    bs = sorted(bp)
+    if len(bs) >= 5:
+        notes.append(f"BPS（1株純資産）：{bs[0][:4]}年 {bp[bs[0]]:,.1f} → {bs[-1][:7]} {bp[bs[-1]]:,.1f}（{(bp[bs[-1]] / bp[bs[0]] - 1) * 100:+.0f}%）"
+                     if bp[bs[0]] > 0 else "")
+    sh = [(d, qd[d].get("shares")) for d in qs if qd[d].get("shares")]
+    if len(sh) >= 4:
+        chg = (sh[-1][1] / sh[0][1] - 1) * 100
+        notes.append(f"発行株数：直近{len(sh)}四半期で {chg:+.1f}%（{'希薄化あり' if chg > 2 else '自社株買い等で減少' if chg < -2 else 'ほぼ横ばい'}）。")
+    for n in [x for x in notes if x]:
+        st.markdown(f"- {n}")
+    st.caption(
+        "数値は各銘柄の現地通貨。出典: Yahoo Finance（決算ごとの実績EPS・四半期/年次の財務諸表）。四半期の財務諸表は直近5〜6期分しか"
+        "取れないため、それより古い設備投資・純資産は年次の値でしか見られません。日本株は四半期の開示が粗い銘柄があります。"
+        f"業績データの最終更新: {f.get('updated_at', '—')}。"
+    )
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_current_holdings_backtest() -> pd.DataFrame:
     """現在の保有株数を固定したまま過去の株価に当てはめた場合の、合成ポートフォリオ評価額
@@ -37054,6 +37390,7 @@ def render_claude_trading_project():
                         )
 
                     render_portfolio_risk_simulation()
+                    render_portfolio_fundamentals()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
