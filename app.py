@@ -27482,6 +27482,219 @@ def _compute_portfolio_allocation_history() -> pd.DataFrame:
     return value_hist
 
 
+_RISK_SCENARIOS = [
+    ("2020年コロナ急落", "2020-02-19", "2020-03-23"),
+    ("2022年の下落相場", "2022-01-03", "2022-10-12"),
+    ("2018年末の急落", "2018-10-03", "2018-12-24"),
+    ("2008年リーマン・ショック", "2008-09-12", "2009-03-09"),
+    ("2000年ITバブル崩壊", "2000-03-24", "2002-10-09"),
+]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _compute_portfolio_risk_inputs() -> dict | None:
+    """現在の保有銘柄（円換算の評価額ウェイト）を使って、過去の値動きからリスク指標と
+    過去の暴落シナリオでの影響を計算する。投資信託は日次の価格が取れないため対象外（カバー率に反映）。
+    Returns: {weights, names, coverage_pct, total_jpy, monthly(月次リターンSeries), stats, stress}
+    """
+    open_pos = _get_open_positions()
+    tickers = [t for t in open_pos if t not in _JP_FUND_MAP]
+    if not tickers:
+        return None
+    price_dict = _fetch_ticker_close_prices(tickers, period="max")
+    if not price_dict:
+        return None
+    price_df = pd.concat(price_dict.values(), axis=1).sort_index()
+    if getattr(price_df.index, "tz", None) is not None:
+        price_df.index = price_df.index.tz_localize(None)
+    price_df.index = price_df.index.normalize()
+    price_df = price_df[~price_df.index.duplicated(keep="last")].ffill(limit=5)
+
+    def _dl(tk):
+        try:
+            raw = yf.download(tk, period="max", auto_adjust=True, progress=False)["Close"]
+            s = raw.iloc[:, 0] if isinstance(raw, pd.DataFrame) else raw
+            s = s.dropna()
+            if getattr(s.index, "tz", None) is not None:
+                s.index = s.index.tz_localize(None)
+            s.index = s.index.normalize()
+            return s[~s.index.duplicated(keep="last")]
+        except Exception:
+            return pd.Series(dtype=float)
+
+    fx = _dl("USDJPY=X").reindex(price_df.index).ffill().bfill()
+    bench = _dl("^GSPC")
+    if fx.isna().all() or bench.empty:
+        return None
+    jpy = pd.DataFrame({t: price_df[t] * (1.0 if t.endswith(".T") else fx)
+                        for t in price_df.columns if t in open_pos})
+    last_val = {t: float(open_pos[t]["qty"]) * float(jpy[t].dropna().iloc[-1]) for t in jpy.columns if jpy[t].notna().any()}
+    total = sum(last_val.values())
+    if total <= 0:
+        return None
+    w = {t: v / total for t, v in last_val.items()}
+    names = {t: _get_stock_display_name(t) for t in w}
+
+    rets = jpy.pct_change()
+    avail = rets.notna() & (rets.abs() < 1.0)           # 異常値（分割等の取り込み誤り）は除外
+    wv = pd.Series(w)
+    num = (rets.where(avail, 0.0) * wv).sum(axis=1)
+    den = (avail * wv).sum(axis=1)
+    port = (num / den).where(den >= 0.6).dropna()      # ウェイトの60%以上が揃う日だけ使う
+    if len(port) < 250:
+        return None
+    def _monthly(x):
+        try:
+            return (1 + x).resample("ME").prod() - 1
+        except ValueError:      # pandas 2.2未満は"ME"が未対応
+            return (1 + x).resample("M").prod() - 1
+
+    monthly = _monthly(port)
+    recent = port[port.index >= port.index[-1] - pd.DateOffset(years=5)]
+    _rm = _monthly(recent)
+    cum = (1 + recent).cumprod()
+    stats = {
+        "ann_vol": float(recent.std() * (252 ** 0.5)) * 100,
+        "max_dd": float((cum / cum.cummax() - 1).min()) * 100,
+        "worst_month": float(_rm.min()) * 100,
+        "best_month": float(_rm.max()) * 100,
+        "history_start": str(port.index[0].date()),
+        "top5_share": float(sum(sorted(w.values(), reverse=True)[:5])) * 100,
+        "eff_n": float(1.0 / sum(v * v for v in w.values())),
+    }
+    # 市場（S&P500）に対する感応度（直近3年・日次、円換算ポートフォリオ vs ドル建てS&P500）
+    b_ret = bench.pct_change().dropna()
+    _j = pd.concat([port, b_ret], axis=1, join="inner").dropna().tail(756)
+    stats["beta"] = float(_j.iloc[:, 0].cov(_j.iloc[:, 1]) / _j.iloc[:, 1].var()) if len(_j) > 120 else None
+
+    beta_i = {}
+    for t in w:
+        _jj = pd.concat([rets[t], b_ret], axis=1, join="inner").dropna().tail(756)
+        beta_i[t] = float(_jj.iloc[:, 0].cov(_jj.iloc[:, 1]) / _jj.iloc[:, 1].var()) if len(_jj) > 120 else 1.0
+
+    def _at(s, d, side):
+        s = s.dropna()
+        if s.empty:
+            return None
+        d = pd.Timestamp(d)
+        if side == "start":
+            x = s[s.index >= d]
+            return float(x.iloc[0]) if len(x) and (x.index[0] - d).days <= 10 else None
+        x = s[s.index <= d]
+        return float(x.iloc[-1]) if len(x) and (d - x.index[-1]).days <= 10 else None
+
+    stress = []
+    for nm, a, b in _RISK_SCENARIOS:
+        pa, pb = _at(bench, a, "start"), _at(bench, b, "end")
+        if pa is None or pb is None:
+            continue
+        mkt = pb / pa - 1
+        covered, impact, uncovered_w = 0.0, 0.0, 0.0
+        for t, wt in w.items():
+            ra, rb = _at(jpy[t], a, "start"), _at(jpy[t], b, "end")
+            if ra and rb:
+                impact += wt * (rb / ra - 1)
+                covered += wt
+            else:
+                impact += wt * beta_i[t] * mkt
+                uncovered_w += wt
+        stress.append({"name": nm, "start": a, "end": b, "market": mkt * 100, "impact": impact * 100,
+                       "covered": covered * 100})
+    cover_all = sum(open_pos[t]["qty"] * float(jpy[t].dropna().iloc[-1]) for t in w) if w else 0
+    return {"weights": w, "names": names, "total_jpy": total, "monthly": monthly, "stats": stats,
+            "stress": stress, "cover_all": cover_all}
+
+
+@st.fragment
+def render_portfolio_risk_simulation():
+    """📐 今のポートフォリオ構成で、過去の暴落と将来の値動きがどうなるかを計算して表示する。
+    ログイン中のユーザーの取引記録をその場で計算するだけで、保有データは保存・送信しない。"""
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**📐 今のポートフォリオ構成だと、どうなるか（リスクと将来のシミュレーション）**")
+    with st.spinner("保有銘柄の過去データからリスクを計算中..."):
+        r = _compute_portfolio_risk_inputs()
+    if not r:
+        st.info("計算に必要なデータが足りません（保有銘柄の株価データを取得できませんでした）。")
+        return
+    st_ = r["stats"]
+    c = st.columns(4)
+    c[0].metric("年率ボラティリティ", f"{st_['ann_vol']:.0f}%", help="直近5年の日次リターンから計算（円換算）。S&P500は約15〜20%。")
+    c[1].metric("直近5年の最大下落", f"{st_['max_dd']:.0f}%")
+    c[2].metric("最悪の月 / 最良の月", f"{st_['worst_month']:+.0f}% / {st_['best_month']:+.0f}%")
+    c[3].metric("S&P500に対するβ", f"{st_['beta']:.2f}" if st_["beta"] is not None else "—",
+                help="直近3年。1より大きいほど、市場の上下より大きく動く構成。")
+    st.caption(
+        f"上位5銘柄で全体の**{st_['top5_share']:.0f}%**、実質的な分散数（1/Σウェイト²）は**{st_['eff_n']:.1f}銘柄分**です"
+        "（実際の保有数より小さいほど、少数の銘柄に偏っています）。"
+    )
+
+    st.markdown("**① 過去の暴落が、今の構成で起きたら**")
+    _rows = []
+    for s in r["stress"]:
+        _loss = r["total_jpy"] * s["impact"] / 100
+        _rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{s["name"]}'
+            f'<div style="font-size:11px;color:#64748b;font-weight:400">{s["start"]}〜{s["end"]}</div></td>'
+            f'<td>{s["market"]:+.0f}%</td><td style="color:#f87171;font-weight:700">{s["impact"]:+.0f}%</td>'
+            f'<td style="color:#f87171">{_loss / 10000:+,.0f}万円</td><td style="color:#94a3b8">{s["covered"]:.0f}%</td></tr>'
+        )
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">シナリオ</th><th>S&P500</th>'
+        "<th>今の構成の推定</th><th>評価額の変化</th><th>実績ベースの割合</th></tr></thead><tbody>"
+        + "".join(_rows) + "</tbody></table>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "各銘柄の実際の値動き（円換算）をウェイトで合算。その時点で上場していなかった銘柄は、直近3年のβ×当時のS&P500の"
+        "騰落率で代用しています（「実績ベースの割合」が100%未満の行は、その分が推定）。現在の構成を過去に当てはめた仮の計算で、"
+        "実際にその構成で保有していたわけではありません。"
+    )
+
+    st.markdown("**② 今後の値動きのシミュレーション（ブートストラップ法）**")
+    _m = r["monthly"][-60:].dropna()
+    _a, _b = st.columns(2)
+    _exp = _a.slider("想定する年平均リターン（%）", 0, 20, 7, 1, key="pr_exp",
+                     help="過去の実績は、保有銘柄が急騰した分だけ良く見えます。そこで、月ごとのばらつき方だけを過去から借り、平均は、ここで指定した値に合わせます。")
+    _yrs = _b.radio("期間", [5, 10, 20], index=1, horizontal=True, key="pr_yrs", format_func=lambda v: f"{v}年")
+    import numpy as _np
+    _rng = _np.random.default_rng(42)
+    _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)   # 平均だけ指定値に合わせる
+    _n, _steps, _blk = 2000, _yrs * 12, 3
+    _idx = _rng.integers(0, max(len(_arr) - _blk, 1), size=(_n, (_steps // _blk) + 1))
+    _paths = _np.concatenate([_arr[_idx + k][:, :, None] for k in range(_blk)], axis=2).reshape(_n, -1)[:, :_steps]
+    _val = r["total_jpy"] * _np.cumprod(1 + _paths, axis=1)
+    _val = _np.concatenate([_np.full((_n, 1), r["total_jpy"]), _val], axis=1)
+    _p10, _p50, _p90 = (_np.percentile(_val, q, axis=0) for q in (10, 50, 90))
+    _x = list(range(_steps + 1))
+    _fig = go.Figure()
+    _fig.add_trace(go.Scatter(x=_x, y=_p90 / 1e4, name="上位10%", line=dict(color="#4ade80", width=1.2)))
+    _fig.add_trace(go.Scatter(x=_x, y=_p50 / 1e4, name="中央値", line=dict(color="#e2e8f0", width=2.4)))
+    _fig.add_trace(go.Scatter(x=_x, y=_p10 / 1e4, name="下位10%", line=dict(color="#f87171", width=1.2),
+                              fill="tonexty", fillcolor="rgba(148,163,184,0.12)"))
+    _fig.update_layout(
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=320, margin=dict(l=10, r=10, t=10, b=20),
+        font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+        xaxis=dict(title=dict(text="経過月数", font=dict(color="#94a3b8")), tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+        yaxis=dict(title=dict(text="評価額（万円）", font=dict(color="#94a3b8")), tickfont=dict(color="#94a3b8"),
+                   gridcolor="#1e293b", tickformat=","),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+    )
+    st.plotly_chart(_fig, use_container_width=True, key="pr_fan")
+    _cm = _np.cumprod(1 + _paths, axis=1)
+    _p_loss = float((_cm[:, -1] < 1).mean()) * 100
+    _p_dd30 = float(((_cm / _np.maximum.accumulate(_np.concatenate([_np.ones((_n, 1)), _cm], axis=1)[:, 1:], axis=1) - 1).min(axis=1) <= -0.30).mean()) * 100
+    d = st.columns(3)
+    d[0].metric(f"{_yrs}年後の中央値", f"{_p50[-1] / 1e4:,.0f}万円", f"{(_p50[-1] / r['total_jpy'] - 1) * 100:+.0f}%")
+    d[1].metric(f"{_yrs}年後に今より減っている確率", f"{_p_loss:.0f}%")
+    d[2].metric("途中で30%以上下落する確率", f"{_p_dd30:.0f}%")
+    st.caption(
+        f"過去5年（{len(_m)}か月分、計算に使えた履歴は{st_['history_start']}以降）の月次リターンを3か月ずつ並べ替えて{_n:,}通りを作成。税金・手数料・追加投資・取り崩しは含みません。"
+        "投資信託は日次データが無いため計算から除いています。"
+        "あくまで過去のばらつき方を借りた試算で、将来を予測・保証するものではありません。"
+    )
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_current_holdings_backtest() -> pd.DataFrame:
     """現在の保有株数を固定したまま過去の株価に当てはめた場合の、合成ポートフォリオ評価額
@@ -36747,6 +36960,8 @@ def render_claude_trading_project():
                             "※ 評価額は円換算（USD建て銘柄は日次USDJPYレートで換算）。投資信託は日次の基準価額が取れないため、取引時の約定価格を据え置いた近似値（最新日のみ現在の基準価額）。"
                             "売却済みで保有額が0の銘柄は非表示。全期間表示です。"
                         )
+
+                    render_portfolio_risk_simulation()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
