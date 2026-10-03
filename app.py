@@ -28042,12 +28042,35 @@ def render_portfolio_fundamentals():
         c[0].metric("持分利益（TTM）", f"{e_now / 1e4:,.0f}万円",
                     f"{_fund_series_ratio(e_now, e_prev):+.0f}%（前年比）" if _fund_series_ratio(e_now, e_prev) is not None else None,
                     help="Σ 保有株数×各銘柄の直近4決算の実績EPS（円換算）。今の保有株数を過去に当てはめた値。")
-        c[1].metric("ポートフォリオPER", f"{total_val / e_now:.1f}倍" if e_now > 0 else "—",
-                    help="現在の評価額 ÷ 持分利益(TTM)。マイナス利益の銘柄も合算しています。")
+        c[1].metric("ポートフォリオPER（評価額÷利益）", f"{total_val / e_now:.1f}倍" if e_now > 0 else "—",
+                    help="今の評価額が、直近1年の利益（持分利益）の何年分か。利益そのものが何倍になったかではありません（成長倍率は下に表示）。"
+                         "マイナス利益の銘柄も合算しています。")
         c[2].metric("持分純資産（BPS×株数）", f"{b_now / 1e4:,.0f}万円" if b_now else "—")
         c[3].metric("ポートフォリオPBR / ROE",
                     (f"{total_val / b_now:.1f}倍 / {e_now / b_now * 100:.0f}%" if b_now and b_now > 0 else "—"),
                     help="PBR=評価額÷持分純資産、ROE=持分利益÷持分純資産。")
+        def _multiples_line(series, label):
+            """今の値が、1年・3年・5年前、最古の何倍か（年率つき）。"""
+            parts = []
+            for yrs in (1, 3, 5):
+                if len(series) > 4 * yrs and series.iloc[-1 - 4 * yrs] > 0:
+                    parts.append(f"{yrs}年前の**{series.iloc[-1] / series.iloc[-1 - 4 * yrs]:.1f}倍**")
+            if len(series) > 8 and series.iloc[0] > 0:
+                yrs_all = (len(series) - 1) / 4
+                mult = series.iloc[-1] / series.iloc[0]
+                cagr = (mult ** (1 / yrs_all) - 1) * 100
+                parts.append(f"最古（{series.index[0]}）の**{mult:.1f}倍**（年率**{cagr:.0f}%**）")
+            return f"{label}は、今が " + "、".join(parts) if parts else ""
+
+        _ml = _multiples_line(e, "持分利益（EPSの合計）")
+        if _ml:
+            st.markdown(f"🔢 {_ml}。")
+        _mb = _multiples_line(b, "持分純資産（BPSの合計）") if len(b) else ""
+        if _mb:
+            st.markdown(f"🔢 {_mb}。")
+        st.caption("※ PER 29.1倍のような「倍」は、株価が利益の何年分か（評価の高さ）を表します。利益や純資産の成長は、ここに書いた「○年前の○倍」を見てください。"
+                   "今の保有銘柄の過去を見ているため、後から勝ち残った銘柄が中心になる点（後知恵）にも注意してください。")
+
         def _growth_chart(series, name, color, key):
             """金額の棒グラフ（左軸）と、前年同期比の成長率の線（右軸）。EPSとBPSは桁が違うので別々に描く。"""
             yoy = (series.pct_change(4) * 100).where(series.shift(4) > 0)
