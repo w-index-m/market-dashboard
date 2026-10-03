@@ -6379,6 +6379,8 @@ _MARKS_PRINCIPLES = """
 16. 一見別の銘柄・テーマでも、危機時には同時に下がることがある。複数の銘柄が同じ要因（同じテーマ・同じ需要）に依存していないかを確認し、分散していると見なさない。
 17. 成績を、市場全体の動き（ベータ）によるものか、個別の選択（アルファ）によるものか、分けて考える。市場の上昇に乗っただけの成績を、実力と見なさない。
 18. 典型的な過ち: 買いすぎる、競り合って値をつり上げる、キャッシュを持たない、レバレッジをかけすぎる、高いリターンを追いすぎる。提案がこれに当てはまらないかを確認する。
+19. リターンの数字だけで評価せず、どれだけのリスクを取って得たかを見る。高リスクの結果の高リターンは付加価値ではない。
+20. 目標は非対称性。上げ相場では市場に大きく遅れず、下げ相場では市場より小さい下げ幅に抑えられる構成を良いとする。構成の評価では、上昇時の取りこぼしと、下落時の耐性の両方に触れる。
 """
 
 
@@ -27744,6 +27746,18 @@ def _compute_portfolio_risk_inputs() -> dict | None:
     b_ret = bench.pct_change().dropna()
     _j = pd.concat([port, b_ret], axis=1, join="inner").dropna().tail(756)
     stats["beta"] = float(_j.iloc[:, 0].cov(_j.iloc[:, 1]) / _j.iloc[:, 1].var()) if len(_j) > 120 else None
+    # 上げ相場・下げ相場の捕捉率（直近3年の月次、円換算ポートフォリオ vs ドル建てS&P500）
+    stats["up_cap"], stats["down_cap"], stats["cap_n"] = None, None, 0
+    try:
+        _pm, _bm = _monthly(port), _monthly(b_ret)
+        _mm = pd.concat([_pm, _bm], axis=1, join="inner").dropna().tail(36)
+        _up, _dn = _mm[_mm.iloc[:, 1] > 0], _mm[_mm.iloc[:, 1] < 0]
+        if len(_up) >= 6 and len(_dn) >= 6:
+            stats["up_cap"] = float(_up.iloc[:, 0].mean() / _up.iloc[:, 1].mean()) * 100
+            stats["down_cap"] = float(_dn.iloc[:, 0].mean() / _dn.iloc[:, 1].mean()) * 100
+            stats["cap_n"] = (len(_up), len(_dn))
+    except Exception:
+        pass
     stats["alpha"], stats["r2"] = None, None
     if stats["beta"] is not None:
         _resid = _j.iloc[:, 0] - stats["beta"] * _j.iloc[:, 1]
@@ -27812,6 +27826,17 @@ def render_portfolio_risk_simulation():
             f"市場の動き（β={st_['beta']:.2f}）では説明できない超過リターン（アルファ）は**年率{st_['alpha']:+.0f}%**（概算）。"
             "アルファは偶然（運）や、特定のテーマの上昇によるものを含み、将来も続く実力とは限りません。"
             "円換算のポートフォリオとドル建てのS&P500を比べており、無リスク金利は引いていません。"
+        )
+    if st_.get("up_cap") is not None:
+        _u, _d = st_["up_cap"], st_["down_cap"]
+        _verdict = ("上げ相場で市場以上に取り、下げ相場では市場より小さい下げ（非対称性が良好）" if _u >= 100 and _d < 100
+                    else "上げ相場で市場以上に取るが、下げ相場でも市場以上に下がる（攻め寄り）" if _u >= 100
+                    else "上げ相場の取りこぼしがあるが、下げ相場は市場より小さい（守り寄り）" if _d < 100
+                    else "上げ相場で市場に届かず、下げ相場でも市場以上に下がる（不利な形）")
+        st.caption(
+            f"⚖️ **上げ・下げ相場の捕捉率**（直近3年の月次。上げ{st_['cap_n'][0]}か月／下げ{st_['cap_n'][1]}か月）："
+            f"上げ相場で市場の**{_u:.0f}%**、下げ相場で市場の**{_d:.0f}%**を捕捉 → {_verdict}。"
+            "100%なら市場と同じ動き。上げで100%超かつ下げで100%未満が理想的な非対称性です。月数が少ないため目安です。"
         )
     st.caption(
         f"上位5銘柄で全体の**{st_['top5_share']:.0f}%**、実質的な分散数（1/Σウェイト²）は**{st_['eff_n']:.1f}銘柄分**です"
