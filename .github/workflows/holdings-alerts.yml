@@ -1,0 +1,36 @@
+name: Holdings alerts (LINE & Slack)
+
+on:
+  schedule:
+    - cron: "30 7 * * 1-5"    # 07:30 UTC = 16:30 JST 平日（日本株の引け後）
+    - cron: "30 21 * * 1-5"   # 21:30 UTC = 06:30 JST 火〜土（米国株の引け後）
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "jp / us / all"
+        default: "all"
+      dry_run:
+        description: "1 にすると送信せずログにだけ表示"
+        default: ""
+
+# 条件に当てはまった時だけ通知する（当てはまらなければ何も送らない）。売買は行わない。
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Check holdings and notify
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TRADING_USERNAME: "admin"
+          ALERT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          MARKET: ${{ github.event.schedule == '30 7 * * 1-5' && 'jp' || github.event.schedule == '30 21 * * 1-5' && 'us' || github.event.inputs.market || 'all' }}
+        run: python scripts/holdings_alerts.py "$MARKET"
