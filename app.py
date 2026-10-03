@@ -11417,6 +11417,7 @@ def render_macro_indicators(macro: dict | None = None):
         st.info("日本10年国債利回りのデータを取得できませんでした。")
 
     render_reit_card()
+    render_longterm_compounding_card()
 
 
 # J-REIT（日本の上場不動産投資信託）。ETFは分配金込みの調整後終値で比較する。
@@ -11538,6 +11539,131 @@ def _render_tokyo_re_index():
         "公表ページで最新のものとは限りません）。東京都全体の指数で、23区だけの値ではありません。"
         "季節調整値・取引価格ベース。出典: 国土交通省「不動産価格指数（住宅）」"
     )
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _load_longterm_returns() -> dict | None:
+    """scripts/precompute_longterm_returns.py がGitHub Actionsで月1回生成する
+    data/longterm_returns.json（株式・REIT・国債の月次トータルリターン指数とCPI）を読む。"""
+    import json as _json_lt
+    path = os.path.join(os.path.dirname(__file__), "data", "longterm_returns.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_lt.load(f)
+        return d if (d.get("series") or {}).get("sp500") else None
+    except Exception as e:
+        logger.warning(f"[longterm_returns] 読込失敗: {e}")
+        return None
+
+
+# キー: (表示名, 色, 説明)
+_LT_ASSETS = {
+    "sp500":       ("S&P500（配当再投資）", "#4ade80", "VFINX（500インデックス・ファンド）、1980年〜"),
+    "reit_idx":    ("米国REIT指数（配当再投資）", "#f59e0b", "VGSIX（米国REIT指数連動ファンド）、1996年〜"),
+    "reit_fund":   ("米国REIT（フィデリティ・アクティブ）", "#f59e0b", "FRESX、1986年〜。アクティブ運用で指数ではありません"),
+    "tsy_long":    ("米国長期国債（利子再投資）", "#60a5fa", "VUSTX（長期米国債ファンド）、1986年〜"),
+    "tsy_mid":     ("米国中期国債（利子再投資）", "#a78bfa", "VFITX（中期米国債ファンド）、1991年〜"),
+    "tsy10_synth": ("米国10年国債（合成）", "#60a5fa", "FRED 10年利回りから計算した推定値（1953年〜）"),
+}
+
+
+@st.fragment
+def render_longterm_compounding_card():
+    """🌱 米国の株式・REIT・国債に長期投資した場合の複利チャート（配当・利子はすべて再投資）。
+    ウィジェット操作でページ全体が再実行されないよう、フラグメントにしてある。"""
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0;margin:4px 0 4px">'
+        '🌱 長期の複利シミュレーション（米国：株式・REIT・国債）</div>',
+        unsafe_allow_html=True,
+    )
+    d = _load_longterm_returns()
+    if not d:
+        st.info("長期リターンのデータがまだ生成されていません（GitHub Actionsの月次更新待ち）。")
+        return
+    ser = {}
+    for k, m in d["series"].items():
+        _s = pd.Series(m)
+        _s.index = pd.PeriodIndex(_s.index, freq="M")
+        ser[k] = _s.sort_index()
+    _latest = max(s.index[-1] for k, s in ser.items() if k != "cpi")
+    _cpi = ser["cpi"].reindex(pd.period_range(ser["cpi"].index[0], _latest, freq="M")).ffill()
+
+    _wins = {
+        "20年": (20, ["sp500", "reit_idx", "tsy_long", "tsy_mid"]),
+        "30年": (30, ["sp500", "reit_idx", "tsy_long", "tsy_mid"]),
+        "約40年": (40, ["sp500", "reit_fund", "tsy_long"]),
+        "最長（約46年・株と国債のみ）": (60, ["sp500", "tsy10_synth"]),
+    }
+    _c1, _c2 = st.columns([3, 2])
+    _w = _c1.radio("期間", list(_wins), horizontal=True, key="lt_window")
+    _init = _c2.number_input("初期投資額（USD）", min_value=1000, max_value=100_000_000, value=10_000, step=1000, key="lt_init")
+    _c3, _c4 = st.columns(2)
+    _real = _c3.checkbox("インフレ調整（実質）", value=False, key="lt_real",
+                         help="米国の消費者物価指数(CPI)で割り、購買力ベースにします。")
+    _log = _c4.checkbox("縦軸を対数目盛にする", value=False, key="lt_log")
+
+    _years, _keys = _wins[_w]
+    _start = max(_latest - _years * 12, max(ser[k].index[0] for k in _keys))
+    _fig = go.Figure()
+    _rows = []
+    for k in _keys:
+        _s = ser[k]
+        _s = _s[(_s.index >= _start) & (_s.index <= _latest)]
+        if len(_s) < 12:
+            continue
+        _val = _s / _s.iloc[0] * _init
+        if _real:
+            _c = _cpi.reindex(_s.index).ffill()
+            _val = _val / (_c / _c.iloc[0])
+        _name, _color, _desc = _LT_ASSETS[k]
+        _fig.add_trace(go.Scatter(
+            x=_s.index.to_timestamp(), y=_val.round(0), name=_name, mode="lines",
+            line=dict(color=_color, width=2.6 if k == "sp500" else 1.8, dash="dot" if k == "tsy_mid" else "solid"),
+            hovertemplate="%{x|%Y-%m}<br>" + _name + ": $%{y:,.0f}<extra></extra>",
+        ))
+        _yrs = (len(_s) - 1) / 12
+        _cagr = (float(_val.iloc[-1] / _val.iloc[0]) ** (1 / _yrs) - 1) * 100 if _yrs > 0 else 0.0
+        _dd = float((_val / _val.cummax() - 1).min()) * 100
+        _vol = float(_val.pct_change().dropna().std() * (12 ** 0.5)) * 100
+        _rows.append((_name, _val.iloc[-1], _cagr, _dd, _vol))
+    if not _fig.data:
+        st.info("この期間で表示できるデータがありません。")
+        return
+    _fig.update_layout(
+        paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=360,
+        margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
+        xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+        yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", tickprefix="$", tickformat=",",
+                   type="log" if _log else "linear",
+                   title=dict(text="評価額（USD" + ("・実質" if _real else "") + "）", font=dict(color="#94a3b8"))),
+        legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")),
+    )
+    st.plotly_chart(_fig, use_container_width=True, key="lt_fig")
+
+    _tr = "".join(
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{n}</td>'
+        f'<td>${v:,.0f}</td><td style="color:{"#4ade80" if c >= 0 else "#f87171"}">{c:+.1f}%</td>'
+        f'<td style="color:#f87171">{dd:.0f}%</td><td>{vol:.0f}%</td></tr>'
+        for n, v, c, dd, vol in _rows
+    )
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">資産</th>'
+        f"<th>最終評価額</th><th>年率リターン</th><th>最大下落</th><th>年率ボラ</th></tr></thead><tbody>{_tr}</tbody></table>",
+        unsafe_allow_html=True,
+    )
+    _sy = f"{_start.year}年{_start.month}月"
+    st.caption(
+        f"期間: {_sy}〜{_latest.year}年{_latest.month}月（月次）。初期投資額 ${_init:,} を一括で投資し、配当・利子はすべて再投資、"
+        "税金・為替は考慮していません（米ドル建て）。ファンドの実績値は運用コスト控除後です。"
+        "株式のトータルリターンを取れる期間は1980年からのため、「50年」は用意できず、最長で約46年です。"
+        "国債の「合成」は、10年国債の利回りから計算した推定値で、実在のファンドの実績ではありません。"
+        "過去の実績は将来を保証しません。出典: yfinance（各ファンドの分配金再投資後の価格）、FRED（利回り・CPI）"
+    )
+    with st.expander("使っているデータの内訳"):
+        st.markdown("\n".join(f"- **{v[0]}**: {v[2]}" for v in _LT_ASSETS.values()))
 
 
 def render_reit_card():
