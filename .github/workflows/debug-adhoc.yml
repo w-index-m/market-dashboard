@@ -20,6 +20,8 @@ jobs:
       - name: Install deps
         run: pip install -q -r requirements.txt
       - name: Run script
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: PYTHONPATH=. python "scripts/${{ github.event.inputs.script }}" 2>&1 | grep -v "possibly delisted\|HTTP Error" | tee /tmp/adhoc.txt
       # 実行ログはアシスタントの作業環境から読めないため、結果をadhoc-outputブランチに置く（毎回上書き）
       - name: Publish output

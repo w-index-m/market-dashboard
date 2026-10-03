@@ -4,7 +4,7 @@ import warnings
 import yfinance as yf
 
 warnings.filterwarnings("ignore")
-for t in ["AVGO", "NVDA", "MU", "VRT", "LITE", "8306.T", "8001.T", "5803.T", "6857.T", "2801.T", "4912.T", "4967.T", "5334.T", "8058.T", "200A.T", "285A.T"]:
+for t in ["AAPL", "MSFT", "KO", "JNJ", "7203.T", "8306.T", "9432.T"]:
     try:
         tk = yf.Ticker(t)
         info = tk.info or {}
