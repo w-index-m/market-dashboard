@@ -914,6 +914,13 @@ def render_server_metrics_panel() -> None:
         _cpu_last = next((x["cpu_pct"] for x in reversed(_smp) if x["cpu_pct"] is not None), None)
         _c[1].metric("CPU（直近30秒）", f"{_cpu_last:.0f}%" if _cpu_last is not None else "—",
                      help="100% = 1コアをフルに使用。コア数が複数あれば100%を超えることがあります。")
+        _nc = _now.get("ncpu")
+        if _nc:
+            _nc_txt = f"{_nc:g}"
+            _line = f"🧮 利用可能なCPUコア数: **{_nc_txt}**"
+            if _cpu_last is not None:
+                _line += f"　／　直近の使用: 約{_cpu_last / 100:.2f}コア分（全体の{_cpu_last / _nc:.0f}%）"
+            st.caption(_line)
         if st.button("🧹 メモリを整理する", key="srv_mem_trim",
                      help="不要なデータを回収し、使っていないメモリをOSへ返します（キャッシュは消えません）。"):
             _before = _now["cg_used_mb"] if _now["cg_used_mb"] is not None else _now["rss_mb"]
