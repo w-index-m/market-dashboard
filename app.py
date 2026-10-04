@@ -39505,23 +39505,53 @@ def _render_trading_page():
 
 def _disable_browser_translate() -> None:
     """ブラウザの自動翻訳（Chromeの「日本語に翻訳」など）を止める。
-    Streamlitは<html lang="en">を出すため、日本語のページが英語と誤判定されて自動翻訳され、
-    「配当安定モード」が「入力安定モード」になるなど文言が壊れて表示されることがあった。
-    親ページのlangをjaにし、notranslateを付ける（iframe内スクリプトから親ドキュメントを書き換える）。"""
+    Streamlitは<html lang="en">を出し、最初に届くHTMLの中身も英語（"You need to enable JavaScript"）のため、
+    Chromeが「英語のページ」と判定して日本語に自動翻訳し、「配当安定モード」が「入力安定モード」になるなど
+    文言が崩れることがある。Streamlit Cloudでは配信されるHTMLを変えられないので、アプリ起動後にJSで
+      ① 親ページの lang を ja、translate="no"、meta notranslate / content-language を設定
+      ② Chromeが翻訳済みのクラス（translated-ltr/rtl）を付けた場合は、画面上部に解除方法の案内バナーを出す
+    を行う（翻訳済みの文言はJSから元に戻せないため、案内にとどめる）。"""
     import streamlit.components.v1 as _stc
     _stc.html(
         """<script>
         (function(){
-          try {
-            var d = window.parent.document;
-            d.documentElement.setAttribute('lang', 'ja');
-            d.documentElement.setAttribute('translate', 'no');
-            d.documentElement.classList.add('notranslate');
-            if (d.body) { d.body.setAttribute('translate', 'no'); d.body.classList.add('notranslate'); }
-            if (!d.querySelector('meta[name="google"][content="notranslate"]')) {
-              var m = d.createElement('meta'); m.name = 'google'; m.content = 'notranslate'; d.head.appendChild(m);
-            }
-          } catch(e) {}
+          var d; try { d = window.parent.document; } catch(e) { return; }
+          function setup(){
+            try {
+              var h = d.documentElement;
+              h.setAttribute('lang', 'ja'); h.setAttribute('translate', 'no'); h.classList.add('notranslate');
+              if (d.body) { d.body.setAttribute('translate', 'no'); d.body.classList.add('notranslate'); }
+              [['google','notranslate'], ['content-language','ja']].forEach(function(p){
+                var sel = 'meta[' + (p[0]==='content-language' ? 'http-equiv' : 'name') + '="' + p[0] + '"]';
+                if (!d.querySelector(sel)) {
+                  var m = d.createElement('meta');
+                  if (p[0]==='content-language') m.setAttribute('http-equiv', 'content-language'); else m.name = p[0];
+                  m.content = p[1]; d.head.appendChild(m);
+                }
+              });
+            } catch(e) {}
+          }
+          function check(){
+            try {
+              var h = d.documentElement;
+              var translated = h.classList.contains('translated-ltr') || h.classList.contains('translated-rtl');
+              var id = 'jp-translate-warning';
+              if (translated && !d.getElementById(id)) {
+                var b = d.createElement('div'); b.id = id;
+                b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fff;'
+                  + 'padding:8px 12px;font-size:13px;line-height:1.5;display:flex;gap:10px;align-items:center';
+                b.innerHTML = '<span style="flex:1">⚠️ ブラウザの自動翻訳が有効なため、文言が崩れて表示されている可能性があります。'
+                  + 'アドレスバーの翻訳アイコン →「元のページを表示」または「日本語を翻訳しない」を選んでください。</span>'
+                  + '<button style="background:#fff;color:#7c2d12;border:0;border-radius:6px;padding:4px 10px;font-weight:700">閉じる</button>';
+                b.querySelector('button').onclick = function(){ b.remove(); };
+                d.body.appendChild(b);
+              }
+              if (!translated) { var w = d.getElementById(id); if (w) w.remove(); }
+            } catch(e) {}
+          }
+          setup();
+          [1500, 4000, 8000].forEach(function(t){ setTimeout(function(){ setup(); check(); }, t); });
+          try { new MutationObserver(check).observe(d.documentElement, {attributes:true, attributeFilter:['class']}); } catch(e) {}
         })();
         </script>""",
         height=0,
