@@ -28143,6 +28143,21 @@ def _fetch_fundamentals_history(ticker: str) -> dict:
                 ]
         except Exception:
             pass
+        # 決算発表日時点の株価（PERの過去の位置を出すため。配当調整なし＝EPSと同じ基準）
+        try:
+            if out["eps_hist"]:
+                _h = tk.history(period="max", auto_adjust=False)["Close"].dropna()
+                if getattr(_h.index, "tz", None) is not None:
+                    _h.index = _h.index.tz_localize(None)
+                _h.index = _h.index.normalize()
+                _px = {}
+                for _x in out["eps_hist"]:
+                    _sub = _h[_h.index <= pd.Timestamp(_x["d"])]
+                    if len(_sub):
+                        _px[_x["d"]] = round(float(_sub.iloc[-1]), 4)
+                out["px_at"] = _px
+        except Exception:
+            pass
         for tag, inc, bal, cf in (
             ("q", getattr(tk, "quarterly_income_stmt", None), getattr(tk, "quarterly_balance_sheet", None),
              getattr(tk, "quarterly_cashflow", None)),
@@ -28218,6 +28233,9 @@ def _merge_fundamentals(old: dict, new: dict, max_q: int = 40, max_a: int = 20, 
     eps = {x["d"]: x for x in (old.get("eps_hist") or [])}
     eps.update({x["d"]: x for x in (new.get("eps_hist") or [])})
     out["eps_hist"] = [eps[d] for d in sorted(eps)[-max_eps:]]
+    pxa = {**(old.get("px_at") or {}), **(new.get("px_at") or {})}
+    if pxa:
+        out["px_at"] = {d: pxa[d] for d in sorted(pxa)[-max_eps:]}
     return out
 
 
@@ -28321,6 +28339,32 @@ def _close_history_5y(ticker: str) -> pd.Series:
         return pd.Series(dtype=float)
 
 
+def _mvs_pct(w: float, total: float) -> str:
+    return f"{w / total * 100:.1f}%" if total else "—"
+
+
+def _per_position(f: dict, cur_price) -> dict | None:
+    """銘柄の「今のPER」が、その銘柄自身の過去（最大約10年）のPERのどのあたりかを返す。
+    PER = 決算発表日の株価 ÷ 直近4決算の実績EPS合計(TTM)。TTMがマイナスの時期は除く。
+    Returns: {"now","median","pct"(今より低かった割合%),"n"}。計算できなければNone。"""
+    eh = [x for x in (f.get("eps_hist") or []) if x.get("a") is not None]
+    px = f.get("px_at") or {}
+    if len(eh) < 8 or not px or not cur_price:
+        return None
+    hist = []
+    for i in range(3, len(eh)):
+        ttm = sum(x["a"] for x in eh[i - 3:i + 1])
+        p0 = px.get(eh[i]["d"])
+        if ttm > 0 and p0:
+            hist.append(p0 / ttm)
+    ttm_now = sum(x["a"] for x in eh[-4:])
+    if ttm_now <= 0 or len(hist) < 10:
+        return None
+    now = float(cur_price) / ttm_now
+    arr = pd.Series(hist[-40:])
+    return {"now": now, "median": float(arr.median()), "pct": float((arr < now).mean() * 100), "n": len(arr)}
+
+
 @st.fragment
 def render_portfolio_fundamentals():
     """📊 保有銘柄の業績推移（EPS・BPS・設備投資）。利益と投資の裏付けがあって株価が上がってきたかを見る。
@@ -28422,6 +28466,41 @@ def render_portfolio_fundamentals():
             "EPSの履歴は決算ごとの実績（最大約12年分）、純資産は直近5〜6期（四半期）と年次4〜5期から作るため、古い期間は純資産が欠けます。"
             "利益がマイナスの銘柄も合算されます。投資信託・ETFは対象外です。"
         )
+
+    # ── 割高度：今のPERは、その銘柄自身の過去のPERのどのあたりか ──────────
+    st.markdown("**🧭 割高度：今のPERは、その銘柄の過去と比べてどこか**")
+    _vrows, _hi_w, _tot_w = [], 0.0, 0.0
+    for _tk, _p in pos2.items():
+        _w = (_p["qty"] * (_p["price"] or 0) * (1.0 if _p["is_jp"] else fx))
+        _v = _per_position(funds.get(_tk) or {}, _p["price"])
+        if not _v:
+            continue
+        _tot_w += _w
+        _hi = _v["pct"] >= 80
+        _hi_w += _w if _hi else 0.0
+        _lab, _col = (("🟠 過去と比べ高い", "#fb923c") if _v["pct"] >= 80 else
+                      ("🔵 過去と比べ低い", "#60a5fa") if _v["pct"] <= 30 else ("⚪ 平常圏", "#94a3b8"))
+        _vrows.append((_w, f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">'
+                       f'{_get_stock_display_name(_tk)}</td><td>{_v["now"]:.1f}倍</td><td>{_v["median"]:.1f}倍</td>'
+                       f'<td style="font-weight:700">{_v["pct"]:.0f}%</td><td style="color:{_col}">{_lab}</td>'
+                       f'<td style="color:#94a3b8">{_mvs_pct(_w, total_val)}</td></tr>'))
+    if _vrows:
+        _vrows.sort(key=lambda x: -x[0])
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>今のPER</th>'
+            "<th>過去の中央値</th><th>今より低かった割合</th><th>判定</th><th>保有比率</th></tr></thead><tbody>"
+            + "".join(r[1] for r in _vrows) + "</tbody></table>", unsafe_allow_html=True)
+        if _tot_w > 0:
+            st.markdown(f"- 評価額ベースで、**{_hi_w / _tot_w * 100:.0f}%** が、自分自身の過去のPERと比べて高い側（上位20%以内）にあります"
+                        f"（対象{len(_vrows)}銘柄）。")
+        st.caption(
+            "PER＝決算発表日の株価÷直近4決算の実績EPS合計。過去最大約10年・各銘柄自身との比較です（他の銘柄や市場全体との比較ではありません）。"
+            "メモリ半導体のように利益が景気で大きく振れる銘柄は、利益のピークでPERが低く見え、谷で高く見えるため、この指標だけで割安・割高を"
+            "判断しないでください。利益がマイナスの時期は除いています。株式分割後の価格で比較しています。"
+        )
+    else:
+        st.caption("PERの過去の位置を計算できる銘柄がありません（株価の履歴は、次回の自動保存で追加されます）。")
 
     # ── 銘柄ごと ──────────────────────────────────────────────
     st.markdown("**🔍 銘柄ごとの業績の推移**")
