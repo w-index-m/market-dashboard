@@ -64,8 +64,8 @@ LINE_TEXT_MAX_LEN = 4900  # LINEのtextメッセージ上限は5000文字。安�
 
 MODE_LABELS = {
     "growth": "🌱長期育成", "momentum": "⚡モメンタム",
-    "ai_mix": "✨AIミックス", "optical_mix": "💡光銘柄ミックス", "dividend_stable": "💰配当安定",
-    "stable_growth": "🪨安定成長", "marks": "💎マークス",
+    "ai_mix": "✨AIミックス", "optical_mix": "💡光銘柄ミックス", "dividend_stable": "🏦高配当ディフェンシブ",
+    "stable_growth": "🪨右肩上がりチャート", "marks": "💎マークス",
 }
 
 
