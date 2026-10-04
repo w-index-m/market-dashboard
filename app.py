@@ -28599,6 +28599,373 @@ def render_portfolio_fundamentals():
     )
 
 
+# ══════════════════════════════════════════════════════════════
+# 🎯 目標と進捗 / 💴 税金と手取りの目安
+# ══════════════════════════════════════════════════════════════
+_GOALS_HEADERS = ["username", "target_man", "years", "monthly_man", "updated_at"]
+_NISA_HEADERS = ["username", "ticker", "updated_at"]
+_TAX_RATE = 0.20315          # 譲渡益・配当にかかる税率（所得税15.315%＋住民税5%）
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_goal(username: str = "") -> dict:
+    """保存済みの目標 {target_man(万円), years, monthly_man(万円)}。無ければ{}。非公開のGoogle Sheets（claude_goals）から読む。"""
+    try:
+        ws = _trading_ws("claude_goals", _GOALS_HEADERS)
+        if not ws:
+            return {}
+        u = (username or "admin").strip()
+        for r in ws.get_all_records():
+            if str(r.get("username") or "admin") == u:
+                return {"target_man": float(r.get("target_man") or 0), "years": int(r.get("years") or 0),
+                        "monthly_man": float(r.get("monthly_man") or 0)}
+    except Exception as e:
+        logger.warning(f"[goal] 読込失敗: {e}")
+    return {}
+
+
+def _save_goal(username: str, target_man: float, years: int, monthly_man: float) -> bool:
+    try:
+        ws = _trading_ws("claude_goals", _GOALS_HEADERS)
+        if not ws:
+            return False
+        u = (username or "admin").strip()
+        keep = [[str(r.get("username") or "admin"), r.get("target_man"), r.get("years"), r.get("monthly_man"), str(r.get("updated_at") or "")]
+                for r in ws.get_all_records() if str(r.get("username") or "admin") != u]
+        mine = [[u, float(target_man), int(years), float(monthly_man), datetime.now(JST).strftime("%Y-%m-%d %H:%M")]]
+        ws.clear()
+        ws.update([_GOALS_HEADERS] + keep + mine, "A1", value_input_option="RAW")
+        _load_goal.clear()
+        return True
+    except Exception as e:
+        logger.warning(f"[goal] 保存失敗: {e}")
+        return False
+
+
+def _circ_boot(pool, n, steps, blk, rng):
+    """円環ブロック・ブートストラップ（末尾の月も先頭と同じ頻度で選ばれるようにし、平均がずれないようにする）。"""
+    import numpy as _np
+    idx = rng.integers(0, len(pool), size=(n, (steps // blk) + 1))
+    return _np.concatenate([pool[(idx + k) % len(pool)][:, :, None] for k in range(blk)], axis=2).reshape(n, -1)[:, :steps]
+
+
+def _goal_paths(monthly, years, arith_pct, long_src=None, n=3000, seed=7):
+    """月次リターンの経路 (n × 月数) を作る。平均（算術）は arith_pct（年率%）に合わせ、ばらつきは過去から借りる。
+    long_src: {"mk": S&P500月次リターン配列, "beta": 月次β, "resid": 個別要因の残差配列} を渡すと、市場の長期データ×β＋個別要因で作る。"""
+    import numpy as _np
+    rng = _np.random.default_rng(seed)
+    steps, blk = int(years) * 12, 3
+    tgt_m = (1 + arith_pct / 100) ** (1 / 12) - 1
+    if long_src is not None:
+        mk, beta, res = long_src["mk"], float(long_src["beta"]), _np.array(long_src["resid"], dtype=float)
+        pm = beta * _circ_boot(mk, n, steps, blk, rng) + _circ_boot(res, n, steps, blk, rng)
+        return _np.clip(pm - (beta * mk.mean() + res.mean()) + tgt_m, -0.95, None)
+    arr = (monthly - monthly.mean()) + tgt_m
+    return _circ_boot(arr, n, steps, blk, rng)
+
+
+def _goal_eval(paths, v0, target, monthly_contrib):
+    """経路ごとの最終評価額（毎月 monthly_contrib を月初に積立）から、目標への到達確率と、確率別の必要積立額を返す。
+    最終額 = v0×G + c×S（Gは複利係数、Sは積立の複利係数の合計）が積立額cについて一次式なので、必要積立額は経路ごとに解ける。"""
+    import numpy as _np
+    G = _np.cumprod(1 + paths, axis=1)
+    GT = G[:, -1]
+    Gp = _np.concatenate([_np.ones((paths.shape[0], 1)), G[:, :-1]], axis=1)
+    S = (GT[:, None] / Gp).sum(axis=1)
+    final = v0 * GT + monthly_contrib * S
+    need = _np.clip((target - v0 * GT) / S, 0, None)
+    return {"p_reach": float((final >= target).mean()), "final_p": {q: float(_np.percentile(final, q)) for q in (10, 50, 90)},
+            "need": {q: float(_np.percentile(need, q)) for q in (50, 70, 90)}, "n": paths.shape[0]}
+
+
+def _goal_value_paths(paths, v0, monthly_contrib):
+    """評価額の推移（10/50/90%点）。積立は毎月初。"""
+    import numpy as _np
+    V = _np.full(paths.shape[0], float(v0))
+    rows = [(_np.percentile(V, 10), _np.percentile(V, 50), _np.percentile(V, 90))]
+    for t in range(paths.shape[1]):
+        V = (V + monthly_contrib) * (1 + paths[:, t])
+        rows.append((_np.percentile(V, 10), _np.percentile(V, 50), _np.percentile(V, 90)))
+    return _np.array(rows)
+
+
+@st.fragment
+def render_goal_tracker():
+    """🎯 目標と進捗：目標金額・年数・毎月の積立額から、到達確率と必要な積立額を試算する。"""
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**🎯 目標と進捗：今のペースで目標に届くか**")
+    _usr_g = st.session_state.get("_trading_user", "") or ""
+    r = _compute_portfolio_risk_inputs()
+    if not r:
+        st.info("計算に必要なデータが足りません（保有銘柄の株価データを取得できませんでした）。")
+        return
+    saved = _load_goal(_usr_g)
+    v0_stock = float(r["total_jpy"])
+    c1, c2, c3 = st.columns(3)
+    _extra = c1.number_input("株以外の資産を足す（万円）", min_value=0, value=0, step=100, key="goal_extra",
+                             help="投資信託・現金・不動産など、上の計算に含まれない資産を足して、全体で目標を考えられます（リターンは同じと仮定）。")
+    _target = c2.number_input("目標金額（万円）", min_value=100, value=int(saved.get("target_man") or max(int(v0_stock / 1e4 * 2), 1000)),
+                              step=500, key="goal_target")
+    _years = c3.number_input("目標までの年数", min_value=1, max_value=40, value=int(saved.get("years") or 10), step=1, key="goal_years")
+    c4, c5 = st.columns(2)
+    _monthly = c4.number_input("毎月の積立額（万円）", min_value=0.0, value=float(saved.get("monthly_man") or 0.0), step=1.0, key="goal_monthly",
+                               help="今の保有銘柄と同じ構成で積み立てると仮定します。0なら積立なし。")
+    _beta = float(r["stats"].get("beta") if r["stats"].get("beta") is not None else 1.0)
+    _def_ret = int(round(min(max(4.0 + _beta * 5.0, 3.0), 25.0)))
+    _ret = c5.slider("想定リターン（年率・算術平均%）", 0, 30, _def_ret, 1, key="goal_ret",
+                     help=f"既定は、リスク連動（無リスク4%＋β{_beta:.2f}×市場プレミアム5%）です。過去の実績をそのまま使うと、急騰した分が楽観的に出ます。")
+    _lt = _load_longterm_returns()
+    _lt_ok = bool(_lt) and r["stats"].get("resid") is not None and r["stats"].get("beta_m") is not None
+    _vsrc = st.radio("値動きのばらつき", ["保有銘柄の過去5年", "S&P500の長期（1980年〜）×β ＋ 個別要因（暴落を含む）"] if _lt_ok else ["保有銘柄の過去5年"],
+                     horizontal=True, key="goal_vsrc")
+    if st.button("💾 この目標を保存", key="btn_save_goal"):
+        if _save_goal(_usr_g, _target, int(_years), _monthly):
+            st.success("目標を保存しました（次回から自動で入ります）")
+        else:
+            st.error("保存に失敗しました（Google Sheetsに接続できませんでした）")
+
+    v0 = v0_stock + _extra * 1e4
+    long_src = None
+    if _vsrc.startswith("S&P500"):
+        mk = pd.Series(_lt["series"]["sp500"])
+        mk.index = pd.PeriodIndex(mk.index, freq="M")
+        long_src = {"mk": mk.sort_index().pct_change().dropna().to_numpy(), "beta": r["stats"]["beta_m"], "resid": r["stats"]["resid"]}
+    monthly = r["monthly"][-60:].dropna().to_numpy()
+    paths = _goal_paths(monthly, int(_years), float(_ret), long_src)
+    ev = _goal_eval(paths, v0, _target * 1e4, _monthly * 1e4)
+    bands = _goal_value_paths(paths, v0, _monthly * 1e4)
+
+    need0 = (_target * 1e4 / v0) ** (1 / int(_years)) - 1 if v0 > 0 else 0
+    m = st.columns(4)
+    m[0].metric("今の評価額", f"{v0 / 1e4:,.0f}万円")
+    m[1].metric("目標に届く確率", f"{ev['p_reach'] * 100:.0f}%",
+                help="2,000〜3,000通りの将来のうち、期間後の評価額が目標以上になった割合。")
+    m[2].metric("積立なしで必要な年率", f"{need0 * 100:.1f}%", help="積立をせず、今の評価額だけで目標に届くのに必要な年率（複利）。")
+    m[3].metric(f"{int(_years)}年後の中央値", f"{ev['final_p'][50] / 1e4:,.0f}万円")
+    st.markdown(
+        "**届く確率を上げるために必要な毎月の積立額**（今の評価額に加えて）："
+        + "　".join(f"確率{q}% → **{ev['need'][q] / 1e4:,.1f}万円/月**" for q in (50, 70, 90))
+    )
+    fig = go.Figure()
+    x = list(range(bands.shape[0]))
+    fig.add_trace(go.Scatter(x=x, y=bands[:, 2] / 1e4, name="上位10%", line=dict(color="#4ade80", width=1.2)))
+    fig.add_trace(go.Scatter(x=x, y=bands[:, 1] / 1e4, name="中央値", line=dict(color="#e2e8f0", width=2.4)))
+    fig.add_trace(go.Scatter(x=x, y=bands[:, 0] / 1e4, name="下位10%", line=dict(color="#f87171", width=1.2),
+                             fill="tonexty", fillcolor="rgba(148,163,184,0.12)"))
+    fig.add_hline(y=_target, line=dict(color="#f59e0b", dash="dash"), annotation_text=f"目標 {_target:,.0f}万円",
+                  annotation_font_color="#f59e0b")
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=320, margin=dict(l=10, r=10, t=10, b=20),
+                      font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+                      xaxis=dict(title=dict(text="経過月数", font=dict(color="#94a3b8")), tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                      yaxis=dict(title=dict(text="評価額（万円）", font=dict(color="#94a3b8")), tickfont=dict(color="#94a3b8"),
+                                 gridcolor="#1e293b", tickformat=","),
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="goal_fig")
+    st.caption(
+        f"今の保有銘柄（円換算ウェイト、投資信託を除く{v0_stock / 1e4:,.0f}万円）の値動きのばらつき（年率ボラ約{r['stats']['ann_vol']:.0f}%）を過去から借り、"
+        f"平均リターンは上で決めた値に合わせて、{ev['n']:,}通りの将来を作っています。積立は毎月初に、保有銘柄と同じ構成で投資する前提です。"
+        "税金・手数料・取り崩し・インフレは含みません（インフレを考える場合は、目標金額を物価上昇分だけ増やしてください）。"
+        "将来を予測・保証するものではなく、目標との距離を見るための目安です。"
+    )
+
+
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _usdjpy_history(start_date: str) -> pd.Series:
+    try:
+        raw = yf.download("USDJPY=X", start=start_date, auto_adjust=True, progress=False)["Close"]
+        s = (raw.iloc[:, 0] if isinstance(raw, pd.DataFrame) else raw).dropna()
+        if getattr(s.index, "tz", None) is not None:
+            s.index = s.index.tz_localize(None)
+        s.index = s.index.normalize()
+        return s[~s.index.duplicated(keep="last")]
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def _jpy_cost_basis(df: "pd.DataFrame", fx_hist: "pd.Series", fallback_fx: float = 150.0) -> dict:
+    """取引記録から、保有中の銘柄の取得額を円で出す（総平均法）。米国株は購入日のドル円で円換算する。
+    Returns: {ticker: {"qty": 保有株数, "cost_jpy": 取得額（円）}}。投資信託は含めない。"""
+    pos: dict = {}
+    d = df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    for _, row in d.sort_values("date").iterrows():
+        tk = str(row.get("ticker", "")).strip()
+        if not tk or tk in _JP_FUND_MAP:
+            continue
+        qty = float(row.get("quantity", 0) or 0)
+        price = float(row.get("price", 0) or 0)
+        fee = float(row.get("fee", 0) or 0)
+        if qty <= 0:
+            continue
+        if tk.endswith(".T"):
+            fx = 1.0
+        else:
+            v = fx_hist.asof(pd.Timestamp(row["date"]).normalize()) if len(fx_hist) else None
+            fx = float(v) if v is not None and pd.notna(v) else fallback_fx
+        q, c = pos.get(tk, (0.0, 0.0))
+        if row.get("action") == "BUY":
+            pos[tk] = (q + qty, c + (qty * price + fee) * fx)
+        elif row.get("action") == "SELL" and q > 0:
+            sell = min(qty, q)
+            pos[tk] = (q - sell, c - c / q * sell)
+    return {t: {"qty": q, "cost_jpy": c} for t, (q, c) in pos.items() if q > 0}
+
+
+def _tax_net_ratio(is_jp: bool, nisa: bool) -> float:
+    """配当の手取り割合の目安。課税口座は日米とも約20.315%（米国株は米国10%の源泉徴収を日本の税額から控除する外国税額控除後）。
+    NISA口座は、日本株は非課税、米国株は米国の源泉徴収10%のみ引かれる（日本では控除できない）。"""
+    if nisa:
+        return 1.0 if is_jp else 0.90
+    return 1 - _TAX_RATE
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_nisa_tickers(username: str = "") -> set:
+    try:
+        ws = _trading_ws("claude_nisa", _NISA_HEADERS)
+        if not ws:
+            return set()
+        u = (username or "admin").strip()
+        return {str(r.get("ticker")) for r in ws.get_all_records() if str(r.get("username") or "admin") == u and r.get("ticker")}
+    except Exception as e:
+        logger.warning(f"[nisa] 読込失敗: {e}")
+        return set()
+
+
+def _save_nisa_tickers(username: str, tickers) -> bool:
+    try:
+        ws = _trading_ws("claude_nisa", _NISA_HEADERS)
+        if not ws:
+            return False
+        u = (username or "admin").strip()
+        keep = [[str(r.get("username") or "admin"), str(r.get("ticker")), str(r.get("updated_at") or "")]
+                for r in ws.get_all_records() if r.get("ticker") and str(r.get("username") or "admin") != u]
+        now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+        ws.clear()
+        ws.update([_NISA_HEADERS] + keep + [[u, t, now] for t in tickers], "A1", value_input_option="RAW")
+        _load_nisa_tickers.clear()
+        return True
+    except Exception as e:
+        logger.warning(f"[nisa] 保存失敗: {e}")
+        return False
+
+
+@st.fragment
+def render_tax_estimate():
+    """💴 税金と手取りの目安（概算）：売却した場合の税額・手取り、配当の手取り、NISA枠の残り。"""
+    st.markdown("**💴 税金と手取りの目安（概算）**")
+    _u = st.session_state.get("_trading_user", "") or ""
+    df, err = _load_trades(_u)
+    if err or df.empty:
+        st.info("取引記録が読み込めないため、計算できません。")
+        return
+    pos = _get_open_positions(_u)
+    tickers = [t for t in pos if t not in _JP_FUND_MAP]
+    if not tickers:
+        st.info("計算できる保有銘柄がありません（投資信託は対象外です）。")
+        return
+    pr = _fetch_portfolio_prices(tuple(tickers))
+    fx = float(pr.get("_usdjpy") or 150.0)
+    basis = _jpy_cost_basis(df, _usdjpy_history(str(pd.to_datetime(df["date"]).min().date())), fx)
+    nisa = _load_nisa_tickers(_u)
+
+    _nisa_sel = st.multiselect("NISA口座で持っている銘柄（売却益・配当が非課税）", sorted(tickers),
+                               default=[t for t in tickers if t in nisa], key="tax_nisa_sel",
+                               format_func=lambda t: f"{t} — {_get_stock_display_name(t)}")
+    if st.button("💾 NISA銘柄を保存", key="btn_save_nisa"):
+        if _save_nisa_tickers(_u, _nisa_sel):
+            st.success("保存しました")
+        else:
+            st.error("保存に失敗しました（Google Sheetsに接続できませんでした）")
+    nisa = set(_nisa_sel)
+
+    rows, tot_val, tot_gain_taxable, tot_loss_taxable, tot_tax_each = [], 0.0, 0.0, 0.0, 0.0
+    for t in tickers:
+        b = basis.get(t)
+        px = (pr.get(t) or {}).get("price")
+        if not b or not px:
+            continue
+        jp = t.endswith(".T")
+        val = b["qty"] * px * (1.0 if jp else fx)
+        gain = val - b["cost_jpy"]
+        taxable = t not in nisa
+        tax = max(gain, 0.0) * _TAX_RATE if taxable else 0.0
+        tot_val += val
+        if taxable:
+            tot_gain_taxable += max(gain, 0.0)
+            tot_loss_taxable += max(-gain, 0.0)
+            tot_tax_each += tax
+        rows.append((val, t, jp, val, b["cost_jpy"], gain, taxable, tax))
+    rows.sort(key=lambda x: -x[0])
+    if not rows:
+        st.info("計算できる銘柄がありません。")
+        return
+    _tr = "".join(
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{_get_stock_display_name(t)}</td>'
+        f'<td>{"NISA" if not taxable else "課税"}</td><td>{val / 1e4:,.0f}万</td><td>{cost / 1e4:,.0f}万</td>'
+        f'<td style="color:{"#4ade80" if gain >= 0 else "#f87171"}">{gain / 1e4:+,.0f}万</td>'
+        f'<td>{tax / 1e4:,.0f}万</td><td style="font-weight:700">{(val - tax) / 1e4:,.0f}万</td></tr>'
+        for _, t, jp, val, cost, gain, taxable, tax in rows
+    )
+    st.markdown(
+        '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:6px 0 4px">① 売却した場合の税額と手取り（銘柄ごと）</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>口座</th><th>評価額</th><th>取得額</th>'
+        f"<th>含み損益</th><th>税額</th><th>手取り</th></tr></thead><tbody>{_tr}</tbody></table>",
+        unsafe_allow_html=True)
+    net_taxable = max(tot_gain_taxable - tot_loss_taxable, 0.0)
+    tax_all = net_taxable * _TAX_RATE
+    st.markdown(
+        f"- **全部売却した場合**（課税口座の損益を同じ年に通算）：税額の目安 **{tax_all / 1e4:,.0f}万円**"
+        f"（銘柄ごとに、個別で計算した合計は{tot_tax_each / 1e4:,.0f}万円。損失の出ている銘柄があれば、同じ年に売ると、税額が減ります）。"
+        f"評価額の合計は{tot_val / 1e4:,.0f}万円、税引き後の手取り合計は約**{(tot_val - tax_all) / 1e4:,.0f}万円**。")
+
+    # ② 配当の手取り
+    div_rows, tg, tn = [], 0.0, 0.0
+    for t in tickers:
+        prof = _fetch_dividend_growth_profile(t) or {}
+        q = basis.get(t, {}).get("qty") or pos[t]["qty"]
+        if not prof.get("trail") or not q:
+            continue
+        jp = t.endswith(".T")
+        gross = prof["trail"] * q * (1.0 if jp else fx)
+        net = gross * _tax_net_ratio(jp, t in nisa)
+        tg += gross
+        tn += net
+        div_rows.append((gross, t, gross, net))
+    if div_rows:
+        div_rows.sort(key=lambda x: -x[0])
+        _dr = "".join(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{_get_stock_display_name(t)}</td>'
+            f'<td>{"NISA" if t in nisa else "課税"}</td><td>{g / 1e4:,.1f}万</td><td>{n / 1e4:,.1f}万</td></tr>'
+            for _, t, g, n in div_rows
+        )
+        st.markdown(
+            '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:12px 0 4px">② 配当の手取り（直近12か月の実績ベース）</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>口座</th><th>税引き前</th><th>手取り</th></tr></thead>'
+            f"<tbody>{_dr}</tbody></table>", unsafe_allow_html=True)
+        st.markdown(f"- 合計：税引き前 **{tg / 1e4:,.1f}万円** → 手取りの目安 **{tn / 1e4:,.1f}万円**（税金・源泉徴収で約{(tg - tn) / 1e4:,.1f}万円）。")
+
+    # ③ NISA枠
+    st.markdown('<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:12px 0 4px">③ 新NISAの枠の残り（目安）</div>', unsafe_allow_html=True)
+    n1, n2 = st.columns(2)
+    _y_used = n1.number_input("今年のNISA投資額（万円）", min_value=0, value=0, step=10, key="nisa_year_used",
+                              help="今年、NISA口座で買った金額（売却しても、年間枠は復活しません）。")
+    _life_used = n2.number_input("これまでのNISA投資額の累計・簿価（万円）", min_value=0, value=0, step=50, key="nisa_life_used",
+                                 help="買い付けた金額の累計（売却すると、その簿価分だけ、翌年以降に生涯枠が復活します）。")
+    st.markdown(
+        f"- 年間枠（成長240万＋つみたて120万＝360万円）の残り：**{max(360 - _y_used, 0):,.0f}万円**　／　"
+        f"生涯枠（1,800万円）の残り：**{max(1800 - _life_used, 0):,.0f}万円**（うち成長投資枠は1,200万円まで）")
+    st.caption(
+        "【前提】税率は、譲渡益・配当とも約20.315%（所得税15.315%＋住民税5%）の特定口座を想定した概算です。米国株の取得額は購入日のドル円で円換算し、"
+        "為替差益も含めて計算しています。米国株の配当は、米国の源泉徴収10%を日本の税額から控除した後の合計として、課税口座は日米とも約20.3%、"
+        "NISAでは米国株のみ10%が引かれる扱いで計算しています。損益通算は同じ年内の課税口座の譲渡損益のみです。"
+        "iDeCo・確定拠出、配当の総合課税・申告分離の選択、扶養・社会保険への影響、手数料は考慮していません。NISAの制度（枠・対象）は改正されることがあるため、"
+        "最新の情報を確認してください。税務上の確定的な判断には使わず、税理士や税務署に確認してください。"
+    )
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _compute_current_holdings_backtest() -> pd.DataFrame:
     """現在の保有株数を固定したまま過去の株価に当てはめた場合の、合成ポートフォリオ評価額
@@ -38023,6 +38390,7 @@ def render_claude_trading_project():
                         )
 
                     render_portfolio_risk_simulation()
+                    render_goal_tracker()
                     render_portfolio_fundamentals()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
@@ -38958,6 +39326,8 @@ def render_claude_trading_project():
                             )
                         else:
                             st.info("アナリスト予想を取得できた銘柄がありません。")
+
+                render_tax_estimate()
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
