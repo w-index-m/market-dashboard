@@ -27804,6 +27804,18 @@ def _compute_portfolio_risk_inputs() -> dict | None:
     stats["beta"] = float(_j.iloc[:, 0].cov(_j.iloc[:, 1]) / _j.iloc[:, 1].var()) if len(_j) > 120 else None
     # 上げ相場・下げ相場の捕捉率（直近3年の月次、円換算ポートフォリオ vs ドル建てS&P500）
     stats["up_cap"], stats["down_cap"], stats["cap_n"] = None, None, 0
+    stats["beta_m"], stats["resid"] = None, None
+    try:
+        # 月次の市場感応度と、市場で説明できない残差（個別銘柄・テーマ要因）。長期の市場データを使うシミュレーション用
+        _pm0, _bm0 = _monthly(port), _monthly(b_ret)
+        _m60 = pd.concat([_pm0, _bm0], axis=1, join="inner").dropna().tail(60)
+        if len(_m60) >= 36 and float(_m60.iloc[:, 1].var()) > 0:
+            _bm_beta = float(_m60.iloc[:, 0].cov(_m60.iloc[:, 1]) / _m60.iloc[:, 1].var())
+            _res = _m60.iloc[:, 0] - _bm_beta * _m60.iloc[:, 1]
+            stats["beta_m"] = _bm_beta
+            stats["resid"] = (_res - _res.mean()).round(5).tolist()
+    except Exception:
+        pass
     try:
         _pm, _bm = _monthly(port), _monthly(b_ret)
         _mm = pd.concat([_pm, _bm], axis=1, join="inner").dropna().tail(36)
@@ -28012,19 +28024,50 @@ def render_portfolio_risk_simulation():
                + ("EPS成長は、今の保有銘柄（勝ち残った銘柄）の過去の利益を、今の保有株数で計算したもので、後知恵が入ります。"
                   "株価は、利益の成長に加えてPERの変化でも動くため、利益が伸びても株価が同じだけ上がるとは限りません。"
                   if _src.startswith("過去のEPS") else ""))
+    _lt = _load_longterm_returns()
+    _lt_ok = bool(_lt) and st_.get("resid") is not None and st_.get("beta_m") is not None
+    _vsrc = st.radio(
+        "値動きのばらつき（暴落の再現）",
+        ["保有銘柄の過去5年", "S&P500の長期（1980年〜）×β ＋ 個別要因"] if _lt_ok else ["保有銘柄の過去5年"],
+        horizontal=True, key="pr_vsrc",
+        help="過去5年には2008年・2000年・2020年の暴落が含まれません。長期モードは、S&P500の月次リターン（配当込み・1980年〜）を"
+             "ポートフォリオのβ倍し、市場で説明できない個別要因（過去5年の残差）を加えて、より深い下落も再現します。")
     _rng = _np.random.default_rng(42)
-    if _arith_target is not None:
-        # 算術平均（期待値）を目標に合わせる。値動きが荒いほど複利の成長（中央値）は低くなる
-        _arr = (_m - _m.mean()).to_numpy() + ((1 + _arith_target / 100) ** (1 / 12) - 1)
-    elif _fixed_mode.startswith("複利"):
-        _lg = _np.log1p(_m.to_numpy())
-        _arr = _np.expm1(_lg - _lg.mean() + _np.log1p(_exp / 100) / 12)
-    else:
-        _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)
     _n, _steps, _blk = 2000, _yrs * 12, 3
-    # 円環ブートストラップ（末尾の月も先頭と同じ頻度で選ばれるようにし、平均がずれないようにする）
-    _idx = _rng.integers(0, len(_arr), size=(_n, (_steps // _blk) + 1))
-    _paths = _np.concatenate([_arr[(_idx + k) % len(_arr)][:, :, None] for k in range(_blk)], axis=2).reshape(_n, -1)[:, :_steps]
+
+    def _boot(pool, n, steps, blk, rng):
+        # 円環ブートストラップ（末尾の月も先頭と同じ頻度で選ばれるようにし、平均がずれないようにする）
+        idx = rng.integers(0, len(pool), size=(n, (steps // blk) + 1))
+        return _np.concatenate([pool[(idx + k) % len(pool)][:, :, None] for k in range(blk)], axis=2).reshape(n, -1)[:, :steps]
+
+    _long = _vsrc.startswith("S&P500")
+    if _long:
+        _mk = pd.Series(_lt["series"]["sp500"])
+        _mk.index = pd.PeriodIndex(_mk.index, freq="M")
+        _mk_ret = _mk.sort_index().pct_change().dropna().to_numpy()
+        _bm_ = float(st_["beta_m"])
+        _res = _np.array(st_["resid"], dtype=float)
+        if _arith_target is not None:
+            _tg = _arith_target
+        else:
+            _tg = float(_exp)
+        _tg_m = (1 + _tg / 100) ** (1 / 12) - 1
+        _pm_ = _bm_ * _boot(_mk_ret, _n, _steps, _blk, _rng) + _boot(_res, _n, _steps, _blk, _rng)
+        _paths = _np.clip(_pm_ - (_bm_ * _mk_ret.mean() + _res.mean()) + _tg_m, -0.95, None)
+        st.caption(f"📉 ばらつきの元：S&P500の月次リターン{len(_mk_ret)}か月（{_mk.index.min()}〜、最悪の月は{_mk_ret.min() * 100:.0f}%、"
+                   f"2008年・2000年・2020年・2022年を含む）×月次β{_bm_:.2f}＋市場で説明できない個別要因（過去5年の残差、月次の標準偏差{_res.std() * 100:.1f}%）。"
+                   "市場の平均リターンは、上で決めた想定リターンに合わせて差し替えています。"
+                   + ("（固定値は、このモードでは算術平均として扱います）" if _arith_target is None else ""))
+    else:
+        if _arith_target is not None:
+            # 算術平均（期待値）を目標に合わせる。値動きが荒いほど複利の成長（中央値）は低くなる
+            _arr = (_m - _m.mean()).to_numpy() + ((1 + _arith_target / 100) ** (1 / 12) - 1)
+        elif _fixed_mode.startswith("複利"):
+            _lg = _np.log1p(_m.to_numpy())
+            _arr = _np.expm1(_lg - _lg.mean() + _np.log1p(_exp / 100) / 12)
+        else:
+            _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)
+        _paths = _boot(_arr, _n, _steps, _blk, _rng)
     _val = r["total_jpy"] * _np.cumprod(1 + _paths, axis=1)
     _val = _np.concatenate([_np.full((_n, 1), r["total_jpy"]), _val], axis=1)
     _p10, _p50, _p90 = (_np.percentile(_val, q, axis=0) for q in (10, 50, 90))
