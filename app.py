@@ -27924,21 +27924,54 @@ def render_portfolio_risk_simulation():
 
     st.markdown("**② 今後の値動きのシミュレーション（ブートストラップ法）**")
     _m = r["monthly"][-60:].dropna()
-    _a, _b = st.columns(2)
-    _exp = _a.slider("想定する年平均リターン（%）", 0, 20, 7, 1, key="pr_exp",
-                     help="過去の実績は、保有銘柄が急騰した分だけ良く見えます。そこで、月ごとのばらつき方だけを過去から借り、平均は、ここで指定した値に合わせます。")
-    _yrs = _b.radio("期間", [5, 10, 20], index=1, horizontal=True, key="pr_yrs", format_func=lambda v: f"{v}年")
-    _mode = st.radio("想定リターンの意味", ["複利ベース（中央値が年○%で増える）", "算術平均（毎月の平均が年○%）"], horizontal=True,
-                     key="pr_mode", help="値動きが荒いほど、算術平均が同じでも複利の成長は低くなります（概算：複利≒算術平均−ボラ²÷2）。"
-                                         "「年7%で増える」イメージに近いのは複利ベースです。")
     import numpy as _np
+    _yrs = st.radio("期間", [5, 10, 20], index=1, horizontal=True, key="pr_yrs", format_func=lambda v: f"{v}年")
+    _src = st.radio(
+        "想定リターンの決め方",
+        ["実績とリスク連動の混合（推奨）", "リスク連動のみ（β×市場プレミアム）", "固定値（従来）"],
+        horizontal=False, key="pr_src",
+        help="どのポートフォリオでも同じ平均リターンにすると、リスクの大きさが反映されません。リスクが大きい構成ほど高い見返りを"
+             "要求されるはず、という考え方（リスク連動）と、過去5年の実績の一部を混ぜる方式を選べます。",
+    )
+    _beta = float(st_.get("beta") if st_.get("beta") is not None else 1.0)
+    _ann_vol = float(st_["ann_vol"])
+    _hist_arith = float((1 + _m.mean()) ** 12 - 1) * 100           # 過去5年の実績（算術平均の年率換算）
+    _arith_target = None
+    _label = ""
+    if _src.startswith("固定"):
+        _c1, _c2 = st.columns(2)
+        _exp = _c1.slider("想定する年平均リターン（%）", 0, 20, 7, 1, key="pr_exp")
+        _fixed_mode = _c2.radio("意味", ["複利（中央値が年○%）", "算術平均（毎月の平均が年○%）"], key="pr_mode")
+        _label = f"固定値 年{_exp}%（{'複利' if _fixed_mode.startswith('複利') else '算術平均'}）"
+    else:
+        _c1, _c2 = st.columns(2)
+        _rf = _c1.slider("無リスク金利（%）", 0.0, 6.0, 4.0, 0.5, key="pr_rf",
+                         help="米国債（3か月〜10年）の利回りが目安です。")
+        _erp = _c2.slider("株式の市場プレミアム（%）", 2.0, 8.0, 5.0, 0.5, key="pr_erp",
+                          help="S&P500が無リスク資産を上回ると期待する年率。長期の目安は4〜6%程度です。")
+        _capm = _rf + _beta * _erp                                    # リスク連動の期待リターン（算術平均）
+        if _src.startswith("実績"):
+            _w = st.slider("過去5年の実績をどれだけ反映するか（%）", 0, 100, 50, 10, key="pr_w",
+                           help="0%=リスク連動のみ、100%=過去5年の実績そのまま。実績は保有銘柄が急騰した分だけ高く出るため、"
+                                "反映は上限30%/年に制限しています（それを超える分は将来に伸ばしません）。")
+            _hist_used = min(_hist_arith, 30.0)
+            _arith_target = (_w / 100) * _hist_used + (1 - _w / 100) * _capm
+            _label = (f"実績 {_hist_arith:.0f}%{'（上限30%に制限）' if _hist_arith > 30 else ''} × {_w}% ＋ "
+                      f"リスク連動 {_capm:.1f}% × {100 - _w}% ＝ 平均年{_arith_target:.1f}%")
+        else:
+            _arith_target = _capm
+            _label = f"リスク連動：{_rf:.1f}% ＋ β{_beta:.2f} × {_erp:.1f}% ＝ 平均年{_capm:.1f}%"
+    st.caption(f"📌 想定リターン（期待値＝毎月の平均を年率換算）：{_label}。ポートフォリオのβは{_beta:.2f}、年率ボラは約{_ann_vol:.0f}%。"
+               "アルファ（市場で説明できない超過リターン）は0と仮定しています。")
     _rng = _np.random.default_rng(42)
-    if _mode.startswith("複利"):
-        # 月次の対数リターンの平均を、指定した年率（複利）に合わせる（ばらつき方は過去のまま）
+    if _arith_target is not None:
+        # 算術平均（期待値）を目標に合わせる。値動きが荒いほど複利の成長（中央値）は低くなる
+        _arr = (_m - _m.mean()).to_numpy() + ((1 + _arith_target / 100) ** (1 / 12) - 1)
+    elif _fixed_mode.startswith("複利"):
         _lg = _np.log1p(_m.to_numpy())
         _arr = _np.expm1(_lg - _lg.mean() + _np.log1p(_exp / 100) / 12)
     else:
-        _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)   # 算術平均だけ指定値に合わせる
+        _arr = (_m - _m.mean()).to_numpy() + ((1 + _exp / 100) ** (1 / 12) - 1)
     _n, _steps, _blk = 2000, _yrs * 12, 3
     # 円環ブートストラップ（末尾の月も先頭と同じ頻度で選ばれるようにし、平均がずれないようにする）
     _idx = _rng.integers(0, len(_arr), size=(_n, (_steps // _blk) + 1))
@@ -27964,10 +27997,12 @@ def render_portfolio_risk_simulation():
     _cm = _np.cumprod(1 + _paths, axis=1)
     _p_loss = float((_cm[:, -1] < 1).mean()) * 100
     _p_dd30 = float(((_cm / _np.maximum.accumulate(_np.concatenate([_np.ones((_n, 1)), _cm], axis=1)[:, 1:], axis=1) - 1).min(axis=1) <= -0.30).mean()) * 100
-    d = st.columns(3)
+    d = st.columns(4)
     d[0].metric(f"{_yrs}年後の中央値", f"{_p50[-1] / 1e4:,.0f}万円", f"{(_p50[-1] / r['total_jpy'] - 1) * 100:+.0f}%")
-    d[1].metric(f"{_yrs}年後に今より減っている確率", f"{_p_loss:.0f}%")
-    d[2].metric("途中で30%以上下落する確率", f"{_p_dd30:.0f}%")
+    d[1].metric("中央値の年率（複利）", f"{((_p50[-1] / r['total_jpy']) ** (1 / _yrs) - 1) * 100:+.1f}%",
+                help="平均（期待値）より低くなるのは、値動きが荒いほど複利の成長が下がるため（ボラティリティの足かせ）。")
+    d[2].metric(f"{_yrs}年後に今より減っている確率", f"{_p_loss:.0f}%")
+    d[3].metric("途中で30%以上下落する確率", f"{_p_dd30:.0f}%")
     st.caption(
         f"今の保有銘柄（円換算ウェイト）の過去5年（{len(_m)}か月分、計算に使えた履歴は{st_['history_start']}以降）の月次リターンの"
         f"ばらつき方（年率ボラ約{st_['ann_vol']:.0f}%）を借り、3か月ずつ並べ替えて{_n:,}通りを作成。値動きが荒いほど、算術平均が同じでも"
