@@ -39503,8 +39503,34 @@ def _render_trading_page():
     render_claude_trading_project()
 
 
+def _disable_browser_translate() -> None:
+    """ブラウザの自動翻訳（Chromeの「日本語に翻訳」など）を止める。
+    Streamlitは<html lang="en">を出すため、日本語のページが英語と誤判定されて自動翻訳され、
+    「配当安定モード」が「入力安定モード」になるなど文言が壊れて表示されることがあった。
+    親ページのlangをjaにし、notranslateを付ける（iframe内スクリプトから親ドキュメントを書き換える）。"""
+    import streamlit.components.v1 as _stc
+    _stc.html(
+        """<script>
+        (function(){
+          try {
+            var d = window.parent.document;
+            d.documentElement.setAttribute('lang', 'ja');
+            d.documentElement.setAttribute('translate', 'no');
+            d.documentElement.classList.add('notranslate');
+            if (d.body) { d.body.setAttribute('translate', 'no'); d.body.classList.add('notranslate'); }
+            if (!d.querySelector('meta[name="google"][content="notranslate"]')) {
+              var m = d.createElement('meta'); m.name = 'google'; m.content = 'notranslate'; d.head.appendChild(m);
+            }
+          } catch(e) {}
+        })();
+        </script>""",
+        height=0,
+    )
+
+
 def main():
     now_jst = datetime.now(JST)
+    _disable_browser_translate()
 
     # ── ① 国ブロック（最優先チェック）──────────────────────────
     if check_country_block():
