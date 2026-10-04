@@ -38753,6 +38753,15 @@ def render_claude_trading_project():
                     # 銘柄ごとに独立した配当履歴取得（yfinance→Tiingo→Finnhubのフォール
                     # バックを含む）なので、逐次実行だとサマリータブ全体の表示が遅くなる。
                     # _compute_portfolio_summary側と同様にThreadPoolExecutorで並行化する。
+                    # 増配（減配）の想定率: 増配予想（_estimate_dividend_growth）の値を、前年同月の実績に掛ける
+                    _gk = [t for t in positions if t not in _JP_FUND_MAP]
+                    with ThreadPoolExecutor(max_workers=min(8, max(len(_gk), 1))) as _gp_ex:
+                        _gprofs = dict(zip(_gk, _gp_ex.map(_fetch_dividend_growth_profile, _gk)))
+                    _gfactor = {}
+                    for _gt, _gpf in _gprofs.items():
+                        _ge = _estimate_dividend_growth(_gpf)
+                        if _ge and _ge["basis"] != "据え置き（根拠データ不足）":
+                            _gfactor[_gt] = 1 + _ge["g"] / 100
                     with ThreadPoolExecutor(max_workers=min(10, len(positions))) as _proj_ex:
                         _proj_futures = {
                             _proj_ex.submit(_fetch_dividend_by_month_extended, _tk): (_tk, _p)
@@ -38771,7 +38780,7 @@ def render_claude_trading_project():
                                 _last_year_key = f"{_y - 1:04d}-{_m:02d}"
                                 _per_share = _hist.get(_last_year_key)
                                 if _per_share:
-                                    _amt = _to_display(_per_share * _p["qty"], _is_jp_tk)
+                                    _amt = _to_display(_per_share * _p["qty"] * _gfactor.get(_tk, 1.0), _is_jp_tk)
                                     _proj_month_totals[f"{_y:04d}-{_m:02d}"] += _amt
                     _proj_rows_html = ""
                     for _y, _m in _proj_months:
@@ -38794,11 +38803,12 @@ def render_claude_trading_project():
                     if any(v > 0 for v in _proj_month_totals.values()):
                         _combined_div_html += (
                             '<div style="font-size:12px;font-weight:700;color:#a78bfa;margin:10px 0 6px">'
-                            '🔮 予想配当（前年同月実績ベース・参考値）</div>'
+                            '🔮 予想配当（前年同月実績 × 増配予想・参考値）</div>'
                             + _proj_rows_html +
                             '<div style="font-size:11px;color:#64748b;margin-top:6px">'
-                            '※ 前年同月に実際に支払われた1株配当×現在の保有株数で計算した参考値です。'
-                            '増配・減配・配当中止や保有株数の変化により、実際の金額は変わります。'
+                            '※ 前年同月に実際に支払われた1株配当に、下の「📈増配予想」の想定増配率（予想配当または過去3年の増配ペース）を掛け、'
+                            '現在の保有株数で計算した参考値です。増配率の根拠が無い銘柄は据え置きで計算しています。'
+                            '減配・配当中止・支払月のずれや、保有株数の変化により、実際の金額は変わります。'
                             '前年同月に配当が無かった銘柄・保有していなかった銘柄は含まれません。</div>'
                         )
                     _combined_div_html += '</div>'
