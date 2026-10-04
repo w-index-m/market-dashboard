@@ -28725,6 +28725,45 @@ def _calc_positions_from_df(df: "pd.DataFrame") -> dict:
     }
 
 
+_LOCKS_HEADERS = ["username", "ticker", "note", "updated_at"]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_locked_tickers(username: str = "") -> dict:
+    """売買対象外にロックした銘柄（株主優待目的の長期保有など）を返す {ticker: note}。
+    Google Sheetsの claude_locks タブ（非公開）から読む。AIの売買判断・損切り/利確アラートの対象から除外するために使う。"""
+    try:
+        ws = _trading_ws("claude_locks", _LOCKS_HEADERS)
+        if not ws:
+            return {}
+        u = (username or "admin").strip()
+        return {str(r.get("ticker")): str(r.get("note") or "")
+                for r in ws.get_all_records() if str(r.get("username") or "admin") == u and r.get("ticker")}
+    except Exception as e:
+        logger.warning(f"[locks] 読込失敗: {e}")
+        return {}
+
+
+def _save_locked_tickers(username: str, items: dict) -> bool:
+    """そのユーザーのロック銘柄を {ticker: note} で置き換え保存する（他ユーザーの行は変更しない）。"""
+    try:
+        ws = _trading_ws("claude_locks", _LOCKS_HEADERS)
+        if not ws:
+            return False
+        u = (username or "admin").strip()
+        now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+        keep = [[str(r.get("username") or "admin"), str(r.get("ticker")), str(r.get("note") or ""), str(r.get("updated_at") or "")]
+                for r in ws.get_all_records() if r.get("ticker") and str(r.get("username") or "admin") != u]
+        mine = [[u, t, n, now] for t, n in items.items()]
+        ws.clear()
+        ws.update([_LOCKS_HEADERS] + keep + mine, "A1", value_input_option="RAW")
+        _load_locked_tickers.clear()
+        return True
+    except Exception as e:
+        logger.warning(f"[locks] 保存失敗: {e}")
+        return False
+
+
 def _get_open_positions(username: str = "") -> dict:
     """保有中ポジションを計算して返す {ticker: {name, qty, avg_cost, cost}}"""
     df, _ = _load_trades(username)
@@ -33958,6 +33997,15 @@ def render_claude_trading_project():
                 _load_trades.clear()
                 st.rerun()
 
+        # 🔒 ロック銘柄（優待など）は売買判断の対象外にする
+        _locked = _load_locked_tickers(_sig_usr) if _sig_usr else {}
+        if _locked and open_pos:
+            _locked_held = [t for t in open_pos if t in _locked]
+            if _locked_held:
+                st.caption("🔒 売買対象外（優待など）: " + "、".join(f"{t} {_get_stock_display_name(t)}" for t in _locked_held)
+                           + "　※ AIの売買判断の対象から除いています（解除は「取引記録入力」タブ）")
+                open_pos = {t: p for t, p in open_pos.items() if t not in _locked}
+
         # 選択肢: 保有銘柄のみ
         all_options = {}
         if open_pos:
@@ -36541,6 +36589,23 @@ def render_claude_trading_project():
                 else:
                     st.info("保有中の銘柄はまだありません。")
 
+            # 🔒 売買対象外（株主優待など）。AIの売買判断・損切り/利確アラートから除外する
+            _lock_cur = _load_locked_tickers(_usr)
+            with st.expander(f"🔒 売買対象外にロックする銘柄（株主優待など・現在{len(_lock_cur)}銘柄）", expanded=False):
+                st.caption("優待目的などで売らない銘柄をロックすると、AIの売買判断（売却・一部利確・追加買い）、損切り/利確ラインの通知、"
+                           "毎朝の保有銘柄アクション判定の対象から外れます。取引の記録は、ロック中でも通常どおりできます。")
+                _lock_opts = sorted(set(_held_now) | set(_lock_cur))
+                _lock_sel = st.multiselect(
+                    "ロックする銘柄", _lock_opts, default=[t for t in _lock_cur if t in _lock_opts], key="lock_sel_trade",
+                    format_func=lambda t: f"{t} — {_get_stock_display_name(t)}",
+                )
+                if st.button("💾 ロックを保存", key="btn_save_locks"):
+                    if _save_locked_tickers(_usr, {t: _lock_cur.get(t, "優待") for t in _lock_sel}):
+                        st.success(f"✅ {len(_lock_sel)}銘柄をロックしました")
+                        st.rerun()
+                    else:
+                        st.error("保存に失敗しました（Google Sheetsに接続できませんでした）")
+
             # エラー/成功メッセージを session_state で永続化
             _tr_status = st.session_state.pop("_trade_status", None)
             _tr_msg    = st.session_state.pop("_trade_msg", None)
@@ -36720,6 +36785,8 @@ def render_claude_trading_project():
                     # 対応する投信協会コードへ正規化する
                     trade_ticker = _resolve_fund_ticker_alias(trade_ticker)
                     trade_name = t_name.strip() or _get_stock_display_name(trade_ticker)
+                    if trade_ticker in _lock_cur and "SELL" in t_action:
+                        st.warning(f"🔒 {trade_ticker} は売買対象外にロックしている銘柄です（記録は保存します）。")
                     if trade_ticker and t_price > 0:
                         action = "BUY" if "BUY" in t_action else "SELL"
 

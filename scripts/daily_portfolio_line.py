@@ -184,6 +184,9 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
         return {"text": "", "model": "", "error": err or "取引記録がありません"}, {}, {}
 
     positions = app._calc_positions_from_df(trades_df)
+    # 優待などで売買対象外にロックした銘柄は、アクション判定（売却・一部利確・追加買い）から除く
+    _locked = set(app._load_locked_tickers(username))
+    positions = {t_: p_ for t_, p_ in positions.items() if t_ not in _locked}
     if not positions:
         return {"text": "", "model": "", "error": "保有銘柄がありません"}, {}, {}
 

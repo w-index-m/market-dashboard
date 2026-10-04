@@ -48,7 +48,7 @@ def _cfg() -> dict:
     }
 
 
-def evaluate(positions: dict, closes: dict, names: dict, cfg: dict) -> list:
+def evaluate(positions: dict, closes: dict, names: dict, cfg: dict, locked=()) -> list:
     """保有銘柄ごとにアラート文（日本語1行）を返す。closes: {ticker: 終値のpd.Series}。"""
     out = []
     for tk, pos in positions.items():
@@ -68,6 +68,8 @@ def evaluate(positions: dict, closes: dict, names: dict, cfg: dict) -> list:
         elif day >= cfg["day_up"]:
             out.append(f"📈 {nm} 本日 {day:+.1f}%（急騰）")
 
+        if tk in locked:
+            continue   # 優待などでロック中の銘柄は、売買の目安になる通知（損切り・利確・高値からの下落）を出さない
         avg = float(pos.get("avg_cost") or 0)
         if avg > 0:
             pnl_now, pnl_prev = (cur / avg - 1) * 100, (prev / avg - 1) * 100
@@ -145,7 +147,8 @@ def main() -> None:
                 closes[t] = close
             elif t in close.columns:
                 closes[t] = close[t]
-    alerts = evaluate(positions, closes, names, cfg)
+    locked = set(app._load_locked_tickers(username))
+    alerts = evaluate(positions, closes, names, cfg, locked)
 
     if market in ("us", "all") and "^VIX" in closes:
         v = closes["^VIX"].dropna()
