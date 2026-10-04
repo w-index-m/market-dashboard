@@ -27858,6 +27858,34 @@ def _compute_portfolio_risk_inputs() -> dict | None:
             "stress": stress, "cover_all": cover_all}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _portfolio_eps_growth() -> dict | None:
+    """今の保有株数を掛けた持分利益（Σ保有株数×各銘柄のTTM EPS、円換算）の年平均成長率を返す。
+    保存済みの業績データ（fundamentals_cache）を使う。保有額の85%以上で利益データが揃う期間だけが対象。
+    Returns: {"cagr3","cagr5"(足りなければNone),"start","n","last_ttm"}。計算できなければNone。"""
+    open_pos = {t: p for t, p in _get_open_positions().items() if t not in _JP_FUND_MAP}
+    if not open_pos:
+        return None
+    funds = _load_fundamentals_cache_all()
+    if not funds:
+        return None
+    pr = _fetch_portfolio_prices(tuple(open_pos))
+    fx = float(pr.get("_usdjpy") or 150.0)
+    pos2 = {t: {"qty": p["qty"], "is_jp": t.endswith(".T"), "price": (pr.get(t) or {}).get("price")}
+            for t, p in open_pos.items()}
+    e = _look_through_series(pos2, funds, fx)["earnings"]
+    if len(e) < 13 or e.iloc[-1] <= 0:
+        return None
+
+    def _cagr(q):
+        if len(e) <= q or e.iloc[-1 - q] <= 0:
+            return None
+        return float((e.iloc[-1] / e.iloc[-1 - q]) ** (4 / q) - 1) * 100
+
+    return {"cagr3": _cagr(12), "cagr5": _cagr(20), "start": str(e.index[0]), "last_ttm": float(e.iloc[-1]),
+            "n_q": len(e)}
+
+
 @st.fragment
 def render_portfolio_risk_simulation():
     """📐 今のポートフォリオ構成で、過去の暴落と将来の値動きがどうなるかを計算して表示する。
@@ -27928,7 +27956,7 @@ def render_portfolio_risk_simulation():
     _yrs = st.radio("期間", [5, 10, 20], index=1, horizontal=True, key="pr_yrs", format_func=lambda v: f"{v}年")
     _src = st.radio(
         "想定リターンの決め方",
-        ["実績とリスク連動の混合（推奨）", "リスク連動のみ（β×市場プレミアム）", "固定値（従来）"],
+        ["実績とリスク連動の混合（推奨）", "リスク連動のみ（β×市場プレミアム）", "過去のEPS成長に合わせる", "固定値（従来）"],
         horizontal=False, key="pr_src",
         help="どのポートフォリオでも同じ平均リターンにすると、リスクの大きさが反映されません。リスクが大きい構成ほど高い見返りを"
              "要求されるはず、という考え方（リスク連動）と、過去5年の実績の一部を混ぜる方式を選べます。",
@@ -27938,7 +27966,25 @@ def render_portfolio_risk_simulation():
     _hist_arith = float((1 + _m.mean()) ** 12 - 1) * 100           # 過去5年の実績（算術平均の年率換算）
     _arith_target = None
     _label = ""
-    if _src.startswith("固定"):
+    if _src.startswith("過去のEPS"):
+        _eg = _portfolio_eps_growth()
+        if not _eg or (_eg["cagr3"] is None and _eg["cagr5"] is None):
+            st.warning("EPS成長を計算できませんでした（業績データが揃う期間が短い、または未保存）。別の決め方を選んでください。")
+            _arith_target, _label = 7.0, "EPS成長を計算できないため、仮に年7%"
+        else:
+            _c1, _c2 = st.columns(2)
+            _basis = _c1.radio("使う期間", [x for x, v in (("直近5年", _eg["cagr5"]), ("直近3年", _eg["cagr3"])) if v is not None],
+                               horizontal=True, key="pr_eps_basis")
+            _g_raw = _eg["cagr5"] if _basis == "直近5年" else _eg["cagr3"]
+            _cap = _c2.slider("成長率の上限（%/年）", 5, 40, 25, 5, key="pr_eps_cap",
+                              help="過去に急成長した分を、将来も続ける前提は楽観的です。上限を超える分は反映しません。")
+            _g_used = max(-10.0, min(_g_raw, float(_cap)))
+            _dy = st.slider("配当利回りの上乗せ（%）", 0.0, 4.0, 0.5, 0.5, key="pr_eps_dy")
+            _arith_target = _g_used + _dy
+            _label = (f"持分利益（EPS×保有株数）の{_basis}の年平均成長 {_g_raw:.0f}%"
+                      f"{f'（上限{_cap}%に制限）' if _g_raw > _cap else ''} ＋ 配当 {_dy:.1f}% ＝ 平均年{_arith_target:.1f}%"
+                      "（PER＝利益に対する評価は変わらない前提）")
+    elif _src.startswith("固定"):
         _c1, _c2 = st.columns(2)
         _exp = _c1.slider("想定する年平均リターン（%）", 0, 20, 7, 1, key="pr_exp")
         _fixed_mode = _c2.radio("意味", ["複利（中央値が年○%）", "算術平均（毎月の平均が年○%）"], key="pr_mode")
@@ -27962,7 +28008,10 @@ def render_portfolio_risk_simulation():
             _arith_target = _capm
             _label = f"リスク連動：{_rf:.1f}% ＋ β{_beta:.2f} × {_erp:.1f}% ＝ 平均年{_capm:.1f}%"
     st.caption(f"📌 想定リターン（期待値＝毎月の平均を年率換算）：{_label}。ポートフォリオのβは{_beta:.2f}、年率ボラは約{_ann_vol:.0f}%。"
-               "アルファ（市場で説明できない超過リターン）は0と仮定しています。")
+               "アルファ（市場で説明できない超過リターン）は0と仮定しています。"
+               + ("EPS成長は、今の保有銘柄（勝ち残った銘柄）の過去の利益を、今の保有株数で計算したもので、後知恵が入ります。"
+                  "株価は、利益の成長に加えてPERの変化でも動くため、利益が伸びても株価が同じだけ上がるとは限りません。"
+                  if _src.startswith("過去のEPS") else ""))
     _rng = _np.random.default_rng(42)
     if _arith_target is not None:
         # 算術平均（期待値）を目標に合わせる。値動きが荒いほど複利の成長（中央値）は低くなる
