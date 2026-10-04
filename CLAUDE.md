@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Only two source files matter:
 
-- `app.py` — The entire application (~17,000 lines). Single-file Streamlit app.
+- `app.py` — The entire application (~40,000 lines). Single-file Streamlit app.
 - `analytics.py` — Access analytics module (page views, Google Sheets persistence, IP/UA detection).
 
 ## Architecture Overview
@@ -183,3 +183,45 @@ A separate page (own header, mode-selector cards, own tab bar) from the main mar
 **配当サマリ's "おすすめ高配当銘柄" card is a daily-refreshed top-5, not a fixed list.** `_JP_HIGH_DIV_CANDIDATES` / `_US_HIGH_DIV_CANDIDATES` are hand-picked pools (~15-17 large-cap dividend payers each; tickers are manually chosen, never AI-generated, to avoid a hallucinated ticker or company name slipping through) — `_pick_top_high_dividend()` computes each candidate's trailing-12-month yield (sum of `_fetch_dividend_history()`'s last-year dividends ÷ current price, not yfinance's own `dividendYield` field) and returns the top N, cached 24h. The displayed lineup shifts with real price/dividend changes instead of always showing the same names.
 
 **前日比/先週比/前月比/前年比 and the daily CSV export all share one source of truth: `asset_category_snapshot`.** A dedicated GitHub Actions cron (`daily-asset-snapshot.yml`, 00:00 JST) calls `_save_daily_asset_category_snapshot()`, which uses `_compute_portfolio_summary()` (fund NAVs included) to record one row per user per day: `日本株`/`米国株`/`投資信託`/`債券`/`total_value_jpy`. `_load_asset_category_snapshot(username, target_date)` returns the closest snapshot on/before a given date (used for all four period-comparison figures — 先週比/前月比/前年比 fall back to a stock-only recompute via `_compute_portfolio_history()`, marked with `＊`, when no snapshot exists that far back yet); `_load_asset_category_snapshot_all(username)` (cached) backs both that lookup and the "📅 資産クラス別 日次推移" CSV download at the bottom of 配当サマリ. Note this data has a different scope than a household-finance aggregator like MoneyForward (bank accounts, other brokerages, cash, real estate) — it only covers positions entered as trades in this app, by design.
+
+## Working rules (added 2026-10)
+
+- **Lint gates the commit.** Run `python3 -m py_compile app.py && ruff check app.py scripts/` in the *same* `&&` chain as `git commit` (CI fails on ruff errors; Python 3.11 — no backslashes inside f-string expressions).
+- **Public repo: never commit user holdings, trade records or amounts** (data files, debug scripts, logs). Use generic tickers in `scripts/debug_*.py`. User data lives in the private Google Sheet and is read at runtime only; Actions logs must not print holdings (count-only `::notice` annotations are OK).
+- **Push to both** `origin main` (deploys) and the session branch after `git fetch` + `git merge origin/main` (Actions bots commit `data/*.json` to main).
+
+## Precompute pattern (GitHub Actions → `data/*.json` → app reads local file)
+
+Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so heavy fetches run on Actions and are committed; the app only reads the file (with a live-fetch fallback where cheap).
+
+| Workflow | Script | Output | Used by |
+|---|---|---|---|
+| precompute-sp600-candidates.yml (daily) | precompute_sp600_candidates.py / precompute_jp_tenbagger.py / check_tenbagger_health.py | sp600_candidates.json, jp_tenbagger_raw.json | 🌱長期育成 / 🚀日本株10倍株候補 modes (+ health check job) |
+| earnings-review.yml | precompute_earnings_review.py | earnings_reviews.json | 📅決算後レビュー (fixed US universe only) |
+| ai-forecast-log.yml | ai_forecast_log.py | ai_forecasts.json | 🏁AIの答え合わせ scoreboard |
+| marks-valuation.yml (weekdays) | precompute_marks_valuation.py | marks_valuation.json | 💎マークスモード / valuation flags in AI prompts |
+| tokyo-re-index.yml (weekly) | precompute_tokyo_re_index.py | tokyo_re_index.json | MLIT Tokyo residential price index card |
+| longterm-returns.yml (monthly) | precompute_longterm_returns.py | longterm_returns.json | 長期の複利シミュレーション (US stocks/REIT/Treasuries, total return) |
+| fundamentals-cache.yml (Sun/Wed) | precompute_fundamentals.py | **Google Sheet** `fundamentals_cache` tab (private, merged over time so quarterly history grows) | 📊 portfolio fundamentals (EPS/BPS/investment) |
+| holdings-alerts.yml | holdings_alerts.py | LINE/Slack notification only (no trading) | holdings alerts (急落/損切り/高値からの下落/VIX) |
+| daily-portfolio-line.yml / daily-asset-snapshot.yml | daily_portfolio_line.py / daily_asset_snapshot.py | LINE+Slack digest / `asset_category_snapshot` sheet | daily digest, period comparisons |
+
+**Debugging from the sandbox:** egress is limited to github.com. Use `debug-adhoc.yml` (`workflow_dispatch`, input `script` = bare filename under `scripts/`); output is published to the orphan branch `adhoc-output` (`git fetch origin adhoc-output && git show origin/adhoc-output:adhoc_output.txt`). `GITHUB_TOKEN` env allows `workflow_dispatch` via REST (`Content-Type: application/json`, retry on 502/503). Actions run logs themselves are not reachable.
+
+## Features added 2026-09/10 (where to look)
+
+- **AI infra**: `call_ai_with_fallback`/`_try_providers_in_order` now include Mistral (`MISTRAL_API_KEY`); `_ai_usage_store` + `render_ai_usage_panel` (in-memory, resets on deploy); LLM-as-judge must be a *different provider* than the scorer (`_JUDGE_PROVIDER_ORDER`).
+- **Marks-inspired principles**: `_MARKS_PRINCIPLES` (13 themed items, paraphrased — do not paste book text), `_marks_valuation_metrics` / `_marks_mode_score` / `_marks_prompt_blocks`; injected into Agent C prompts, `_generate_full_portfolio_recommendation`, and shown in the 🧭 expander. 💎 `marks` mode = valuation-first ranking (forward PER from analyst EPS, 3y max drawdown, overheating penalty; ETFs excluded).
+- **Portfolio page (損益・ポートフォリオ tab)**: `_compute_portfolio_allocation_history` (USD→JPY, funds approximated from trade prices, held-ticker-missing warning), `_compute_portfolio_history` (JPY-converted; USD was previously summed raw), `render_portfolio_risk_simulation` (stress scenarios, beta/alpha/R², up/down capture, bootstrap fan chart with 4 expected-return modes: mixed / risk-linked β×ERP / EPS-growth / fixed), `render_portfolio_fundamentals` (look-through EPS/BPS = Σ shares × per-share value; only periods where ≥85% of holdings have data).
+- **配当サマリ tab**: 📈増配予想 (`_fetch_dividend_growth_profile`/`_estimate_dividend_growth`), 💹EPSアナリスト予想 (`_fetch_eps_estimates`).
+- **Macro section**: rate/inflation card helpers (BLS fallback, MOF JGB10Y CSV, official 3M Treasury yield instead of `^IRX`), J-REIT card (`render_reit_card`), Tokyo residential price index, `render_longterm_compounding_card` (fragment).
+- **Sidebar**: `render_server_metrics_panel` (cgroup memory/CPU, malloc_trim button; sampler thread started via `st.cache_resource`).
+- **Mode comparison table** is hand-written HTML (hover tooltip with top-10 tickers via `_order_for_display`); `_MODE_BASKET_DISPLAY_ORDER` only affects the tooltip.
+
+## Known data gotchas
+
+- `^IRX` is the 13-week discount basis (~0.17pt below the official 3M yield); `^TNX`/`^IRX` are both plain percent (no `/10`).
+- yfinance quarterly statements give only ~5–6 quarters (annual 4–5); reported-EPS history via `get_earnings_dates(limit=60)` reaches ~12y and is split-adjusted. Japanese `forwardEps` in `info` is unreliable — use `earnings_estimate` (`0y`/`+1y`).
+- Mutual funds (`_JP_FUND_MAP`, NAV per 10,000 units, `_JP_FUND_NAV_UNIT`) have no daily series; the fund-name alias match is NFKC + casefold (`_normalize_fund_name`).
+- FRED can time out from Actions; CPI falls back to BLS.
+
