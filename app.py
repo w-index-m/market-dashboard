@@ -31530,10 +31530,31 @@ def _compute_mode_basket_backtest(mode_key: str) -> dict:
     # グラフ用: ベンチマークの累積値をバスケットの日付に合わせる（休場日は前日の値を引き継ぐ）
     _bench_on_basket = bench_cum.reindex(cum.index, method="ffill").bfill()
 
+    # シャープレシオ（年率）= (平均日次リターン − 無リスク金利/252) ÷ 日次リターンの標準偏差 × √252。
+    # 無リスク金利は米財務省の最新の3ヶ月利回り（取れなければ4%）。バスケットは均等加重の日次リターンで計算する。
+    try:
+        _rf = float(_fetch_treasury_3m_series().dropna().iloc[-1])
+    except Exception:
+        _rf = 4.0
+
+    def _sharpe(r, days):
+        r = r.dropna().tail(days)
+        if len(r) < max(60, int(days * 0.6)) or float(r.std()) <= 0:
+            return None
+        return float((r.mean() - _rf / 100 / 252) / r.std() * (252 ** 0.5))
+
+    _top10 = _order_for_display(mode_key, [t for t in tickers if t in close_all.columns])[:10]
+    _tk_sharpe = {t: _sharpe(close_all[t].dropna().pct_change(), 252) for t in _top10}
     return {
         "ok":              True,
         "n_tickers":       n_ok,
-        "tickers":         _order_for_display(mode_key, [t for t in tickers if t in close_all.columns])[:10],
+        "tickers":         _top10,
+        "ticker_sharpe":   _tk_sharpe,
+        "sharpe_1y":       _sharpe(basket_ret, 252),
+        "sharpe_3y":       _sharpe(basket_ret, 756),
+        "bench_sharpe_1y": _sharpe(bench_ret, 252),
+        "bench_sharpe_3y": _sharpe(bench_ret, 756),
+        "rf":              _rf,
         "selection_kind":  "ranked" if is_ranked else "theme",
         "ret_1y":          _ret_over(cum, 252),
         "ret_3y":          _ret_over(cum, 756),
@@ -34232,7 +34253,10 @@ def render_claude_trading_project():
             if _top:
                 _tip_lines = "".join(
                     f'<div>{_i}. {_html_mod.escape(_tk)}　<span style="color:#94a3b8">'
-                    f'{_html_mod.escape(_short_name(str(_get_stock_display_name(_tk))))}</span></div>'
+                    f'{_html_mod.escape(_short_name(str(_get_stock_display_name(_tk))))}</span>'
+                    + (f'<span style="color:#64748b">　シャープ {_r["ticker_sharpe"][_tk]:.2f}</span>'
+                       if (_r.get("ticker_sharpe") or {}).get(_tk) is not None else "")
+                    + '</div>'
                     for _i, _tk in enumerate(_top, 1)
                 )
                 _tip = ('<div class="mc-tip"><div style="color:#94a3b8;margin-bottom:4px">'
@@ -34247,11 +34271,21 @@ def render_claude_trading_project():
                 f'{_r["ret_1y"]:+.1f}%' if _ok and _r.get("ret_1y") is not None else "—",
                 f'{_r["ret_3y"]:+.1f}%' if _ok and _r.get("ret_3y") is not None else "—",
                 f'{_r["max_dd_1y"]:+.1f}%' if _ok and _r.get("max_dd_1y") is not None else "—",
+                f'{_r["sharpe_1y"]:.2f}' if _ok and _r.get("sharpe_1y") is not None else "—",
+                f'{_r["sharpe_3y"]:.2f}' if _ok and _r.get("sharpe_3y") is not None else "—",
             ]
             _cmp_body.append(
                 "<tr>" + _label_cell + "".join(f"<td>{_v}</td>" for _v in _vals)
                 + f'<td style="font-weight:600">{_method}</td></tr>'
             )
+        _ref = next((x for x in _bt_all.values() if x.get("ok") and x.get("bench_ret_1y") is not None), None)
+        if _ref:
+            _f = lambda v, pct=True: ("—" if v is None else (f"{v:+.1f}%" if pct else f"{v:.2f}"))   # noqa: E731
+            _cmp_body.append(
+                '<tr style="color:#94a3b8"><td>📈 S&P500（参考）</td>'
+                f'<td>{_f(_ref.get("bench_ret_1y"))}</td><td>{_f(_ref.get("bench_ret_3y"))}</td><td>—</td>'
+                f'<td>{_f(_ref.get("bench_sharpe_1y"), False)}</td><td>{_f(_ref.get("bench_sharpe_3y"), False)}</td>'
+                '<td>市場の目安</td></tr>')
         st.markdown(
             "<style>"
             ".mc-tbl{width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0}"
@@ -34264,10 +34298,15 @@ def render_claude_trading_project():
             ".mc-has:hover .mc-tip,.mc-has:focus .mc-tip{display:block}"
             "</style>"
             '<table class="mc-tbl"><thead><tr><th>モード（ⓘ=タップ/ホバーで主な銘柄）</th><th>1年リターン</th>'
-            "<th>3年リターン</th><th>直近1年最大DD</th><th>選定方法</th></tr></thead><tbody>"
+            "<th>3年リターン</th><th>直近1年最大DD</th><th>シャープ(1年)</th><th>シャープ(3年)</th><th>選定方法</th></tr></thead><tbody>"
             + "".join(_cmp_body) + "</tbody></table>",
             unsafe_allow_html=True,
         )
+        st.caption(
+            "シャープレシオ＝リスク（値動きの大きさ）1単位あたりの超過リターン（年率。(平均リターン−無リスク金利)÷標準偏差）。"
+            "高いほど、同じリスクで効率よく稼げたことを表します（1以上で良好、2以上は優秀、マイナスは無リスク資産以下）。"
+            "各モードの均等加重バスケットの日次リターンで計算しています（ⓘの中の銘柄ごとの値は直近1年）。"
+            "無リスク金利は米財務省の最新の3か月利回り。")
         st.caption(
             "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
             "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
