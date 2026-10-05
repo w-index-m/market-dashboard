@@ -57,7 +57,7 @@ check(len(j) >= 3, "🚀日本株10倍株候補 候補選定",
       f"{len(j)}銘柄 " + ", ".join(f"{t}({v.get('name', '')[:8]} {v.get('score_total')}点)" for t, v in list(j.items())[:10]))
 
 for key, label in (("growth", "🌱長期育成"), ("jp_tenbagger", "🚀日本株10倍株候補")):
-    bt = app._compute_mode_basket_backtest(key)
+    bt = app._compute_mode_basket_backtest_live(key)
     ok = bool(bt.get("ok")) and bt.get("ret_1y") is not None
     if ok:
         r3 = bt.get("ret_3y")

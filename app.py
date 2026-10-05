@@ -31426,8 +31426,37 @@ def _get_mode_backtest_tickers(mode_key: str) -> tuple[list, bool]:
     return [t[0] for t in _top], True
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_precomputed_mode_backtests() -> dict | None:
+    """scripts/precompute_mode_backtest.py がGitHub Actionsで平日毎日生成する data/mode_backtest.json を読む。
+    Returns: {"generated_at": ISO文字列, "modes": {mode_key: 結果dict}}。無い・壊れている・生成から48時間超ならNone。"""
+    import json as _json_mb
+    path = os.path.join(os.path.dirname(__file__), "data", "mode_backtest.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_mb.load(f)
+        _gen = datetime.strptime(d["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - _gen).total_seconds() > 48 * 3600:
+            return None
+        return d if d.get("modes") else None
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=TTL_DAILY, show_spinner=False)
 def _compute_mode_basket_backtest(mode_key: str) -> dict:
+    """全モード比較表・バックテスト詳細用。GitHub Actionsが事前計算した結果（data/mode_backtest.json）があればそれを返し、
+    無い・古い・そのモードが失敗している場合だけ、その場で計算する（_compute_mode_basket_backtest_live）。"""
+    pre = _load_precomputed_mode_backtests()
+    if pre:
+        r = (pre["modes"] or {}).get(mode_key)
+        if r and r.get("ok"):
+            return {**r, "computed_at": pre["generated_at"], "precomputed": True}
+    return _compute_mode_basket_backtest_live(mode_key)
+
+
+@st.cache_data(ttl=TTL_DAILY, show_spinner=False)
+def _compute_mode_basket_backtest_live(mode_key: str) -> dict:
     """投資戦略モードの対象銘柄群を均等加重で保有し続けた場合の1年・3年リターンを
     バックテストする（推奨ポートフォリオモード選択カードの直下に表示し、
     「このモードを選ぶと過去どう推移したか」の参考情報を提供する）。
@@ -34307,6 +34336,13 @@ def render_claude_trading_project():
             "高いほど、同じリスクで効率よく稼げたことを表します（1以上で良好、2以上は優秀、マイナスは無リスク資産以下）。"
             "各モードの均等加重バスケットの日次リターンで計算しています（ⓘの中の銘柄ごとの値は直近1年）。"
             "無リスク金利は米財務省の最新の3か月利回り。")
+        _pre_ts = next((x.get("computed_at") for x in _bt_all.values() if x.get("precomputed")), None)
+        if _pre_ts:
+            _ts_jst = datetime.strptime(_pre_ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(JST)
+            st.caption(f"🗂️ 計算結果はGitHub Actionsが事前に計算したものです（{_ts_jst.strftime('%m/%d %H:%M')} JST時点・平日毎日更新）。"
+                       "チャートは週次に間引いています。")
+        else:
+            st.caption("🗂️ 事前計算データが無い（または古い）ため、その場で計算しました。")
         st.caption(
             "「スコア選定」列のモードは、「💼推奨ポートフォリオを生成」でAIが最終的に候補として使うのと"
             "同じ絞り込み基準（価格モメンタムのスコアリング）で、今日時点の上位銘柄を選び、過去に遡って"
