@@ -679,7 +679,109 @@
     "usdjpy": "up"
    },
    "scenario": "米金利上昇が継続し、ドル高・円安でS&Pは下落。日経は円安追い風で上昇、10年債は上昇。"
+  },
+  {
+   "id": "2026-10-06-groq",
+   "date": "2026-10-06",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7773.95,
+     "chg20_pct": 0.72,
+     "date": "2026-10-05"
+    },
+    "nikkei": {
+     "value": 70126.742,
+     "chg20_pct": 9.21,
+     "date": "2026-10-06"
+    },
+    "tnx": {
+     "value": 5.311,
+     "chg20_pct": 11.02,
+     "date": "2026-10-05"
+    },
+    "usdjpy": {
+     "value": 157.937,
+     "chg20_pct": 2.65,
+     "date": "2026-10-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利上昇と日経の成長期待が続き、株価は上昇。高金利でドル高、円安が進む。"
+  },
+  {
+   "id": "2026-10-06-mistral",
+   "date": "2026-10-06",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7773.95,
+     "chg20_pct": 0.72,
+     "date": "2026-10-05"
+    },
+    "nikkei": {
+     "value": 70126.742,
+     "chg20_pct": 9.21,
+     "date": "2026-10-06"
+    },
+    "tnx": {
+     "value": 5.311,
+     "chg20_pct": 11.02,
+     "date": "2026-10-05"
+    },
+    "usdjpy": {
+     "value": 157.937,
+     "chg20_pct": 2.65,
+     "date": "2026-10-06"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米FOMCの利下げ期待強まり（インフレ減速、雇用鈍化）で米長期金利低下、S&P500はリスク回避で下落。日経は米利下げと円安（原油高）で上昇。ドル円は原油高と米利下げの相殺で円安維持。"
+  },
+  {
+   "id": "2026-10-06-openrouter",
+   "date": "2026-10-06",
+   "model": "OpenRouter (inclusionai/ling-3.0-flash-sante:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7773.95,
+     "chg20_pct": 0.72,
+     "date": "2026-10-05"
+    },
+    "nikkei": {
+     "value": 70126.742,
+     "chg20_pct": 9.21,
+     "date": "2026-10-06"
+    },
+    "tnx": {
+     "value": 5.311,
+     "chg20_pct": 11.02,
+     "date": "2026-10-05"
+    },
+    "usdjpy": {
+     "value": 157.937,
+     "chg20_pct": 2.65,
+     "date": "2026-10-06"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米利回り5%超持続でリスクオフ。日経は調整入り。FRB追加利上げ観測でTNX上昇。日銀政策不透明感で円安維持"
   }
  ],
- "updated_at": "2026-10-03T01:21:31Z"
+ "updated_at": "2026-10-06T02:27:57Z"
 }
