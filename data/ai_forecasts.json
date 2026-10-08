@@ -917,7 +917,143 @@
     "usdjpy": "down"
    },
    "scenario": "FRB利下げ観測再燃で米利回り低下、ドル弱含み。日経は円安一時材料だが70000円超高水準売りで調整。S&P500は決算鈍化懸念と利回り重視で下落。"
+  },
+  {
+   "id": "2026-10-08-groq",
+   "date": "2026-10-08",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7801.77,
+     "chg20_pct": 2.17,
+     "date": "2026-10-07"
+    },
+    "nikkei": {
+     "value": 69482.812,
+     "chg20_pct": 4.64,
+     "date": "2026-10-08"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 9.1,
+     "date": "2026-10-07"
+    },
+    "usdjpy": {
+     "value": 157.759,
+     "chg20_pct": 2.73,
+     "date": "2026-10-08"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利上昇と企業収益改善が続き、株価は上昇。日経は円高圧力緩和と輸出企業好調で上昇。米10年債利回りは引き上げ継続。ドル円は円安圧力で上昇。"
+  },
+  {
+   "id": "2026-10-08-mistral",
+   "date": "2026-10-08",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7801.77,
+     "chg20_pct": 2.17,
+     "date": "2026-10-07"
+    },
+    "nikkei": {
+     "value": 69482.812,
+     "chg20_pct": 4.64,
+     "date": "2026-10-08"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 9.1,
+     "date": "2026-10-07"
+    },
+    "usdjpy": {
+     "value": 157.759,
+     "chg20_pct": 2.73,
+     "date": "2026-10-08"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米利上げピーク懸念と金融緩和期待で米長期金利低下、リスク資産売り戻し。日米景気減速懸念から株安、ドル円は原油高・米金利上昇圧力で円安維持。"
+  },
+  {
+   "id": "2026-10-08-nvidia",
+   "date": "2026-10-08",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7801.77,
+     "chg20_pct": 2.17,
+     "date": "2026-10-07"
+    },
+    "nikkei": {
+     "value": 69482.812,
+     "chg20_pct": 4.64,
+     "date": "2026-10-08"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 9.1,
+     "date": "2026-10-07"
+    },
+    "usdjpy": {
+     "value": 157.759,
+     "chg20_pct": 2.73,
+     "date": "2026-10-08"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "長期金利ピークアウトでドル円調整・円高進行。高バリュエーション株は利確売り優勢で下落。"
+  },
+  {
+   "id": "2026-10-08-openrouter",
+   "date": "2026-10-08",
+   "model": "OpenRouter (inclusionai/ling-3.0-flash-sante:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7801.77,
+     "chg20_pct": 2.17,
+     "date": "2026-10-07"
+    },
+    "nikkei": {
+     "value": 69482.812,
+     "chg20_pct": 4.64,
+     "date": "2026-10-08"
+    },
+    "tnx": {
+     "value": 5.277,
+     "chg20_pct": 9.1,
+     "date": "2026-10-07"
+    },
+    "usdjpy": {
+     "value": 157.759,
+     "chg20_pct": 2.73,
+     "date": "2026-10-08"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "FRB利下げ鈍化で金利高持続、リスク資産はやや調整。日経は円安で堅調。ドル円は利差で円安拡大。"
   }
  ],
- "updated_at": "2026-10-07T01:46:50Z"
+ "updated_at": "2026-10-08T02:14:26Z"
 }
