@@ -1053,7 +1053,109 @@
     "usdjpy": "up"
    },
    "scenario": "FRB利下げ鈍化で金利高持続、リスク資産はやや調整。日経は円安で堅調。ドル円は利差で円安拡大。"
+  },
+  {
+   "id": "2026-10-09-groq",
+   "date": "2026-10-09",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7765.36,
+     "chg20_pct": 2.29,
+     "date": "2026-10-08"
+    },
+    "nikkei": {
+     "value": 68461.047,
+     "chg20_pct": 4.89,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.231,
+     "chg20_pct": 5.81,
+     "date": "2026-10-08"
+    },
+    "usdjpy": {
+     "value": 158.032,
+     "chg20_pct": 2.3,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利上昇でドル高、日経は企業業績改善で上昇、S&Pは成長株が牽引"
+  },
+  {
+   "id": "2026-10-09-mistral",
+   "date": "2026-10-09",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7765.36,
+     "chg20_pct": 2.29,
+     "date": "2026-10-08"
+    },
+    "nikkei": {
+     "value": 68461.047,
+     "chg20_pct": 4.89,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.231,
+     "chg20_pct": 5.81,
+     "date": "2026-10-08"
+    },
+    "usdjpy": {
+     "value": 158.032,
+     "chg20_pct": 2.3,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fed利上げペース鈍化の可能性高まり（インフレ減速、金融緩和期待）で米長期金利低下。米景気減速懸念からリスク資産売り込み、日米株安。ドル円は米利下げ期待と日本金融緩和継続で円安維持。"
+  },
+  {
+   "id": "2026-10-09-nvidia",
+   "date": "2026-10-09",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7765.36,
+     "chg20_pct": 2.29,
+     "date": "2026-10-08"
+    },
+    "nikkei": {
+     "value": 68461.047,
+     "chg20_pct": 4.89,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.231,
+     "chg20_pct": 5.81,
+     "date": "2026-10-08"
+    },
+    "usdjpy": {
+     "value": 158.032,
+     "chg20_pct": 2.3,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米長期金利ピークアウトでドル円反落、円高が日経を圧迫。米株は金利低下恩恵で上昇。"
   }
  ],
- "updated_at": "2026-10-08T02:14:26Z"
+ "updated_at": "2026-10-09T02:29:23Z"
 }
