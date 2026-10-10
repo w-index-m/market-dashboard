@@ -1155,7 +1155,143 @@
     "usdjpy": "down"
    },
    "scenario": "米長期金利ピークアウトでドル円反落、円高が日経を圧迫。米株は金利低下恩恵で上昇。"
+  },
+  {
+   "id": "2026-10-10-gemini",
+   "date": "2026-10-10",
+   "model": "Gemini (gemini-3.8-flash)",
+   "snapshot": {
+    "sp500": {
+     "value": 7811.54,
+     "chg20_pct": 2.02,
+     "date": "2026-10-09"
+    },
+    "nikkei": {
+     "value": 69030.922,
+     "chg20_pct": 5.76,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.244,
+     "chg20_pct": 5.41,
+     "date": "2026-10-09"
+    },
+    "usdjpy": {
+     "value": 158.246,
+     "chg20_pct": 2.44,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "高金利の長期化懸念と過熱感から日米株式は調整安。米利回りはピークアウトし、為替は介入警戒も重なり円高方向へ修正。"
+  },
+  {
+   "id": "2026-10-10-groq",
+   "date": "2026-10-10",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7811.54,
+     "chg20_pct": 2.02,
+     "date": "2026-10-09"
+    },
+    "nikkei": {
+     "value": 69030.922,
+     "chg20_pct": 5.76,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.244,
+     "chg20_pct": 5.41,
+     "date": "2026-10-09"
+    },
+    "usdjpy": {
+     "value": 158.246,
+     "chg20_pct": 2.44,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米国景気回復期待と金利緩和圧力で株価上昇、日経も同調。米10年利回りはインフレ圧力低下で下落。円は米国金利低下で弱含み。"
+  },
+  {
+   "id": "2026-10-10-mistral",
+   "date": "2026-10-10",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7811.54,
+     "chg20_pct": 2.02,
+     "date": "2026-10-09"
+    },
+    "nikkei": {
+     "value": 69030.922,
+     "chg20_pct": 5.76,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.244,
+     "chg20_pct": 5.41,
+     "date": "2026-10-09"
+    },
+    "usdjpy": {
+     "value": 158.246,
+     "chg20_pct": 2.44,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米利上げピーク懸念（FRBの金融正常化遅延）と中国景気回復の鈍化でリスクオフ。米国株安、日経も追随。10年債利回りはインフレ減速期待で低下。ドル円は米国株安と日本金利低迷で円安が継続。"
+  },
+  {
+   "id": "2026-10-10-nvidia",
+   "date": "2026-10-10",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7811.54,
+     "chg20_pct": 2.02,
+     "date": "2026-10-09"
+    },
+    "nikkei": {
+     "value": 69030.922,
+     "chg20_pct": 5.76,
+     "date": "2026-10-09"
+    },
+    "tnx": {
+     "value": 5.244,
+     "chg20_pct": 5.41,
+     "date": "2026-10-09"
+    },
+    "usdjpy": {
+     "value": 158.246,
+     "chg20_pct": 2.44,
+     "date": "2026-10-09"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "粘着的インフレで長期金利上昇、株価重し。160円目前で介入警戒感強まり円高進行。"
   }
  ],
- "updated_at": "2026-10-09T02:29:23Z"
+ "updated_at": "2026-10-10T01:53:49Z"
 }
