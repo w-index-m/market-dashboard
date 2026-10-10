@@ -27898,6 +27898,40 @@ def _portfolio_eps_growth() -> dict | None:
             "n_q": len(e)}
 
 
+def _compare_return_methods(r: dict, years: int, long_src, rf: float = 4.0, erp: float = 5.0, w: int = 50,
+                            eps_cap: float = 25.0, fixed: float = 7.0, n: int = 2000) -> list:
+    """想定リターンの決め方4方式を、同じばらつき・同じ期間で並べて比較する。
+    Returns: [{"name","target"(算術平均の年率%),"median","p10","p90","cagr","p_loss"}...]（金額は円）。EPS成長が計算できなければその方式は除く。"""
+    import numpy as _np
+    stt = r["stats"]
+    beta = float(stt.get("beta") if stt.get("beta") is not None else 1.0)
+    monthly = r["monthly"][-60:].dropna()
+    hist_arith = min(float((1 + monthly.mean()) ** 12 - 1) * 100, 30.0)
+    capm = rf + beta * erp
+    methods = [
+        (f"リスク連動のみ（{rf:.0f}% + β{beta:.2f}×{erp:.0f}%）", capm),
+        (f"実績{w}% × リスク連動{100 - w}%（実績は上限30%）", w / 100 * hist_arith + (1 - w / 100) * capm),
+    ]
+    try:
+        eg = _portfolio_eps_growth()
+    except Exception:
+        eg = None
+    if eg and (eg.get("cagr5") is not None or eg.get("cagr3") is not None):
+        g = eg["cagr5"] if eg.get("cagr5") is not None else eg["cagr3"]
+        methods.append((f"過去のEPS成長（上限{eps_cap:.0f}%＋配当0.5%）", max(-10.0, min(g, eps_cap)) + 0.5))
+    methods.append((f"固定値（年{fixed:.0f}%）", fixed))
+    v0 = float(r["total_jpy"])
+    out = []
+    for name, tgt in methods:
+        paths = _goal_paths(monthly.to_numpy(), years, tgt, long_src, n=n, seed=11)
+        fin = v0 * _np.cumprod(1 + paths, axis=1)[:, -1]
+        p50 = float(_np.percentile(fin, 50))
+        out.append({"name": name, "target": tgt, "median": p50, "p10": float(_np.percentile(fin, 10)),
+                    "p90": float(_np.percentile(fin, 90)), "cagr": ((p50 / v0) ** (1 / years) - 1) * 100,
+                    "p_loss": float((fin < v0).mean()) * 100})
+    return out
+
+
 @st.fragment
 def render_portfolio_risk_simulation():
     """📐 今のポートフォリオ構成で、過去の暴落と将来の値動きがどうなるかを計算して表示する。
@@ -28095,6 +28129,34 @@ def render_portfolio_risk_simulation():
                 help="平均（期待値）より低くなるのは、値動きが荒いほど複利の成長が下がるため（ボラティリティの足かせ）。")
     d[2].metric(f"{_yrs}年後に今より減っている確率", f"{_p_loss:.0f}%")
     d[3].metric("途中で30%以上下落する確率", f"{_p_dd30:.0f}%")
+
+    with st.expander("📊 想定リターンの決め方4つを並べて比べる（同じ期間・同じばらつき）", expanded=False):
+        _ls = None
+        if _long:
+            _ls = {"mk": _mk_ret, "beta": _bm_, "resid": st_["resid"]}
+        _cmp = _compare_return_methods(r, int(_yrs), _ls, rf=float(st.session_state.get("pr_rf", 4.0)),
+                                       erp=float(st.session_state.get("pr_erp", 5.0)),
+                                       w=int(st.session_state.get("pr_w", 50)),
+                                       eps_cap=float(st.session_state.get("pr_eps_cap", 25)),
+                                       fixed=float(st.session_state.get("pr_exp", 7)))
+        _tot0 = r["total_jpy"]
+        _crow = "".join(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{c["name"]}</td>'
+            f'<td>{c["target"]:.1f}%</td><td style="color:#f87171">{c["p10"] / 1e4:,.0f}万</td>'
+            f'<td style="font-weight:700">{c["median"] / 1e4:,.0f}万</td><td style="color:#4ade80">{c["p90"] / 1e4:,.0f}万</td>'
+            f'<td>{c["cagr"]:+.1f}%</td><td>{c["p_loss"]:.0f}%</td></tr>'
+            for c in _cmp)
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">決め方</th><th>想定（平均年率）</th>'
+            f"<th>{_yrs}年後 下位10%</th><th>中央値</th><th>上位10%</th><th>中央値の年率</th><th>元本割れ確率</th></tr></thead>"
+            f"<tbody>{_crow}</tbody></table>", unsafe_allow_html=True)
+        _spread = (max(c["target"] for c in _cmp) - min(c["target"] for c in _cmp))
+        st.caption(
+            f"今の評価額は{_tot0 / 1e4:,.0f}万円。想定リターンの決め方によって、平均年率が最大{_spread:.0f}ポイント違い、{_yrs}年後の中央値が大きく変わります。"
+            "どれが正しいかは分からないため、**中央値が最も低い方式〜最も高い方式の範囲を、見込みの幅として**見てください。"
+            "リスク連動は理論上の目安、実績混合は過去の勢いの一部を反映、EPS成長は利益が伸び続けた場合の上振れシナリオです。"
+            "（ばらつきの元データ・期間は、上の選択に合わせています。各方式のスライダーの値は、直前に選んだ設定を使います）")
     st.caption(
         f"今の保有銘柄（円換算ウェイト）の過去5年（{len(_m)}か月分、計算に使えた履歴は{st_['history_start']}以降）の月次リターンの"
         f"ばらつき方（年率ボラ約{st_['ann_vol']:.0f}%）を借り、3か月ずつ並べ替えて{_n:,}通りを作成。値動きが荒いほど、算術平均が同じでも"
@@ -28964,6 +29026,207 @@ def render_tax_estimate():
         "iDeCo・確定拠出、配当の総合課税・申告分離の選択、扶養・社会保険への影響、手数料は考慮していません。NISAの制度（枠・対象）は改正されることがあるため、"
         "最新の情報を確認してください。税務上の確定的な判断には使わず、税理士や税務署に確認してください。"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 📝 売買の理由メモと ✅ 答え合わせ
+# ══════════════════════════════════════════════════════════════
+_NOTES_HEADERS = ["username", "note_id", "date", "ticker", "action", "price", "target", "stop", "horizon_m", "reason", "created_at"]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_trade_notes(username: str = "") -> list:
+    """売買の理由メモ（非公開のGoogle Sheets claude_trade_notes）。新しい順ではなく、記録順で返す。"""
+    try:
+        ws = _trading_ws("claude_trade_notes", _NOTES_HEADERS)
+        if not ws:
+            return []
+        u = (username or "admin").strip()
+        out = []
+        for r in ws.get_all_records():
+            if str(r.get("username") or "admin") != u or not r.get("note_id"):
+                continue
+            out.append({"note_id": str(r["note_id"]), "date": str(r.get("date") or "")[:10], "ticker": str(r.get("ticker") or ""),
+                        "action": str(r.get("action") or "BUY"), "price": float(r.get("price") or 0),
+                        "target": float(r.get("target") or 0), "stop": float(r.get("stop") or 0),
+                        "horizon_m": int(r.get("horizon_m") or 12), "reason": str(r.get("reason") or "")})
+        return out
+    except Exception as e:
+        logger.warning(f"[notes] 読込失敗: {e}")
+        return []
+
+
+def _add_trade_note(username: str, rec: dict) -> bool:
+    try:
+        ws = _trading_ws("claude_trade_notes", _NOTES_HEADERS)
+        if not ws:
+            return False
+        now = datetime.now(JST)
+        ws.append_row([(username or "admin").strip(), now.strftime("%Y%m%d%H%M%S%f"), rec["date"], rec["ticker"], rec["action"],
+                       rec["price"], rec["target"], rec["stop"], rec["horizon_m"], rec["reason"], now.strftime("%Y-%m-%d %H:%M")],
+                      value_input_option="RAW")
+        _load_trade_notes.clear()
+        return True
+    except Exception as e:
+        logger.warning(f"[notes] 保存失敗: {e}")
+        return False
+
+
+def _delete_trade_note(username: str, note_id: str) -> bool:
+    try:
+        ws = _trading_ws("claude_trade_notes", _NOTES_HEADERS)
+        if not ws:
+            return False
+        u = (username or "admin").strip()
+        for i, r in enumerate(ws.get_all_records()):
+            if str(r.get("note_id")) == note_id and str(r.get("username") or "admin") == u:
+                ws.delete_rows(i + 2)
+                _load_trade_notes.clear()
+                return True
+    except Exception as e:
+        logger.warning(f"[notes] 削除失敗: {e}")
+    return False
+
+
+def _review_trade_note(note: dict, ohlc: "pd.DataFrame", bench: "pd.Series", today: "pd.Timestamp") -> dict:
+    """理由メモ1件を、その後の値動きと照らして採点する。
+    ohlc: メモの日付以降の日足（Close/High/Low、配当調整なし）。bench: 同期間の指数（米国株ならS&P500、日本株なら日経225）の終値。
+    BUY: メモの価格より上がっていれば「的中」。SELL: メモの価格より下がっていれば「売って正解」。市場（指数）より良かったかも別に判定する。
+    horizon_m（月）を過ぎていれば「期間経過＝確定」、まだなら「進行中」。"""
+    if ohlc is None or len(ohlc) < 2 or not note.get("price"):
+        return {"status": "データ不足"}
+    p0, cur = float(note["price"]), float(ohlc["Close"].iloc[-1])
+    ret = (cur / p0 - 1) * 100
+    b_ret = None
+    if bench is not None and len(bench) >= 2:
+        b_ret = (float(bench.iloc[-1]) / float(bench.iloc[0]) - 1) * 100
+    hit_t = hit_s = None
+    if note.get("target"):
+        _h = ohlc[ohlc["High"] >= note["target"]]
+        hit_t = _h.index[0] if len(_h) else None
+    if note.get("stop"):
+        _l = ohlc[ohlc["Low"] <= note["stop"]]
+        hit_s = _l.index[0] if len(_l) else None
+    due = pd.Timestamp(note["date"]) + pd.DateOffset(months=int(note.get("horizon_m") or 12))
+    matured = today >= due
+    buy = note.get("action", "BUY") == "BUY"
+    right = ret > 0 if buy else ret < 0
+    beat = None if b_ret is None else ((ret - b_ret) > 0 if buy else (ret - b_ret) < 0)
+    first = None
+    if hit_t is not None and hit_s is not None:
+        first = "目標が先" if hit_t < hit_s else "損切りが先"
+    elif hit_t is not None:
+        first = "目標到達"
+    elif hit_s is not None:
+        first = "損切りライン割れ"
+    return {"status": "確定" if matured else "進行中", "ret": ret, "bench": b_ret, "right": right, "beat": beat,
+            "first": first, "cur": cur, "due": due.date()}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_note_prices(ticker: str, start: str) -> tuple:
+    """メモの日付以降の日足（配当調整なし）と、比較する指数の終値。"""
+    try:
+        h = yf.Ticker(ticker).history(start=start, auto_adjust=False)[["Close", "High", "Low"]].dropna()
+        if getattr(h.index, "tz", None) is not None:
+            h.index = h.index.tz_localize(None)
+        bk = "^N225" if ticker.endswith(".T") else "^GSPC"
+        b = yf.Ticker(bk).history(start=start, auto_adjust=False)["Close"].dropna()
+        if getattr(b.index, "tz", None) is not None:
+            b.index = b.index.tz_localize(None)
+        return h, b
+    except Exception:
+        return pd.DataFrame(), pd.Series(dtype=float)
+
+
+@st.fragment
+def render_trade_notes():
+    """📝 売買の理由メモと答え合わせ：買った（売った）理由・目標・撤退ラインを記録し、期間後に結果と見比べる。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    notes = _load_trade_notes(_u)
+    with st.expander(f"📝 売買の理由メモと答え合わせ（{len(notes)}件）", expanded=False):
+        st.caption("売買した時の理由・目標株価・撤退ライン・見直す時期を記録しておくと、あとで「当たったか」「運か実力か」を振り返れます。"
+                   "メモは非公開のGoogle Sheetsに保存されます。")
+        held = sorted(_get_open_positions(_u))
+        with st.form("trade_note_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            _tk = c1.text_input("ティッカー", placeholder="例: NVDA / 7203.T").strip().upper()
+            _act = c2.selectbox("売買区分", ["BUY（買い）", "SELL（売り）"])
+            _date = c3.date_input("売買日", value=datetime.now(JST).date())
+            c4, c5, c6, c7 = st.columns(4)
+            _px = c4.number_input("売買した価格", min_value=0.0, step=0.1, format="%.2f")
+            _tg = c5.number_input("目標株価（任意）", min_value=0.0, step=0.1, format="%.2f")
+            _st = c6.number_input("撤退ライン（任意）", min_value=0.0, step=0.1, format="%.2f")
+            _hz = c7.selectbox("見直す時期", [3, 6, 12, 24], index=2, format_func=lambda m: f"{m}か月後")
+            _rs = st.text_area("理由・想定シナリオ", placeholder="例: 来期のEPS成長が予想PERに対して割安。AIデータセンター需要が続く限り保有。"
+                                                          "売上成長が10%を下回ったら見直す。", height=90)
+            if st.form_submit_button("💾 メモを保存", type="primary"):
+                _t = _resolve_fund_ticker_alias(_strip_ticker_quote_prefix(_tk))
+                if re.fullmatch(r"\d[0-9A-Z]{3}", _t):
+                    _t += ".T"
+                if not _t or _px <= 0 or not _rs.strip():
+                    st.warning("ティッカー・価格・理由を入力してください。")
+                elif _add_trade_note(_u, {"date": str(_date), "ticker": _t, "action": "BUY" if "BUY" in _act else "SELL",
+                                          "price": _px, "target": _tg, "stop": _st, "horizon_m": int(_hz), "reason": _rs.strip()}):
+                    st.success("メモを保存しました")
+                    st.rerun()
+                else:
+                    st.error("保存に失敗しました（Google Sheetsに接続できませんでした）")
+        if held:
+            st.caption("保有中: " + "、".join(held[:12]) + ("…" if len(held) > 12 else ""))
+        if not notes:
+            st.info("まだメモがありません。")
+            return
+
+        today = pd.Timestamp(datetime.now(JST).date())
+        rows, done = [], []
+        for n in sorted(notes, key=lambda x: x["date"], reverse=True):
+            ohlc, bench = _fetch_note_prices(n["ticker"], n["date"])
+            if len(ohlc):
+                ohlc = ohlc[ohlc.index >= pd.Timestamp(n["date"])]
+            if len(bench):
+                bench = bench[bench.index >= pd.Timestamp(n["date"])]
+            rv = _review_trade_note(n, ohlc, bench, today)
+            if rv.get("status") == "確定":
+                done.append(rv)
+            _ok = "—" if "right" not in rv else ("✅" if rv["right"] else "❌")
+            _bt = "—" if rv.get("beat") is None else ("✅" if rv["beat"] else "❌")
+            _col = "#94a3b8" if "ret" not in rv else ("#4ade80" if rv["ret"] >= 0 else "#f87171")
+            rows.append(
+                f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:6px 8px">{n["date"]}</td>'
+                f'<td style="font-weight:600">{_get_stock_display_name(n["ticker"])}<div style="font-size:10px;color:#64748b">{n["ticker"]}</div></td>'
+                f'<td>{"買い" if n["action"] == "BUY" else "売り"}<div style="font-size:10px;color:#64748b">{n["price"]:,.2f}</div></td>'
+                f'<td style="color:{_col};font-weight:700">{(str(round(rv["ret"], 1)) + "%") if "ret" in rv else "—"}</td>'
+                f'<td>{(str(round(rv["bench"], 1)) + "%") if rv.get("bench") is not None else "—"}</td>'
+                f'<td>{_ok}</td><td>{_bt}</td><td style="font-size:11px">{rv.get("first") or "—"}</td>'
+                f'<td style="font-size:11px">{rv.get("status", "—")}<div style="color:#64748b">{n["horizon_m"]}か月({rv.get("due", "")})</div></td>'
+                f'<td style="font-size:11px;color:#94a3b8;max-width:260px">{html.escape(n["reason"])}</td></tr>')
+        st.markdown(
+            '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:10px 0 4px">✅ 答え合わせ（メモの価格からの値動き）</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">日付</th><th>銘柄</th><th>売買</th>'
+            "<th>その後<br>の値動き</th><th>市場</th><th>方向</th><th>市場に<br>勝った</th><th>目標/<br>撤退</th><th>状態</th><th>理由</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>", unsafe_allow_html=True)
+        if done:
+            n_ok = sum(1 for d in done if d["right"])
+            n_beat = [d for d in done if d.get("beat") is not None]
+            st.markdown(
+                f"- **期間が過ぎたメモ{len(done)}件**：方向が当たった割合 **{n_ok / len(done) * 100:.0f}%**"
+                + (f"、市場（指数）に勝った割合 **{sum(1 for d in n_beat if d['beat']) / len(n_beat) * 100:.0f}%**" if n_beat else "")
+                + f"、平均リターン {sum(d['ret'] for d in done) / len(done):+.1f}%。")
+            if len(done) < 10:
+                st.caption("件数が少ないうちは、当たった割合は偶然（運）に大きく左右されます。10件以上たまってから傾向を見てください。")
+        else:
+            st.caption("まだ見直す時期に達したメモがありません（「進行中」のものは、現時点の値動きです）。")
+        st.caption("方向の判定：買いは「メモの価格より上がった」、売りは「メモの価格より下がった（売って正解）」。市場は、米国株ならS&P500、日本株なら日経225の同期間の値動き。"
+                   "「目標/撤退」は、メモの日以降の高値・安値で、目標株価や撤退ラインに先に届いたかを見ます。配当は含まない株価ベースで、売買手数料と税金も含みません。")
+        _dl = {f"{n['date']} {n['ticker']} {n['action']} {n['price']:,.2f}（{n['reason'][:20]}）": n["note_id"] for n in notes}
+        _del = st.selectbox("メモを削除", ["（選択しない）"] + list(_dl), key="note_del_sel")
+        if _del != "（選択しない）" and st.button("🗑 このメモを削除", key="btn_del_note"):
+            if _delete_trade_note(_u, _dl[_del]):
+                st.rerun()
+            else:
+                st.error("削除に失敗しました")
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -37049,6 +37312,8 @@ def render_claude_trading_project():
                         st.rerun()
                     else:
                         st.error("保存に失敗しました（Google Sheetsに接続できませんでした）")
+
+            render_trade_notes()
 
             # エラー/成功メッセージを session_state で永続化
             _tr_status = st.session_state.pop("_trade_status", None)
