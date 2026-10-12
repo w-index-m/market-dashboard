@@ -28616,6 +28616,10 @@ def render_portfolio_fundamentals():
         _med = float(_ser.tail(40).median())
         _cur_per = _per_ok[-1][2]
         _pct = float((_ser.tail(40) < _cur_per).mean() * 100)
+        # 対数軸の目盛りは、2,4,6,8のような読みにくい表示になるため、きりの良い値を明示する
+        _pmin, _pmax = min(x[1] for x in _per_pts), max(x[1] for x in _per_pts)
+        _pv = [v for v in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000)
+               if _pmin * 0.7 <= v <= _pmax * 1.4]
         fig3 = go.Figure()
         fig3.add_trace(go.Scatter(
             x=[x[0] for x in _per_pts], y=[min(x[2], _PER_CAP) if x[2] is not None else None for x in _per_pts],
@@ -28632,7 +28636,8 @@ def render_portfolio_fundamentals():
                            yaxis=dict(tickfont=dict(color="#f59e0b"), gridcolor="#1e293b", rangemode="tozero",
                                       title=dict(text="PER（倍）", font=dict(color="#f59e0b"))),
                            yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#60a5fa"), showgrid=False,
-                                       type="log", title=dict(text="株価（対数）", font=dict(color="#60a5fa"))),
+                                       type="log", tickmode="array", tickvals=_pv, ticktext=[f"{v:,}" for v in _pv],
+                                       title=dict(text="株価（対数）", font=dict(color="#60a5fa"))),
                            hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
         st.markdown("**📉 PERの推移（決算発表日ごと）**")
         st.plotly_chart(fig3, use_container_width=True, key="pf_fund_per")
