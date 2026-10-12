@@ -28601,6 +28601,53 @@ def render_portfolio_fundamentals():
                        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
     st.plotly_chart(fig2, use_container_width=True, key="pf_fund_one")
 
+    # ── PERの推移（決算発表日の株価 ÷ 直近4決算の実績EPS合計）。利益が景気で振れる銘柄は、PERの谷＝利益のピークになりやすい ──
+    _pxa = f.get("px_at") or {}
+    _per_pts = []          # (日付, 株価, PER or None, TTM EPS)
+    for _i in range(3, len(eh)):
+        _ttm = sum(x["a"] for x in eh[_i - 3:_i + 1])
+        _p0 = _pxa.get(eh[_i]["d"])
+        if _p0:
+            _per_pts.append((eh[_i]["d"], _p0, (_p0 / _ttm) if _ttm > 0 else None, _ttm))
+    _per_ok = [x for x in _per_pts if x[2] is not None]
+    if len(_per_ok) >= 8:
+        _PER_CAP = 100.0
+        _ser = pd.Series({x[0]: x[2] for x in _per_ok})
+        _med = float(_ser.tail(40).median())
+        _cur_per = _per_ok[-1][2]
+        _pct = float((_ser.tail(40) < _cur_per).mean() * 100)
+        fig3 = go.Figure()
+        fig3.add_trace(go.Scatter(
+            x=[x[0] for x in _per_pts], y=[min(x[2], _PER_CAP) if x[2] is not None else None for x in _per_pts],
+            name="PER（倍）", mode="lines+markers", line=dict(color="#f59e0b", width=2.4), connectgaps=False,
+            customdata=[[x[2] if x[2] is not None else float("nan"), x[3]] for x in _per_pts],
+            hovertemplate="%{x}<br>PER %{customdata[0]:.1f}倍（直近12か月EPS %{customdata[1]:.2f}）<extra></extra>"))
+        fig3.add_trace(go.Scatter(x=[x[0] for x in _per_pts], y=[x[1] for x in _per_pts], name=f"株価（{cur}）", mode="lines",
+                                  line=dict(color="#60a5fa", width=1.4, dash="dot"), yaxis="y2"))
+        fig3.add_hline(y=min(_med, _PER_CAP), line=dict(color="#94a3b8", dash="dash"), annotation_text=f"過去の中央値 {_med:.1f}倍",
+                       annotation_font_color="#94a3b8")
+        fig3.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=300, margin=dict(l=10, r=10, t=10, b=20),
+                           font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.14),
+                           xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                           yaxis=dict(tickfont=dict(color="#f59e0b"), gridcolor="#1e293b", rangemode="tozero",
+                                      title=dict(text="PER（倍）", font=dict(color="#f59e0b"))),
+                           yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#60a5fa"), showgrid=False,
+                                       type="log", title=dict(text="株価（対数）", font=dict(color="#60a5fa"))),
+                           hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.markdown("**📉 PERの推移（決算発表日ごと）**")
+        st.plotly_chart(fig3, use_container_width=True, key="pf_fund_per")
+        _lo = min(_per_ok, key=lambda x: x[2])
+        st.markdown(
+            f"- 今のPER（直近12か月EPSベース）：**{_cur_per:.1f}倍**／過去最大約10年の中央値 {_med:.1f}倍／今より低かった割合 **{_pct:.0f}%**。"
+            f"過去で最も低かったのは **{_lo[2]:.1f}倍**（{_lo[0]}）。")
+        _loss = [x[0] for x in _per_pts if x[2] is None]
+        st.caption(
+            "PER＝決算発表日の株価÷その時点の直近4決算の実績EPS合計（配当調整なし・株式分割は調整済み）。"
+            + (f"利益がマイナスだった時期（{len(_loss)}回）は計算できないため線が途切れます。" if _loss else "")
+            + f"PERが{_PER_CAP:.0f}倍を超える点は、グラフ上は{_PER_CAP:.0f}倍に切り詰めています（ホバーで実際の値）。"
+            "利益が景気で大きく振れる銘柄（メモリ半導体など）は、利益のピークでPERが低く、谷で高くなりやすいため、"
+            "PERの低さだけで『割安』とは判断できません。実績ベースで、アナリストの予想PER（来期など）とは別の指標です。")
+
     # 直近の四半期の「利益と投資」の表
     def _m(v):
         if v is None:
