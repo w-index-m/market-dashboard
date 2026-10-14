@@ -12471,6 +12471,68 @@ def render_insider_activity():
             "一方、市場での**買い**（特に複数人の買い）は、経営陣の自信を示すことがあります。件数・金額は小さい場合も多く、遅れて提出されるため最新の動きは反映されないことがあります。")
 
 
+# ══════════════════════════════════════════════════════════════
+# 🧪 マークス型の選定ルールの過去検証
+# ══════════════════════════════════════════════════════════════
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_marks_backtest() -> dict | None:
+    """scripts/precompute_marks_backtest.py がGitHub Actionsで月1回生成する data/marks_backtest.json を読む。"""
+    import json as _json_mb2
+    path = os.path.join(os.path.dirname(__file__), "data", "marks_backtest.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_mb2.load(f)
+        return d if d.get("cum") else None
+    except Exception:
+        return None
+
+
+def render_marks_backtest():
+    """🧪 マークス型ルールの過去検証：当時のデータだけで選んだ場合の成績を、母集団・S&P500・モメンタムと比べる。"""
+    st.markdown('<a id="marks-backtest"></a>', unsafe_allow_html=True)
+    d = _load_marks_backtest()
+    with st.expander("🧪 マークス型の選定ルールを、過去に当てはめるとどうだったか（後知恵なしの検証）", expanded=False):
+        if not d:
+            st.info("検証データがまだありません（GitHub Actionsが月1回計算します）。")
+            return
+        names = {"picks": ("💎 マークス型（上位20）", "#f472b6", 3.0), "uni": ("母集団（対象銘柄の等ウェイト）", "#94a3b8", 1.5),
+                 "spy": ("S&P500（SPY）", "#60a5fa", 1.5), "mom": ("⚡ モメンタム上位20（6か月の上昇率）", "#fbbf24", 1.5),
+                 "lowper": ("PERが低い上位20", "#34d399", 1.5)}
+        fig = go.Figure()
+        xs = d["dates"] + ["（最終）"]
+        for k, (lab, col, w) in names.items():
+            if k in d["cum"]:
+                fig.add_trace(go.Scatter(x=xs, y=[1.0] + d["cum"][k], name=lab, mode="lines", line=dict(color=col, width=w),
+                                         hovertemplate="%{x}<br>" + lab + ": %{y:.2f}倍<extra></extra>"))
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=320, margin=dict(l=10, r=10, t=10, b=20),
+                          font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.18),
+                          xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", type="category", nticks=8),
+                          yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", ticksuffix="倍", title=dict(text="資産（開始時=1）", font=dict(color="#94a3b8"))),
+                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(fig, use_container_width=True, key="mb_fig")
+        rows = []
+        for k, (lab, _c, _w) in names.items():
+            s_ = d["stats"].get(k)
+            if not s_:
+                continue
+            rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{lab}</td>'
+                        f'<td style="font-weight:700">{s_["cagr"]:+.1f}%</td><td>{s_["mean_q"]:+.2f}%</td>'
+                        f'<td>{"—" if k == "uni" else str(int(s_["hit"])) + "%"}</td><td style="color:#f87171">{s_["mdd"]:.0f}%</td><td>{s_["vol_q"]:.1f}%</td></tr>')
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">方法</th><th>年率リターン</th><th>四半期の平均</th>'
+            f"<th>母集団に勝った割合</th><th>最大下落</th><th>四半期のばらつき</th></tr></thead><tbody>{''.join(rows)}</tbody></table>", unsafe_allow_html=True)
+        st.caption(
+            f"検証期間：{d['first']}〜{d['last']}の四半期ごとの入れ替え（{d['n_periods']}期間）。各時点で、**その時点までに発表済みの決算と株価だけ**を使って、"
+            f"S&P500の対象銘柄（平均{d['avg_eligible']}銘柄）から上位{d['top_n']}銘柄を等ウェイトで選び、次の四半期まで保有した結果です。"
+            "実績PER（直近4決算のEPS）・EPSの前年比成長・過去2年の最大下落・過去1年の上昇率（2倍超を減点）で採点（PER40倍超は除外）。"
+            "**当時のアナリスト予想（予想PER）は取得できないため、実際のマークスモードの予想PERベースの選定とは同じではありません**。"
+            "また、母集団は「現在の」S&P500構成銘柄で、のちに除外された銘柄が入らない（生存者バイアス）ため、全体の成績が高めに出ます。"
+            "手数料・税金・売買の影響は含みません。過去の結果は将来を保証しません。")
+        gen = d.get("generated_at", "")[:10]
+        st.caption(f"計算日: {gen}（月1回更新）")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_rising_candidates() -> dict | None:
     """scripts/precompute_rising.py がGitHub Actionsで平日毎日生成する data/rising_candidates.json
@@ -41643,6 +41705,11 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ===================================================
     render_sector_flow()
     st.divider()
+
+    # ===================================================
+    # ★ マークス型ルールの過去検証
+    # ===================================================
+    render_marks_backtest()
 
     # ===================================================
     # ★ テーマ動向解説（AIミックス・光銘柄ミックス）
