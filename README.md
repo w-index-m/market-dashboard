@@ -44,6 +44,10 @@
 - 🔄 セクターローテーション（RRGチャート）、日経225/S&P500の値動き予測モデル（アンサンブル方式）
 - 📅 日米の経済指標カレンダー（雇用統計・CPI・FOMC等の発表日と実績値の自動突合）
 - 📰 Yahoo!ファイナンス・株探・みんかぶ・TDnet・日経/ロイターRSSを横断したニュース集約
+- 🏢 J-REIT（東証REIT指数ETF・住宅特化型）、国土交通省の東京の住宅価格指数、🌱 米国の株式・REIT・国債の長期（20年〜約46年）複利シミュレーション
+- 🔥 上昇銘柄スクリーナー — S&P500（大型株）・**S&P600（米国の小型株指数）**・日経225の約1,330銘柄から、過去に上昇した銘柄を、期間・上昇率・過熱の除外・出来高・シャープレシオで絞り込み
+- 🎛 先物・オプション市場の分析 — VIX期間構造、SKEW・VVIX、個別銘柄のオプション（建玉・IV・マックスペイン）、CFTC先物ポジション（ヘッジファンド等の買い越し・売り越し）
+- 🧭 セクター別の資金の流れ（米国11セクター・日本TOPIX-17）、🧪 マークス型の選定ルールを後知恵なしで過去に当てはめた検証
 
 ### 🇯🇵 日本株特化の分析ツール
 - モメンタムランキング、日本株シャープレシオTOP10（日経225主要銘柄・ベンチマーク日経平均）
@@ -62,9 +66,11 @@
 ログインすると、自分の保有銘柄に対してAIが3段階のマルチエージェント構成で投資判断を行います
 （詳細は[後述](#aiマルチエージェントパイプライン)）。
 
-- 🌱長期育成 / ⚡モメンタム / ✨Claude AIミックス / 💡光銘柄ミックス / 🏦高配当ディフェンシブ / 🪨チャート形状 /
-  🚀日本株10倍株候補 の7つの投資戦略モードを切り替え可能。各モードの過去1年・3年バックテスト
-  比較付き（テーマ固定バスケットと、AIが実際に使うスコアリング基準で選ぶ銘柄群の両方に対応）
+- 🌱長期育成（S&P600＝小型株指数）/ ⚡モメンタム / ✨Claude AIミックス / 💡光銘柄ミックス / 🏦高配当ディフェンシブ（配当・財務で選ぶ）/
+  🪨チャート形状（チャートの形だけで選ぶ）/ 💎マークス（価格と価値を最重視）/ 🚀日本株10倍株候補 の8つの投資戦略モードを切り替え可能。
+  各モードの過去1年・3年リターン、最大下落、シャープレシオの比較表付き（GitHub Actionsが毎日事前計算。モード名のⓘで主な銘柄を表示）
+- ハワード・マークスの考え方を参考にした**判断の原則（14項目）**を、AIの銘柄選定・保有銘柄の判定に組み込み（書籍の本文は使わず要点を言い換え）。
+  予想PER・来期の利益成長・過熱の有無は、アナリスト予想から**コードで機械計算**してAIに渡す（AIに数字を作らせない）
 - 保有銘柄ごとのニュース・決算情報をAIが並列取得・日本語で要約（進捗をストリーミング表示）
 - 予算・リスク許容度に応じた推奨ポートフォリオの自動生成（エントリー価格・損切ライン付き）
 
@@ -72,7 +78,13 @@
 - 取引記録の入力・編集・削除（Google Sheetsに永続保存、ユーザーアカウント制）
 - 保有ポジションの含み損益・評価額（米国株/日本株混在でも円換算に統一）・アセットクラス別配分
 - 前日比／先週比／前月比／前年比のパフォーマンス追跡（日次スナップショットベース、GitHub Actionsで自動記録）
-- 配当サマリ（月別実績・翌月以降の予想配当・高配当銘柄レコメンド）
+- 配当サマリ（月別実績・翌月以降の予想配当〔前年同月×増配予想〕・📈増配予想・💹アナリストEPS予想・高配当銘柄レコメンド）
+- 📊 業績の推移 — 保有株数×各銘柄のEPS・BPSの合計（ポートフォリオ全体の利益・純資産の成長）、銘柄ごとの四半期の売上・利益・設備投資、PERの推移と過去10年の中での位置（割高度）
+- 📐 リスクと将来のシミュレーション — 過去の暴落（2020/2022/2008等）を今の構成に当てはめた影響、β・アルファ、上げ/下げ相場の捕捉率、想定リターン4方式（混合・リスク連動・EPS成長・固定）の並べ比較、S&P500の長期データ×βで暴落も再現
+- 🎯 目標と進捗（到達確率・必要な積立額）、💴 税金と手取りの目安（売却益・配当・新NISA枠）
+- 🎲 オプション市場が織り込む決算前の想定変動幅、🕴 インサイダー売買（保有米国株）
+- 📝 売買の理由メモと答え合わせ、🏁 AIの売買判断の成績表（30日後に自動採点）、🔒 優待銘柄を売買判断から外すロック
+- 🔔 保有銘柄のアラート通知（急落・損切り/利確ライン・高値からの下落・VIX）と、毎朝のLINE/Slack配信（重要度つきニュース）。通知のみで売買は行いません
 - CSV/Excelダウンロード対応
 
 ---
@@ -176,7 +188,7 @@ yfinanceから実際に取得してAgent Cに渡しています。他モード�
 
 ## アーキテクチャと設計判断
 
-`app.py` は約17,000行の単一ファイルですが、一貫して以下の3層構造に従っています。
+`app.py` は約40,000行の単一ファイルですが、一貫して以下の3層構造に従っています。
 
 ```
 fetch_* / compute_*   … データ取得・計算。@st.cache_data でキャッシュ。st.* は一切呼ばない
@@ -192,6 +204,11 @@ main()                … トップレベルのエントリーポイント
   まとめて1回のAI呼び出しで済ませる箇所を増やしています（AI無料枠のクォータ消費を抑えるため）。
 - **数値とAIコメントの分離**: 決算実績やファンダメンタルズの数値は必ずPython側で決定的に計算し、
   AIには短い定性コメントの生成だけを任せています（数値のハルシネーションを避けるため）。
+- **重い処理はGitHub Actionsで事前計算**: Streamlit Cloudの共有IPからYahoo Financeへ多数の銘柄を問い合わせると失敗しやすいため、
+  銘柄の候補・バックテスト・業績・オプション・先物ポジションなどはActionsで定期計算し、公開してよいデータは`data/*.json`へコミット、
+  保有銘柄に紐づくデータは**非公開のGoogle Sheets**へ保存します。アプリは読むだけ（キャッシュが古い場合のみその場で計算）。
+- **公開リポジトリでの個人情報の扱い**: 保有銘柄・取引記録・金額は、リポジトリ・ログ・確認用スクリプトに一切出しません（実行時にGoogle Sheetsから読む）。
+- **自動更新の健全性監視**: 毎朝、Actionsの失敗とデータの鮮度を確認し、問題がある時だけLINE/Slackへ通知（`scripts/health_monitor.py`）。
 
 ## 本番運用で踏んだ落とし穴と対処
 
@@ -233,7 +250,12 @@ main()                … トップレベルのエントリーポイント
 | Shiller CAPE | multpl.com（スクレイピング） | — |
 | 信用残高・投資部門別売買（日本株） | J-Quants API v2（有料プラン要） | irbank.net（無料・内訳データなしの簡易版） |
 | 米国株の機関投資家保有・インサイダー取引 | Finnhub | yfinance |
-| S&P600小型株の構成銘柄（テンバガー候補） | Wikipedia（スクレイピング） | — |
+| S&P600（小型株指数）の構成銘柄 | SPDR SPSM / iShares IJR の公式保有銘柄 | GitHubミラー → Wikipedia |
+| S&P500・日経225の構成銘柄 | Wikipedia（User-Agent付きで取得） | 代表30銘柄 |
+| 先物ポジション（ヘッジファンド等） | 米CFTC TFF報告（公開データ） | — |
+| 東京の住宅価格指数 | 国土交通省「不動産価格指数（住宅）」 | — |
+| 米国債の公式利回り・CPI | 米財務省・FRED（CSV）・BLS | — |
+| 売買の理由メモ・目標・ロック等の個人データ | Google Sheets（非公開） | — |
 | 日本株の東証スタンダード小型株一覧（10倍株候補） | JPX公式上場銘柄一覧（data_j.xlsx） | — |
 | AIコメント生成 | Gemini | Groq → DeepSeek → NVIDIA NIM → OpenRouter |
 
@@ -256,12 +278,16 @@ main()                … トップレベルのエントリーポイント
 ## ファイル構成
 
 ```
-app.py                          アプリ本体（ページ全体を構成する単一ファイル、約17,000行）
+app.py                          アプリ本体（ページ全体を構成する単一ファイル、約40,000行）
 analytics.py                    アクセス解析（ページビュー・地域/UA検出・Google Sheets連携）
 slack_bot.py                    Slackメンションに応答する常時稼働Bot（別デプロイ）
 scripts/
   daily_asset_snapshot.py       日次のアセットクラス別評価額をGoogle Sheetsへ記録
   daily_portfolio_line.py       AI生成の市況・保有銘柄サマリーをLINE/Slackへ配信
+  holdings_alerts.py            保有銘柄のアラート（急落・損切り等）をLINE/Slackへ通知（売買はしない）
+  precompute_*.py               事前計算（S&P600/日経/上昇銘柄/モード別バックテスト/決算レビュー/先物ポジション/業績/オプション 等）
+  health_monitor.py             Actionsの失敗とデータの鮮度を毎朝確認し、問題がある時だけ通知
+data/                            事前計算した公開データ（JSON）。保有銘柄に紐づくデータは含めない
 .github/workflows/               上記スクリプトを定時実行するGitHub Actions、およびpush/PR時のCI
 ```
 
@@ -321,6 +347,10 @@ DeepSeek/NVIDIA/OpenRouter, and more) working together. See
 - 🔄 Sector rotation (RRG chart), ensemble price-direction models for Nikkei 225 and the US market
 - 📅 US/Japan economic calendar with automatic actual-vs-forecast reconciliation (NFP, CPI, FOMC, etc.)
 - 📰 Cross-source Japanese news aggregation (Yahoo! Finance, Kabutan, Minkabu, TDnet, Nikkei/Reuters RSS)
+- 🏢 J-REITs, MLIT's Tokyo residential price index, and 🌱 long-horizon (20 to ~46 years) compounding simulations for US stocks, REITs and Treasuries
+- 🔥 Rising-stock screener — ~1,330 names across the S&P 500 (large caps), the **S&P 600 (the US small-cap index)** and the Nikkei 225, filtered by horizon, return, overheating, volume and Sharpe ratio
+- 🎛 Futures & options analysis — VIX term structure, SKEW/VVIX, a per-ticker option explorer (open interest, IV, max pain), and CFTC futures positioning
+- 🧭 Sector money-flow view (11 US sectors, TOPIX-17), and 🧪 a point-in-time backtest of Marks-style selection rules (no look-ahead)
 
 ### 🇯🇵 Japan-equity-focused analysis tools
 - Momentum ranking, and a Sharpe-ratio TOP10 (Nikkei 225 constituents, benchmarked against the index)
@@ -340,10 +370,13 @@ DeepSeek/NVIDIA/OpenRouter, and more) working together. See
 After logging in, your holdings are analyzed by a 3-stage AI multi-agent pipeline (see
 [below](#the-ai-multi-agent-pipeline) for details).
 
-- Seven switchable strategy modes — 🌱 Growth (US tenbagger small-cap screener), ⚡ Momentum, ✨ Claude AI Mix,
-  💡 Claude Optical Mix, 🏦 Dividend Stable, 🪨 Stable Growth, and 🚀 JP Tenbagger Candidates (TSE Growth/
-  Standard small-cap screener) — each with a 1-year/3-year backtest comparison (covering both the fixed
-  theme baskets and the same scoring criteria the AI actually uses to narrow candidates)
+- Eight switchable strategy modes — 🌱 Growth (S&P 600 small-cap index tenbagger screener), ⚡ Momentum, ✨ Claude AI Mix,
+  💡 Claude Optical Mix, 🏦 High-Dividend Defensive (picked on dividends and financials), 🪨 Chart Shape (picked on the
+  price chart alone), 💎 Marks (price-vs-value first), and 🚀 JP Tenbagger Candidates (TSE Standard small caps) — with a
+  comparison table of 1-/3-year returns, max drawdown and Sharpe ratio (precomputed daily by GitHub Actions)
+- A 14-item set of decision principles inspired by Howard Marks' investment philosophy (paraphrased, not quoted) is built
+  into the AI's stock selection and holdings judgments. Forward PER, next-year EPS growth and overheating flags are
+  computed deterministically from analyst estimates and handed to the AI — the AI is never asked to invent numbers
 - Parallel fetch and Japanese-language AI summarization of news/earnings for each held ticker, with
   streaming progress display
 - Automatic recommended-portfolio generation based on budget and risk tolerance — stock selection is the
@@ -356,7 +389,18 @@ After logging in, your holdings are analyzed by a 3-stage AI multi-agent pipelin
   with asset-class allocation breakdown
 - Day-over-day / week-over-week / month-over-month / year-over-year performance tracking, based on daily
   snapshots recorded automatically via GitHub Actions
-- Dividend summary (monthly actuals, projected dividends for upcoming months, high-yield stock picks)
+- Dividend summary (monthly actuals, projected dividends = last year's same month × expected dividend growth, 📈 dividend-growth
+  forecast, 💹 analyst EPS estimates, high-yield picks)
+- 📊 Fundamentals — look-through EPS/BPS (Σ shares × per-share value) for the whole portfolio, per-ticker quarterly revenue/
+  profit/capex, and PER history with the current PER's percentile against its own ~10-year history
+- 📐 Risk & forward simulation — past crashes (2020/2022/2008…) applied to today's holdings, beta/alpha, up/down capture, four
+  expected-return methods side by side (blended / risk-linked / EPS-growth / fixed), and long-history S&P 500 × beta to reproduce deep drawdowns
+- 🎯 Goal tracker (probability of reaching a target, required monthly contribution) and 💴 tax & take-home estimates (sale gains, dividends, new-NISA room)
+- 🎲 Option-implied earnings moves and 🕴 insider trading for US holdings
+- 📝 Trade rationale notes with later review, 🏁 a scoreboard that scores the AI's holdings judgments after 30 days, and 🔒 locking
+  benefit-driven (yūtai) holdings out of trade decisions
+- 🔔 Holdings alerts (sharp drops, stop-loss/profit lines, drawdown from highs, VIX) and a morning LINE/Slack digest (with news
+  importance tags). Notification only — the app never trades
 - CSV/Excel export
 
 ---
@@ -450,7 +494,7 @@ To avoid being a black box, here's how the core analytics are computed and where
 
 ## Architecture and design decisions
 
-`app.py` is a single ~17,000-line file, but it consistently follows a three-layer pattern:
+`app.py` is a single ~40,000-line file, but it consistently follows a three-layer pattern:
 
 ```
 fetch_* / compute_*   … data fetching and computation. Cached with @st.cache_data. Never calls st.*
@@ -468,6 +512,14 @@ main()                … top-level entry point
 - **Numbers and AI commentary are kept separate**: earnings figures and fundamentals are always computed
   deterministically in Python; the AI is only ever asked for short qualitative commentary, to avoid
   numeric hallucination.
+- **Heavy work is precomputed on GitHub Actions**: bulk Yahoo Finance requests from Streamlit Cloud's shared IP fail often, so
+  candidate lists, backtests, fundamentals, options and futures positioning are computed on a schedule. Public data is committed
+  to `data/*.json`; anything tied to a user's holdings goes to a **private Google Sheet**. The app only reads (and computes
+  live only when a cache is stale).
+- **No personal data in a public repo**: holdings, trade records and amounts never appear in the repository, logs or probe
+  scripts — they are read from Google Sheets at runtime.
+- **Automated health monitoring**: every morning a job checks for failed Actions runs and stale data, and notifies LINE/Slack
+  only when something is wrong (`scripts/health_monitor.py`).
 
 ## Production incidents and fixes
 
@@ -513,7 +565,12 @@ A running log of real issues found in production and how they were resolved.
 | Shiller CAPE | multpl.com (scraped) | — |
 | Margin balance / investor-type flows (JP) | J-Quants API v2 (paid plan required) | irbank.net (free, no breakdown) |
 | US institutional holdings / insider trading | Finnhub | yfinance |
-| S&P600 small-cap constituents (tenbagger candidates) | Wikipedia (scraped) | — |
+| S&P 600 (small-cap index) constituents | SPDR SPSM / iShares IJR official holdings | GitHub mirror → Wikipedia |
+| S&P 500 / Nikkei 225 constituents | Wikipedia (fetched with a User-Agent) | 30 representative names |
+| Futures positioning (hedge funds etc.) | US CFTC TFF report (public) | — |
+| Tokyo residential price index | MLIT Real Estate Price Index (residential) | — |
+| Official Treasury yields / CPI | US Treasury, FRED (CSV), BLS | — |
+| Personal data (rationale notes, goals, locks) | Google Sheets (private) | — |
 | AI commentary generation | Gemini | Groq → DeepSeek → NVIDIA NIM → OpenRouter |
 
 ## Tech stack
@@ -535,12 +592,17 @@ A running log of real issues found in production and how they were resolved.
 ## File layout
 
 ```
-app.py                          The app itself — a single file of ~17,000 lines
+app.py                          The app itself — a single file of ~40,000 lines
 analytics.py                    Access analytics (pageviews, geo/UA detection, Google Sheets integration)
 slack_bot.py                    Always-on Slack bot that responds to mentions (deployed separately)
 scripts/
   daily_asset_snapshot.py       Records daily per-asset-class portfolio value to Google Sheets
   daily_portfolio_line.py       Sends an AI-generated market/portfolio digest to LINE/Slack
+  holdings_alerts.py            Holdings alerts (sharp drops, stop-loss, etc.) to LINE/Slack — never trades
+  precompute_*.py               Scheduled precomputation (S&P 600 / Nikkei / rising stocks / per-mode backtests / earnings review /
+                                futures positioning / fundamentals / options …)
+  health_monitor.py             Daily check for failed Actions runs and stale data; notifies only when something is wrong
+data/                            Precomputed public data (JSON). Nothing tied to a user's holdings is stored here
 .github/workflows/               Scheduled GitHub Actions that run the scripts above, plus push/PR CI
 ```
 
