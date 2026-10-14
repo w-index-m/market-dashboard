@@ -29934,6 +29934,149 @@ def _fetch_note_prices(ticker: str, start: str) -> tuple:
         return pd.DataFrame(), pd.Series(dtype=float)
 
 
+# ══════════════════════════════════════════════════════════════
+# 🏁 AIの売買判断の成績表（保有銘柄のアクション判定を、あとから値動きで採点）
+# ══════════════════════════════════════════════════════════════
+_JUDGE_HEADERS = ["username", "date", "ticker", "action", "mode", "source", "model"]
+_ACTION_LABEL = {"ADD": "💙 追加買い", "HOLD": "🟢 保有継続", "TRIM": "🟡 一部利確", "SELL": "🔴 売却"}
+
+
+def _parse_holdings_actions(text: str, tickers) -> dict:
+    """保有銘柄アクション判定の文章から、銘柄ごとの推奨（ADD/HOLD/TRIM/SELL）を取り出す。
+    見出し（### 銘柄名（ティッカー））の近くにティッカーがあり、「推奨: …」の行から判定する。
+    テンプレートの選択肢がそのまま残っている（複数の語が含まれる）場合は、判定不能として除く。"""
+    out = {}
+    chunks = re.split(r"\n#{3,4}\s+", "\n" + (text or ""))
+    for ch in chunks[1:]:
+        head = ch[:160]
+        tk = next((t for t in tickers if re.search(rf"(?<![A-Z0-9]){re.escape(t)}(?![A-Z0-9])", head, re.I)
+                   or (t.endswith(".T") and re.search(rf"(?<!\d){re.escape(t[:-2])}(?!\d)", head))), None)
+        if not tk or tk in out:
+            continue
+        m = re.search(r"推奨\*{0,2}\s*[:：]\s*([^\n]+)", ch)
+        if not m:
+            continue
+        line = m.group(1)
+        hits = [k for k, kws in (("TRIM", ("一部利確",)), ("SELL", ("売却", "全株売")), ("ADD", ("追加買い", "買い増し", "追加買")),
+                                 ("HOLD", ("保有継続",))) if any(w in line for w in kws)]
+        if len(hits) == 1:
+            out[tk] = hits[0]
+    return out
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_ai_judgments(username: str = "") -> list:
+    try:
+        ws = _trading_ws("claude_ai_judgments", _JUDGE_HEADERS)
+        if not ws:
+            return []
+        u = (username or "admin").strip()
+        return [{"date": str(r.get("date") or "")[:10], "ticker": str(r.get("ticker") or ""), "action": str(r.get("action") or ""),
+                 "mode": str(r.get("mode") or ""), "source": str(r.get("source") or "")}
+                for r in ws.get_all_records() if str(r.get("username") or "admin") == u and r.get("ticker")]
+    except Exception as e:
+        logger.warning(f"[judgments] 読込失敗: {e}")
+        return []
+
+
+def _record_ai_judgments(username: str, date_str: str, actions: dict, mode: str, source: str, model: str = "") -> int:
+    """AIの判定を記録する（同じ日・同じ銘柄・同じ出所は1件だけ）。保存件数を返す。"""
+    if not actions:
+        return 0
+    try:
+        ws = _trading_ws("claude_ai_judgments", _JUDGE_HEADERS)
+        if not ws:
+            return 0
+        u = (username or "admin").strip()
+        have = {(str(r.get("date"))[:10], str(r.get("ticker")), str(r.get("source")))
+                for r in ws.get_all_records() if str(r.get("username") or "admin") == u}
+        rows = [[u, date_str, t, a, mode, source, model] for t, a in actions.items() if (date_str, t, source) not in have]
+        if rows:
+            ws.append_rows(rows, value_input_option="RAW")
+            _load_ai_judgments.clear()
+        return len(rows)
+    except Exception as e:
+        logger.warning(f"[judgments] 保存失敗: {e}")
+        return 0
+
+
+def _score_judgment(action: str, ret_pct: float) -> bool:
+    """判定の採点。追加買い＝その後上がった、一部利確・売却＝その後下がった（売って正解）、保有継続＝大きく下がらなかった（−5%超）。"""
+    if action == "ADD":
+        return ret_pct > 0
+    if action in ("TRIM", "SELL"):
+        return ret_pct < 0
+    return ret_pct > -5.0
+
+
+def _judgment_returns(ohlc: "pd.DataFrame", date_str: str, horizon_days: int = 30) -> dict:
+    """判定日の終値（その日以降の最初の取引日）を基準に、現在までと、horizon_days後の騰落率を返す。"""
+    if ohlc is None or len(ohlc) < 2:
+        return {}
+    d0 = pd.Timestamp(date_str)
+    sub = ohlc[ohlc.index >= d0]
+    if len(sub) < 2:
+        return {}
+    p0 = float(sub["Close"].iloc[0])
+    out = {"now": (float(sub["Close"].iloc[-1]) / p0 - 1) * 100, "age": (sub.index[-1] - d0).days}
+    after = sub[sub.index >= d0 + pd.Timedelta(days=horizon_days)]
+    if len(after):
+        out["h"] = (float(after["Close"].iloc[0]) / p0 - 1) * 100
+    return out
+
+
+def render_ai_judgment_scoreboard():
+    """🏁 AIの売買判断の成績表：保有銘柄のアクション判定（売却/一部利確/保有継続/追加買い）を、30日後の値動きで採点する。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    js = _load_ai_judgments(_u)
+    with st.expander(f"🏁 AIの売買判断の成績表（記録{len(js)}件）", expanded=False):
+        st.caption("保有銘柄のアクション判定（AIが「売却/一部利確/保有継続/追加買い」を出したもの）は、判定時に自動で記録され、30日後の値動きで採点します。"
+                   "アプリでの判定と、毎朝の自動配信の判定の、どちらも対象です。")
+        if not js:
+            st.info("まだ記録がありません（判定を生成すると、記録が始まります）。")
+            return
+        rows, stat = [], {}
+        for j in sorted(js, key=lambda x: x["date"], reverse=True)[:60]:
+            ohlc, _b = _fetch_note_prices(j["ticker"], j["date"])
+            r = _judgment_returns(ohlc, j["date"])
+            if not r:
+                continue
+            ok = None
+            if "h" in r:
+                ok = _score_judgment(j["action"], r["h"])
+                s = stat.setdefault(j["action"], [0, 0, 0.0])
+                s[0] += 1
+                s[1] += 1 if ok else 0
+                s[2] += r["h"]
+            rows.append(
+                f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">{j["date"]}</td>'
+                f'<td style="font-weight:600">{_get_stock_display_name(j["ticker"])}<div style="font-size:10px;color:#64748b">{j["ticker"]}</div></td>'
+                f'<td>{_ACTION_LABEL.get(j["action"], j["action"])}</td><td>{r["age"]}日</td>'
+                f'<td style="color:{"#4ade80" if r["now"] >= 0 else "#f87171"}">{r["now"]:+.1f}%</td>'
+                f'<td>{("%+.1f%%" % r["h"]) if "h" in r else "—"}</td>'
+                f'<td>{"—" if ok is None else ("✅" if ok else "❌")}</td></tr>')
+        if rows:
+            st.markdown(
+                '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+                '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">判定日</th><th>銘柄</th><th>AIの判定</th><th>経過</th>'
+                f"<th>現在までの<br>値動き</th><th>30日後の<br>値動き</th><th>採点</th></tr></thead><tbody>{''.join(rows)}</tbody></table>",
+                unsafe_allow_html=True)
+        if stat:
+            st.markdown("**判定の種類ごとの成績（30日が経過したもの）**")
+            for a in ("ADD", "HOLD", "TRIM", "SELL"):
+                if a in stat:
+                    n, k, tot = stat[a]
+                    st.markdown(f"- {_ACTION_LABEL[a]}：{n}件、的中 **{k / n * 100:.0f}%**（{k}/{n}）、平均の30日後の値動き {tot / n:+.1f}%")
+            n_all = sum(v[0] for v in stat.values())
+            if n_all < 20:
+                st.caption("件数が少ないうちは、的中率は偶然（運）に大きく左右されます。20件以上たまってから傾向を見てください。")
+        else:
+            st.caption("まだ30日が経過した判定がありません（「現在までの値動き」は、途中経過です）。")
+        st.caption("採点の基準：💙追加買い＝30日後に判定日より上がっていたら的中。🟡一部利確・🔴売却＝30日後に下がっていたら的中（売って正解）。"
+                   "🟢保有継続＝30日後に−5%より大きく下がっていなければ的中。方向だけの簡易な採点で、市場全体の上昇・下落の影響も含みます（市場より良かったかは見ていません）。"
+                   "配当・手数料・税金は含みません。")
+
+
 @st.fragment
 def render_trade_notes():
     """📝 売買の理由メモと答え合わせ：買った（売った）理由・目標・撤退ラインを記録し、期間後に結果と見比べる。"""
@@ -36120,6 +36263,13 @@ def render_claude_trading_project():
                             _today, _rec_mode, _tickers_key, _news_key,
                             _rec_result["text"], _rec_result["model"],
                         )
+                        # AIの判定を、あとから採点できるように記録（成績表用）
+                        try:
+                            _record_ai_judgments(
+                                _sig_usr, _today, _parse_holdings_actions(_rec_result["text"], list(open_pos.keys())),
+                                _rec_mode, "app", str(_rec_result.get("model") or ""))
+                        except Exception as _je:
+                            logger.warning(f"[judgments] 記録失敗: {_je}")
 
                 if _rec_result.get("error"):
                     st.error(f"AI分析エラー: {_rec_result['error']}")
@@ -39529,6 +39679,7 @@ def render_claude_trading_project():
                     render_portfolio_fundamentals()
                     render_option_implied_moves()
                     render_insider_activity()
+                    render_ai_judgment_scoreboard()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)

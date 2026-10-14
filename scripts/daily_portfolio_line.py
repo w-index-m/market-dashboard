@@ -262,6 +262,14 @@ def generate_holdings_action(market_ctx: dict, mode: str, model_pref: str, usern
         )
         if not ai_result.get("error"):
             app._save_ai_digest_cache(cache_key, today_str, ai_result)
+            # AIの判定を、あとから採点できるように記録（アプリの「AIの売買判断の成績表」用）
+            try:
+                n = app._record_ai_judgments(
+                    username, today_str, app._parse_holdings_actions(ai_result.get("text", ""), list(positions.keys())),
+                    mode, "daily", str(ai_result.get("model") or ""))
+                print(f"::notice title=judgments::recorded {n}")
+            except Exception as e:
+                print(f"judgment record failed: {e}", file=sys.stderr)
     return ai_result, stock_data_map, ticker_names
 
 
