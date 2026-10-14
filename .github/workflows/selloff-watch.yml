@@ -1,0 +1,44 @@
+name: Selloff watch (log + notify)
+
+on:
+  schedule:
+    - cron: "45 22 * * 1-5"   # 22:45 UTC = 07:45 JST 火〜土朝（米国の引け後）
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1 にすると送信せずログにだけ表示"
+        default: ""
+
+# 公開データのみを data/selloff_log.json に1日1行で追記する。条件に当てはまった日だけ通知する（売買はしない）。
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q -r requirements.txt
+      - name: Log and notify
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SELLOFF_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: python scripts/selloff_watch.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/selloff_log.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update selloff log"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
