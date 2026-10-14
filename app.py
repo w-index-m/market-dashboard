@@ -12394,6 +12394,47 @@ def _derivatives_facts() -> str:
     return "\n".join(lines)
 
 
+def _ungrounded_numbers(text: str, source: str, limit: int = 6) -> list:
+    """AIの文章に出てくる数字のうち、AIに渡した材料（プロンプト全文）に見当たらないものを返す。
+    小さな整数・年・日付などは対象外。小数・％・3桁以上の数値だけを見る。丸め（小数1桁）の違いは許容する。"""
+    def _nums(t: str) -> list:
+        out = []
+        for m_ in re.finditer(r"(?<![A-Za-z0-9.])[+\-−]?\$?(\d[\d,]*(?:\.\d+)?)\s*(%|％|倍|bp|万円|枚|ドル)?", t):
+            raw, unit = m_.group(1), m_.group(2)
+            try:
+                v = float(raw.replace(",", ""))
+            except ValueError:
+                continue
+            out.append((v, unit, "." in raw))
+        return out
+    src_vals = [v for v, _u, _d in _nums(source)]
+    bad, seen = [], set()
+    for v, unit, has_dec in _nums(text):
+        if not (unit in ("%", "％", "bp") or has_dec or v >= 100):
+            continue
+        if 1990 <= v <= 2100 and not has_dec and not unit:
+            continue
+        if any(abs(v - sv) <= max(0.051, abs(sv) * 0.006) for sv in src_vals):
+            continue
+        key = round(v, 2)
+        if key in seen:
+            continue
+        seen.add(key)
+        bad.append(f"{v:g}{unit or ''}")
+        if len(bad) >= limit:
+            break
+    return bad
+
+
+def _grounding_note(text: str, source: str) -> str:
+    """_ungrounded_numbers の結果を、画面に出す注意書き（無ければ空文字）にする。"""
+    bad = _ungrounded_numbers(text, source)
+    if not bad:
+        return ""
+    return ("\n\n⚠️ **自動チェックの注意**: 次の数字は、AIに渡した材料に見当たりませんでした（AIの推測・計算の可能性）。"
+            "参考にしすぎないでください: " + "、".join(bad))
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _explain_derivatives_ai(facts: str, kind: str) -> dict:
     """先物・オプション関連の数値を、初心者向けに日本語で解説する。kind: "market"（市場全体）/ "ticker"（個別銘柄のオプション）。
@@ -12431,7 +12472,7 @@ def _explain_derivatives_ai(facts: str, kind: str) -> dict:
             text, model = _call_ai_for_trading(prompt, model_pref="groq", max_output_tokens=3000, temperature=0.3)
         if len(text) < 250:
             return {"text": "", "model": model, "error": "解説が途中で切れました。もう一度お試しください。"}
-        return {"text": text, "model": model, "error": None}
+        return {"text": text + _grounding_note(text, prompt), "model": model, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)[:120]}
 
@@ -20600,7 +20641,7 @@ def _generate_optical_brief(date_key: str, facts: str, headlines: str) -> dict:
             text, model = _call_ai_for_trading(prompt, model_pref="groq", max_output_tokens=3000, temperature=0.3)
         if len(text) < 200:
             return {"text": "", "model": model, "error": "要約を取得できませんでした。"}
-        return {"text": text, "model": model, "error": None}
+        return {"text": text + _grounding_note(text, prompt), "model": model, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)[:100]}
 
@@ -27704,7 +27745,7 @@ def _summarize_holdings_news(stock_data_map: dict) -> dict:
         "TICKER: 【重要度:高】要約文"
     )
     try:
-        text, _model = _call_ai_for_trading(prompt, max_output_tokens=500, temperature=0.3)
+        text, _model = _call_ai_for_trading(prompt, max_output_tokens=3000, temperature=0.3)
     except Exception:
         return {}
 
@@ -31454,6 +31495,7 @@ def _generate_ai_trade_signal(
         _chk = _check_trade_signal_text(text, data.get("price_raw") or price, rsi, currency)
         if _chk:
             text += "\n\n⚠️ **自動チェックの注意**（AIの文章に次の疑いがあります。参考にしすぎないでください）\n" + "\n".join(f"- {n}" for n in _chk)
+        text += _grounding_note(text, prompt)
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
@@ -33454,7 +33496,8 @@ def generate_theme_narrative(theme_key: str, date_str: str) -> dict:
 見当たらない場合は、その旨を正直に述べること。"""
 
     try:
-        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=400, temperature=0.3)
+        _text, _model = call_ai_with_fallback(_prompt, max_output_tokens=3000, temperature=0.3)
+        _text = _text + _grounding_note(_text, _prompt)
     except Exception as e:
         logger.warning(f"[theme_narrative] AI呼び出し失敗: {e}")
         return {"ok": False, "reason": "AI呼び出しに失敗しました。"}
