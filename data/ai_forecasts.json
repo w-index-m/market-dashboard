@@ -1291,7 +1291,177 @@
     "usdjpy": "down"
    },
    "scenario": "粘着的インフレで長期金利上昇、株価重し。160円目前で介入警戒感強まり円高進行。"
+  },
+  {
+   "id": "2026-10-13-groq",
+   "date": "2026-10-13",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7807.24,
+     "chg20_pct": 2.46,
+     "date": "2026-10-12"
+    },
+    "nikkei": {
+     "value": 67292.391,
+     "chg20_pct": 3.3,
+     "date": "2026-10-13"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 5.62,
+     "date": "2026-10-12"
+    },
+    "usdjpy": {
+     "value": 158.261,
+     "chg20_pct": 3.15,
+     "date": "2026-10-13"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米国景気回復期待と金利引き下げ圧力で株価上昇、日経も同調。金利は緩和期待で低下、円は安全資産需要増で円高へ。"
+  },
+  {
+   "id": "2026-10-13-mistral",
+   "date": "2026-10-13",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7807.24,
+     "chg20_pct": 2.46,
+     "date": "2026-10-12"
+    },
+    "nikkei": {
+     "value": 67292.391,
+     "chg20_pct": 3.3,
+     "date": "2026-10-13"
+    },
+    "tnx": {
+     "value": 5.24,
+     "chg20_pct": 5.62,
+     "date": "2026-10-12"
+    },
+    "usdjpy": {
+     "value": 158.261,
+     "chg20_pct": 3.15,
+     "date": "2026-10-13"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fedの利下げ期待が先延ばしとなり、米国株はリスクオフ、米長期金利は利下げ期待で低下。日経は米国株連動性強く下落。円安は米国株の下落でリスク回避円買いが一時発生するも、米国金利低下で再び円安傾向。"
+  },
+  {
+   "id": "2026-10-14-groq",
+   "date": "2026-10-14",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7805.45,
+     "chg20_pct": 2.9,
+     "date": "2026-10-13"
+    },
+    "nikkei": {
+     "value": 67975.633,
+     "chg20_pct": 4.35,
+     "date": "2026-10-14"
+    },
+    "tnx": {
+     "value": 5.217,
+     "chg20_pct": 4.42,
+     "date": "2026-10-13"
+    },
+    "usdjpy": {
+     "value": 158.461,
+     "chg20_pct": 2.06,
+     "date": "2026-10-14"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国景気拡大と企業収益改善が継続し、金利上昇圧力が強まる。日本は円安圧力と日経上昇が続く。"
+  },
+  {
+   "id": "2026-10-14-mistral",
+   "date": "2026-10-14",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7805.45,
+     "chg20_pct": 2.9,
+     "date": "2026-10-13"
+    },
+    "nikkei": {
+     "value": 67975.633,
+     "chg20_pct": 4.35,
+     "date": "2026-10-14"
+    },
+    "tnx": {
+     "value": 5.217,
+     "chg20_pct": 4.42,
+     "date": "2026-10-13"
+    },
+    "usdjpy": {
+     "value": 158.461,
+     "chg20_pct": 2.06,
+     "date": "2026-10-14"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fedの利下げ期待高まり（インフレ減速、雇用鈍化）で米長期金利低下。米国株安に連動し日経も下落。ドル円はリスク回避で一時円高転換も、米利下げ期待で再円安。"
+  },
+  {
+   "id": "2026-10-14-nvidia",
+   "date": "2026-10-14",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7805.45,
+     "chg20_pct": 2.9,
+     "date": "2026-10-13"
+    },
+    "nikkei": {
+     "value": 67975.633,
+     "chg20_pct": 4.35,
+     "date": "2026-10-14"
+    },
+    "tnx": {
+     "value": 5.217,
+     "chg20_pct": 4.42,
+     "date": "2026-10-13"
+    },
+    "usdjpy": {
+     "value": 158.461,
+     "chg20_pct": 2.06,
+     "date": "2026-10-14"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "粘着的インフレで長期金利上昇継続、割高株価を圧迫。160円接近で介入・日銀利上げ警戒強まり円高誘発、株安連鎖"
   }
  ],
- "updated_at": "2026-10-10T01:53:49Z"
+ "updated_at": "2026-10-14T01:21:41Z"
 }
