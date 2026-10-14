@@ -200,6 +200,7 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 | earnings-review.yml | precompute_earnings_review.py | earnings_reviews.json | 📅決算後レビュー (fixed US universe only) |
 | ai-forecast-log.yml | ai_forecast_log.py | ai_forecasts.json | 🏁AIの答え合わせ scoreboard |
 | marks-valuation.yml (weekdays) | precompute_marks_valuation.py | marks_valuation.json | 💎マークスモード / valuation flags in AI prompts |
+| rising-candidates.yml (weekdays) | precompute_rising.py | rising_candidates.json | 🔥上昇銘柄スクリーナー (S&P500 + S&P600=小型株指数 + 日経225, ~1,330 names) |
 | tokyo-re-index.yml (weekly) | precompute_tokyo_re_index.py | tokyo_re_index.json | MLIT Tokyo residential price index card |
 | longterm-returns.yml (monthly) | precompute_longterm_returns.py | longterm_returns.json | 長期の複利シミュレーション (US stocks/REIT/Treasuries, total return) |
 | fundamentals-cache.yml (Sun/Wed) | precompute_fundamentals.py | **Google Sheet** `fundamentals_cache` tab (private, merged over time so quarterly history grows) | 📊 portfolio fundamentals (EPS/BPS/investment) |

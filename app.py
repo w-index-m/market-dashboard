@@ -12064,6 +12064,113 @@ def _fetch_optical_vs_semi(period: str = "1y") -> dict:
     }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_rising_candidates() -> dict | None:
+    """scripts/precompute_rising.py がGitHub Actionsで平日毎日生成する data/rising_candidates.json
+    （S&P500・S&P600・日経225の全構成銘柄の騰落率など）を読む。無い・壊れている・生成から72時間超ならNone。"""
+    import json as _json_rs
+    path = os.path.join(os.path.dirname(__file__), "data", "rising_candidates.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_rs.load(f)
+        _gen = datetime.strptime(d["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - _gen).total_seconds() > 72 * 3600:
+            return None
+        return d if d.get("items") else None
+    except Exception:
+        return None
+
+
+_RISING_GROUPS = {"US500": "🇺🇸 米国・大型株（S&P500）", "US600": "🇺🇸 米国・小型株（S&P600＝小型株指数）", "JP225": "🇯🇵 日本（日経225）"}
+
+
+def _rising_filter(items: dict, groups, period: str, min_ret: float, max_ret1y: float | None,
+                   near_high: float | None, vol_up: bool, min_sharpe: float | None) -> list:
+    """条件に合う銘柄を、選んだ期間のリターンの高い順に返す。
+    period: r1m/r3m/r6m/r1y/r2y。max_ret1y: 1年リターンの上限%（過熱を除く）。near_high: 52週高値からの下落が、これ以内（正の%）。
+    vol_up: 直近20日の出来高が、その前の約100日の平均を上回る。min_sharpe: 1年のシャープレシオの下限。"""
+    out = []
+    for t, x in items.items():
+        if x.get("grp") not in groups:
+            continue
+        r = x.get(period)
+        if r is None or r < min_ret:
+            continue
+        if max_ret1y is not None and x.get("r1y") is not None and x["r1y"] > max_ret1y:
+            continue
+        if near_high is not None and x.get("from_high") is not None and x["from_high"] < -near_high:
+            continue
+        if vol_up and not (x.get("vol_ratio") is not None and x["vol_ratio"] > 1.0):
+            continue
+        if min_sharpe is not None and not (x.get("sharpe") is not None and x["sharpe"] >= min_sharpe):
+            continue
+        out.append((t, x))
+    out.sort(key=lambda kv: -kv[1][period])
+    return out
+
+
+@st.fragment
+def render_rising_screener():
+    """🔥 上昇銘柄スクリーナー（日米）：S&P500・S&P600（小型株指数）・日経225の全銘柄から、過去に上昇した銘柄を条件で絞る。"""
+    st.markdown('<a id="rising-screener"></a>', unsafe_allow_html=True)
+    st.markdown("### 🔥 上昇銘柄スクリーナー（日米）")
+    d = _load_rising_candidates()
+    if not d:
+        st.info("データがまだありません（GitHub Actionsが平日の朝に更新します）。")
+        return
+    items = d["items"]
+    _ts = datetime.strptime(d["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(JST)
+    st.caption(
+        f"対象：S&P500（米国の大型株500銘柄）・**S&P600（米国の小型株指数・約600銘柄）**・日経225（日本の代表225銘柄）。"
+        f"配当調整済みの日足から計算（{_ts.strftime('%m/%d %H:%M')} JST時点・平日毎日更新）。")
+    c1, c2 = st.columns(2)
+    _grp = c1.multiselect("対象", list(_RISING_GROUPS), default=list(_RISING_GROUPS), format_func=lambda g: _RISING_GROUPS[g],
+                          key="rs_groups")
+    _per = c2.radio("上昇率を見る期間", ["r1m", "r3m", "r6m", "r1y", "r2y"], index=2, horizontal=True, key="rs_period",
+                    format_func=lambda k: {"r1m": "1か月", "r3m": "3か月", "r6m": "6か月", "r1y": "1年", "r2y": "2年"}[k])
+    c3, c4, c5 = st.columns(3)
+    _min = c3.slider("上昇率の下限（%）", 0, 300, 50, 10, key="rs_min")
+    _cap_on = c4.checkbox("1年で大きく上がりすぎた銘柄（過熱）を除く", value=False, key="rs_cap_on",
+                          help="1年の上昇率が、下の値を超える銘柄を除きます。すでに上がりきった銘柄を拾うのを避けるためです。")
+    _cap = c4.slider("1年の上昇率の上限（%）", 50, 1000, 300, 50, key="rs_cap", disabled=not _cap_on)
+    _nh_on = c5.checkbox("52週高値に近い銘柄だけ", value=False, key="rs_nh_on")
+    _nh = c5.slider("高値からの下落の許容（%）", 0, 50, 10, 5, key="rs_nh", disabled=not _nh_on)
+    c6, c7 = st.columns(2)
+    _vol = c6.checkbox("出来高が増えている銘柄だけ（直近20日 > 過去平均）", value=False, key="rs_vol")
+    _sh_on = c7.checkbox("シャープレシオ（1年）で絞る", value=False, key="rs_sh_on")
+    _sh = c7.slider("シャープレシオの下限", 0.0, 3.0, 1.0, 0.1, key="rs_sh", disabled=not _sh_on)
+    rows = _rising_filter(items, set(_grp), _per, float(_min), float(_cap) if _cap_on else None,
+                          float(_nh) if _nh_on else None, bool(_vol), float(_sh) if _sh_on else None)
+    st.markdown(f"**該当 {len(rows)}銘柄**（上昇率の高い順に上位50件を表示）")
+    if not rows:
+        st.info("条件に合う銘柄がありません。条件をゆるめてください。")
+        return
+    _lab = {"US500": "米大型", "US600": "米小型", "JP225": "日本"}
+    _fmt = lambda v, suf="%": "—" if v is None else f"{v:+.0f}{suf}"   # noqa: E731
+    _trs = []
+    for t, x in rows[:50]:
+        _vr = "—" if x.get("vol_ratio") is None else f"{x['vol_ratio']:.1f}倍"
+        _sp = "—" if x.get("sharpe") is None else f"{x['sharpe']:.2f}"
+        _hot = "#fb923c" if (x.get("r1y") or 0) > 300 else "#e2e8f0"
+        _trs.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{html.escape(str(x["name"])[:22])}'
+            f'<div style="font-size:10px;color:#64748b">{t}・{_lab.get(x["grp"], "")}</div></td>'
+            f'<td>{_fmt(x.get("r1m"))}</td><td>{_fmt(x.get("r3m"))}</td><td>{_fmt(x.get("r6m"))}</td>'
+            f'<td style="font-weight:700;color:{_hot}">{_fmt(x.get("r1y"))}</td>'
+            f'<td>{_fmt(x.get("from_high"))}</td><td>{_fmt(x.get("mdd1y"))}</td><td>{_vr}</td><td>{_sp}</td></tr>')
+    _tr = "".join(_trs)
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>1か月</th><th>3か月</th><th>6か月</th>'
+        "<th>1年</th><th>高値から</th><th>1年の<br>最大下落</th><th>出来高<br>（直近/平均）</th><th>シャープ<br>(1年)</th></tr></thead>"
+        f"<tbody>{_tr}</tbody></table>", unsafe_allow_html=True)
+    st.caption(
+        "⚠️ すでに上昇した銘柄を並べているため、**上がった後の銘柄を拾う（後知恵・過熱を拾う）**ことになりやすい点に注意してください。"
+        "1年で3倍超の銘柄は、オレンジ色で表示しています。上昇の理由（利益の裏づけ）と価格（PER）は、別に確認してください"
+        "（銘柄名を「個別株PJ」の分析や、🧭判断の原則の観点で確認できます）。出来高の比は、直近20日の平均を、その前の約100日の平均で割った値です。"
+        "シャープレシオは、(平均リターン−無リスク金利)÷標準偏差（年率）で、リスクに対して効率よく上がったかの目安です。投資助言ではありません。")
+
+
 def render_optical_vs_semi():
     """📡 光通信・AI インフラ vs 半導体 パフォーマンス比較"""
     st.markdown('<a id="optical-semi"></a>', unsafe_allow_html=True)
@@ -40739,6 +40846,12 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ★ 光通信・AIインフラ vs 半導体 パフォーマンス比較
     # ===================================================
     render_optical_vs_semi()
+    st.divider()
+
+    # ===================================================
+    # ★ 上昇銘柄スクリーナー（日米・S&P500 / S&P600 / 日経225）
+    # ===================================================
+    render_rising_screener()
     st.divider()
 
     # ===================================================
