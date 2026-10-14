@@ -20516,6 +20516,7 @@ _BREADTH_GROUPS: dict[str, list[str]] = {
     "AIインフラ（電源・接続）": ["VRT", "APH", "ANET", "CRDO", "ALAB"],
     "半導体（大型）": ["NVDA", "AMD", "AVGO", "QCOM", "INTC", "AMAT", "TSM"],
     "メモリ・ストレージ": ["MU", "SNDK", "WDC", "STX"],
+    "AIの資金繰り（ネオクラウド等）": ["CRWV", "NBIS", "IREN", "ORCL"],   # 社債の価格は取れないため、株価の動きで代用
     "メモリ（日韓）": ["285A.T", "000660.KS", "005930.KS"],   # 日韓は米国と取引日がずれるため、判定には使わず参考表示
 }
 _BREADTH_REFERENCE_GROUPS = {"メモリ（日韓）"}   # 広がりの判定に含めないグループ
@@ -20736,6 +20737,14 @@ def render_optical_brief():
         f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{desc}</div>'
         f'<div style="font-size:12px;color:#94a3b8;margin-top:6px">基準日 {d["date"]}　{chips}</div></div>',
         unsafe_allow_html=True)
+    with st.expander("📖 光通信の技術動向メモ（日付つき・参考）", expanded=False):
+        st.markdown(
+            "- **2026年6月29日（NICT発表）**: 英国ロンドンの既設光ファイバで、毎秒450テラビットの伝送に成功。"
+            "世界最大の42.4THzの帯域を使い、従来の既存ファイバ伝送の記録（毎秒430テラビット）を更新したとしています。"
+            "往復39kmの実験で、理想的な誤り訂正を仮定したデータレートです。\n"
+            "- **2024年12月（NTT）**: 陸上のフィールド環境で、最大455テラビット毎秒の空間多重長距離光伝送に成功。")
+        st.caption("※ 研究機関の実験成果で、実運用の速度や各社の業績とは別です。今回（10月）の株価の動きとの関係を示す報道は、確認できていません。"
+                   "出所: NICT、NTTの発表。")
     if not big:
         st.caption("光通信・半導体とも大きな動きはありません（背景の要約は、大きく動いた日だけ作成します）。")
         return
