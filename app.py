@@ -41851,6 +41851,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     render_optical_vs_semi()
     st.divider()
 
+    # 光通信・AIインフラバスケット（上の比較と同じテーマなので隣に置く）
+    render_optical_basket()
+    st.divider()
+
     # ===================================================
     # ★ 上昇銘柄スクリーナー（日米・S&P500 / S&P600 / 日経225）
     # ===================================================
@@ -42414,10 +42418,6 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # Market News Board
     render_market_news_board(translate_mode=translate_mode)
-    st.divider()
-
-    # 光通信・AIインフラバスケット
-    render_optical_basket()
     st.divider()
 
     # AIインフラ投資マネーフロー
