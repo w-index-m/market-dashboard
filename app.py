@@ -12435,6 +12435,17 @@ def _grounding_note(text: str, source: str) -> str:
             "参考にしすぎないでください: " + "、".join(bad))
 
 
+def _with_grounding(res: tuple, prompt: str) -> tuple:
+    """(text, model) を返すAI呼び出しの結果に、材料に見当たらない数字の注意書きを付ける（エラー時はそのまま）。"""
+    try:
+        text, model = res
+    except (TypeError, ValueError):
+        return res
+    if not text or model == "none" or str(text).startswith(("⚠️", "AI生成エラー", "AI generation error")):
+        return res
+    return text + _grounding_note(text, prompt), model
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _explain_derivatives_ai(facts: str, kind: str) -> dict:
     """先物・オプション関連の数値を、初心者向けに日本語で解説する。kind: "market"（市場全体）/ "ticker"（個別銘柄のオプション）。
@@ -13695,7 +13706,7 @@ SOX（半導体指数）と光通信バスケットの今後6〜12ヶ月の見�
 ※情報提供目的のみ。投資助言ではありません。"""
 
     try:
-        return call_ai_with_fallback(prompt, max_output_tokens=900, temperature=0.4)
+        return _with_grounding(call_ai_with_fallback(prompt, max_output_tokens=4000, temperature=0.4), prompt)
     except Exception as e:
         return f"AI生成エラー: {e}", ""
 
@@ -18384,9 +18395,9 @@ def _ai_media_comment(media_name: str, media_type: str,
 簡潔・実用的に。"""
 
     try:
-        comment, model = call_ai_with_fallback(
-            prompt, max_output_tokens=600, temperature=0.5
-        )
+        comment, model = _with_grounding(call_ai_with_fallback(
+            prompt, max_output_tokens=3000, temperature=0.5
+        ), prompt)
         return comment, model
     except Exception as e:
         return f"AI生成エラー: {e}", ""
@@ -21135,7 +21146,7 @@ Summarize in 150 words or fewer using this format:
 ※情報提供目的のみ。投資助言ではありません。"""
 
     try:
-        comment, model = call_ai_with_fallback(prompt, max_output_tokens=400, temperature=0.4)
+        comment, model = _with_grounding(call_ai_with_fallback(prompt, max_output_tokens=3000, temperature=0.4), prompt)
         return comment, model
     except Exception as e:
         return f"AI generation error: {e}" if lang == "en" else f"AI生成エラー: {e}", ""
@@ -22611,7 +22622,7 @@ Summarize in 100 words or fewer using this format:
 
 ※情報提供目的のみ。投資助言ではありません。"""
     try:
-        comment, model = call_ai_with_fallback(prompt, max_output_tokens=350, temperature=0.3)
+        comment, model = _with_grounding(call_ai_with_fallback(prompt, max_output_tokens=3000, temperature=0.3), prompt)
         return comment, model
     except Exception as e:
         return f"AI generation error: {e}" if lang == "en" else f"AI生成エラー: {e}", ""
@@ -24221,7 +24232,7 @@ def _ai_chart_analysis(
 ※ 数値・見出しは上記データにあるものだけを使い、創作しないこと。
 ※ 冒頭または末尾に「情報提供目的であり投資助言ではない」旨を一言添えること。"""
 
-    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=900, temperature=0.4)
+    return _with_grounding(_call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.4), prompt)
 
 
 def _summarize_year_chart_state(y_close: pd.Series, y_up: pd.Series, y_lo: pd.Series,
@@ -24286,7 +24297,7 @@ def _ai_year_comment(ticker: str, year: int, summary: dict, model_pref: str = "a
 投資助言ではなく、チャートの特徴を端的に説明するだけにしてください。
 必ず「{year}年は」で書き出すこと。前置き不要、コメント本文のみ返すこと。"""
 
-    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=150, temperature=0.4)
+    return _call_ai_for_trading(prompt, model_pref=model_pref, max_output_tokens=1500, temperature=0.4)
 
 
 def render_ticker_chart_compare(key_prefix: str = "main"):
@@ -25669,11 +25680,11 @@ def render_market_research_ai():
 ※ニュースの具体的な内容を根拠として積極的に引用してください。""" + _lang_prompt_suffix()
 
         try:
-            result, used_model = call_ai_with_fallback(
+            result, used_model = _with_grounding(call_ai_with_fallback(
                 prompt,
-                max_output_tokens=1800,
+                max_output_tokens=5000,
                 temperature=0.4,
-            )
+            ), prompt)
             st.session_state["market_research_result"] = result
             st.session_state["market_research_model"]  = used_model
             st.session_state["market_research_meta"] = {
@@ -25980,7 +25991,7 @@ Summarize in 150–200 words using this format:
 ※STOCK Act（議員株取引開示法）に基づく公開情報です。"""
 
     try:
-        comment, model = call_ai_with_fallback(prompt, max_output_tokens=500, temperature=0.4)
+        comment, model = _with_grounding(call_ai_with_fallback(prompt, max_output_tokens=3000, temperature=0.4), prompt)
         return comment, model
     except Exception as e:
         return f"AI生成エラー: {e}", ""
@@ -31981,8 +31992,9 @@ def _generate_portfolio_wide_analysis(
 
     try:
         text, model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=1200, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.3
         )
+        text += _grounding_note(text, prompt)
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
