@@ -20562,6 +20562,126 @@ def _event_day_reactions() -> dict:
     return out
 
 
+@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+def _fetch_macro_move() -> dict:
+    """米10年債利回り(^TNX)とVIXの最新値と前日差。Returns: {"tnx": (値, 差bp), "vix": (値, 差)}。失敗時は {}。"""
+    try:
+        raw = yf.download(["^TNX", "^VIX"], period="10d", interval="1d", auto_adjust=False, progress=False, group_by="column")
+        cl = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[macro_move] 取得失敗: {e}")
+        return {}
+    out = {}
+    for k, key in (("^TNX", "tnx"), ("^VIX", "vix")):
+        if k in cl.columns:
+            c = cl[k].dropna()
+            if len(c) >= 2:
+                diff = float(c.iloc[-1] - c.iloc[-2])
+                out[key] = (float(c.iloc[-1]), diff * 100 if key == "tnx" else diff)   # ^TNXは%値なので差は bp に直す
+    return out
+
+
+@st.cache_data(ttl=3600 * 2, show_spinner=False)
+def _generate_optical_brief(date_key: str, facts: str, headlines: str) -> dict:
+    """光通信・AIインフラ株の動きの背景を、アナリストレポート調で要約する。date_key/facts/headlinesが同じなら2hキャッシュ。"""
+    prompt = (
+        "あなたは、証券会社のシニアアナリストです。顧客向けレポートの本文を書いてください。"
+        "以下の【数値】と【ニュース見出し】だけを根拠に、光通信・AIインフラ株（COHR・LITE・GLW・AAOI・CIEN・VIAV、VRT・APH 等）の"
+        "直近の値動きの背景を整理してください。\n\n"
+        "【文体】挨拶・前置き・結びは書かない。最初の見出しから始める。である調で簡潔に。\n"
+        "【厳守】\n・数値と見出しにない数字・出来事・発言を作らない。見出しに根拠が見当たらない点は「確認できない」と書く。\n"
+        "・金利と成長株の関係など一般的な仕組みを説明する場合は「一般論として」と明示する。\n"
+        "・値動きの予想や売買の指示はしない。原因は断定せず「〜と報じられている」「〜と整合する」とする。\n\n"
+        f"【数値】\n{facts}\n\n【ニュース見出し】\n{headlines or '（見出しなし）'}\n\n"
+        "出力形式（全体で450字程度）:\n【何が起きたか】\n【金利・マクロとの関係】\n【AI投資・個別材料】\n【確認したい点】")
+    try:
+        text, model = _call_ai_for_trading(prompt, max_output_tokens=8000, temperature=0.3)
+        if len(text) < 200 or text.startswith("⚠️"):
+            text, model = _call_ai_for_trading(prompt, model_pref="groq", max_output_tokens=3000, temperature=0.3)
+        if len(text) < 200:
+            return {"text": "", "model": model, "error": "要約を取得できませんでした。"}
+        return {"text": text, "model": model, "error": None}
+    except Exception as e:
+        return {"text": "", "model": "", "error": str(e)[:100]}
+
+
+def render_optical_brief():
+    """📰 ページ上部の「光通信・AIインフラ株 今日の背景」。大きく動いた日だけAIが背景を要約する（静かな日はAIを呼ばない）。"""
+    d = _fetch_breadth_returns()
+    if not d or not d.get("rets"):
+        return
+    rets = d["rets"]
+    grp = {}
+    for g, syms in _BREADTH_GROUPS.items():
+        v = [rets[x] for x in syms if x in rets]
+        if v:
+            grp[g] = float(pd.Series(v).median())
+    opt = grp.get("光通信")
+    if opt is None:
+        return
+    idx = {k: rets.get(k) for k in _BREADTH_INDEXES}
+    label, desc = _breadth_verdict(grp, idx)
+    mm = _fetch_macro_move()
+    big = abs(opt) >= 2.0 or abs(idx.get("SMH") or 0) >= 2.5
+    st.markdown('<a id="optical-brief"></a>', unsafe_allow_html=True)
+    col = "#f87171" if opt < 0 else "#4ade80"
+    chips = "".join(
+        f'<span style="margin-right:16px">{nm} <b style="color:{"#f87171" if (idx[k] or 0) < 0 else "#4ade80"}">'
+        f'{"—" if idx[k] is None else f"{idx[k]:+.1f}%"}</b></span>' for k, nm in _BREADTH_INDEXES.items())
+    if "tnx" in mm:
+        chips += f'<span style="margin-right:16px">米10年債 <b>{mm["tnx"][0]:.2f}%</b>（{mm["tnx"][1]:+.0f}bp）</span>'
+    if "vix" in mm:
+        chips += f'<span>VIX <b>{mm["vix"][0]:.1f}</b>（{mm["vix"][1]:+.1f}）</span>'
+    st.markdown(
+        '<div style="background:#1e293b;border:1px solid #334155;border-left:4px solid #f59e0b;border-radius:10px;padding:12px 16px;margin:6px 0 10px">'
+        '<div style="font-size:16px;font-weight:800;color:#e2e8f0">📰 光通信・AIインフラ株 今日の背景</div>'
+        f'<div style="font-size:22px;font-weight:900;color:{col};margin-top:4px">光通信 {opt:+.1f}%'
+        f'<span style="font-size:11px;color:#94a3b8;font-weight:400">（前営業日比・中央値）</span>　<span style="font-size:14px;color:#e2e8f0">{label}</span></div>'
+        f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{desc}</div>'
+        f'<div style="font-size:12px;color:#94a3b8;margin-top:6px">基準日 {d["date"]}　{chips}</div></div>',
+        unsafe_allow_html=True)
+    if not big:
+        st.caption("光通信・半導体とも大きな動きはありません（背景の要約は、大きく動いた日だけ作成します）。")
+        return
+    movers = sorted([(x, rets[x]) for x in _BREADTH_GROUPS["光通信"] + _BREADTH_GROUPS["AIインフラ（電源・接続）"] if x in rets],
+                    key=lambda z: abs(z[1]), reverse=True)[:6]
+    heads = []
+    for x, _r in movers[:4]:
+        h = _finnhub_latest_headline(x)
+        if h:
+            heads.append(f"[{x}] {h}")
+    for feed in ("光通信(COHR)", "光通信(LITE)", "ブルームバーグ", "Reuters Business", "CNBC"):
+        fd = RSS_FEEDS.get(feed)
+        if not fd:
+            continue
+        try:
+            for a in fetch_rss_feed(fd["url"], max_items=4, translate=False):
+                t_ = (a.get("title") or "").strip()
+                if t_:
+                    heads.append(f"[{feed}] {t_}")
+        except Exception:
+            continue
+    heads = heads[:20]
+    lines = [f"・光通信（中央値）{opt:+.1f}%、" + "、".join(f"{g}{v:+.1f}%" for g, v in grp.items() if g != "光通信")]
+    lines.append("・主な値動き: " + "、".join(f"{x}{r_:+.1f}%" for x, r_ in movers))
+    lines.append("・指数: " + "、".join(f"{_BREADTH_INDEXES[k]}{v:+.1f}%" for k, v in idx.items() if v is not None))
+    if "tnx" in mm:
+        lines.append(f"・米10年債利回り {mm['tnx'][0]:.2f}%（前日差{mm['tnx'][1]:+.0f}bp）")
+    if "vix" in mm:
+        lines.append(f"・VIX {mm['vix'][0]:.1f}（前日差{mm['vix'][1]:+.1f}）")
+    lines.append(f"・ルール判定: {label}")
+    facts = "\n".join(lines)
+    with st.spinner("背景を整理中…"):
+        res = _generate_optical_brief(d["date"], facts, "\n".join(heads))
+    if res.get("error"):
+        st.caption(f"背景の要約を取得できませんでした: {res['error']}")
+    else:
+        st.markdown(res["text"])
+        st.caption(f"🤖 {res.get('model', '')}による要約です。数値とニュース見出しだけを根拠にしており、原因の断定や将来の予想ではありません。")
+    with st.expander("AIに渡した数値・見出し", expanded=False):
+        st.code(facts + "\n\n" + "\n".join(heads), language=None)
+
+
 def render_selloff_breadth():
     """🔎 急落の広がり確認：下落が個別銘柄か、光通信などのテーマか、半導体全体か、市場全体かを切り分ける。"""
     st.markdown('<a id="selloff-breadth"></a>', unsafe_allow_html=True)
@@ -42162,6 +42282,9 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ★ Today's Market Snapshot（全体概要 — 最初に表示）
     # ===================================================
     render_market_summary()
+
+    # ★ 光通信・AIインフラ株 今日の背景（大きく動いた日だけAIが要約）
+    render_optical_brief()
 
     # ===================================================
     # ★ 米国経済イベントカレンダー（バックグラウンド並列取得）
