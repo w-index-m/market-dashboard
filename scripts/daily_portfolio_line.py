@@ -323,7 +323,9 @@ def build_holdings_news_message(stock_data_map: dict, today: str, username: str 
 
     lines = [f"📰 保有銘柄 関連ニュースまとめ（{today}）", ""]
     has_content = False
-    for ticker, data in stock_data_map.items():
+    # 重要度の高い銘柄のニュースを先に並べる（同じ重要度では元の順）
+    _ordered = sorted(stock_data_map.items(), key=lambda kv: app._news_importance_rank(summaries.get(kv[0])))
+    for ticker, data in _ordered:
         items = (data or {}).get("news_items") or []
         if not items:
             continue
@@ -344,7 +346,7 @@ def build_holdings_news_message(stock_data_map: dict, today: str, username: str 
     if not has_content:
         return None
 
-    lines.append("※ 要約はAIによる見出しの機械的な要約です。ポジティブ/ネガティブの評価は「📋 保有銘柄アクション判定」内のIR・ニュース評価を参照してください。")
+    lines.append("※ 要約と重要度（高/中/低）はAIが見出しだけから判断したものです（本文は読んでいません）。ポジティブ/ネガティブの評価は「📋 保有銘柄アクション判定」内のIR・ニュース評価を参照してください。")
     return "\n".join(lines).strip()
 
 

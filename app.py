@@ -12311,6 +12311,166 @@ def render_derivatives_market():
         _render_cot()
 
 
+# ══════════════════════════════════════════════════════════════
+# 🧭 セクター別の資金の流れ
+# ══════════════════════════════════════════════════════════════
+_SECTOR_ETFS_US = {
+    "XLK": "情報技術", "XLC": "通信サービス", "XLY": "一般消費財", "XLP": "生活必需品", "XLV": "ヘルスケア",
+    "XLF": "金融", "XLI": "資本財", "XLE": "エネルギー", "XLB": "素材", "XLU": "公益", "XLRE": "不動産",
+}
+_SECTOR_ETFS_JP = {
+    "1617.T": "食品", "1618.T": "エネルギー資源", "1619.T": "建設・資材", "1620.T": "素材・化学", "1621.T": "医薬品",
+    "1622.T": "自動車・輸送機", "1623.T": "鉄鋼・非鉄", "1624.T": "機械", "1625.T": "電機・精密",
+    "1626.T": "情報通信・サービス", "1627.T": "電力・ガス", "1628.T": "運輸・物流", "1629.T": "商社・卸売",
+    "1630.T": "小売", "1631.T": "銀行", "1632.T": "金融（除く銀行）", "1633.T": "不動産",
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_sector_flow(market: str) -> pd.DataFrame:
+    """セクターETFの騰落と出来高の変化を計算する。market: "US" or "JP"。
+    Returns: DataFrame(index=ETFコード, columns=[name, r1w, r1m, r3m, rel1m(対市場の1か月差), vol_ratio(直近20日÷その前40日の平均出来高)])。"""
+    etfs = _SECTOR_ETFS_US if market == "US" else _SECTOR_ETFS_JP
+    bench = "SPY" if market == "US" else "1306.T"
+    syms = list(etfs) + [bench]
+    try:
+        raw = yf.download(syms, period="8mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        close, vol = raw["Close"], raw["Volume"]
+    except Exception as e:
+        logger.warning(f"[sector_flow] 取得失敗: {e}")
+        return pd.DataFrame()
+    rows = {}
+
+    def _ret(s, n):
+        s = s.dropna()
+        return float(s.iloc[-1] / s.iloc[-n - 1] - 1) * 100 if len(s) > n else None
+
+    b1m = _ret(close[bench], 21) if bench in close.columns else None
+    for t, nm in etfs.items():
+        if t not in close.columns or close[t].dropna().shape[0] < 70:
+            continue
+        v = vol[t].dropna() if t in vol.columns else pd.Series(dtype=float)
+        vr = float(v.tail(20).mean() / v.iloc[-60:-20].mean()) if len(v) >= 60 and float(v.iloc[-60:-20].mean()) > 0 else None
+        r1m = _ret(close[t], 21)
+        rows[t] = {"name": nm, "r1w": _ret(close[t], 5), "r1m": r1m, "r3m": _ret(close[t], 63),
+                   "rel1m": (r1m - b1m) if (r1m is not None and b1m is not None) else None, "vol_ratio": vr}
+    return pd.DataFrame.from_dict(rows, orient="index")
+
+
+def render_sector_flow():
+    """🧭 セクター別の資金の流れ：セクターETFの騰落・市場との差・出来高の増減で、資金が向かっている業種を見る。"""
+    st.markdown('<a id="sector-flow"></a>', unsafe_allow_html=True)
+    st.markdown("### 🧭 セクター別の資金の流れ")
+    mk = st.radio("市場", ["米国（SPDRセクターETF）", "日本（TOPIX-17ETF）"], horizontal=True, key="sf_mkt")
+    df = _fetch_sector_flow("US" if mk.startswith("米国") else "JP")
+    if df.empty:
+        st.info("セクターのデータを取得できませんでした。")
+        return
+    df = df.sort_values("r1m", ascending=False)
+    colors = ["#4ade80" if (v or 0) >= 0 else "#f87171" for v in df["r1m"]]
+    fig = go.Figure(go.Bar(x=df["name"], y=df["r1m"].round(1), marker_color=colors,
+                           hovertemplate="%{x}: %{y:+.1f}%<extra></extra>"))
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=260, margin=dict(l=10, r=10, t=10, b=20),
+                      font=dict(color="#e2e8f0"), xaxis=dict(tickfont=dict(color="#94a3b8")),
+                      yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", ticksuffix="%", title=dict(text="1か月の騰落", font=dict(color="#94a3b8"))),
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key=f"sf_fig_{mk[:2]}")
+    f = lambda v, suf="%": "—" if v is None or v != v else f"{v:+.1f}{suf}"   # noqa: E731
+    rows = []
+    for t, r in df.iterrows():
+        vr = r["vol_ratio"]
+        vcol = "#4ade80" if (vr or 0) >= 1.2 else "#f87171" if (vr or 9) <= 0.8 else "#94a3b8"
+        flow = "🔥 流入" if (r["rel1m"] or 0) > 0 and (vr or 0) >= 1.1 else "❄️ 流出" if (r["rel1m"] or 0) < 0 and (vr or 9) <= 0.95 else "—"
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{r["name"]}'
+            f'<div style="font-size:10px;color:#64748b">{t}</div></td><td>{f(r["r1w"])}</td><td>{f(r["r1m"])}</td><td>{f(r["r3m"])}</td>'
+            f'<td>{f(r["rel1m"], "pt")}</td><td style="color:{vcol}">{"—" if vr is None else f"{vr:.2f}倍"}</td><td>{flow}</td></tr>')
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+        '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">セクター</th><th>1週間</th><th>1か月</th><th>3か月</th>'
+        f"<th>市場との差<br>(1か月)</th><th>出来高<br>(直近20日/その前40日)</th><th>資金の向き</th></tr></thead><tbody>{''.join(rows)}</tbody></table>",
+        unsafe_allow_html=True)
+    st.caption("市場との差＝セクターの1か月の騰落−市場（米国はSPY、日本はTOPIX連動ETF）。出来高の比が1.2倍以上は、売買が活発化していることを示します。"
+               "「🔥流入」＝市場より強く、出来高も増加。「❄️流出」＝市場より弱く、出来高も減少。ETFの価格と出来高からの簡易な見方で、"
+               "実際の資金の出入り（ファンドフロー）そのものではありません。投資助言ではありません。")
+
+
+# ══════════════════════════════════════════════════════════════
+# 🕴 インサイダー売買（保有している米国株）
+# ══════════════════════════════════════════════════════════════
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _insider_summary(symbol: str, days: int = 90) -> dict:
+    """Finnhubのインサイダー取引（SEC Form 4）から、直近days日の市場内の買い（P）と売り（S）を集計する。
+    付与（A）・税務目的の処分（F）・権利行使（M）などは、投資判断の意思表示ではないため除く。
+    Returns: {"ok", "buy_n","buy_val","sell_n","sell_val","latest"}。"""
+    api_key = get_env_var("FINNHUB_API_KEY", "")
+    if not api_key:
+        return {"ok": False, "reason": "FINNHUB_API_KEY未設定"}
+    try:
+        r = requests.get("https://finnhub.io/api/v1/stock/insider-transactions", params={"symbol": symbol, "token": api_key}, timeout=12)
+        if r.status_code != 200:
+            return {"ok": False, "reason": f"HTTP {r.status_code}"}
+        data = r.json().get("data", []) or []
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        out = {"ok": True, "buy_n": 0, "buy_val": 0.0, "sell_n": 0, "sell_val": 0.0, "latest": None}
+        for it in data:
+            d = str(it.get("transactionDate") or "")
+            if d < since:
+                continue
+            code = (it.get("transactionCode") or "").upper()
+            sh = abs(it.get("change") or 0)
+            px = it.get("transactionPrice") or 0
+            if code == "P":
+                out["buy_n"] += 1
+                out["buy_val"] += sh * px
+            elif code == "S":
+                out["sell_n"] += 1
+                out["sell_val"] += sh * px
+            else:
+                continue
+            if out["latest"] is None or d > out["latest"]:
+                out["latest"] = d
+        return out
+    except Exception as e:
+        return {"ok": False, "reason": str(e)[:80]}
+
+
+def render_insider_activity():
+    """🕴 保有している米国株の、経営陣・役員のインサイダー売買（直近90日、市場内の買いと売り）。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = [t for t in _get_open_positions(_u) if not t.endswith(".T") and t not in _JP_FUND_MAP]
+    with st.expander("🕴 インサイダー売買（保有している米国株・直近90日）", expanded=False):
+        if not pos:
+            st.info("米国の保有銘柄がありません（日本株は、この機能の対象外です）。")
+            return
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            res = dict(zip(pos, ex.map(_insider_summary, pos)))
+        if all(not r.get("ok") for r in res.values()):
+            st.info("インサイダー取引のデータを取得できませんでした（FINNHUB_API_KEY が未設定か、取得に失敗しました）。")
+            return
+        rows = []
+        for t, r in res.items():
+            if not r.get("ok"):
+                continue
+            net = r["buy_val"] - r["sell_val"]
+            tag = ("🟢 買い越し" if net > 0 and r["buy_n"] > 0 else "🔴 売り越し" if net < 0 else "⚪ 動きなし")
+            rows.append((-abs(net), f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{_get_stock_display_name(t)}'
+                         f'<div style="font-size:10px;color:#64748b">{t}</div></td>'
+                         f'<td>{r["buy_n"]}件<div style="font-size:10px;color:#64748b">${r["buy_val"] / 1e6:,.2f}M</div></td>'
+                         f'<td>{r["sell_n"]}件<div style="font-size:10px;color:#64748b">${r["sell_val"] / 1e6:,.2f}M</div></td>'
+                         f'<td style="font-weight:700">{"+" if net >= 0 else "−"}${abs(net) / 1e6:,.2f}M</td><td>{tag}</td>'
+                         f'<td style="color:#94a3b8">{r["latest"] or "—"}</td></tr>'))
+        rows.sort(key=lambda x: x[0])
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>市場内の買い</th><th>市場内の売り</th>'
+            f"<th>差し引き</th><th>傾向</th><th>最新の取引日</th></tr></thead><tbody>{''.join(r[1] for r in rows)}</tbody></table>", unsafe_allow_html=True)
+        st.caption(
+            "SEC提出のForm 4（Finnhub経由）から、**市場で実際に買った（P）・売った（S）**取引だけを集計しています。株式報酬の付与・権利行使・税金のための処分は除きます。"
+            "**役員の売りは、報酬の現金化・資産の分散・税金など、株価の見通しと関係ない理由が多い**ため、売り越しを悲観のサインと決めつけないでください。"
+            "一方、市場での**買い**（特に複数人の買い）は、経営陣の自信を示すことがあります。件数・金額は小さい場合も多く、遅れて提出されるため最新の動きは反映されないことがあります。")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_rising_candidates() -> dict | None:
     """scripts/precompute_rising.py がGitHub Actionsで平日毎日生成する data/rising_candidates.json
@@ -26904,12 +27064,15 @@ def _summarize_holdings_news(stock_data_map: dict) -> dict:
         return {}
 
     prompt = (
-        "以下は保有銘柄ごとの直近ニュース見出しです。銘柄ごとに「何が起きているか」を"
-        "日本語1文（40字程度）で要約してください。見出しに書かれていない内容を憶測で"
-        "書かないこと。\n\n"
+        "以下は保有銘柄ごとの直近ニュース見出しです。銘柄ごとに、①株価・業績への影響の大きさ（重要度）と、"
+        "②「何が起きているか」の日本語1文（40字程度）を出してください。見出しに書かれていない内容を憶測で書かないこと。\n"
+        "重要度の基準（見出しだけで判断する）:\n"
+        "・高＝業績・財務・規制・訴訟・大型の提携や買収・格付け変更・大口顧客の増減など、業績や株価に直接影響しうるもの\n"
+        "・中＝新製品・人事・設備投資・アナリストの目標株価の変更など、間接的に影響しうるもの\n"
+        "・低＝一般的な話題・過去の株価の動きの解説・影響が読み取れないもの\n\n"
         + "\n\n".join(blocks)
         + "\n\n出力形式（この形式のみ。他の文言・見出し・番号・前置きは一切不要）:\n"
-        "TICKER: 要約文"
+        "TICKER: 【重要度:高】要約文"
     )
     try:
         text, _model = _call_ai_for_trading(prompt, max_output_tokens=500, temperature=0.3)
@@ -26926,8 +27089,16 @@ def _summarize_holdings_news(stock_data_map: dict) -> dict:
         tk = tk.strip().upper()
         summary = summary.strip()
         if tk in tickers_with_news and summary:
+            # 重要度の表記ゆれ（【重要度:高】【重要度：高】）を正規化。無ければ付けない
+            summary = re.sub(r"【重要度[:：]\s*(高|中|低)\s*】", lambda m: f"【重要度:{m.group(1)}】", summary)
             summaries[tk] = summary
     return summaries
+
+
+def _news_importance_rank(summary: str | None) -> int:
+    """_summarize_holdings_newsの要約から重要度を数値にする（高=0, 中=1, 低=2, 不明=3。小さいほど重要）。"""
+    m = re.search(r"【重要度:(高|中|低)】", summary or "")
+    return {"高": 0, "中": 1, "低": 2}.get(m.group(1), 3) if m else 3
 
 
 _EDINET_DOC_LABELS = {
@@ -39357,6 +39528,7 @@ def render_claude_trading_project():
                     render_goal_tracker()
                     render_portfolio_fundamentals()
                     render_option_implied_moves()
+                    render_insider_activity()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)
@@ -41313,6 +41485,12 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ★ 先物・オプション市場の分析
     # ===================================================
     render_derivatives_market()
+    st.divider()
+
+    # ===================================================
+    # ★ セクター別の資金の流れ
+    # ===================================================
+    render_sector_flow()
     st.divider()
 
     # ===================================================
