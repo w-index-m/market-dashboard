@@ -31160,7 +31160,7 @@ def _generate_ai_trade_signal(
         analysis_focus = """
 【分析の優先順位（長期育成モード）】
 1. 成長性: EPS成長率・売上成長率・次回決算の予想サプライズ
-2. バリュエーション: 現在PERは過去レンジ・同業他社比で割安/適正/割高か
+2. バリュエーション: 現在PERは、与えられた過去PER推移の範囲で割安/適正/割高か（同業他社比較は与えられたデータがある場合のみ）
 3. 競合優位性・ビジネスモデル: 参入障壁・シェア拡大余地
 4. 財務健全性: PEG・自己資本比率・フリーキャッシュフロー
 5. テクニカル: 押し目での仕込み機会・トレンドの方向性（補助として使用）
@@ -31172,7 +31172,7 @@ def _generate_ai_trade_signal(
             f"**テクニカル評価**: RSI={rsi}（70↑過熱/30↓売られ過ぎ）"
             f" | MA25={ma25}{currency}に対し株価は上/下"
             f" | MA75={ma75}{currency}との位置関係とトレンド方向をコメント\n"
-            f"**バリュエーション評価**: 現在PER {trailing_pe or '不明'}倍は割安/適正/割高か。過去PER推移と比較した見解\n"
+            f"**バリュエーション評価**: 現在PER {trailing_pe or '不明'}倍は割安/適正/割高か。過去PER推移（上のデータ）がある場合のみ比較し、無ければ「判断保留」\n"
             "**成長ドライバー**: 今後2年で業績を牽引する要因を1〜2点\n"
             "**リスク要因**: ビジネスモデルを脅かす競合・規制・マクロ要因"
         )
@@ -31209,9 +31209,49 @@ def _generate_ai_trade_signal(
 - **キャッシュ保有推奨の場合**: その根拠（市場全体の転換点・VIX上昇・Fear&Greed過熱等）と、再エントリーを検討する具体的なトリガー（何がどうなったら動くか）"""
     output_fmt += post_sell_section
 
+    # ── 計算済みの基準値（AIに計算させず、コード側で決定的に出す）──
+    def _fnum(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    _px_n, _ma25_n, _ma75_n = _fnum(data.get("price_raw")) or _fnum(price), _fnum(ma25), _fnum(ma75)
+    _tight = mode == "momentum"
+    _stop_pcts = (5, 8) if _tight else (15, 20)
+    ref_lines = []
+    if _px_n:
+        for _p in _stop_pcts:
+            ref_lines.append(f"- 現在株価から-{_p}%の水準: {_px_n * (1 - _p / 100):,.2f} {currency}")
+        if _ma25_n:
+            ref_lines.append(f"- 25日移動平均: {_ma25_n:,.2f} {currency}（現在株価は{(_px_n / _ma25_n - 1) * 100:+.1f}%）")
+        if _ma75_n:
+            ref_lines.append(f"- 75日移動平均: {_ma75_n:,.2f} {currency}（現在株価は{(_px_n / _ma75_n - 1) * 100:+.1f}%）")
+        _eps_f = _fnum(eps_fwd)
+        if _eps_f and _eps_f > 0:
+            ref_lines.append(f"- 予想EPS {_eps_f:g} に対する現在株価の予想PER: {_px_n / _eps_f:.1f}倍")
+            if not _tight:
+                for _per in (15, 20, 26):
+                    ref_lines.append(f"- 目標株価の計算例（予想EPS × PER{_per}倍）: {_eps_f * _per:,.1f} {currency}（現在株価比{(_eps_f * _per / _px_n - 1) * 100:+.0f}%）")
+    ref_section = "\n".join(ref_lines) if ref_lines else "（計算できる基準値なし）"
+    rules_section = f"""
+【計算済みの基準値（この数値だけを使うこと）】
+{ref_section}
+
+【厳守ルール（違反した回答は不可）】
+1. 上のデータ・基準値・ニュースに書かれていない数字（同業平均PER、業界平均、過去のEPS成長率、サプライズ率、市場シェア等）を使わない。
+   同業他社との比較が必要な場合は「同業平均は与えられていないため比較できない」と書く。
+2. RSIの解釈は固定基準: 70以上=過熱、30以下=売られ過ぎ、30超70未満=中立。RSIが中立なのに「売られ過ぎ」と書かない。
+   移動平均より下にあることは「短期トレンドが弱い」と書き、売られ過ぎとは言わない。
+3. 損切りライン・目標株価は、上の【計算済みの基準値】のどれを根拠にしたかを明記し、価格と%を一致させる（例: 現在株価-20%の水準=○○）。
+   サポートや移動平均を根拠にする場合も、上に書かれた水準だけを使う。理由の文章と価格が食い違わないこと。
+4. 過去PER推移が「データなし」の場合、PERが割安・割高かの断定はせず、「過去との比較はできない」「判断保留」と書く。
+5. EPS成長率などを書く場合は、データにある値だけを引用する。無い場合は「データなし」と書く。
+6. 結論（判断）と矛盾する根拠（弱気材料だけを並べて「保有継続」など）を書かず、弱気材料も必ずリスク要因に含める。
+"""
     prompt = f"""あなたは{analyst_role}です。以下のデータを元に「{name}（{ticker}）」について{scenario}を判断してください。
 
 {analysis_focus}
+{rules_section}
 
 【テクニカルデータ】
 - 現在株価: {price} {currency}
@@ -31248,7 +31288,7 @@ def _generate_ai_trade_signal(
 """
     try:
         text, model_used = _call_ai_for_trading(
-            prompt, model_pref=model_pref, max_output_tokens=950, temperature=0.3
+            prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.2
         )
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
