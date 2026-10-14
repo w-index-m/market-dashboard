@@ -9862,10 +9862,10 @@ def fetch_nikkei225_constituents() -> dict:
                 continue
             for _, row in df.iterrows():
                 code = str(row[code_col]).strip()
-                if code.isdigit() and len(code) == 4:
+                # 新形式の英数混在コード（例: 285A）も含める
+                if re.fullmatch(r"\d[0-9A-Z]{3}", code):
                     result[f"{code}.T"] = str(row[name_col]).strip()
-            if len(result) > 100:
-                break
+            # ページ内の業種別の表に分かれているため、途中で打ち切らず全部の表から集める
         if len(result) < 150:
             raise ValueError(f"取得件数が少なすぎます: {len(result)}件")
         return result
