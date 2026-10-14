@@ -20889,6 +20889,131 @@ def _render_policy_watch():
         st.info("今後の予定はありません。")
 
 
+def _rsi14(c: pd.Series, n: int = 14) -> pd.Series:
+    d = c.diff()
+    up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    return 100 - 100 / (1 + up / dn.replace(0, float("nan")))
+
+
+def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict:
+    """価格系列（日次終値）から、反転チェックリストの各項目の値と、満たしたかどうかを計算する（純粋関数）。"""
+    px = px.dropna()
+    if len(px) < 130:
+        return {}
+    last = float(px.iloc[-1])
+    ma20, ma50 = px.rolling(20).mean(), px.rolling(50).mean()
+    hi60 = float(px.iloc[-60:].max())
+    dd = (last / hi60 - 1) * 100
+    r = _rsi14(px)
+    r_now = float(r.iloc[-1])
+    r_min10 = float(r.iloc[-10:].min())
+    chg = px.pct_change()
+    # 前回の安値: 直近8営業日を除いた過去120営業日の最安値（終値）。今の安値が前回の安値より下なら「割り込み」
+    win = px.iloc[-120:-8]
+    prev_low = float(win.min())
+    prev_low_date = str(win.idxmin().date())
+    recent_low = float(px.iloc[-8:].min())
+    vx = vix.reindex(px.index).ffill()
+    tx = tnx.reindex(px.index).ffill()
+    vix_now = float(vx.iloc[-1])
+    vix_peak10 = float(vx.iloc[-10:].max())
+    tnx_hi20 = float(tx.iloc[-20:].max())
+    tnx_now = float(tx.iloc[-1])
+    tnx_rise40 = float(tx.iloc[-1] - tx.iloc[-40:].min())
+    in_down = (dd <= -10) and (last < float(ma50.iloc[-1]))
+    checks = {
+        "下落局面にいる（高値から-10%以下かつ50日線の下）": (in_down, f"高値から{dd:+.1f}%"),
+        "RSIが売られ過ぎ圏（30以下）に入った": (r_min10 < 30, f"RSI {r_now:.0f}（直近10日の最低 {r_min10:.0f}）"),
+        "RSIが30を回復した（直近10日に30割れ→今は30超）": (r_min10 < 30 <= r_now, f"RSI {r_now:.0f}"),
+        "VIXが30以上に急騰した（ショック型の底の条件）": (float(vx.iloc[-10:].max()) >= 30, f"VIX {vix_now:.1f}（直近10日の最高 {vix_peak10:.1f}）"),
+        "VIXがピーク（25以上）から15%以上低下した": (vix_peak10 >= 25 and vix_now <= vix_peak10 * 0.85, f"VIX {vix_now:.1f}／ピーク {vix_peak10:.1f}"),
+        "金利が上げ止まった（20日高値から0.15pt以上低下）": (tnx_hi20 - tnx_now >= 0.15, f"10年債 {tnx_now:.2f}%（20日高値 {tnx_hi20:.2f}%）"),
+        "前回の安値を割り込んでいない": (recent_low >= prev_low, f"前回の安値 {prev_low_date}／現在は{(last / prev_low - 1) * 100:+.1f}%"),
+        "20日線を回復した": (last > float(ma20.iloc[-1]), f"20日線から{(last / float(ma20.iloc[-1]) - 1) * 100:+.1f}%"),
+        "3日続伸している": (bool(chg.iloc[-1] > 0 and chg.iloc[-2] > 0 and chg.iloc[-3] > 0), f"直近3日 {chg.iloc[-1] * 100:+.1f}%/{chg.iloc[-2] * 100:+.1f}%/{chg.iloc[-3] * 100:+.1f}%"),
+    }
+    # 下落のタイプ（過去の解析では、底までの長さがタイプで大きく違った）
+    if vix_now >= 30 or float(vx.iloc[-10:].max()) >= 30:
+        kind = "ショック型（VIX急騰）：過去は1〜2か月で底を打つことが多かった"
+    elif tnx_rise40 >= 0.30:
+        kind = "金利上昇型：過去は金利が上げ止まるまで長引きやすかった（2022年は約200日）"
+    else:
+        kind = "低VIX型（VIXが高くない下落）：信用不安や需給の悪化が落ち着くまで続きやすかった"
+    return {"checks": checks, "kind": kind, "last": last, "dd": dd}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _reversal_data() -> dict:
+    """SMH・光通信バスケット（等加重）・VIX・10年債の日次終値を取得する。失敗時は {}。"""
+    opt = _BREADTH_GROUPS["光通信"]
+    try:
+        raw = yf.download(["SMH", "^VIX", "^TNX"] + opt, period="2y", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        cl = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[reversal] 取得失敗: {e}")
+        return {}
+    if cl.empty or "SMH" not in cl.columns:
+        return {}
+    rets = cl[[c for c in opt if c in cl.columns]].pct_change(fill_method=None).mean(axis=1, skipna=True).fillna(0)
+    return {"SMH": cl["SMH"].dropna(), "光通信バスケット": (1 + rets).cumprod(),
+            "vix": cl["^VIX"].dropna(), "tnx": cl["^TNX"].dropna()}
+
+
+def render_reversal_checklist():
+    """🧭 反転チェックリスト：下落局面で「反転のサイン」とされる項目を、今の値で自動判定する（過去の検証結果つき）。"""
+    st.markdown('<a id="reversal-checklist"></a>', unsafe_allow_html=True)
+    st.markdown("### 🧭 反転チェックリスト")
+    d = _reversal_data()
+    if not d:
+        st.info("データを取得できませんでした。")
+        return
+    res = {k: _reversal_metrics_for(d[k], d["vix"], d["tnx"]) for k in ("SMH", "光通信バスケット")}
+    res = {k: v for k, v in res.items() if v}
+    if not res:
+        st.info("判定に必要なデータが足りません。")
+        return
+    names = list(res)
+    labels = list(next(iter(res.values()))["checks"])
+    hdr = "".join(f'<th style="padding:6px 8px">{n}</th>' for n in names)
+    rows = []
+    for lb in labels:
+        tds = ""
+        for n in names:
+            ok, txt = res[n]["checks"][lb]
+            tds += (f'<td style="padding:6px 8px;vertical-align:top"><span style="font-size:15px">{"✅" if ok else "⬜"}</span> '
+                    f'<span style="font-size:11px;color:#cbd5e1">{txt}</span></td>')
+        rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600;font-size:12px">{lb}</td>{tds}</tr>')
+    # 満たした数（「下落局面にいる」自体は数えない）
+    cnt = {n: sum(1 for lb in labels[1:] if res[n]["checks"][lb][0]) for n in names}
+    summ = "　".join(f"{n}: <b>{cnt[n]}/{len(labels) - 1}</b>" for n in names)
+    kinds = "".join(f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{n}の下落タイプ: {res[n]["kind"]}</div>' for n in names)
+    st.markdown(
+        f'<div style="background:#1e293b;border-left:4px solid #38bdf8;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
+        f'<div style="font-size:14px;font-weight:700">満たしたサインの数　{summ}</div>{kinds}</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+        f'<th style="padding:6px 8px">チェック項目</th>{hdr}</tr></thead><tbody>{"".join(rows)}</tbody></table>',
+        unsafe_allow_html=True)
+    with st.expander("📚 過去の検証結果（SMH 2000年〜・QQQ 1999年〜・光通信 2016年〜、2026-10-15時点）", expanded=False):
+        st.markdown(
+            "**まず前提**: 下落局面で、その後20日以内にさらに5%下がる割合は、何もサインがなくても約5割（SMH 52%、QQQ 56%）でした。\n\n"
+            "| サイン（SMH） | 回数 | 20日後の中央値 | 20日後にプラス | 20日内に-5%再下落 |\n|---|---|---|---|---|\n"
+            "| VIXが30以上に急騰 | 65 | +3.7% | 66% | 45% |\n"
+            "| VIXがピークから15%低下 | 49 | +2.0% | 69% | 53% |\n"
+            "| 金利が高値から0.15pt低下 | 30 | +3.2% | 57% | 47% |\n"
+            "| RSIが30を割り込む | 43 | +1.2% | 63% | 47% |\n"
+            "| RSIが30を回復 | 37 | -0.9% | 46% | 62% |\n"
+            "| 20日線を回復 | 66 | +1.0% | 52% | 58% |\n"
+            "| 3日続伸 | 52 | +0.9% | 52% | 58% |\n\n"
+            "**下落のタイプで、底までの長さが違いました**\n"
+            "- ショック型（VIX急騰）: 2020年（SMH -34%・底まで23日）、2025年4月（-36%）は1〜2か月で底。底のVIXは50〜80台。\n"
+            "- 金利上昇型: 2021年12月〜2022年10月は SMH -45%・203日（10年債が+2.5pt上昇）。光通信の2021〜2023年は-50%・565日。\n"
+            "- 低VIX型: 2026年6〜7月は SMH -25%・底のVIXは20.7（前回の安値は7/29）。")
+        st.caption("※ 単独で反転を当てるサインはありませんでした。VIX30以上は成績が良い一方、2008・2020・2022・2025年など少数の危機に集中しており、"
+                   "独立した事例は多くありません。光通信バスケットは、現在の構成銘柄をさかのぼって使っているため、生き残った銘柄に偏っています。"
+                   "このチェックリストは売買の指示ではなく、状況を整理するための目安です。")
+
+
 def _render_selloff_log():
     """data/selloff_log.json（GitHub Actionsが毎営業日に記録した、急落の広がりの判定）を表で表示する。"""
     import json as _json_sl
@@ -42830,6 +42955,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # 急落の広がり確認（光通信などの下落がどこまで波及しているか）
     render_selloff_breadth()
+    st.divider()
+
+    # 反転チェックリスト（下落局面の反転サインの自動判定）
+    render_reversal_checklist()
     st.divider()
 
     # メモリ株の見方（市況サイクル）
