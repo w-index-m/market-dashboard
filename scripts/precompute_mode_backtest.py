@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import app
 
 OUTPUT_PATH = "data/mode_backtest.json"
-MODE_KEYS = ["growth", "momentum", "ai_mix", "optical_mix", "dividend_stable", "stable_growth", "marks", "jp_tenbagger"]
+MODE_KEYS = ["growth", "momentum", "ai_mix", "optical_mix", "dividend_stable", "etf_core", "stable_growth", "marks", "jp_tenbagger"]
 
 
 def _thin(r: dict) -> dict:

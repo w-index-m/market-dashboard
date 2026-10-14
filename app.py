@@ -27160,6 +27160,7 @@ def _generate_replacement_rec(
         "ai_mix":     "AI特化テーマ集中（インフラ/プラットフォーム/ソフトウェア3層からAI純粋銘柄を選定）",
         "optical_mix":     "光通信テーマ集中（光トランシーバ/光ファイバー/光NW装置からAIデータセンター需要銘柄を選定）",
         "dividend_stable": "株価安定・高配当重視（3年最大ドローダウン-35%以内・配当利回り3%以上の銘柄のみ選定）",
+        "etf_core":        "広く分散した低コストETF（VT・VTI・VUG・VIG）で、そこそこの成長と分散を両立するコア運用",
         "stable_growth":   "財務指標不使用・5年チャートが滑らかに右肩上がりの銘柄のみ（日経225・S&P500全銘柄からスクリーニング）",
         "jp_tenbagger":    "日本株10倍株候補（東証スタンダード小型株、成長性・割安度・競争優位性・10倍化余地を100点満点で評価）",
         "marks":           "価格と価値の関係を最重視（予想PER・成長・下落耐性・過熱の有無。上昇しているだけでは選ばない）",
@@ -32739,6 +32740,8 @@ def _get_top_candidate_args(cand_perf: dict, trading_mode: str, budget: int, n: 
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
     elif trading_mode == "dividend_stable":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_DIVIDEND_BASKET}
+    elif trading_mode == "etf_core":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_ETF_BASKET}
     _weights = {"momentum": (0.5, 0.3, 0.2), "growth": (0.2, 0.3, 0.5)}.get(trading_mode, (0.3, 0.3, 0.4))
     _scored = []
     for _tk, _d in cand_perf.items():
@@ -32782,6 +32785,7 @@ _TRADING_CANDIDATES = [
     # 配当安定株・米国（高配当ディフェンシブモード用）
     "JNJ", "PG", "KO", "PEP", "MCD", "O", "VZ", "CVX", "ABT", "PM",
     "VYM", "SCHD", "HDV",  # 高配当ETF
+    "VT", "VTI", "VUG", "VIG",  # 分散成長ETFモード用
     # US Finance/Consumer
     "BRK-B", "JPM", "GS", "V", "MA", "COST", "WMT", "HD",
     # US Healthcare
@@ -32906,6 +32910,15 @@ _CLAUDE_DIVIDEND_BASKET = {
     "4502.T",   # 武田薬品（医薬品・高配当）
 }
 
+# 分散成長ETFモード: 広く分散しつつ、そこそこ成長するコア向けETFの固定バスケット
+_CLAUDE_ETF_BASKET = {"VT", "VTI", "VUG", "VIG"}
+_ETF_DESCRIPTIONS = {
+    "VT":  ("Vanguard Total World Stock", "全世界の株式（先進国＋新興国、約9,000銘柄）に1本で分散。米国は約6割で、日本や欧州・新興国も含む。費用は年0.06%程度。", "地域の分散。米国だけが不調でも影響を和らげる土台"),
+    "VTI": ("Vanguard Total Stock Market", "米国株式市場のほぼ全体（大型〜小型、約3,500銘柄）。S&P500より小型株も含む。費用は年0.03%程度。", "米国の広い分散。S&P500とほぼ同じ値動きだが、小型株の分だけ裾野が広い"),
+    "VUG": ("Vanguard Growth", "米国の大型グロース株（成長が速い企業）に絞ったETF。ハイテク比率が高い。費用は年0.04%程度。", "成長の押し上げ役。上昇相場に強いが、下落相場では下げも大きくなりやすい"),
+    "VIG": ("Vanguard Dividend Appreciation", "10年以上連続で増配してきた米国企業のETF。利回りは低めだが、財務が堅い企業が中心。費用は年0.05%程度。", "守りと成長のバランス。下落時にやや粘りやすい"),
+}
+
 # 🔥 テーマ動向解説（値動きが大きい日だけAIが背景をまとめる）の対象テーマ定義。
 # rss は RSS_FEEDS（このファイル上部で定義）のキー名。光銘柄ミックスは専用フィード
 # （光通信(COHR)等）があるためそれを優先し、両テーマともブルームバーグ等の一般市況フィードも加える。
@@ -33021,6 +33034,7 @@ _MODE_FIXED_BASKETS = {
     "ai_mix":          _CLAUDE_AI_BASKET,
     "optical_mix":     _CLAUDE_OPTICAL_BASKET,
     "dividend_stable": _CLAUDE_DIVIDEND_BASKET,
+    "etf_core":        _CLAUDE_ETF_BASKET,
 }
 
 # 固定バスケットは集合で順序を持たないため、全モード比較表の「主な銘柄」ツールチップ用に
@@ -33030,6 +33044,7 @@ _MODE_BASKET_DISPLAY_ORDER = {
     "ai_mix": ["NVDA", "MSFT", "GOOGL", "AMZN", "META", "AVGO", "TSM", "AMD", "ASML", "PLTR"],
     "optical_mix": ["LITE", "COHR", "GLW", "VRT", "CIEN", "MRVL", "CSCO", "APH", "5803.T", "AAOI"],
     "dividend_stable": ["JNJ", "PG", "KO", "PEP", "MCD", "XOM", "CVX", "VZ", "8058.T", "8306.T"],
+    "etf_core": ["VT", "VTI", "VUG", "VIG"],
 }
 _KNOWN_NAMES.setdefault("2244.T", "グローバルX NASDAQ100 ETF(円)")
 
@@ -34136,6 +34151,8 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_OPTICAL_BASKET}
     elif trading_mode == "dividend_stable":
         cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_DIVIDEND_BASKET}
+    elif trading_mode == "etf_core":
+        cand_perf = {k: v for k, v in cand_perf.items() if k in _CLAUDE_ETF_BASKET}
     # モードに応じたスコアリング重み
     if trading_mode == "momentum":
         weights = (0.5, 0.3, 0.2)  # 3m, 6m, 1y
@@ -34180,6 +34197,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         "【Claude AIミックスバスケット限定】" if trading_mode == "ai_mix"
         else "【Claude 光銘柄バスケット限定】" if trading_mode == "optical_mix"
         else "【Claude 高配当ディフェンシブバスケット限定・3年MDD>-35%のみ】" if trading_mode == "dividend_stable"
+        else "【分散成長ETFバスケット限定（VT/VTI/VUG/VIG）】" if trading_mode == "etf_core"
         else ""
     )
     _lines = [f"【実株価モメンタムデータ（当日取得・キャッシュ済 / 予算¥{budget:,}対応済）{_basket_note}】"]
@@ -34192,6 +34210,7 @@ def _build_momentum_table(cand_perf: dict, trading_mode: str, budget: int = 1_00
         else "AI露出度+1y重視" if trading_mode == "ai_mix"
         else "光通信需要+1y重視" if trading_mode == "optical_mix"
         else "3y安定性+配当重視" if trading_mode == "dividend_stable"
+        else "分散ETFの1y・3m実績" if trading_mode == "etf_core"
         else "価格と価値の関係（予想PER・成長・下落耐性）重視" if trading_mode == "marks"
         else "1y重視"
     )
@@ -34402,6 +34421,12 @@ def _generate_investment_portfolio_rec(
             "連続増配・高配当利回り・財務健全性を評価軸とし、急落リスクを極力排除する。"
             "PG・KO・KDDI・三菱商事等のディフェンシブ株・高配当ETFが中心。損切-10〜15%。",
         ),
+        "etf_core": (
+            "🌐 分散成長ETFモード",
+            "VT（全世界株）・VTI（米国全体）・VUG（米国グロース）・VIG（増配企業）の低コストETFで、"
+            "広く分散しつつ市場並み〜やや上の成長を狙うコア運用。個別株の選定リスクを避ける。"
+            "損切は-15〜20%・保有期間は1年以上を想定。",
+        ),
         "stable_growth": (
             "🪨 チャート形状モード",
             "財務諸表を一切見ず、株価チャートの形だけで判断。日経225・S&P500の全構成銘柄から、"
@@ -34487,6 +34512,19 @@ def _generate_investment_portfolio_rec(
   ④ バリュエーション【10%ウェイト】
      光通信セクターは一般に中・小型株が多い。過去の業績変動リスクを注記すること
   ※ 日本株はフジクラ(5803.T)・古河電工(5801.T)を積極的に組み入れる""",
+
+        "etf_core": """\
+評価軸の優先順位（🌐 分散成長ETFモード — 低コスト・広い分散・コア運用）:
+  ① 分散の効き方【最重要・40%ウェイト】
+     VT(全世界)・VTI(米国全体)・VUG(米国グロース)・VIG(増配企業)の役割が重ならないよう配分する
+     （VUGに偏りすぎると結局ハイテク集中になるため、VT/VTIを土台にして上限を設ける）
+  ② 3年・1年の実績とドローダウン【30%ウェイト】
+     3yMDDがあれば数値を根拠に記載すること
+  ③ 成長性とリスクのバランス【20%ウェイト】
+     成長はVUG、守りはVIGが担う。偏りが出る場合はその旨をdemeritsに書く
+  ④ 保有コスト【10%ウェイト】
+     いずれも低コストだが、配分は長期保有を前提にする
+  ※ 個別株は選ばない（候補はETFのみ）""",
 
         "stable_growth": """\
 評価軸の優先順位（🪨 チャート形状モード — チャートの滑らかさのみで事前選定済み）:
@@ -34629,6 +34667,9 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
             "選ぶ場合は価格水準の高さをdemeritsに必ず書く。人気テーマの材料だけを選定理由にしない。キャッシュ比率を高めに保つ選択肢も示す。"
             "損切ラインは-10〜15%で統一"
             if trading_mode == "marks"
+            else "\n・【分散成長ETFモード専用】銘柄はAgent Bリストのティッカーのみから選定（VT/VTI/VUG/VIGのETFのみ）。"
+            "役割の重ならない配分にし、VUGへの偏りに注意すること。損切ラインは-15〜20%"
+            if trading_mode == "etf_core"
             else "\n・【高配当ディフェンシブモード専用】銘柄はAgent Bリストのティッカーのみから選定。"
             "3yMDDが-25%以内の銘柄を最優先。配当利回り・連続増配年数をmeritsに必ず記載すること。"
             "損切ラインは-10〜15%（通常より短め）に設定すること"
@@ -34749,6 +34790,7 @@ ETF候補例: QQQ(NDX100), SPY/VOO(S&P500), VGT(テクノロジー), XLF(金融)
 {
 "・【AIミックスモード専用】インフラ層・プラットフォーム層・ソフトウェア層の3層から各1銘柄以上必ず選定" if trading_mode == "ai_mix"
 else "・【光銘柄ミックスモード専用】光トランシーバ・光ファイバー・光NW装置・インフラの各カテゴリから必ず選定" if trading_mode == "optical_mix"
+else "・【分散成長ETFモード専用】VT/VTI/VUG/VIGのETFのみを、役割が重ならないように配分する。個別株は選ばない" if trading_mode == "etf_core"
 else "・【マークスモード専用】価格水準（予想PER）と下落耐性を根拠に選ぶ。モメンタムの強さだけでは選ばない。損切ライン-10〜15%で統一" if trading_mode == "marks"
 else "・【高配当ディフェンシブモード専用】3yMDD -35%以内の銘柄のみ選定可。日米ともに配当利回り3%以上を必須条件とする。損切ライン-10〜15%で統一" if trading_mode == "dividend_stable"
 else "・【チャート形状モード専用】財務指標は評価に使わず、5年チャートの滑らかさ（stability_r2）と最大ドローダウンの小ささのみを根拠にすること" if trading_mode == "stable_growth"
@@ -35768,6 +35810,21 @@ def render_claude_trading_project():
                 "border": "#059669", "bg": "#022c22",
             },
             {
+                "key":    "etf_core",
+                "emoji":  "🌐",
+                "label":  "分散成長ETFモード",
+                "sub":    "個別株を選ばない · 低コストETF4本で広く分散 · そこそこ成長するコア運用",
+                "detail": (
+                    "・<b>VT</b>＝全世界株（約9,000銘柄）。地域の分散の土台。費用は年0.06%程度<br>"
+                    "・<b>VTI</b>＝米国株ほぼ全体（大型〜小型）。S&P500より裾野が広い。費用は年0.03%程度<br>"
+                    "・<b>VUG</b>＝米国の大型グロース株。成長の押し上げ役だが、下落時は下げも大きい。費用は年0.04%程度<br>"
+                    "・<b>VIG</b>＝10年以上連続増配の企業。守りと成長のバランス。費用は年0.05%程度<br>"
+                    "・個別株の選定リスクがなく、損切り-15〜20%・保有1年以上を想定（費用は概算。最新の数値は各運用会社で確認）"
+                ),
+                "color":  "#a78bfa", "sub_color": "#c4b5fd",
+                "border": "#7c3aed", "bg": "#1a1033",
+            },
+            {
                 "key":    "stable_growth",
                 "emoji":  "🪨",
                 "label":  "チャート形状モード",
@@ -35813,7 +35870,7 @@ def render_claude_trading_project():
             },
         ]
 
-        # 3+3+1 の3行レイアウトでモードボタンを表示
+        # 3+3+3 の3行レイアウトでモードボタンを表示
         _mode_row1 = _MODE_DEFS[:3]
         _mode_row2 = _MODE_DEFS[3:6]
         _mode_row3 = _MODE_DEFS[6:]
@@ -35835,7 +35892,7 @@ def render_claude_trading_project():
                     f'<div style="font-size:14px;font-weight:700;color:{_md["color"]}">'
                     f'{_md["emoji"]} {_md["label"]}</div>'
                     f'<div style="font-size:11px;color:{_md["sub_color"]};margin-top:3px">{_md["sub"]}</div>'
-                    f'<div style="font-size:10px;color:#64748b;margin-top:3px">{_md["detail"]}</div>'
+                    f'<div style="font-size:10px;color:#94a3b8;margin-top:3px">{_md["detail"]}</div>'
                     f'{_check}</div>',
                     unsafe_allow_html=True,
                 )
