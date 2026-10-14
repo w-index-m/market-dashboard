@@ -912,14 +912,17 @@ def render_server_metrics_panel() -> None:
         _c = st.columns(2)
         _c[0].metric("プロセス", f"{_now['rss_mb'] / 1024:.2f} GB" if _now["rss_mb"] is not None else "—")
         _cpu_last = next((x["cpu_pct"] for x in reversed(_smp) if x["cpu_pct"] is not None), None)
-        _c[1].metric("CPU（直近30秒）", f"{_cpu_last:.0f}%" if _cpu_last is not None else "—",
-                     help="100% = 1コアをフルに使用。コア数が複数あれば100%を超えることがあります。")
         _nc = _now.get("ncpu")
+        # cpu_pct は「100%=1コア」の値。全コアに対する使用率（0〜100%）に直して表示する
+        _den = float(_nc) if _nc else 1.0
+        _cpu_share = _cpu_last / _den if _cpu_last is not None else None
+        _c[1].metric("CPU使用率（直近30秒）", f"{_cpu_share:.0f}%" if _cpu_share is not None else "—",
+                     help=("割り当てられた全コアに対する使用率（最大100%）。" if _nc else "100% = 1コアをフルに使用。") +
+                     "30秒間の平均なので、瞬間的な負荷は表れにくいです。")
         if _nc:
-            _nc_txt = f"{_nc:g}"
-            _line = f"🧮 利用可能なCPUコア数: **{_nc_txt}**"
+            _line = f"🧮 利用可能なCPUコア数: **{_nc:g}**（最大100%＝全コア使用）"
             if _cpu_last is not None:
-                _line += f"　／　直近の使用: 約{_cpu_last / 100:.2f}コア分（全体の{_cpu_last / _nc:.0f}%）"
+                _line += f"　／　直近の使用: 約{_cpu_last / 100:.2f}コア分"
             st.caption(_line)
         if st.button("🧹 メモリを整理する", key="srv_mem_trim",
                      help="不要なデータを回収し、使っていないメモリをOSへ返します（キャッシュは消えません）。"):
@@ -934,14 +937,14 @@ def render_server_metrics_panel() -> None:
             _mem_col = "cg_used_mb" if _df["cg_used_mb"].notna().any() else "rss_mb"
             _g.add_trace(go.Scatter(x=_df["t"], y=_df[_mem_col], name="メモリ(MB)", line=dict(color="#60a5fa")))
             if _df["cpu_pct"].notna().any():
-                _g.add_trace(go.Scatter(x=_df["t"], y=_df["cpu_pct"], name="CPU(%)", yaxis="y2",
+                _g.add_trace(go.Scatter(x=_df["t"], y=_df["cpu_pct"] / _den, name="CPU使用率(%)", yaxis="y2",
                                         line=dict(color="#f59e0b", width=1.2)))
             _g.update_layout(
                 paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=200, margin=dict(l=5, r=5, t=10, b=10),
                 font=dict(color="#e2e8f0"), legend=dict(orientation="h", y=1.15, font=dict(size=10)),
                 xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
                 yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
-                yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#f59e0b"), showgrid=False),
+                yaxis2=dict(overlaying="y", side="right", tickfont=dict(color="#f59e0b"), showgrid=False, range=[0, 100]),
             )
             st.plotly_chart(_g, use_container_width=True, key="srv_hist")
         st.caption(f"記録開始: {_store['started_at']}（30秒おき・最大約6時間。再デプロイ/再起動でリセット）。"
