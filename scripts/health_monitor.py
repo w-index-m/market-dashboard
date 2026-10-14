@@ -72,7 +72,8 @@ def main() -> None:
     for path, max_h in DATA_FILES.items():
         try:
             with open(path, encoding="utf-8") as f:
-                gen = json.load(f).get("generated_at")
+                d = json.load(f)
+            gen = d.get("generated_at") or d.get("updated_at")   # ai_forecasts.json は updated_at を使う
             age = now - datetime.strptime(gen, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             if age > timedelta(hours=max_h):
                 problems.append(f"🗂️ {path}: 更新が古い（{int(age.total_seconds() // 3600)}時間前）")
