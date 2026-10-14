@@ -12610,14 +12610,26 @@ def render_rising_screener():
     _sh = c7.slider("シャープレシオの下限", 0.0, 3.0, 1.0, 0.1, key="rs_sh", disabled=not _sh_on)
     rows = _rising_filter(items, set(_grp), _per, float(_min), float(_cap) if _cap_on else None,
                           float(_nh) if _nh_on else None, bool(_vol), float(_sh) if _sh_on else None)
-    st.markdown(f"**該当 {len(rows)}銘柄**（上昇率の高い順に上位50件を表示）")
     if not rows:
         st.info("条件に合う銘柄がありません。条件をゆるめてください。")
         return
+    _sort_opts = {"上昇率（上で選んだ期間）": "__period", "1か月": "r1m", "3か月": "r3m", "6か月": "r6m", "1年": "r1y", "2年": "r2y",
+                  "高値からの下落": "from_high", "1年の最大下落": "mdd1y", "出来高の増減": "vol_ratio", "シャープレシオ": "sharpe", "銘柄名": "name"}
+    s1, s2, s3 = st.columns([2, 1, 1])
+    _sk = s1.selectbox("並べ替え", list(_sort_opts), key="rs_sort_key")
+    _asc = s2.radio("順序", ["降順（大きい順）", "昇順（小さい順）"], horizontal=True, key="rs_sort_dir").startswith("昇順")
+    _nshow = s3.selectbox("表示件数", [50, 100, 200, "すべて"], key="rs_nshow")
+    _key = _per if _sort_opts[_sk] == "__period" else _sort_opts[_sk]
+    _has = [kv for kv in rows if kv[1].get(_key) is not None]
+    _none = [kv for kv in rows if kv[1].get(_key) is None]          # 値が無い銘柄は、並べ替えでも最後に置く
+    _has.sort(key=lambda kv: (str(kv[1][_key]) if _key == "name" else kv[1][_key]), reverse=not _asc)
+    rows = _has + _none
+    _limit = len(rows) if _nshow == "すべて" else int(_nshow)
+    st.markdown(f"**該当 {len(rows)}銘柄**（「{_sk}」の{'小さい' if _asc else '大きい'}順に、上位{min(_limit, len(rows))}件を表示）")
     _lab = {"US500": "米大型", "US600": "米小型", "JP225": "日本"}
     _fmt = lambda v, suf="%": "—" if v is None else f"{v:+.0f}{suf}"   # noqa: E731
     _trs = []
-    for t, x in rows[:50]:
+    for t, x in rows[:_limit]:
         _vr = "—" if x.get("vol_ratio") is None else f"{x['vol_ratio']:.1f}倍"
         _sp = "—" if x.get("sharpe") is None else f"{x['sharpe']:.2f}"
         _hot = "#fb923c" if (x.get("r1y") or 0) > 300 else "#e2e8f0"
