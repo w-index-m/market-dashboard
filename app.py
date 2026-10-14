@@ -31160,6 +31160,37 @@ def _fmt_past_signals(past_signals: list | None) -> str:
     return "\n".join(lines)
 
 
+def _check_trade_signal_text(text: str, price, rsi, currency: str) -> list:
+    """個別株のAI分析の文章を機械的に検査し、矛盾や根拠のない記述の疑いを日本語の注意書きで返す（空なら問題なし）。"""
+    notes = []
+    try:
+        px = float(price)
+    except (TypeError, ValueError):
+        px = None
+    # ① 損切りラインの価格と％の整合
+    m = re.search(r"損切りライン[^:：\n]*[:：]\s*\**\s*([0-9][0-9,\.]*)\s*" + re.escape(currency) + r"[（(]\s*([+\-−]?\d+(?:\.\d+)?)", text)
+    if m and px:
+        try:
+            lv = float(m.group(1).replace(",", ""))
+            pct = float(m.group(2).replace("−", "-"))
+            real = (lv / px - 1) * 100
+            if abs(real - (pct if pct < 0 else -pct)) > 2.0:
+                notes.append(f"損切りライン {lv:,.2f}{currency} は現在株価から {real:+.1f}% の水準で、文中の「{m.group(2)}%」と一致しません。")
+        except ValueError:
+            pass
+    # ② RSIが中立なのに「売られ過ぎ」
+    try:
+        r = float(rsi)
+        if 30 < r < 70 and re.search(r"売られ過ぎ", text.replace("30↓売られ過ぎ", "").replace("30以下=売られ過ぎ", "")):
+            notes.append(f"RSIは {r:.0f}（中立）ですが、文中に「売られ過ぎ」の記述があります。")
+    except (TypeError, ValueError):
+        pass
+    # ③ 与えていない比較対象（同業・業界平均）
+    if re.search(r"(同業|業界)平均[^。\n]{0,12}\d", text) and "比較できない" not in text:
+        notes.append("「同業平均／業界平均」の数値が書かれていますが、このデータには含まれていません（AIの推測の可能性）。")
+    return notes
+
+
 def _generate_ai_trade_signal(
     ticker: str, name: str, is_jp: bool, data: dict,
     position_ctx: dict | None = None,
@@ -31420,6 +31451,9 @@ def _generate_ai_trade_signal(
         text, model_used = _call_ai_for_trading(
             prompt, model_pref=model_pref, max_output_tokens=4000, temperature=0.2
         )
+        _chk = _check_trade_signal_text(text, data.get("price_raw") or price, rsi, currency)
+        if _chk:
+            text += "\n\n⚠️ **自動チェックの注意**（AIの文章に次の疑いがあります。参考にしすぎないでください）\n" + "\n".join(f"- {n}" for n in _chk)
         return {"text": text, "model": model_used, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)}
