@@ -12374,6 +12374,23 @@ def _derivatives_facts() -> str:
         lines.append("・米国セクターETF（SPDR11業種、出来高倍率=直近20日÷その前40日。純資金流入ではなく価格と出来高からの推定）: "
                      f"1か月の上位={'、'.join(top)}。下位={'、'.join(bot)}。"
                      f"流入の目安（市場より強く出来高増）={'、'.join(inflow) or 'なし'}。流出の目安（市場より弱く出来高減）={'、'.join(outflow) or 'なし'}。")
+    try:
+        br = (_fetch_breadth_returns() or {}).get("rets", {})
+    except Exception:
+        br = {}
+    if br:
+        gm = {}
+        for g, syms in _BREADTH_GROUPS.items():
+            v = [br[x] for x in syms if x in br]
+            if v:
+                gm[g] = float(pd.Series(v).median())
+        idxr = {k: br.get(k) for k in _BREADTH_INDEXES}
+        if gm:
+            lab, _desc = _breadth_verdict(gm, idxr)
+            lines.append("・直近営業日の下落の広がり（前日終値比、グループ内の中央値）: "
+                         + "、".join(f"{g}{v:+.1f}%" for g, v in gm.items())
+                         + "。" + "、".join(f"{_BREADTH_INDEXES[k]}{v:+.1f}%" for k, v in idxr.items() if v is not None)
+                         + f"。ルールによる判定={lab}")
     return "\n".join(lines)
 
 
@@ -29485,6 +29502,48 @@ def _save_options_cache(items: dict) -> int:
 
 
 @st.fragment
+def render_holdings_selloff_overlap():
+    """🎯 保有銘柄と急落テーマの重なり：保有のうち、光通信・AIインフラ・半導体・メモリの各グループが占める割合と、直近の騰落による概算影響を表示する。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = {t: p for t, p in _get_open_positions(_u).items() if not t.endswith(".T") and t not in _JP_FUND_MAP}
+    with st.expander("🎯 保有銘柄と急落テーマの重なり（AI・半導体への偏り）", expanded=False):
+        if not pos:
+            st.info("米国の保有銘柄がありません。")
+            return
+        pr = _fetch_portfolio_prices(tuple(pos))
+        fx = float(pr.get("_usdjpy") or 150.0)
+        val = {t: p["qty"] * float((pr.get(t) or {}).get("price") or 0) * fx for t, p in pos.items()}
+        total = sum(val.values())
+        if total <= 0:
+            st.info("評価額を計算できませんでした。")
+            return
+        rets = (_fetch_breadth_returns() or {}).get("rets", {})
+        rows, covered = [], set()
+        for g, syms in _BREADTH_GROUPS.items():
+            held = [t for t in syms if t in val and val[t] > 0]
+            if not held:
+                continue
+            covered |= set(held)
+            gv = sum(val[t] for t in held)
+            imp = sum(val[t] * rets[t] / 100 for t in held if t in rets)
+            names = "・".join(held)
+            col = "#f87171" if imp < 0 else "#4ade80"
+            rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{g}<div style="font-size:10px;color:#94a3b8">{names}</div></td>'
+                        f'<td>{gv / total * 100:.1f}%</td><td style="color:{col};font-weight:700">{imp / 1e4:+,.0f}万円</td></tr>')
+        all_g = set(t for v in _BREADTH_GROUPS.values() for t in v)
+        theme_share = sum(val[t] for t in val if t in all_g) / total * 100
+        if not rows:
+            st.info("保有銘柄に、光通信・AIインフラ・半導体・メモリのグループ銘柄はありません。")
+            return
+        st.markdown(
+            f'<div style="font-size:14px;color:#e2e8f0;margin-bottom:6px">米国株の評価額のうち、これらのテーマ銘柄が <b>{theme_share:.0f}%</b> を占めます。</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+            '<th style="padding:6px 8px">グループ</th><th>米国株内の比率</th><th>直近の騰落による概算影響</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+        st.caption("※ 米国株のみが対象（日本株・投資信託は含みません）。グループは銘柄ごとに1つだけに分けています。"
+                   "概算影響は、前営業日の終値比に保有評価額を掛けた目安で、時間外や為替は含みません。")
+
+
 def render_option_implied_moves():
     """🎲 オプション市場が織り込む値動き：保有している米国株ごとに、次の決算前後の想定変動幅（ATMストラドル・IV）を表示する。"""
     _u = st.session_state.get("_trading_user", "") or ""
@@ -40052,6 +40111,7 @@ def render_claude_trading_project():
                     render_portfolio_risk_simulation()
                     render_goal_tracker()
                     render_portfolio_fundamentals()
+                    render_holdings_selloff_overlap()
                     render_option_implied_moves()
                     render_insider_activity()
                     render_ai_judgment_scoreboard()
