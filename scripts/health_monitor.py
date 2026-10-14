@@ -18,14 +18,14 @@ WORKFLOWS = {
     "precompute-sp600-candidates.yml": 36, "earnings-review.yml": 72, "ai-forecast-log.yml": 72,
     "marks-valuation.yml": 72, "rising-candidates.yml": 72, "mode-backtest.yml": 72, "options-cache.yml": 72,
     "fundamentals-cache.yml": 24 * 5, "holdings-alerts.yml": 72, "daily-portfolio-line.yml": 48,
-    "daily-asset-snapshot.yml": 48, "cot-positions.yml": 24 * 9, "tokyo-re-index.yml": 24 * 9, "longterm-returns.yml": 24 * 35,
+    "daily-asset-snapshot.yml": 48, "cot-positions.yml": 24 * 9, "tokyo-re-index.yml": 24 * 9, "longterm-returns.yml": 24 * 35, "marks-backtest.yml": 24 * 35,
 }
 # データファイル → 許容する古さ（時間）
 DATA_FILES = {
     "data/rising_candidates.json": 72, "data/mode_backtest.json": 72, "data/marks_valuation.json": 72,
     "data/earnings_reviews.json": 72, "data/ai_forecasts.json": 72, "data/sp600_candidates.json": 48,
     "data/jp_tenbagger_raw.json": 48, "data/cot_positions.json": 24 * 10, "data/longterm_returns.json": 24 * 40,
-    "data/tokyo_re_index.json": 24 * 10,
+    "data/tokyo_re_index.json": 24 * 10, "data/marks_backtest.json": 24 * 40,
 }
 
 
