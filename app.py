@@ -909,7 +909,7 @@ def render_server_metrics_panel() -> None:
         _fig.update_layout(paper_bgcolor="#0f172a", height=190, margin=dict(l=10, r=10, t=40, b=0),
                            font=dict(color="#e2e8f0"))
         st.plotly_chart(_fig, use_container_width=True, key="srv_mem_gauge")
-        _c = st.columns(2)
+        _c = [st.container(), st.container()]   # サイドバーは狭いので縦に並べる（横並びだと値が省略表示される）
         _c[0].metric("プロセス", f"{_now['rss_mb'] / 1024:.2f} GB" if _now["rss_mb"] is not None else "—")
         _cpu_last = next((x["cpu_pct"] for x in reversed(_smp) if x["cpu_pct"] is not None), None)
         _nc = _now.get("ncpu")
