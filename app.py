@@ -13487,7 +13487,7 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
         rows_html += (
             f"<tr style='border-bottom:1px solid #1e293b'>"
             f"<td style='padding:6px 10px;font-weight:700;color:#7dd3fc'>{sym}</td>"
-            f"<td style='padding:6px 10px;color:#94a3b8;font-size:12px;white-space:nowrap'>{s['name']}</td>"
+            f"<td style='padding:6px 10px;color:#cbd5e1;font-size:12px;white-space:nowrap'>{s['name']}</td>"
             f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{price_sym}{s['price']:{price_fmt}}</td>"
             + _fmt_price(s.get("target_low"))
             + _fmt_price(s.get("target_mean"))
@@ -13495,7 +13495,7 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
             + _fmt_pct(s.get("upside_low"))
             + _fmt_pct(s.get("upside_mean"))
             + _fmt_pct(s.get("upside_high"))
-            + f"<td style='padding:6px 10px;text-align:right;color:#64748b;font-size:11px'>{n_ana_str}</td>"
+            + f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0;font-size:13px'>{n_ana_str}</td>"
             + _fmt_num(s.get("forward_pe"), ".1f", "x")
             + f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{rev_g}</td>"
             + f"<td style='padding:6px 10px;text-align:right;font-size:11px;color:#e2e8f0'>{rec_text}</td>"
