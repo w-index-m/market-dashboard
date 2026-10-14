@@ -13087,7 +13087,12 @@ _SEMI_FORECAST_TICKERS: list[tuple[str, str]] = [
     ("AMAT", "Applied Materials"),
     ("MU",   "Micron"),
     ("SNDK", "SanDisk"),
+    ("VRT",  "Vertiv"),
+    ("LITE", "Lumentum"),
+    ("AAOI", "AAOI"),
 ]
+# 表には出すが、SOX推定（半導体バスケットの平均）には含めない銘柄（半導体ではなくAI関連の周辺銘柄）
+_SEMI_BASKET_EXCLUDE = frozenset({"VRT", "LITE", "AAOI"})
 _OPTICAL_FORECAST_TICKERS: list[tuple[str, str]] = [
     ("SNDK",   "SanDisk"),
     ("AAOI",   "AAOI"),
@@ -13103,7 +13108,7 @@ _OPTICAL_FORECAST_TICKERS: list[tuple[str, str]] = [
 
 
 @st.cache_data(ttl=3600 * 3, show_spinner=False)
-def _fetch_earnings_forecast(tickers_json: str) -> dict:
+def _fetch_earnings_forecast(tickers_json: str, exclude_json: str = "[]") -> dict:
     """
     代表銘柄のアナリスト目標株価・決算データを取得し、
     バスケット指数の推定上限・中央・下限を算出する。
@@ -13111,6 +13116,7 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
     """
     import json as _json
     tickers = _json.loads(tickers_json)
+    _excl = set(_json.loads(exclude_json))
     stocks: dict[str, dict] = {}
 
     def _fetch_one(sym: str, name: str):
@@ -13189,7 +13195,7 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
     stocks = {sym: stocks[sym] for sym, _name in tickers if sym in stocks}
 
     def _wavg(key: str) -> float | None:
-        vals = [s[key] for s in stocks.values() if s.get(key) is not None]
+        vals = [s[key] for k, s in stocks.items() if k not in _excl and s.get(key) is not None]
         return round(sum(vals) / len(vals), 1) if vals else None
 
     return {
@@ -13197,7 +13203,7 @@ def _fetch_earnings_forecast(tickers_json: str) -> dict:
         "basket_upside_high": _wavg("upside_high"),
         "basket_upside_low":  _wavg("upside_low"),
         "basket_upside_mean": _wavg("upside_mean"),
-        "n_valid":            len(stocks),
+        "n_valid":            len([k for k in stocks if k not in _excl]),
     }
 
 
@@ -13660,7 +13666,7 @@ def render_earnings_index_forecast():
     col_l, col_r = st.columns(2)
     with col_l:
         with st.spinner(t("半導体データ取得中...", "Loading semiconductor data...")):
-            semi_data = _fetch_earnings_forecast(semi_json)
+            semi_data = _fetch_earnings_forecast(semi_json, _json.dumps(sorted(_SEMI_BASKET_EXCLUDE)))
     with col_r:
         with st.spinner(t("光通信データ取得中...", "Loading optical data...")):
             optical_data = _fetch_earnings_forecast(optical_json)
@@ -13703,7 +13709,7 @@ def render_earnings_index_forecast():
             )
             n = semi_data["n_valid"]
             st.caption(
-                t(f"※ {n}銘柄のアナリスト目標株価の等加重平均。SOX実際の指数構成比とは異なります。",
+                t(f"※ {n}銘柄のアナリスト目標株価の等加重平均（VRT・LITE・AAOIは表示のみで、この平均には含みません）。SOX実際の指数構成比とは異なります。",
                   f"* Equal-weighted average of {n} stocks' analyst targets. Differs from actual SOX index weighting.")
             )
         else:
