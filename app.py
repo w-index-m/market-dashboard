@@ -28287,7 +28287,7 @@ def render_portfolio_risk_simulation():
 _OPT_CACHE_HEADERS = ["ticker", "updated_at", "data_json"]
 
 
-def _atm_info(chain, spot: float) -> dict | None:
+def _atm_info(chain, spot: float, days: int = 30) -> dict | None:
     """オプションチェーンから、現在株価に最も近い権利行使価格（ATM）の、ストラドル価格とIV、建玉を取り出す。
     価格はbid/askの中値、取れなければ直近約定値。Returns: {"strike","straddle","iv","oi_put","oi_call","vol_put","vol_call"}。"""
     calls, puts = chain.calls, chain.puts
@@ -28308,7 +28308,12 @@ def _atm_info(chain, spot: float) -> dict | None:
 
     straddle = _mid(c) + _mid(p_)
     ivs = [float(x) for x in (c.get("impliedVolatility"), p_.get("impliedVolatility")) if x and float(x) > 0.01]
-    return {"strike": float(k), "straddle": straddle, "iv": (sum(ivs) / len(ivs)) if ivs else None,
+    iv = (sum(ivs) / len(ivs)) if ivs else None
+    if iv is None and straddle > 0 and days > 0:
+        # Yahooのimpliedvolatilityは取引時間外に無効な値（ほぼ0）になるため、ストラドル価格から逆算する
+        # （ATMストラドル ≒ 0.8 × 株価 × IV × √T）
+        iv = (straddle / spot) / (0.8 * (days / 365) ** 0.5)
+    return {"strike": float(k), "straddle": straddle, "iv": iv,
             "oi_put": float(puts["openInterest"].fillna(0).sum()), "oi_call": float(calls["openInterest"].fillna(0).sum()),
             "vol_put": float(puts["volume"].fillna(0).sum()), "vol_call": float(calls["volume"].fillna(0).sum())}
 
@@ -28350,7 +28355,7 @@ def _fetch_option_summary(ticker: str) -> dict:
             pres = [(e, t) for e, t in exp_ts if t < earn and (t - today).days >= 3]
             pre = pres[-1] if pres else None
         use = cover or near
-        c_info = _atm_info(tk.option_chain(use[0]), spot)
+        c_info = _atm_info(tk.option_chain(use[0]), spot, max((use[1] - today).days, 1))
         if not c_info:
             return {}
         out = {"spot": round(spot, 2), "earn": str(earn.date()) if earn is not None else None, "exp_cover": use[0],
@@ -28360,7 +28365,7 @@ def _fetch_option_summary(ticker: str) -> dict:
                "pc_oi": round(c_info["oi_put"] / c_info["oi_call"], 2) if c_info["oi_call"] > 0 else None,
                "oi_total": int(c_info["oi_put"] + c_info["oi_call"])}
         if pre:
-            p_info = _atm_info(tk.option_chain(pre[0]), spot)
+            p_info = _atm_info(tk.option_chain(pre[0]), spot, max((pre[1] - today).days, 1))
             if p_info and p_info["iv"]:
                 out["exp_pre"] = pre[0]
                 out["iv_pre"] = round(p_info["iv"] * 100, 1)
@@ -28641,6 +28646,110 @@ def _per_position(f: dict, cur_price) -> dict | None:
     now = float(cur_price) / ttm_now
     arr = pd.Series(hist[-40:])
     return {"now": now, "median": float(arr.median()), "pct": float((arr < now).mean() * 100), "n": len(arr)}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_options_cache_all() -> dict:
+    """options_cacheシート（GitHub Actionsが平日の取引時間中に更新）を全件読み、ticker→オプション概算dictを返す。"""
+    import json as _json_o
+    try:
+        ws = _trading_ws("options_cache", _OPT_CACHE_HEADERS)
+        if not ws:
+            return {}
+        out = {}
+        for r in ws.get_all_records():
+            tk = r.get("ticker")
+            if not tk:
+                continue
+            try:
+                out[str(tk)] = _json_o.loads(r.get("data_json") or "{}")
+            except Exception:
+                continue
+        return out
+    except Exception as e:
+        logger.warning(f"[options] cache読込失敗: {e}")
+        return {}
+
+
+def _save_options_cache(items: dict) -> int:
+    """{ticker: オプション概算dict}をoptions_cacheシートへ保存（既存tickerは上書き、新規は追加）。保存件数を返す。"""
+    import json as _json_o
+    ws = _trading_ws("options_cache", _OPT_CACHE_HEADERS)
+    if not ws:
+        return 0
+    existing = {str(r.get("ticker")): i + 2 for i, r in enumerate(ws.get_all_records()) if r.get("ticker")}
+    new_rows, n = [], 0
+    for tk, d in items.items():
+        row = [tk, d.get("updated_at", ""), _json_o.dumps(d, ensure_ascii=False, separators=(",", ":"))]
+        if tk in existing:
+            ws.update([row], f"A{existing[tk]}:C{existing[tk]}", value_input_option="RAW")
+        else:
+            new_rows.append(row)
+        n += 1
+    if new_rows:
+        ws.append_rows(new_rows, value_input_option="RAW")
+    return n
+
+
+@st.fragment
+def render_option_implied_moves():
+    """🎲 オプション市場が織り込む値動き：保有している米国株ごとに、次の決算前後の想定変動幅（ATMストラドル・IV）を表示する。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = {t: p for t, p in _get_open_positions(_u).items() if not t.endswith(".T") and t not in _JP_FUND_MAP}
+    with st.expander("🎲 オプション市場が織り込む値動き（決算前のIV・想定変動幅）", expanded=False):
+        if not pos:
+            st.info("米国の保有銘柄がありません（オプションは米国上場銘柄のみ対象です。日本株はYahoo Financeからオプションを取得できません）。")
+            return
+        cache = _load_options_cache_all()
+        data = {t: cache[t] for t in pos if cache.get(t)}
+        miss = [t for t in pos if t not in data]
+        if miss:
+            with st.spinner(f"{len(miss)}銘柄のオプションをその場で取得中…（保存済みデータが無い銘柄）"):
+                with ThreadPoolExecutor(max_workers=4) as ex:
+                    for t, d in zip(miss[:10], ex.map(_fetch_option_summary, miss[:10])):
+                        if d:
+                            data[t] = d
+        if not data:
+            st.info("オプションのデータを取得できませんでした（時間をおいて再読み込みしてください）。")
+            return
+        pr = _fetch_portfolio_prices(tuple(pos))
+        fx = float(pr.get("_usdjpy") or 150.0)
+        rows = []
+        for t, d in data.items():
+            px = (pr.get(t) or {}).get("price") or d.get("spot")
+            val_jpy = pos[t]["qty"] * px * fx if px else 0.0
+            move = d.get("move_pct")
+            earn_m = d.get("earn_move_pct")
+            ivr = (d["iv_cover"] / d["hv1y"]) if d.get("iv_cover") and d.get("hv1y") else None
+            rows.append((d.get("earn") or "9999", t, d, val_jpy, move, earn_m, ivr))
+        rows.sort(key=lambda x: x[0])
+        _tr = []
+        for earn, t, d, val_jpy, move, earn_m, ivr in rows:
+            _amt = f"±約{val_jpy * move / 100 / 1e4:,.0f}万円" if (move and val_jpy) else "—"
+            _earn_txt = d.get("earn") or "—"
+            _within = "" if d.get("has_earn_in_exp") else '<div style="font-size:10px;color:#f59e0b">決算を含む満期なし</div>'
+            _tr.append(
+                f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:6px 8px;font-weight:600">{_get_stock_display_name(t)}'
+                f'<div style="font-size:10px;color:#64748b">{t}</div></td>'
+                f'<td>{_earn_txt}</td><td>{d.get("exp_cover", "—")}<div style="font-size:10px;color:#64748b">あと{d.get("days_cover", "—")}日</div>{_within}</td>'
+                f'<td style="font-weight:700">{("±" + str(move) + "%") if move is not None else "—"}<div style="font-size:10px;color:#94a3b8">{_amt}</div></td>'
+                f'<td style="font-weight:700;color:#f59e0b">{("±" + str(earn_m) + "%") if earn_m is not None else "—"}</td>'
+                f'<td>{str(d.get("iv_cover")) + "%" if d.get("iv_cover") else "—"}</td>'
+                f'<td>{str(d.get("hv1y")) + "%" if d.get("hv1y") else "—"}</td>'
+                f'<td>{("%.2f倍" % ivr) if ivr else "—"}</td><td>{d.get("pc_oi", "—")}</td></tr>')
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+            '<thead><tr style="color:#94a3b8;text-align:left"><th style="padding:6px 8px">銘柄</th><th>次の決算日</th><th>決算を含む満期</th>'
+            "<th>満期までの<br>想定変動幅</th><th>決算の日の<br>想定（概算）</th><th>ATM IV</th><th>実績ボラ<br>(1年)</th>"
+            f"<th>IV÷実績</th><th>Put/Call<br>建玉比</th></tr></thead><tbody>{''.join(_tr)}</tbody></table>", unsafe_allow_html=True)
+        _ts = max((d.get("updated_at", "") for d in data.values()), default="")
+        st.caption(
+            "オプションの価格から、市場参加者が織り込んでいる値動きの大きさを概算したものです（**方向は示しません**）。"
+            "「満期までの想定変動幅」は、決算日を含む最初の満期の、現在株価に最も近い権利行使価格のコールとプットを同時に買う費用（ATMストラドル）÷株価で、"
+            "決算以外の日の値動きも含みます。「決算の日の想定」は、決算前の満期のIVとの差から逆算した1日分の概算（期待絶対値＝標準偏差×0.8）で、"
+            "手前の満期が無い銘柄は出ません。IV÷実績が高いほど、市場が過去の値動きよりも大きな動きを見込んでいます。"
+            "IVはYahooの値が取引時間外に無効になるため、ストラドル価格から逆算した値を使う場合があります。決算日は予定で、変わることがあります。"
+            f"データ更新: {_ts[:16].replace('T', ' ')} UTC。米国上場銘柄のみ。投資助言ではありません。")
 
 
 @st.fragment
@@ -39000,6 +39109,7 @@ def render_claude_trading_project():
                     render_portfolio_risk_simulation()
                     render_goal_tracker()
                     render_portfolio_fundamentals()
+                    render_option_implied_moves()
 
                     # ── AI ポートフォリオ コメント ──────────────────────
                     st.markdown("<br>", unsafe_allow_html=True)

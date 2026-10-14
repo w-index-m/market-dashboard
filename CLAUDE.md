@@ -204,6 +204,7 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 | tokyo-re-index.yml (weekly) | precompute_tokyo_re_index.py | tokyo_re_index.json | MLIT Tokyo residential price index card |
 | longterm-returns.yml (monthly) | precompute_longterm_returns.py | longterm_returns.json | 長期の複利シミュレーション (US stocks/REIT/Treasuries, total return) |
 | fundamentals-cache.yml (Sun/Wed) | precompute_fundamentals.py | **Google Sheet** `fundamentals_cache` tab (private, merged over time so quarterly history grows) | 📊 portfolio fundamentals (EPS/BPS/investment) |
+| options-cache.yml (weekdays 19:35 UTC, market hours) | precompute_options.py | **Google Sheet** `options_cache` tab (private) | 🎲 option-implied earnings move (ATM straddle/IV/put-call OI) for US holdings |
 | holdings-alerts.yml | holdings_alerts.py | LINE/Slack notification only (no trading) | holdings alerts (急落/損切り/高値からの下落/VIX) |
 | daily-portfolio-line.yml / daily-asset-snapshot.yml | daily_portfolio_line.py / daily_asset_snapshot.py | LINE+Slack digest / `asset_category_snapshot` sheet | daily digest, period comparisons |
 

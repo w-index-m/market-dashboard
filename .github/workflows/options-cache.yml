@@ -1,0 +1,25 @@
+name: Cache holdings option-implied moves to Google Sheets
+
+on:
+  schedule:
+    - cron: "35 19 * * 1-5"   # 19:35 UTC = 米国市場の引けの約25分前（夏時間）。取引時間中はbid/askが有効
+  workflow_dispatch: {}
+
+# 保有している米国株のオプション（決算前の想定変動幅など）を取得し、非公開のGoogle Sheets（options_cacheタブ）へ保存する。
+# 保有銘柄名はログに出さない（公開リポジトリのため）。
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt
+      - name: Fetch and save option summaries
+        env:
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TRADING_USERNAME: "admin"
+        run: PYTHONPATH=. python scripts/precompute_options.py 2>&1 | grep -v "No runtime found\|streamlit run\|to view a Streamlit"
