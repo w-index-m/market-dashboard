@@ -12386,7 +12386,13 @@ def _explain_derivatives_ai(facts: str, kind: str) -> dict:
         "悲観の極みでは過度に恐れないという姿勢で、状況（サイクルの現在地）を述べる。\n\n"
         f"【現在の数値】\n{facts}\n\n{fmt}")
     try:
-        text, model = _call_ai_for_trading(prompt, max_output_tokens=3000, temperature=0.3)
+        # Gemini 2.5系は内部思考がmax_output_tokensを消費して本文が途中で切れるため、大きめに取る。
+        # それでも短い（=途中切れ）場合は別プロバイダーで再試行する。
+        text, model = _call_ai_for_trading(prompt, max_output_tokens=8000, temperature=0.3)
+        if len(text) < 250 and not text.startswith("⚠️"):
+            text, model = _call_ai_for_trading(prompt, model_pref="groq", max_output_tokens=3000, temperature=0.3)
+        if len(text) < 250:
+            return {"text": "", "model": model, "error": "解説が途中で切れました。もう一度お試しください。"}
         return {"text": text, "model": model, "error": None}
     except Exception as e:
         return {"text": "", "model": "", "error": str(e)[:120]}
@@ -12399,8 +12405,8 @@ def _render_ai_explain(facts: str, kind: str, key: str):
     label = "🤖 いまの状態をAIに解説してもらう" if kind == "market" else "🤖 この銘柄のオプションをAIに解説してもらう"
     if st.button(label, key=f"ai_btn_{key}"):
         with st.spinner("AIが数値を読み解いています…"):
-            st.session_state[f"ai_res_{key}"] = _explain_derivatives_ai(facts, kind)
-    res = st.session_state.get(f"ai_res_{key}")
+            st.session_state[f"ai_res2_{key}"] = _explain_derivatives_ai(facts, kind)
+    res = st.session_state.get(f"ai_res2_{key}")
     if res:
         if res.get("error"):
             st.error(f"AIの解説を取得できませんでした: {res['error']}")
