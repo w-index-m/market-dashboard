@@ -13452,7 +13452,7 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
         headers = ["銘柄", "社名", "現在値", "目標安値", "目標中央", "目標高値",
                    "下限%", "中央%", "上限%", "アナリスト数", "予想PER", "売上成長", "レーティング"]
 
-    hdr = "".join(f"<th style='padding:7px 10px;text-align:right;color:#94a3b8;"
+    hdr = "".join(f"<th style='padding:7px 10px;text-align:right;color:#cbd5e1;"
                   f"font-weight:600;font-size:11px;white-space:nowrap'>{h}</th>" for h in headers)
     rows_html = f"<tr style='border-bottom:1px solid #334155'>{hdr}</tr>"
 
@@ -13464,18 +13464,18 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
 
         def _fmt_pct(v):
             if v is None:
-                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
-            color = "#22c55e" if v >= 0 else "#ef4444"
+                return "<td style='padding:6px 10px;text-align:right;color:#94a3b8'>—</td>"
+            color = "#4ade80" if v >= 0 else "#f87171"
             return f"<td style='padding:6px 10px;text-align:right;color:{color};font-weight:700'>{v:+.1f}%</td>"
 
         def _fmt_num(v, fmt=".1f", suffix=""):
             if v is None:
-                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
+                return "<td style='padding:6px 10px;text-align:right;color:#94a3b8'>—</td>"
             return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{v:{fmt}}{suffix}</td>"
 
         def _fmt_price(v, ps=price_sym, pf=price_fmt):
             if v is None:
-                return "<td style='padding:6px 10px;text-align:right;color:#64748b'>—</td>"
+                return "<td style='padding:6px 10px;text-align:right;color:#94a3b8'>—</td>"
             return f"<td style='padding:6px 10px;text-align:right;color:#e2e8f0'>{ps}{v:{pf}}</td>"
 
         rec_text = rec_label.get(s.get("rec_key", ""), "—")
@@ -13510,7 +13510,7 @@ def _render_stock_table(stocks: dict, lang: str = "ja") -> None:
         f"<table style='width:100%;border-collapse:collapse;font-size:13px;"
         f"background:#0f172a;border-radius:8px;overflow:hidden'>"
         f"<tbody>{rows_html}</tbody></table></div>"
-        f"<div style='font-size:11px;color:#64748b;margin-top:6px;padding-left:4px'>"
+        f"<div style='font-size:11px;color:#94a3b8;margin-top:6px;padding-left:4px'>"
         f"📊 {src_note}</div>",
         unsafe_allow_html=True,
     )
