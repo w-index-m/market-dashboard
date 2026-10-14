@@ -20851,6 +20851,44 @@ def render_memory_card():
                    "日韓の銘柄は取引時間が違うため、米国とは別の日付で比べています。")
 
 
+# 経済カレンダー（時刻つき固定データ）に入れにくい、政策・規制・大型IPOの確認予定。日付は報道ベースで、変更・延期がありうる。
+_POLICY_WATCH = [
+    ("2026-10-29", "FCCが、中国の試験機関への制限案を採決予定", "提案段階で、成立した禁止ではない（Reuters報道として紹介）"),
+    ("2026-11-09", "Anthropicの上場ロードショー開始の可能性（週）", "Bloombergの報道。時期は報道ごとに食い違い、未確定"),
+    ("2026-11-10", "中国のレアアース輸出規制の拡大を止めている措置の期限", "10/11時点で延長は確認されていない（ニュースレター報道）"),
+]
+
+
+def _render_policy_watch():
+    """今後の確認予定（FOMC＋政策・規制・IPO）を、あと何日かつきで表示する。"""
+    today = datetime.now(JST).date()
+    items = []
+    try:
+        nxt = _get_next_fomc_meeting_date()
+    except Exception:
+        nxt = None
+    if nxt:
+        items.append((str(nxt), "FOMC政策金利発表", "経済カレンダーの固定データ"))
+    items += _POLICY_WATCH
+    rows = []
+    for ds, name, note in sorted(items):
+        try:
+            dd = (pd.Timestamp(ds).date() - today).days
+        except Exception:
+            continue
+        if dd < 0:
+            continue
+        rows.append(f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:6px 8px;white-space:nowrap">{ds}'
+                    f'<div style="font-size:10px;color:#94a3b8">あと{dd}日</div></td>'
+                    f'<td style="font-weight:600">{name}<div style="font-size:11px;color:#94a3b8;font-weight:400">{note}</div></td></tr>')
+    if rows:
+        st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><tbody>' + "".join(rows) + "</tbody></table>",
+                    unsafe_allow_html=True)
+        st.caption("※ 日付は報道ベースのものを含み、延期・変更がありうります。確定した予定は、公式の発表で確認してください。")
+    else:
+        st.info("今後の予定はありません。")
+
+
 def render_selloff_breadth():
     """🔎 急落の広がり確認：下落が個別銘柄か、光通信などのテーマか、半導体全体か、市場全体かを切り分ける。"""
     st.markdown('<a id="selloff-breadth"></a>', unsafe_allow_html=True)
@@ -20920,6 +20958,8 @@ def render_selloff_breadth():
                    "見出しは最新1件で、その値動きの原因とは限りません。")
     st.caption("※ 判定は単純なルール（市場-1.5%以下／半導体ETF-2.5%以下／グループ中央値-2%以下）によるもので、原因（ニュース・決算など）は分かりません。"
                "時間外の動きは含みません。")
+    with st.expander("📅 今後の確認予定（FOMC・政策・規制・IPO）", expanded=False):
+        _render_policy_watch()
     with st.expander("🗓 経済イベント当日の値動きの傾向（CPI・FOMC・雇用統計・ISM、2025年〜）", expanded=False):
         ev = _event_day_reactions()
         if not ev:
