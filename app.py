@@ -1373,7 +1373,8 @@ def call_ai_with_fallback(prompt: str, max_output_tokens: int = 1500, temperatur
                 ["groq", "mistral", "deepseek", "nvidia", "openrouter"], prompt, max_output_tokens, temperature,
             )
             if _model != "none":
-                return _text, f"{_model} ※Gemini: {last_error_msg}"
+                _gem_note = "無料枠の上限のため代替AIを使用" if quota_exceeded else "一時的な不調のため代替AIを使用"
+                return _text, f"{_model} ※Gemini: {_gem_note}"
             return (f"⚠️ Gemini: {last_error_msg}\n{_text}", "none")
 
         return (f"⚠️ Gemini APIエラー。\n詳細: {last_error_msg}", "none")
@@ -16641,17 +16642,58 @@ def render_market_summary():
                     for n, c in sorted(comps_for_prompt.items(), key=lambda x: x[1]["score"])
                 ]
                 comp_text = "\n".join(lines_data)
+                # 指標スコアだけでは「今日の出来事」が分からないため、直近の値動き・金利・見出しも材料として渡す
+                _ctx = []
+                try:
+                    _br = (_fetch_breadth_returns() or {}).get("rets", {})
+                    _mm = _fetch_macro_move()
+                    if _br:
+                        _gm = {}
+                        for _g, _sy in _BREADTH_GROUPS.items():
+                            _v = [_br[x] for x in _sy if x in _br]
+                            if _v and _g not in _BREADTH_REFERENCE_GROUPS:
+                                _gm[_g] = float(pd.Series(_v).median())
+                        _ctx.append("・直近営業日の騰落（前日終値比）: "
+                                    + "、".join(f"{_BREADTH_INDEXES[k]}{_br[k]:+.1f}%" for k in _BREADTH_INDEXES if k in _br)
+                                    + ("。グループ別の中央値: " + "、".join(f"{g}{v:+.1f}%" for g, v in _gm.items()) if _gm else ""))
+                    if "tnx" in _mm:
+                        _ctx.append(f"・米10年債利回り {_mm['tnx'][0]:.2f}%（前日差{_mm['tnx'][1]:+.0f}bp）")
+                    if "vix" in _mm:
+                        _ctx.append(f"・VIX {_mm['vix'][0]:.1f}（前日差{_mm['vix'][1]:+.1f}）")
+                except Exception:
+                    pass
+                _heads = []
+                for _fd in ("ブルームバーグ", "Reuters Business", "CNBC"):
+                    _f = RSS_FEEDS.get(_fd)
+                    if not _f:
+                        continue
+                    try:
+                        for _a in fetch_rss_feed(_f["url"], max_items=5, translate=False):
+                            _tt = (_a.get("title") or "").strip()
+                            if _tt:
+                                _heads.append(f"[{_fd}] {_tt}")
+                    except Exception:
+                        continue
                 prompt = (
-                    "あなたは市場アナリストです。以下の市場センチメント指標データをもとに、"
-                    f"なぜ総合スコアが{composite:.0f}/100（{ol}）になったのか、"
-                    f"米国{us_composite:.0f}・日本{jp_composite:.0f}の地域差も含め説明してください。"
-                    "さらに「このまま下落が続く可能性が高いのか、それとも一時的な調整で終わりそうか」"
-                    "という今後の見通しも含めて、投資家向けに300字以内で簡潔に日本語で答えてください。\n\n"
-                    f"指標スコア一覧（低い順）:\n{comp_text}"
+                    "あなたは証券会社のシニアアナリストです。顧客向けレポートの本文を書いてください。\n"
+                    f"総合スコアは{composite:.0f}/100（{ol}）、米国{us_composite:.0f}・日本{jp_composite:.0f}です。"
+                    "スコアの理由と、直近の値動きとの関係を、具体的な数値を挙げて説明してください。\n\n"
+                    "【文体】挨拶・前置きは書かない。である調で簡潔に。ざっくりした一般論（「リスク分散が重要」等）で終わらせず、"
+                    "どの指標のどの数値がどう効いているかを書く。\n"
+                    "【厳守】\n・以下の材料にない数字・出来事を作らない。\n"
+                    "・スコアの指標には、遅れて反映されるもの（VIX水準、モメンタム等）が含まれる。直近の値動きとスコアが食い違う場合は、"
+                    "その食い違いを必ず指摘する。\n"
+                    "・「このまま上昇／下落する」と断定しない。見通しは不確実であることを明記し、確認すべき点を挙げる。\n"
+                    "・売買の指示はしない。\n\n"
+                    "出力形式（全体で500字程度）:\n【今日の事実】\n【スコアが示すこと】\n【食い違い・注意点】\n【確認したい点】\n\n"
+                    f"【指標スコア一覧（低い順）】\n{comp_text}\n\n"
+                    f"【直近の値動き・金利】\n{chr(10).join(_ctx) if _ctx else '（取得できず）'}\n\n"
+                    f"【ニュース見出し】\n{chr(10).join(_heads[:12]) if _heads else '（見出しなし）'}"
                     + _lang_prompt_suffix()
                 )
                 with st.spinner(t("AI分析中...", "Analyzing with AI...")):
-                    comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=600, temperature=0.4)
+                    comment, used_model = call_ai_with_fallback(prompt, max_output_tokens=4000, temperature=0.3)
+                    comment = (comment + _grounding_note(comment, prompt)).replace("**", "").replace("\n", "<br>")
                 st.session_state[ai_comment_key] = (comment, used_model)
 
         if ai_comment_key in st.session_state:
