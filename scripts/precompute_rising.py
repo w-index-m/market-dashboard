@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 日米の「過去に上昇した銘柄」スクリーナー用データを事前計算し、data/rising_candidates.json に保存する。
-対象: 米国=S&P500全構成銘柄、日本=日経225全構成銘柄（約730銘柄）。
+対象: 米国=S&P500（大型株）＋S&P600（小型株指数）の全構成銘柄、日本=日経225全構成銘柄（約1,300銘柄）。
 各銘柄について、1か月/3か月/6か月/1年/2年のリターン、52週高値からの距離、1年の最大下落、
 直近の出来高の増減、シャープレシオ（1年）を、配当調整済みの日足から計算する。
 Yahoo Financeへの大量アクセスはStreamlit Cloudからは失敗しやすいため、Actions側で毎日計算し、アプリは読むだけにする。
@@ -70,9 +70,12 @@ def _calc(c: pd.Series, v: pd.Series, rf: float) -> dict | None:
 
 def main() -> None:
     us = app.fetch_sp500_constituents()
+    sm = app.fetch_sp600_constituents()
     jp = app.fetch_nikkei225_constituents()
-    print(f"universe: US {len(us)}, JP {len(jp)}")
-    tickers = list(dict.fromkeys(list(us) + list(jp)))
+    print(f"universe: S&P500 {len(us)}, S&P600 {len(sm)}, 日経225 {len(jp)}")
+    group = {**{t: "US500" for t in us}, **{t: "US600" for t in sm if t not in us}, **{t: "JP225" for t in jp}}
+    names = {**sm, **us, **jp}
+    tickers = list(group)
     close, vol = _download(tickers)
     try:
         rf = float(app._fetch_treasury_3m_series().dropna().iloc[-1])
@@ -84,13 +87,12 @@ def main() -> None:
             continue
         r = _calc(close[t], vol[t] if t in vol.columns else pd.Series(dtype=float), rf)
         if r:
-            r["name"] = (us.get(t) or jp.get(t) or t)
-            r["mkt"] = "JP" if t.endswith(".T") else "US"
+            r["name"] = names.get(t) or t
+            r["grp"] = group[t]
             items[t] = r
-    n_us = sum(1 for x in items.values() if x["mkt"] == "US")
-    n_jp = len(items) - n_us
-    print(f"computed: US {n_us}, JP {n_jp}")
-    if n_us < 300 or n_jp < 100:
+    cnt = {g: sum(1 for x in items.values() if x["grp"] == g) for g in ("US500", "US600", "JP225")}
+    print(f"computed: {cnt}")
+    if cnt["US500"] < 300 or cnt["US600"] < 300 or cnt["JP225"] < 100:
         print("取得できた銘柄が少なすぎるため、既存ファイルを残して終了", file=sys.stderr)
         sys.exit(1)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:

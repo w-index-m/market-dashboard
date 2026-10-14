@@ -9600,6 +9600,15 @@ _SP500_STOCKS = {
 # ─────────────────────────────────────────────
 
 @st.cache_data(ttl=3600 * 24 * 7, show_spinner=False)
+def _wiki_html_tables(url: str) -> list:
+    """Wikipediaのページ内の表を取得する。pandas.read_html(url)は既定のUser-AgentがWikipediaに拒否される
+    （HTTP 403）ことがあり、構成銘柄の取得に失敗して代表30銘柄にフォールバックしていた。
+    User-Agentを付けてrequestsで取得し、HTML文字列をread_htmlに渡す。"""
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; market-dashboard/1.0)"}, timeout=20)
+    resp.raise_for_status()
+    return pd.read_html(io.StringIO(resp.text))
+
+
 def fetch_sp500_constituents() -> dict:
     """
     S&P500の全構成銘柄をWikipediaから取得する（{ticker: 企業名}）。
@@ -9607,7 +9616,7 @@ def fetch_sp500_constituents() -> dict:
     取得失敗時は既存の代表30銘柄（_SP500_STOCKS）にフォールバックする。
     """
     try:
-        tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        tables = _wiki_html_tables("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
         df = tables[0]
         result = {}
         for _, row in df.iterrows():
@@ -9844,7 +9853,7 @@ def fetch_nikkei225_constituents() -> dict:
     取得失敗時は既存の代表30銘柄（_NK225_STOCKS）にフォールバックする。
     """
     try:
-        tables = pd.read_html("https://ja.wikipedia.org/wiki/日経平均株価")
+        tables = _wiki_html_tables("https://ja.wikipedia.org/wiki/日経平均株価")
         result = {}
         for df in tables:
             code_col = next((c for c in df.columns if "コード" in str(c)), None)
