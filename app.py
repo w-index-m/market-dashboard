@@ -20397,6 +20397,156 @@ def fetch_av_economic_indicators() -> Dict[str, Any]:
     return results
 
 
+# =====================================================================
+# 急落の広がり確認（個別 / テーマ / 半導体全体 / 市場全体）
+# =====================================================================
+_BREADTH_GROUPS: dict[str, list[str]] = {
+    "光通信": ["COHR", "LITE", "GLW", "AAOI", "CIEN", "VIAV"],
+    "AIインフラ（電源・接続）": ["VRT", "APH", "ANET", "CRDO", "ALAB"],
+    "半導体（大型）": ["NVDA", "AMD", "AVGO", "QCOM", "INTC", "AMAT", "TSM"],
+    "メモリ・ストレージ": ["MU", "SNDK", "WDC", "STX"],
+}
+_BREADTH_INDEXES: dict[str, str] = {"SPY": "S&P500", "QQQ": "ナスダック100", "SMH": "半導体ETF"}
+
+
+def _breadth_verdict(grp: dict, idx: dict) -> tuple[str, str]:
+    """各グループの中央値騰落率と指数の騰落率から、下落の広がりを判定する（ルールベース）。
+    grp: {グループ名: 中央値%}、idx: {"SPY": %, "QQQ": %, "SMH": %}。Returns: (ラベル, 説明)。"""
+    spy, smh = idx.get("SPY"), idx.get("SMH")
+    weak = [g for g, v in grp.items() if v is not None and v <= -2.0]
+    if spy is not None and spy <= -1.5:
+        return "🌐 市場全体のリスク回避", f"S&P500が{spy:+.1f}%と市場全体が下落。テーマ固有というより広い売りの可能性が高い局面です。"
+    if smh is not None and smh <= -2.5:
+        return "🔌 半導体全体に波及", f"半導体ETF(SMH)が{smh:+.1f}%。個別・小型の話ではなく半導体セクター全体の売りです。"
+    if len(weak) >= 2:
+        return "🧩 AI関連テーマに広く波及", f"{'・'.join(weak)}が中央値で-2%以下。テーマ全体の売りで、市場全体は{spy:+.1f}%にとどまっています。" if spy is not None else f"{'・'.join(weak)}が中央値で-2%以下。テーマ全体の売りです。"
+    if len(weak) == 1:
+        return "🎯 一部のテーマに限定", f"{weak[0]}が中心の下落。他のグループは-2%を超えて下げていません。"
+    return "✅ 目立った広がりなし", "どのグループも中央値で-2%を超える下落ではありません。"
+
+
+@st.cache_data(ttl=TTL_INTRADAY, show_spinner=False)
+def _fetch_breadth_returns() -> dict:
+    """グループ別の最新営業日の騰落率（前日終値比）を返す。失敗時は {}。"""
+    syms = sorted({s for v in _BREADTH_GROUPS.values() for s in v} | set(_BREADTH_INDEXES))
+    try:
+        raw = yf.download(syms, period="10d", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        close = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[breadth] 取得失敗: {e}")
+        return {}
+    if len(close) < 2:
+        return {}
+    rets = {}
+    for s in syms:
+        if s in close.columns:
+            c = close[s].dropna()
+            if len(c) >= 2:
+                rets[s] = float(c.iloc[-1] / c.iloc[-2] - 1) * 100
+    return {"rets": rets, "date": str(close.index[-1].date())}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_theme_selloff_history(group: str) -> dict:
+    """グループ（等加重）が1日で大きく下げた日の、その後の推移を過去5年から集計する。失敗時は {}。"""
+    syms = _BREADTH_GROUPS[group]
+    try:
+        raw = yf.download(syms, period="5y", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        close = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[breadth_hist] 取得失敗: {e}")
+        return {}
+    daily = close.pct_change(fill_method=None).mean(axis=1, skipna=True) * 100   # 等加重の日次騰落（％）
+    basket = (1 + daily.fillna(0) / 100).cumprod()
+    return {"daily": daily, "basket": basket}
+
+
+def _selloff_forward_stats(daily: pd.Series, basket: pd.Series, thresh: float, horizons=(5, 20, 60)) -> dict:
+    """daily（日次％）が thresh 以下の日を起点に、h営業日後のバスケット騰落率の分布を返す。
+    連続する下落日は最初の日だけ数える（5営業日以内の再発は同じ局面とみなす）。"""
+    days, last = [], -99
+    idx = list(daily.index)
+    for i, d in enumerate(idx):
+        v = daily.iloc[i]
+        if v == v and v <= thresh and i - last > 5:
+            days.append(i)
+            last = i
+    out = {"n": len(days)}
+    for h in horizons:
+        fw = [float(basket.iloc[i + h] / basket.iloc[i] - 1) * 100 for i in days if i + h < len(basket)]
+        out[h] = {"n": len(fw), "median": float(pd.Series(fw).median()) if fw else None,
+                  "win": float(sum(1 for x in fw if x > 0) / len(fw) * 100) if fw else None,
+                  "worst": float(min(fw)) if fw else None}
+    return out
+
+
+def render_selloff_breadth():
+    """🔎 急落の広がり確認：下落が個別銘柄か、光通信などのテーマか、半導体全体か、市場全体かを切り分ける。"""
+    st.markdown('<a id="selloff-breadth"></a>', unsafe_allow_html=True)
+    st.markdown("### 🔎 急落の広がり確認")
+    d = _fetch_breadth_returns()
+    if not d or not d.get("rets"):
+        st.info("騰落率のデータを取得できませんでした。")
+        return
+    rets = d["rets"]
+    grp = {}
+    rows = []
+    for g, syms in _BREADTH_GROUPS.items():
+        vals = [(s, rets[s]) for s in syms if s in rets]
+        if not vals:
+            continue
+        med = float(pd.Series([v for _, v in vals]).median())
+        grp[g] = med
+        n_down = sum(1 for _, v in vals if v < 0)
+        worst = min(vals, key=lambda x: x[1])
+        best = max(vals, key=lambda x: x[1])
+        col = "#f87171" if med < 0 else "#4ade80"
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{g}</td>'
+            f'<td style="color:{col};font-weight:700">{med:+.1f}%</td><td>{n_down}/{len(vals)}銘柄が下落</td>'
+            f'<td>最大下落 {worst[0]} {worst[1]:+.1f}%</td><td>最大上昇 {best[0]} {best[1]:+.1f}%</td></tr>')
+    idx = {k: rets.get(k) for k in _BREADTH_INDEXES}
+    idx_html = "".join(
+        f'<span style="margin-right:18px">{nm} <b style="color:{"#f87171" if (idx[k] or 0) < 0 else "#4ade80"}">'
+        f'{"—" if idx[k] is None else f"{idx[k]:+.1f}%"}</b></span>' for k, nm in _BREADTH_INDEXES.items())
+    label, desc = _breadth_verdict(grp, idx)
+    st.markdown(
+        f'<div style="background:#1e293b;border-left:4px solid #f59e0b;border-radius:6px;padding:10px 14px;margin-bottom:10px;color:#e2e8f0">'
+        f'<div style="font-size:16px;font-weight:700">{label}</div>'
+        f'<div style="font-size:12px;color:#cbd5e1;margin-top:4px">{desc}</div>'
+        f'<div style="font-size:12px;color:#94a3b8;margin-top:6px">基準日 {d["date"]}（前営業日の終値比）　{idx_html}</div></div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0">'
+        '<thead><tr style="color:#cbd5e1;text-align:left"><th style="padding:6px 8px">グループ</th><th>中央値</th><th>広がり</th><th></th><th></th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>',
+        unsafe_allow_html=True)
+    st.caption("※ 判定は単純なルール（市場-1.5%以下／半導体ETF-2.5%以下／グループ中央値-2%以下）によるもので、原因（ニュース・決算など）は分かりません。"
+               "時間外の動きは含みません。")
+    with st.expander("📚 過去に同じような急落があった後の推移（過去5年・等加重バスケット）", expanded=False):
+        g = st.selectbox("グループ", list(_BREADTH_GROUPS), key="bd_grp")
+        th = st.select_slider("1日の下落幅（等加重の騰落率がこれ以下の日）", options=[-3.0, -4.0, -5.0, -6.0, -8.0], value=-5.0, key="bd_th")
+        h = _fetch_theme_selloff_history(g)
+        if not h:
+            st.info("過去データを取得できませんでした。")
+        else:
+            stt = _selloff_forward_stats(h["daily"], h["basket"], th)
+            if stt["n"] == 0:
+                st.info("該当する日がありませんでした。")
+            else:
+                cells = []
+                for hz in (5, 20, 60):
+                    s = stt[hz]
+                    if s["n"]:
+                        cells.append(f"<tr><td style='padding:5px 8px'>{hz}営業日後</td><td>{s['median']:+.1f}%</td>"
+                                     f"<td>{s['win']:.0f}%</td><td>{s['worst']:+.1f}%</td><td>{s['n']}回</td></tr>")
+                st.markdown(
+                    f"該当する局面は過去5年で **{stt['n']}回**（5営業日以内の連続は1回と数えています）。"
+                    '<table style="width:100%;font-size:12px;color:#e2e8f0;margin-top:6px"><thead><tr style="color:#cbd5e1;text-align:left">'
+                    '<th style="padding:5px 8px"></th><th>中央値</th><th>プラスだった割合</th><th>最悪</th><th>件数</th></tr></thead>'
+                    f'<tbody>{"".join(cells)}</tbody></table>', unsafe_allow_html=True)
+                st.caption("※ 現在の構成銘柄を過去にさかのぼって使った等加重バスケットです（上場が新しい銘柄は途中から）。"
+                           "件数が少なく、過去が将来を保証するものではありません。")
+
+
 def render_optical_basket():
     """光ケーブル×AI インフラ カスタムバスケットインデックス"""
     st.header("🔦 光通信・AI インフラ バスケット")
@@ -41853,6 +42003,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # 光通信・AIインフラバスケット（上の比較と同じテーマなので隣に置く）
     render_optical_basket()
+    st.divider()
+
+    # 急落の広がり確認（光通信などの下落がどこまで波及しているか）
+    render_selloff_breadth()
     st.divider()
 
     # ===================================================
