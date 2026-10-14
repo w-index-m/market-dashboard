@@ -1,0 +1,35 @@
+name: Update CFTC COT positions (financial futures)
+
+on:
+  schedule:
+    - cron: "0 3 * * 6"   # 土曜 03:00 UTC。CFTCの週次報告は金曜午後（米東部）に公表される
+  workflow_dispatch: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q requests pandas
+      - name: Build COT positions
+        run: python scripts/precompute_cot.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/cot_positions.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update CFTC COT positions"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
