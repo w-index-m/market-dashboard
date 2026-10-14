@@ -29738,6 +29738,135 @@ def _save_options_cache(items: dict) -> int:
     return n
 
 
+_STOPLINE_HEADERS = ["username", "ticker", "stop_price", "updated_at"]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_stoplines(username: str = "") -> dict:
+    """自分で決めた損切りライン {ticker: price} を、非公開のGoogle Sheets（claude_stoplines タブ）から読む。"""
+    try:
+        ws = _trading_ws("claude_stoplines", _STOPLINE_HEADERS)
+        if not ws:
+            return {}
+        u = (username or "admin").strip()
+        out = {}
+        for r in ws.get_all_records():
+            if str(r.get("username") or "admin") == u and r.get("ticker"):
+                try:
+                    out[str(r["ticker"])] = float(r.get("stop_price"))
+                except (TypeError, ValueError):
+                    continue
+        return out
+    except Exception as e:
+        logger.warning(f"[stoplines] 読込失敗: {e}")
+        return {}
+
+
+def _save_stoplines(username: str, items: dict) -> bool:
+    """そのユーザーの損切りラインを {ticker: price} で置き換え保存する（他ユーザーの行は変更しない）。"""
+    try:
+        ws = _trading_ws("claude_stoplines", _STOPLINE_HEADERS)
+        if not ws:
+            return False
+        u = (username or "admin").strip()
+        now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+        keep = [[str(r.get("username") or "admin"), str(r.get("ticker")), r.get("stop_price"), str(r.get("updated_at") or "")]
+                for r in ws.get_all_records() if r.get("ticker") and str(r.get("username") or "admin") != u]
+        mine = [[u, t, float(v), now] for t, v in items.items() if v]
+        ws.clear()
+        ws.update([_STOPLINE_HEADERS] + keep + mine, "A1", value_input_option="RAW")
+        _load_stoplines.clear()
+        return True
+    except Exception as e:
+        logger.warning(f"[stoplines] 保存失敗: {e}")
+        return False
+
+
+@st.fragment
+def render_holdings_checklist():
+    """📝 保有チェック：保有ごとに、①自分で決めた損切りラインまでの距離 ②保有比率と急落時の影響額 ③次の決算日 ④同じテーマの重なりを1表にまとめる。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = {t: p for t, p in _get_open_positions(_u).items() if not t.endswith(".T") and t not in _JP_FUND_MAP}
+    with st.expander("📝 保有チェック（損切りライン・保有比率・決算日・テーマの重なり）", expanded=False):
+        if not pos:
+            st.info("米国の保有銘柄がありません。")
+            return
+        pr = _fetch_portfolio_prices(tuple(pos))
+        fx = float(pr.get("_usdjpy") or 150.0)
+        px = {t: float((pr.get(t) or {}).get("price") or 0) for t in pos}
+        val = {t: pos[t]["qty"] * px[t] * fx for t in pos}
+        total = sum(val.values())
+        if total <= 0:
+            st.info("評価額を計算できませんでした。")
+            return
+        shock = st.slider("もし1日でこれだけ下がったら（影響額の試算）", -30, -5, -12, 1, key="hc_shock", format="%d%%")
+        stops = _load_stoplines(_u)
+        opt_cache = _load_options_cache_all()
+        theme_of = {}
+        for g, syms in _BREADTH_GROUPS.items():
+            for sy in syms:
+                theme_of.setdefault(sy, g)
+        rows = []
+        for t in sorted(pos, key=lambda x: -val[x]):
+            earn = (opt_cache.get(t) or {}).get("earn") or ""
+            rows.append({
+                "銘柄": t, "テーマ": theme_of.get(t, ""),
+                "比率(%)": round(val[t] / total * 100, 1),
+                f"{shock}%時の影響(万円)": round(val[t] * shock / 100 / 1e4, 1),
+                "現在値": round(px[t], 2), "取得単価": round(pos[t]["avg_cost"], 2),
+                "損切りライン(USD)": stops.get(t),
+                "次の決算日": earn,
+            })
+        df = pd.DataFrame(rows)
+        edited = st.data_editor(
+            df, hide_index=True, use_container_width=True, key="hc_editor",
+            disabled=[c for c in df.columns if c != "損切りライン(USD)"],
+            column_config={"損切りライン(USD)": st.column_config.NumberColumn("損切りライン(USD)", min_value=0.0, format="%.2f",
+                                                                          help="ご自身で決めた価格を入力して「保存」を押してください（非公開のシートに保存されます）")})
+        if st.button("💾 損切りラインを保存", key="hc_save"):
+            items = {r["銘柄"]: r["損切りライン(USD)"] for _, r in edited.iterrows()
+                     if r["損切りライン(USD)"] == r["損切りライン(USD)"] and r["損切りライン(USD)"]}
+            if _save_stoplines(_u, items):
+                st.success("保存しました。")
+                st.rerun()
+            else:
+                st.error("保存に失敗しました（シートへの接続を確認してください）。")
+        # 判定（損切りラインまでの距離・テーマ集中）
+        notes = []
+        for t in pos:
+            sl = stops.get(t)
+            if sl and px[t] > 0:
+                gap = (px[t] / sl - 1) * 100
+                if gap <= 0:
+                    notes.append(f"🔴 {t}: 損切りライン {sl:,.2f} を下回っています（現在 {px[t]:,.2f}）")
+                elif gap <= 8:
+                    notes.append(f"🟠 {t}: 損切りラインまであと {gap:.1f}%（現在 {px[t]:,.2f} / ライン {sl:,.2f}）")
+        no_line = [t for t in pos if t not in stops]
+        if no_line:
+            notes.append("⚪ 損切りライン未設定: " + "・".join(no_line))
+        theme_share = {}
+        for t in pos:
+            g = theme_of.get(t)
+            if g:
+                theme_share[g] = theme_share.get(g, 0) + val[t] / total * 100
+        for g, sh in sorted(theme_share.items(), key=lambda x: -x[1]):
+            if sh >= 30:
+                notes.append(f"🟠 「{g}」のテーマが米国株の {sh:.0f}% を占めています（同じ材料で一緒に下がりやすい）")
+        for t in pos:
+            e = (opt_cache.get(t) or {}).get("earn")
+            if e:
+                try:
+                    dd = (pd.Timestamp(e).date() - datetime.now(JST).date()).days
+                    if 0 <= dd <= 14:
+                        notes.append(f"📅 {t}: 決算発表まであと {dd} 日（{e}）")
+                except Exception:
+                    pass
+        if notes:
+            st.markdown("\n".join(f"- {n}" for n in notes))
+        st.caption("※ 米国株のみが対象です。損切りラインは、ご自身で決めた価格をそのまま使います（AIの提案ではありません）。"
+                   "決算日は保存済みのオプションデータから取るため、無い銘柄は空欄です。影響額は為替・時間外を含まない単純な試算です。")
+
+
 @st.fragment
 def render_holdings_selloff_overlap():
     """🎯 保有銘柄と急落テーマの重なり：保有のうち、光通信・AIインフラ・半導体・メモリの各グループが占める割合と、直近の騰落による概算影響を表示する。"""
@@ -29781,6 +29910,7 @@ def render_holdings_selloff_overlap():
                    "概算影響は、前営業日の終値比に保有評価額を掛けた目安で、時間外や為替は含みません。")
 
 
+@st.fragment
 def render_option_implied_moves():
     """🎲 オプション市場が織り込む値動き：保有している米国株ごとに、次の決算前後の想定変動幅（ATMストラドル・IV）を表示する。"""
     _u = st.session_state.get("_trading_user", "") or ""
@@ -40444,6 +40574,7 @@ def render_claude_trading_project():
                     render_portfolio_risk_simulation()
                     render_goal_tracker()
                     render_portfolio_fundamentals()
+                    render_holdings_checklist()
                     render_holdings_selloff_overlap()
                     render_option_implied_moves()
                     render_insider_activity()
