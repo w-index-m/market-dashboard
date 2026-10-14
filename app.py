@@ -12244,6 +12244,29 @@ def _render_option_explorer():
                 + "  \nプット：" + "、".join(f"{r.strike:,.0f}（{int(r.openInterest):,}枚）" for r in top_p.itertuples()))
     st.caption("オプションの建玉は、**買いと売りの両方の合計**で、誰が買い手で誰が売り手かは分かりません。建玉が多い価格は、満期に近づくと、株価の動きに影響する（価格が引き寄せられる、跳ね返される）という見方がありますが、確実ではありません。"
                "方向を予測するものではなく、市場が意識している価格帯の目安です。")
+    _facts = [f"ティッカー={tk}、現在株価={spot:,.2f}、満期={exp}（あと{days}日）"]
+    if atm and spot:
+        _iv_txt = f"、ATMのIV={atm['iv'] * 100:.0f}%" if atm.get("iv") else ""
+        _facts.append(f"満期までの想定変動幅（ATMストラドル÷株価）=±{atm['straddle'] / spot * 100:.1f}%{_iv_txt}")
+    if oi_c > 0:
+        _facts.append(f"Put/Call建玉比={oi_p / oi_c:.2f}（プット建玉={int(oi_p):,}枚、コール建玉={int(oi_c):,}枚）")
+    if mp:
+        _facts.append(f"マックスペイン={mp:,.0f}（現在株価との差{(mp / spot - 1) * 100:+.1f}%）")
+    _c_txt = "、".join(f"{r.strike:,.0f}（{int(r.openInterest):,}枚）" for r in top_c.itertuples())
+    _p_txt = "、".join(f"{r.strike:,.0f}（{int(r.openInterest):,}枚）" for r in top_p.itertuples())
+    _facts.append(f"建玉が大きい権利行使価格: コール{_c_txt} ／ プット{_p_txt}")
+    try:
+        _sm = _fetch_option_summary(tk)
+        if _sm.get("earn"):
+            _em = f"、決算の日の想定変動（概算）=±{_sm['earn_move_pct']}%" if _sm.get("earn_move_pct") else ""
+            _facts.append(f"次の決算日（予定）={_sm['earn']}{_em}")
+        if _sm.get("hv1y"):
+            _h30 = f"、直近30日={_sm['hv30']}%" if _sm.get("hv30") else ""
+            _facts.append(f"過去1年の実績ボラ（年率）={_sm['hv1y']}%{_h30}")
+    except Exception:
+        pass
+    st.markdown("---")
+    _render_ai_explain("\n".join("・" + f for f in _facts), "ticker", f"opt_{tk}_{exp}")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -12296,6 +12319,96 @@ def _render_cot():
         "タイミングは分かりません。出典: 米商品先物取引委員会（CFTC）TFF報告・先物のみ。投資助言ではありません。")
 
 
+def _derivatives_facts() -> str:
+    """VIX期間構造・SKEW・VVIX・先物のポジションの現在値と、過去との位置を、AIに渡すための文章にする。
+    数値は全てここで決定的に計算する（AIには解釈だけを任せる）。取れない項目は含めない。"""
+    lines = []
+    d = _fetch_vol_indices()
+    if not d.empty and {"^VIX9D", "^VIX", "^VIX3M"} <= set(d.columns):
+        last = d.dropna(subset=["^VIX9D", "^VIX", "^VIX3M"]).iloc[-1]
+        v6 = float(d["^VIX6M"].dropna().iloc[-1]) if "^VIX6M" in d.columns and d["^VIX6M"].notna().any() else None
+        lab, _c, _w = _vix_term_state(float(last["^VIX9D"]), float(last["^VIX"]), float(last["^VIX3M"]), v6)
+        ratio = (d["^VIX"] / d["^VIX3M"]).dropna()
+        vix_s = d["^VIX"].dropna()
+        v6_txt = f"、VIX6M={v6:.1f}" if v6 else ""
+        lines.append(f"・VIX期間構造: VIX9D={last['^VIX9D']:.1f}、VIX(30日)={last['^VIX']:.1f}、VIX3M={last['^VIX3M']:.1f}{v6_txt}。"
+                     f"判定={lab}。VIX÷VIX3M={float(ratio.iloc[-1]):.2f}"
+                     f"（過去2年の{float((ratio < float(ratio.iloc[-1])).mean() * 100):.0f}%の日より高い。1.0超で逆転）。"
+                     f"VIX自体は過去2年の{float((vix_s < float(vix_s.iloc[-1])).mean() * 100):.0f}%の日より高い水準。")
+        for sym, nm, hint in (("^SKEW", "SKEW", "100が基準、高いほど急落への備え（ヘッジ需要）が強い"),
+                              ("^VVIX", "VVIX", "VIX自体の変動の大きさ、高いほど不安が急変しやすい")):
+            if sym in d.columns and d[sym].notna().any():
+                sr = d[sym].dropna()
+                lines.append(f"・{nm}={float(sr.iloc[-1]):.1f}（{hint}。過去2年の{float((sr < float(sr.iloc[-1])).mean() * 100):.0f}%の日より高い）")
+    cot = _load_cot_positions()
+    if cot:
+        for nm in ("E-mini S&P500先物", "E-mini ナスダック100先物"):
+            m = (cot.get("markets") or {}).get(nm)
+            if not m or not m.get("rows"):
+                continue
+            df = pd.DataFrame(m["rows"], columns=cot["columns"])
+            la = df.iloc[-1]
+            lev_pct = float((df["lev_net"] < la["lev_net"]).mean() * 100)
+            am_pct = float((df["am_net"] < la["am_net"]).mean() * 100)
+            lines.append(f"・{nm}のポジション（{la['date'].strftime('%Y-%m-%d') if hasattr(la['date'], 'strftime') else la['date']}時点）: "
+                         f"レバレッジドファンド（ヘッジファンド等）の買い－売り={int(la['lev_net']):+,}枚（過去約3年の{lev_pct:.0f}%点）、"
+                         f"アセットマネージャー={int(la['am_net']):+,}枚（{am_pct:.0f}%点）")
+    return "\n".join(lines)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _explain_derivatives_ai(facts: str, kind: str) -> dict:
+    """先物・オプション関連の数値を、初心者向けに日本語で解説する。kind: "market"（市場全体）/ "ticker"（個別銘柄のオプション）。
+    同じ数値なら1時間キャッシュ。Returns: {"text", "model", "error"}。"""
+    if kind == "ticker":
+        task = ("以下は、1つの銘柄のオプション（買う権利・売る権利）の現在の数値です。オプションを分析したことのない人向けに、"
+                "この数値が何を意味するのかを、専門用語を言い換えながら解説してください。")
+        fmt = ("出力形式（見出しを付けて、全体で500字程度）:\n"
+               "【今の状態】市場がこの銘柄の値動きをどう見ているか（大きく動くと見ている/落ち着いていると見ている）を一言で\n"
+               "【数字の読み方】想定変動幅・IV・Put/Call・建玉の集中が、それぞれ何を示すか（方向を示すものではないことも含める）\n"
+               "【注意したい点】この状態で、保有している人・新しく買う人が気をつける点\n"
+               "【次に見るもの】決算日、出来高、IVの変化など、確認すべき材料")
+    else:
+        task = ("以下は、先物・オプション市場の現在の数値（VIXの期間構造、SKEW、VVIX、先物のポジション）です。オプションや先物を分析したことのない人向けに、"
+                "今の市場がどういう状態なのかを、専門用語を言い換えながら解説してください。")
+        fmt = ("出力形式（見出しを付けて、全体で600字程度）:\n"
+               "【今の状態】平常／やや警戒／警戒／過熱のどれに近いかを一言で、理由と一緒に\n"
+               "【数字の読み方】VIXの期間構造、SKEW、VVIX、ポジションが、それぞれ何を示すか（過去と比べた位置も使う）\n"
+               "【注意したい点】この状態で、株式を持っている人・これから買う人が気をつける点（特に、一部のテーマに偏った保有の人への注意）\n"
+               "【次に見るもの】状態が変わるサイン（どの数字がどうなったら注意か）")
+    prompt = (
+        f"あなたは、個人投資家に市場の状況を分かりやすく説明する解説者です。{task}\n\n"
+        "【厳守】\n・以下の数値だけを根拠にする。書かれていない数字・出来事・ニュースを作らない。\n"
+        "・株価が上がる/下がると予測したり、売買を指示したりしない（状態の説明と、注意点にとどめる）。\n"
+        "・指標は経験則であり、当たらないことも多いと必ず触れる。\n・ハワード・マークスの考え方を参考に、過熱や楽観の空気には慎重に、"
+        "悲観の極みでは過度に恐れないという姿勢で、状況（サイクルの現在地）を述べる。\n\n"
+        f"【現在の数値】\n{facts}\n\n{fmt}")
+    try:
+        text, model = _call_ai_for_trading(prompt, max_output_tokens=900, temperature=0.3)
+        return {"text": text, "model": model, "error": None}
+    except Exception as e:
+        return {"text": "", "model": "", "error": str(e)[:120]}
+
+
+def _render_ai_explain(facts: str, kind: str, key: str):
+    """AIの解説ボタンと結果表示。ボタンを押した時だけAIを呼ぶ（無料枠の節約）。"""
+    if not facts.strip():
+        return
+    label = "🤖 いまの状態をAIに解説してもらう" if kind == "market" else "🤖 この銘柄のオプションをAIに解説してもらう"
+    if st.button(label, key=f"ai_btn_{key}"):
+        with st.spinner("AIが数値を読み解いています…"):
+            st.session_state[f"ai_res_{key}"] = _explain_derivatives_ai(facts, kind)
+    res = st.session_state.get(f"ai_res_{key}")
+    if res:
+        if res.get("error"):
+            st.error(f"AIの解説を取得できませんでした: {res['error']}")
+        else:
+            st.markdown(res["text"])
+            st.caption(f"🤖 {res.get('model', '')}による解説です。AIが数値から解釈したもので、将来の予測や売買の助言ではありません。")
+        with st.expander("AIに渡した数値", expanded=False):
+            st.code(facts, language=None)
+
+
 def render_derivatives_market():
     """🎛 先物・オプション市場：VIX期間構造、SKEW・VVIX、個別銘柄のオプション、先物ポジション（CFTC）。"""
     st.markdown('<a id="derivatives"></a>', unsafe_allow_html=True)
@@ -12309,6 +12422,9 @@ def render_derivatives_market():
         _render_option_explorer()
     else:
         _render_cot()
+    if sec != "個別銘柄のオプション":
+        st.markdown("---")
+        _render_ai_explain(_derivatives_facts(), "market", "deriv_market")
 
 
 # ══════════════════════════════════════════════════════════════
