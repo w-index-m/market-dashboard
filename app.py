@@ -20474,7 +20474,9 @@ _BREADTH_GROUPS: dict[str, list[str]] = {
     "AIインフラ（電源・接続）": ["VRT", "APH", "ANET", "CRDO", "ALAB"],
     "半導体（大型）": ["NVDA", "AMD", "AVGO", "QCOM", "INTC", "AMAT", "TSM"],
     "メモリ・ストレージ": ["MU", "SNDK", "WDC", "STX"],
+    "メモリ（日韓）": ["285A.T", "000660.KS", "005930.KS"],   # 日韓は米国と取引日がずれるため、判定には使わず参考表示
 }
+_BREADTH_REFERENCE_GROUPS = {"メモリ（日韓）"}   # 広がりの判定に含めないグループ
 _BREADTH_INDEXES: dict[str, str] = {"SPY": "S&P500", "QQQ": "ナスダック100", "SMH": "半導体ETF"}
 
 
@@ -20482,7 +20484,7 @@ def _breadth_verdict(grp: dict, idx: dict) -> tuple[str, str]:
     """各グループの中央値騰落率と指数の騰落率から、下落の広がりを判定する（ルールベース）。
     grp: {グループ名: 中央値%}、idx: {"SPY": %, "QQQ": %, "SMH": %}。Returns: (ラベル, 説明)。"""
     spy, smh = idx.get("SPY"), idx.get("SMH")
-    weak = [g for g, v in grp.items() if v is not None and v <= -2.0]
+    weak = [g for g, v in grp.items() if v is not None and v <= -2.0 and g not in _BREADTH_REFERENCE_GROUPS]
     if spy is not None and spy <= -1.5:
         return "🌐 市場全体のリスク回避", f"S&P500が{spy:+.1f}%と市場全体が下落。テーマ固有というより広い売りの可能性が高い局面です。"
     if smh is not None and smh <= -2.5:
@@ -20732,6 +20734,70 @@ def render_optical_brief():
         st.caption(f"🤖 {res.get('model', '')}による要約です。数値とニュース見出しだけを根拠にしており、原因の断定や将来の予想ではありません。")
     with st.expander("AIに渡した数値・見出し", expanded=False):
         st.code(facts + "\n\n" + "\n".join(heads), language=None)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _memory_stock_table() -> list:
+    """メモリ関連銘柄の騰落（1か月・3か月・1年）と、52週高値からの下落率を返す。取得できない銘柄は含めない。"""
+    tks = ["MU", "SNDK", "WDC", "STX", "285A.T", "000660.KS", "005930.KS"]
+    try:
+        px = _fetch_ticker_close_prices(tks, period="2y")
+    except Exception as e:
+        logger.warning(f"[memory_card] 取得失敗: {e}")
+        return []
+    names = {"MU": "Micron", "SNDK": "SanDisk", "WDC": "Western Digital", "STX": "Seagate",
+             "285A.T": "キオクシア", "000660.KS": "SKハイニックス", "005930.KS": "サムスン電子"}
+    rows = []
+    for t in tks:
+        s_ = px.get(t)
+        if s_ is None:
+            continue
+        s_ = s_.dropna()
+        if len(s_) < 60:
+            continue
+        cur = float(s_.iloc[-1])
+
+        def _r(n, _s=s_, _c=cur):
+            return (_c / float(_s.iloc[-n - 1]) - 1) * 100 if len(_s) > n else None
+        hi = float(s_.iloc[-252:].max())
+        rows.append({"t": t, "name": names[t], "r1m": _r(21), "r3m": _r(63), "r1y": _r(252), "dd": (cur / hi - 1) * 100})
+    return rows
+
+
+def render_memory_card():
+    """💾 メモリ株の見方：関連銘柄の騰落と高値からの下落を並べ、市況サイクルの見方と、確認したい項目をまとめる。"""
+    st.markdown('<a id="memory-card"></a>', unsafe_allow_html=True)
+    st.markdown("### 💾 メモリ株の見方")
+    rows = _memory_stock_table()
+    if rows:
+        f = lambda v: "—" if v is None else f"{v:+.0f}%"   # noqa: E731
+        col = lambda v: "#94a3b8" if v is None else ("#4ade80" if v >= 0 else "#f87171")   # noqa: E731
+        tr = "".join(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{r["name"]}'
+            f'<div style="font-size:10px;color:#94a3b8">{r["t"]}</div></td>'
+            f'<td style="color:{col(r["r1m"])}">{f(r["r1m"])}</td><td style="color:{col(r["r3m"])}">{f(r["r3m"])}</td>'
+            f'<td style="color:{col(r["r1y"])}">{f(r["r1y"])}</td><td style="color:{col(r["dd"])}">{f(r["dd"])}</td></tr>'
+            for r in rows)
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+            '<th style="padding:6px 8px">銘柄</th><th>1か月</th><th>3か月</th><th>1年</th><th>52週高値から</th></tr></thead>'
+            f'<tbody>{tr}</tbody></table>', unsafe_allow_html=True)
+    else:
+        st.info("メモリ銘柄の価格データを取得できませんでした。")
+    with st.expander("📖 メモリ株の見方（市況サイクルの考え方）", expanded=False):
+        st.markdown(
+            "**メモリは「市況株」**: 製品の価格（需給）で利益が大きく振れます。需要が強いと価格が上がって利益が急増し、供給が増えると価格が下がって利益が急減します。\n\n"
+            "**PERの低さに注意**: 利益が最高のとき、予想PERは低く見えます（割安に見えやすい）。利益のピークは株価のピークより前後しやすいため、PERの低さだけでは割安と言えません。\n\n"
+            "**上振れ・下振れの主な要因**\n"
+            "- 上振れ: AIサーバー向けの需要（HBM・高容量DRAM・NAND）、供給側の設備投資の抑制\n"
+            "- 下振れ: 中国メーカーの増産や技術進展、各社の設備投資の拡大、在庫調整、AI投資の鈍化\n\n"
+            "**確認したい項目**（このカードは数字を持たないので、各社の資料で確認してください）\n"
+            "- DRAM・NANDの契約価格の前期比（TrendForceなどの調査会社）\n"
+            "- 各社の設備投資計画と、次の決算での見通し（ガイダンス）\n"
+            "- 中国メーカー（CXMTなど）の量産時期の報道\n"
+            "- HBMの次世代品（HBM4）の発注・認定の進み具合")
+        st.caption("※ 一般的な考え方をまとめたもので、最新のニュースや将来の予想ではありません。投資判断は自己責任でお願いします。"
+                   "日韓の銘柄は取引時間が違うため、米国とは別の日付で比べています。")
 
 
 def render_selloff_breadth():
@@ -31212,6 +31278,15 @@ def _fmt_past_signals(past_signals: list | None) -> str:
     return "\n".join(lines)
 
 
+_MEMORY_TICKERS = {"MU", "SNDK", "WDC", "STX", "285A.T", "000660.KS", "005930.KS", "SKHY"}
+_MEMORY_CYCLE_CONTEXT = (
+    "・メモリはコモディティ性が強く、価格（需給）の波で利益が大きく振れる市況株である。\n"
+    "・利益のピークは株価のピークより前後しやすく、利益が最高のときは予想PERが低く見える（割安に見えやすい）ため、PERの低さだけで割安とは判断しない。\n"
+    "・上振れ要因: AIサーバー向けの需要（HBM・高容量DRAM・NAND）、供給側の設備投資の抑制。\n"
+    "・下振れ要因: 供給増（中国メーカーの増産・技術進展、各社の設備投資拡大）、在庫調整、AI投資の鈍化。\n"
+    "・この記述は一般的な構造であり、最新の価格・ニュースは与えられたデータだけで判断すること。")
+
+
 def _check_trade_signal_text(text: str, price, rsi, currency: str) -> list:
     """個別株のAI分析の文章を機械的に検査し、矛盾や根拠のない記述の疑いを日本語の注意書きで返す（空なら問題なし）。"""
     notes = []
@@ -31446,7 +31521,13 @@ def _generate_ai_trade_signal(
                 for _per in (15, 20, 26):
                     ref_lines.append(f"- 目標株価の計算例（予想EPS × PER{_per}倍）: {_eps_f * _per:,.1f} {currency}（現在株価比{(_eps_f * _per / _px_n - 1) * 100:+.0f}%）")
     ref_section = "\n".join(ref_lines) if ref_lines else "（計算できる基準値なし）"
-    rules_section = f"""
+    _mem_note = ""
+    if ticker in _MEMORY_TICKERS:
+        _mem_note = f"""
+【メモリ株に固有の注意（一般的な構造。最新のニュースではない）】
+{_MEMORY_CYCLE_CONTEXT}
+"""
+    rules_section = f"""{_mem_note}
 【計算済みの基準値（この数値だけを使うこと）】
 {ref_section}
 
@@ -42623,6 +42704,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # 急落の広がり確認（光通信などの下落がどこまで波及しているか）
     render_selloff_breadth()
+    st.divider()
+
+    # メモリ株の見方（市況サイクル）
+    render_memory_card()
     st.divider()
 
     # ===================================================
