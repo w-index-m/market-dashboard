@@ -20522,6 +20522,46 @@ def _selloff_forward_stats(daily: pd.Series, basket: pd.Series, thresh: float, h
     return out
 
 
+@st.cache_data(ttl=3600 * 6, show_spinner=False)
+def _event_day_reactions() -> dict:
+    """経済イベント（CPI・FOMC・雇用統計・ISM）の当日と、その後5営業日の値動きを、光通信バスケット・SMH・QQQで集計する。
+    イベントは _US_ECO_CALENDAR（2025年〜）の過去分のみ。サプライズ（予想との差）は含まず、「発表日にどう動きやすいか」だけを見る。"""
+    syms = list(_BREADTH_GROUPS["光通信"]) + ["SMH", "QQQ"]
+    try:
+        raw = yf.download(syms, period="2y", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        close = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[event_reaction] 取得失敗: {e}")
+        return {}
+    if close.empty:
+        return {}
+    daily = close.pct_change(fill_method=None) * 100
+    opt = daily[[c for c in _BREADTH_GROUPS["光通信"] if c in daily.columns]].mean(axis=1, skipna=True)
+    series = {"光通信バスケット": opt, "SMH": daily.get("SMH"), "QQQ": daily.get("QQQ")}
+    basket_px = (1 + opt.fillna(0) / 100).cumprod()
+    today = pd.Timestamp.now().normalize()
+    per_event: dict = {}
+    for date_str, _t, name, _ic, impact, _note in _US_ECO_CALENDAR:
+        d = pd.Timestamp(date_str)
+        if d >= today or d not in close.index:
+            continue
+        i = close.index.get_loc(d)
+        row = {k: (float(v.iloc[i]) if v is not None and v.iloc[i] == v.iloc[i] else None) for k, v in series.items()}
+        row["fwd5"] = float(basket_px.iloc[i + 5] / basket_px.iloc[i] - 1) * 100 if i + 5 < len(basket_px) else None
+        row["date"] = date_str
+        per_event.setdefault(name, []).append(row)
+    out = {}
+    for name, rows in per_event.items():
+        agg = {"n": len(rows)}
+        for k in ("光通信バスケット", "SMH", "QQQ", "fwd5"):
+            vals = [r[k] for r in rows if r.get(k) is not None]
+            agg[k] = ({"mean": float(pd.Series(vals).mean()), "median": float(pd.Series(vals).median()),
+                       "down": float(sum(1 for v in vals if v < 0) / len(vals) * 100), "worst": float(min(vals))}
+                      if vals else None)
+        out[name] = agg
+    return out
+
+
 def render_selloff_breadth():
     """🔎 急落の広がり確認：下落が個別銘柄か、光通信などのテーマか、半導体全体か、市場全体かを切り分ける。"""
     st.markdown('<a id="selloff-breadth"></a>', unsafe_allow_html=True)
@@ -20591,6 +20631,29 @@ def render_selloff_breadth():
                    "見出しは最新1件で、その値動きの原因とは限りません。")
     st.caption("※ 判定は単純なルール（市場-1.5%以下／半導体ETF-2.5%以下／グループ中央値-2%以下）によるもので、原因（ニュース・決算など）は分かりません。"
                "時間外の動きは含みません。")
+    with st.expander("🗓 経済イベント当日の値動きの傾向（CPI・FOMC・雇用統計・ISM、2025年〜）", expanded=False):
+        ev = _event_day_reactions()
+        if not ev:
+            st.info("データを取得できませんでした。")
+        else:
+            erows = []
+            for name, a_ in sorted(ev.items(), key=lambda x: -x[1]["n"]):
+                ob = a_.get("光通信バスケット")
+                if not ob:
+                    continue
+                sm, f5 = a_.get("SMH"), a_.get("fwd5")
+                erows.append(
+                    f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{name}</td><td>{a_["n"]}回</td>'
+                    f'<td>{ob["mean"]:+.1f}%</td><td>{ob["down"]:.0f}%</td><td>{ob["worst"]:+.1f}%</td>'
+                    f'<td>{"—" if not sm else format(sm["mean"], "+.1f") + "%"}</td>'
+                    f'<td>{"—" if not f5 else format(f5["mean"], "+.1f") + "%"}</td></tr>')
+            st.markdown(
+                '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+                '<th style="padding:6px 8px">イベント</th><th>回数</th><th>光通信 当日の平均</th><th>下落した割合</th><th>最悪の日</th>'
+                '<th>SMH 当日の平均</th><th>光通信 その後5日の平均</th></tr></thead>'
+                f'<tbody>{"".join(erows)}</tbody></table>', unsafe_allow_html=True)
+            st.caption("※ 発表日の終値ベースの騰落です。予想との差（サプライズ）は考慮していません。回数が少なく（月1回程度）、"
+                       "同じ日に他の材料が重なることも多いので、「発表日に荒れやすいか」の目安としてだけ使ってください。")
     with st.expander("📚 過去に同じような急落があった後の推移（過去5年・等加重バスケット）", expanded=False):
         g = st.selectbox("グループ", list(_BREADTH_GROUPS), key="bd_grp")
         th = st.select_slider("1日の下落幅（等加重の騰落率がこれ以下の日）", options=[-3.0, -4.0, -5.0, -6.0, -8.0], value=-5.0, key="bd_th")
