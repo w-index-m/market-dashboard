@@ -20447,20 +20447,45 @@ def _fetch_breadth_returns() -> dict:
     """グループ別の最新営業日の騰落率（前日終値比）を返す。失敗時は {}。"""
     syms = sorted({s for v in _BREADTH_GROUPS.values() for s in v} | set(_BREADTH_INDEXES))
     try:
-        raw = yf.download(syms, period="10d", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        raw = yf.download(syms, period="2mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
         close = raw["Close"].dropna(how="all")
+        vol = raw["Volume"] if "Volume" in raw.columns.get_level_values(0) else None
     except Exception as e:
         logger.warning(f"[breadth] 取得失敗: {e}")
         return {}
     if len(close) < 2:
         return {}
-    rets = {}
+    rets, vratio = {}, {}
     for s in syms:
         if s in close.columns:
             c = close[s].dropna()
             if len(c) >= 2:
                 rets[s] = float(c.iloc[-1] / c.iloc[-2] - 1) * 100
-    return {"rets": rets, "date": str(close.index[-1].date())}
+            if vol is not None and s in vol.columns:
+                v = vol[s].dropna()
+                if len(v) >= 21 and float(v.iloc[-21:-1].mean()) > 0:
+                    vratio[s] = float(v.iloc[-1] / v.iloc[-21:-1].mean())   # 最新日の出来高÷直前20日平均
+    return {"rets": rets, "vratio": vratio, "date": str(close.index[-1].date())}
+
+
+@st.cache_data(ttl=TTL_RSS, show_spinner=False)
+def _finnhub_latest_headline(sym: str) -> str:
+    """Finnhubの銘柄別ニュースから、直近3日の最新見出しを返す。キー未設定・取得失敗時は空文字。"""
+    api_key = get_env_var("FINNHUB_API_KEY", "")
+    if not api_key:
+        return ""
+    try:
+        end = datetime.now()
+        r = requests.get("https://finnhub.io/api/v1/company-news",
+                         params={"symbol": sym, "from": (end - timedelta(days=3)).strftime("%Y-%m-%d"),
+                                 "to": end.strftime("%Y-%m-%d"), "token": api_key}, timeout=10)
+        arr = r.json() if r.status_code == 200 else []
+        if isinstance(arr, list) and arr:
+            arr.sort(key=lambda x: x.get("datetime", 0), reverse=True)
+            return str(arr[0].get("headline", ""))[:110]
+    except Exception:
+        return ""
+    return ""
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -20536,6 +20561,34 @@ def render_selloff_breadth():
         '<thead><tr style="color:#cbd5e1;text-align:left"><th style="padding:6px 8px">グループ</th><th>中央値</th><th>広がり</th><th></th><th></th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table>',
         unsafe_allow_html=True)
+    vr = d.get("vratio", {})
+    alert = []
+    for g, syms in _BREADTH_GROUPS.items():
+        for sy in syms:
+            r_, v_ = rets.get(sy), vr.get(sy)
+            if r_ is None:
+                continue
+            if abs(r_) >= 5.0 or (v_ is not None and v_ >= 1.8):
+                alert.append((sy, g, r_, v_))
+    if alert:
+        alert.sort(key=lambda x: abs(x[2]), reverse=True)
+        arows = []
+        for sy, g, r_, v_ in alert[:12]:
+            hl = _finnhub_latest_headline(sy)
+            col = "#f87171" if r_ < 0 else "#4ade80"
+            vtxt = "—" if v_ is None else f"{v_:.1f}倍"
+            vcol = "#fbbf24" if (v_ or 0) >= 1.8 else "#cbd5e1"
+            arows.append(
+                f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:6px 8px;font-weight:700">{sy}'
+                f'<div style="font-size:10px;color:#94a3b8">{g}</div></td><td style="color:{col};font-weight:700">{r_:+.1f}%</td>'
+                f'<td style="color:{vcol}">{vtxt}</td><td style="font-size:11px;color:#cbd5e1">{html.escape(hl) if hl else "（見出しなし／未取得）"}</td></tr>')
+        st.markdown(
+            '<div style="margin-top:12px;font-weight:700;color:#e2e8f0">⚡ 値動き・出来高が大きい銘柄（±5%以上、または出来高が直近20日平均の1.8倍以上）</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0;margin-top:4px"><thead><tr style="color:#cbd5e1;text-align:left">'
+            '<th style="padding:6px 8px">銘柄</th><th>騰落</th><th>出来高倍率</th><th>直近3日の最新ニュース見出し（Finnhub）</th></tr></thead>'
+            f'<tbody>{"".join(arows)}</tbody></table>', unsafe_allow_html=True)
+        st.caption("※ 出来高が増えた日は、決算・ニュース・機関の売買などがあった可能性を示すだけで、理由の断定はできません。"
+                   "見出しは最新1件で、その値動きの原因とは限りません。")
     st.caption("※ 判定は単純なルール（市場-1.5%以下／半導体ETF-2.5%以下／グループ中央値-2%以下）によるもので、原因（ニュース・決算など）は分かりません。"
                "時間外の動きは含みません。")
     with st.expander("📚 過去に同じような急落があった後の推移（過去5年・等加重バスケット）", expanded=False):
