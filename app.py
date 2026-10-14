@@ -28284,6 +28284,104 @@ def render_portfolio_risk_simulation():
     )
 
 
+_OPT_CACHE_HEADERS = ["ticker", "updated_at", "data_json"]
+
+
+def _atm_info(chain, spot: float) -> dict | None:
+    """オプションチェーンから、現在株価に最も近い権利行使価格（ATM）の、ストラドル価格とIV、建玉を取り出す。
+    価格はbid/askの中値、取れなければ直近約定値。Returns: {"strike","straddle","iv","oi_put","oi_call","vol_put","vol_call"}。"""
+    calls, puts = chain.calls, chain.puts
+    if calls is None or puts is None or len(calls) == 0 or len(puts) == 0:
+        return None
+    strikes = sorted(set(calls["strike"]).intersection(set(puts["strike"])))
+    if not strikes:
+        return None
+    k = min(strikes, key=lambda x: abs(x - spot))
+    c = calls[calls["strike"] == k].iloc[0]
+    p_ = puts[puts["strike"] == k].iloc[0]
+
+    def _mid(r):
+        b, a = float(r.get("bid") or 0), float(r.get("ask") or 0)
+        if b > 0 and a > 0:
+            return (b + a) / 2
+        return float(r.get("lastPrice") or 0)
+
+    straddle = _mid(c) + _mid(p_)
+    ivs = [float(x) for x in (c.get("impliedVolatility"), p_.get("impliedVolatility")) if x and float(x) > 0.01]
+    return {"strike": float(k), "straddle": straddle, "iv": (sum(ivs) / len(ivs)) if ivs else None,
+            "oi_put": float(puts["openInterest"].fillna(0).sum()), "oi_call": float(calls["openInterest"].fillna(0).sum()),
+            "vol_put": float(puts["volume"].fillna(0).sum()), "vol_call": float(calls["volume"].fillna(0).sum())}
+
+
+def _fetch_option_summary(ticker: str) -> dict:
+    """米国上場銘柄のオプションから、決算前に市場が織り込んでいる値動きの大きさを概算する（st.*は呼ばない）。
+      earn: 次の決算日（取れなければNone）
+      exp_cover: 決算日を含む最初の満期 ／ exp_pre: その手前の満期（決算の影響を含まない基準用、無ければNone）
+      move_pct: 決算を含む満期のATMストラドル価格÷株価（満期までに想定される値動きの幅±%）
+      iv_cover / iv_pre: それぞれのATM IV（年率%）
+      earn_move_pct: 決算を含む満期のIVが、手前の満期のIVを上回る分から逆算した「決算の日の想定値動き」（標準偏差×0.8＝期待絶対値の概算）
+      pc_oi: 決算を含む満期のPut/Call建玉比 ／ hv30, hv1y: 実績ボラ（年率%）
+    オプションが無い（日本株など）・取得失敗時は{}。Yahooのbid/askは取引時間外は0のため、取引時間中の取得が望ましい。"""
+    import math
+    try:
+        tk = yf.Ticker(ticker)
+        exps = list(tk.options or [])
+        if not exps:
+            return {}
+        fi = tk.fast_info
+        spot = float(fi.get("lastPrice") or fi.get("last_price") or 0)
+        if spot <= 0:
+            return {}
+        today = pd.Timestamp.now().normalize()
+        earn = None
+        try:
+            ed = tk.get_earnings_dates(limit=8)
+            fut = ed[(ed["Reported EPS"].isna())].sort_index()
+            fut = fut[fut.index.tz_localize(None) >= today] if getattr(fut.index, "tz", None) is not None else fut[fut.index >= today]
+            if len(fut):
+                earn = pd.Timestamp(fut.index[0]).tz_localize(None).normalize() if getattr(fut.index[0], "tzinfo", None) else pd.Timestamp(fut.index[0]).normalize()
+        except Exception:
+            earn = None
+        exp_ts = [(e, pd.Timestamp(e)) for e in exps]
+        cover = next(((e, t) for e, t in exp_ts if earn is not None and t >= earn), None)
+        near = next(((e, t) for e, t in exp_ts if (t - today).days >= 5), exp_ts[0])
+        pre = None
+        if cover:
+            pres = [(e, t) for e, t in exp_ts if t < earn and (t - today).days >= 3]
+            pre = pres[-1] if pres else None
+        use = cover or near
+        c_info = _atm_info(tk.option_chain(use[0]), spot)
+        if not c_info:
+            return {}
+        out = {"spot": round(spot, 2), "earn": str(earn.date()) if earn is not None else None, "exp_cover": use[0],
+               "days_cover": int((use[1] - today).days), "has_earn_in_exp": bool(cover),
+               "move_pct": round(c_info["straddle"] / spot * 100, 1),
+               "iv_cover": round(c_info["iv"] * 100, 1) if c_info["iv"] else None,
+               "pc_oi": round(c_info["oi_put"] / c_info["oi_call"], 2) if c_info["oi_call"] > 0 else None,
+               "oi_total": int(c_info["oi_put"] + c_info["oi_call"])}
+        if pre:
+            p_info = _atm_info(tk.option_chain(pre[0]), spot)
+            if p_info and p_info["iv"]:
+                out["exp_pre"] = pre[0]
+                out["iv_pre"] = round(p_info["iv"] * 100, 1)
+                if c_info["iv"]:
+                    t2 = max((use[1] - today).days, 1) / 365
+                    extra_var = t2 * (c_info["iv"] ** 2 - p_info["iv"] ** 2)
+                    if extra_var > 0:
+                        out["earn_move_pct"] = round(math.sqrt(extra_var) * 0.8 * 100, 1)
+        try:
+            r = tk.history(period="1y", auto_adjust=True)["Close"].dropna().pct_change().dropna()
+            out["hv30"] = round(float(r.tail(30).std() * math.sqrt(252) * 100), 1)
+            out["hv1y"] = round(float(r.std() * math.sqrt(252) * 100), 1)
+        except Exception:
+            pass
+        out["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return out
+    except Exception as e:
+        logger.warning(f"[options] {ticker} 取得失敗: {e}")
+        return {}
+
+
 _FUND_CACHE_HEADERS = ["ticker", "updated_at", "data_json"]
 
 
