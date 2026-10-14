@@ -12353,6 +12353,24 @@ def _derivatives_facts() -> str:
             lines.append(f"・{nm}のポジション（{la['date'].strftime('%Y-%m-%d') if hasattr(la['date'], 'strftime') else la['date']}時点）: "
                          f"レバレッジドファンド（ヘッジファンド等）の買い－売り={int(la['lev_net']):+,}枚（過去約3年の{lev_pct:.0f}%点）、"
                          f"アセットマネージャー={int(la['am_net']):+,}枚（{am_pct:.0f}%点）")
+    try:
+        sf = _fetch_sector_flow("US")
+    except Exception:
+        sf = pd.DataFrame()
+    if not sf.empty and sf["r1m"].notna().any():
+        sf = sf.sort_values("r1m", ascending=False)
+
+        def _sec(r):
+            vr = r["vol_ratio"]
+            vtxt = "出来高不明" if vr is None or vr != vr else f"出来高{vr:.2f}倍"
+            return f"{r['name']}（1か月{r['r1m']:+.1f}%、対SPY{r['rel1m']:+.1f}pt、{vtxt}）"
+        top = [_sec(r) for _, r in sf.dropna(subset=["r1m", "rel1m"]).head(3).iterrows()]
+        bot = [_sec(r) for _, r in sf.dropna(subset=["r1m", "rel1m"]).tail(3).iterrows()]
+        inflow = [r["name"] for _, r in sf.iterrows() if (r["rel1m"] or 0) > 0 and (r["vol_ratio"] or 0) >= 1.1]
+        outflow = [r["name"] for _, r in sf.iterrows() if (r["rel1m"] or 0) < 0 and (r["vol_ratio"] or 9) <= 0.95]
+        lines.append("・米国セクターETF（SPDR11業種、出来高倍率=直近20日÷その前40日。純資金流入ではなく価格と出来高からの推定）: "
+                     f"1か月の上位={'、'.join(top)}。下位={'、'.join(bot)}。"
+                     f"流入の目安（市場より強く出来高増）={'、'.join(inflow) or 'なし'}。流出の目安（市場より弱く出来高減）={'、'.join(outflow) or 'なし'}。")
     return "\n".join(lines)
 
 
@@ -12369,11 +12387,11 @@ def _explain_derivatives_ai(facts: str, kind: str) -> dict:
                "【注意したい点】この状態で、保有している人・新しく買う人が気をつける点\n"
                "【次に見るもの】決算日、出来高、IVの変化など、確認すべき材料")
     else:
-        task = ("以下は、先物・オプション市場の現在の数値（VIXの期間構造、SKEW、VVIX、先物のポジション）です。オプションや先物を分析したことのない人向けに、"
+        task = ("以下は、先物・オプション市場の現在の数値（VIXの期間構造、SKEW、VVIX、先物のポジション、セクターETFの資金の流れ）です。オプションや先物を分析したことのない人向けに、"
                 "今の市場がどういう状態なのかを、専門用語を言い換えながら解説してください。")
         fmt = ("出力形式（見出しを付けて、全体で600字程度）:\n"
                "【今の状態】平常／やや警戒／警戒／過熱のどれに近いかを一言で、理由と一緒に\n"
-               "【数字の読み方】VIXの期間構造、SKEW、VVIX、ポジションが、それぞれ何を示すか（過去と比べた位置も使う）\n"
+               "【数字の読み方】VIXの期間構造、SKEW、VVIX、ポジション、セクター別の資金の動き（どの業種に資金が向かい、どこから離れているか。純資金流入ではなく推定である点を明記）が、それぞれ何を示すか（過去と比べた位置も使う）\n"
                "【注意したい点】この状態で、株式を持っている人・これから買う人が気をつける点（特に、一部のテーマに偏った保有の人への注意）\n"
                "【次に見るもの】状態が変わるサイン（どの数字がどうなったら注意か）")
     prompt = (
