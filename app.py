@@ -12064,6 +12064,253 @@ def _fetch_optical_vs_semi(period: str = "1y") -> dict:
     }
 
 
+# ══════════════════════════════════════════════════════════════
+# 🎛 先物・オプション市場（VIX期間構造・SKEW/VVIX・個別銘柄オプション・先物ポジション）
+# ══════════════════════════════════════════════════════════════
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_vol_indices() -> pd.DataFrame:
+    """VIX9D・VIX・VIX3M・VIX6M・SKEW・VVIXの日足終値（2年）。取得失敗時は空DataFrame。"""
+    syms = ["^VIX9D", "^VIX", "^VIX3M", "^VIX6M", "^SKEW", "^VVIX"]
+    try:
+        raw = yf.download(syms, period="2y", interval="1d", auto_adjust=False, progress=False, group_by="column")
+        close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        if getattr(close.index, "tz", None) is not None:
+            close.index = close.index.tz_localize(None)
+        return close.dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[vol_indices] 取得失敗: {e}")
+        return pd.DataFrame()
+
+
+def _vix_term_state(v9: float, v1: float, v3: float, v6: float | None) -> tuple:
+    """VIX期間構造の状態を判定する。Returns: (ラベル, 色, 説明)。"""
+    if v9 > v1 > 0 and v1 > v3:
+        return ("🔴 バックワーデーション（短期ほど高い）", "#f87171", "目先の警戒が強い、ストレス局面のサイン。短期〜中期のすべてで、逆転しています。")
+    if v1 > v3 or v9 > v1:
+        return ("🟠 部分的に逆転", "#fb923c", "期間構造の一部が逆転しています。短期の不安が高まり始めた可能性があります。")
+    return ("🟢 コンタンゴ（通常・右肩上がり）", "#4ade80", "短期より中期のほうが高い、平常時の形です。目先の急な警戒は、見られません。")
+
+
+def _max_pain(calls: "pd.DataFrame", puts: "pd.DataFrame") -> float | None:
+    """満期時に、オプションの買い手の利益の合計が最小（売り手の支払いが最小）になる権利行使価格（マックスペイン）。"""
+    ks = sorted(set(calls["strike"]).union(set(puts["strike"])))
+    if not ks:
+        return None
+    co = calls.set_index("strike")["openInterest"].fillna(0)
+    po = puts.set_index("strike")["openInterest"].fillna(0)
+    best, best_val = None, None
+    for k in ks:
+        pay = float(sum(oi * max(0.0, k - s) for s, oi in co.items()) + sum(oi * max(0.0, s - k) for s, oi in po.items()))
+        if best_val is None or pay < best_val:
+            best, best_val = k, pay
+    return float(best) if best is not None else None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_option_expiries(ticker: str) -> list:
+    try:
+        return list(yf.Ticker(ticker).options or [])
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_option_chain_view(ticker: str, expiry: str) -> dict:
+    """1銘柄・1満期のオプションチェーン（権利行使価格ごとの建玉・出来高・IV・価格）。st.*は呼ばない。"""
+    try:
+        tk = yf.Ticker(ticker)
+        fi = tk.fast_info
+        spot = float(fi.get("lastPrice") or fi.get("last_price") or 0)
+        ch = tk.option_chain(expiry)
+        cols = ["strike", "bid", "ask", "lastPrice", "volume", "openInterest", "impliedVolatility"]
+        return {"spot": spot, "calls": ch.calls[cols].copy(), "puts": ch.puts[cols].copy()}
+    except Exception as e:
+        logger.warning(f"[option_chain] {ticker} {expiry} 取得失敗: {e}")
+        return {}
+
+
+def _render_vix_term():
+    d = _fetch_vol_indices()
+    if d.empty or not {"^VIX9D", "^VIX", "^VIX3M"} <= set(d.columns):
+        st.info("VIXのデータを取得できませんでした。")
+        return
+    last = d.dropna(subset=["^VIX9D", "^VIX", "^VIX3M"]).iloc[-1]
+    v6 = float(d["^VIX6M"].dropna().iloc[-1]) if "^VIX6M" in d.columns and d["^VIX6M"].notna().any() else None
+    lab, col, why = _vix_term_state(float(last["^VIX9D"]), float(last["^VIX"]), float(last["^VIX3M"]), v6)
+    st.markdown(f'<div style="font-size:15px;font-weight:800;color:{col}">{lab}</div>', unsafe_allow_html=True)
+    c = st.columns(4)
+    c[0].metric("VIX9D（9日先）", f"{last['^VIX9D']:.1f}")
+    c[1].metric("VIX（30日先）", f"{last['^VIX']:.1f}")
+    c[2].metric("VIX3M（3か月先）", f"{last['^VIX3M']:.1f}")
+    c[3].metric("VIX6M（6か月先）", f"{v6:.1f}" if v6 else "—")
+    ratio = (d["^VIX"] / d["^VIX3M"]).dropna()
+    fig = go.Figure(go.Scatter(x=ratio.index, y=ratio.values, mode="lines", line=dict(color="#f59e0b", width=2), name="VIX÷VIX3M"))
+    fig.add_hline(y=1.0, line=dict(color="#f87171", dash="dash"), annotation_text="1.0（これを超えると逆転）", annotation_font_color="#f87171")
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=240, margin=dict(l=10, r=10, t=10, b=20),
+                      font=dict(color="#e2e8f0"), xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                      yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", title=dict(text="VIX÷VIX3M", font=dict(color="#94a3b8"))),
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="vix_term_ratio")
+    pct = float((ratio < float(ratio.iloc[-1])).mean() * 100)
+    st.caption(f"{why} 現在のVIX÷VIX3Mは{float(ratio.iloc[-1]):.2f}で、過去2年の{pct:.0f}%の日より高い水準です。"
+               "通常は、短期のVIXより、中期のVIXが高い（コンタンゴ）形です。逆転（1.0超）は、短期の急落や、強い警戒の局面に出やすいサインですが、"
+               "逆転しても、必ず下がるわけではありません。")
+
+
+def _render_skew_vvix():
+    d = _fetch_vol_indices()
+    if d.empty or not {"^SKEW", "^VVIX"} <= set(d.columns):
+        st.info("SKEW・VVIXのデータを取得できませんでした。")
+        return
+    for sym, name, hi, desc in (
+        ("^SKEW", "SKEW指数（急落への備えの強さ）", 150, "S&P500の急落（テールリスク）に備えるオプションの割高さを表します。100が基準で、**高いほど、大きな下落への警戒（ヘッジ需要）が強い**ことを示します。"),
+        ("^VVIX", "VVIX（VIX自体の変動の大きさ）", 100, "VIXオプションの価格から、VIXがどれだけ急に動くと見られているかを表します。**高いほど、市場の不安が急に変わりやすい**局面です。"),
+    ):
+        s = d[sym].dropna()
+        if s.empty:
+            continue
+        cur = float(s.iloc[-1])
+        pct = float((s < cur).mean() * 100)
+        st.markdown(f"**{name}**：{cur:.1f}（過去2年の{pct:.0f}%の日より高い）")
+        fig = go.Figure(go.Scatter(x=s.index, y=s.values, mode="lines", line=dict(color="#60a5fa", width=2), name=sym))
+        fig.add_hline(y=hi, line=dict(color="#f59e0b", dash="dash"), annotation_text=f"目安 {hi}", annotation_font_color="#f59e0b")
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=220, margin=dict(l=10, r=10, t=10, b=20),
+                          font=dict(color="#e2e8f0"), xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                          yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(fig, use_container_width=True, key=f"vol_{sym}")
+        st.caption(desc)
+    st.caption("目安の線（SKEW 150、VVIX 100）は、経験則上の高めの水準です。値が高くても、実際に下落が起きるとは限りません。")
+
+
+def _render_option_explorer():
+    c1, c2 = st.columns([1, 2])
+    tk = c1.text_input("ティッカー（米国上場）", value=st.session_state.get("opt_tk", "MU"), key="opt_tk_in").strip().upper()
+    st.session_state["opt_tk"] = tk
+    exps = _fetch_option_expiries(tk) if tk else []
+    if not exps:
+        st.info("この銘柄のオプションを取得できませんでした（日本株はYahoo Financeにオプションがありません。ティッカーを確認してください）。")
+        return
+    exp = c2.selectbox("満期", exps, index=min(2, len(exps) - 1), key="opt_exp")
+    v = _fetch_option_chain_view(tk, exp)
+    if not v:
+        st.info("オプションチェーンを取得できませんでした。")
+        return
+    spot, calls, puts = v["spot"], v["calls"], v["puts"]
+    days = max((pd.Timestamp(exp) - pd.Timestamp.now().normalize()).days, 1)
+    atm = _atm_info(type("C", (), {"calls": calls, "puts": puts})(), spot, days)
+    mp = _max_pain(calls, puts)
+    oi_c, oi_p = float(calls["openInterest"].fillna(0).sum()), float(puts["openInterest"].fillna(0).sum())
+    m = st.columns(5)
+    m[0].metric("株価", f"{spot:,.2f}")
+    m[1].metric("満期までの想定変動幅", f"±{atm['straddle'] / spot * 100:.1f}%" if atm and spot else "—",
+                help="現在株価に最も近い権利行使価格のコールとプットを同時に買う費用（ATMストラドル）÷株価。")
+    m[2].metric("Put/Call 建玉比", f"{oi_p / oi_c:.2f}" if oi_c > 0 else "—", help="プットの建玉÷コールの建玉。高いほど、下落への備え（または弱気）が多い傾向。")
+    m[3].metric("マックスペイン", f"{mp:,.0f}" if mp else "—", help="満期時に、オプションの買い手の利益の合計が最小になる価格。満期が近づくと、株価が引き寄せられると言われることがありますが、確実ではありません。")
+    m[4].metric("建玉の合計", f"{int(oi_c + oi_p):,}枚")
+    lo, hi = spot * 0.7, spot * 1.3
+    cc, pp = calls[(calls["strike"] >= lo) & (calls["strike"] <= hi)], puts[(puts["strike"] >= lo) & (puts["strike"] <= hi)]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=cc["strike"], y=cc["openInterest"].fillna(0), name="コール建玉（買い）", marker_color="#4ade80"))
+    fig.add_trace(go.Bar(x=pp["strike"], y=-pp["openInterest"].fillna(0), name="プット建玉（売り・下落への備え）", marker_color="#f87171"))
+    fig.add_vline(x=spot, line=dict(color="#e2e8f0", dash="dash"), annotation_text=f"現在 {spot:,.0f}", annotation_font_color="#e2e8f0")
+    if mp:
+        fig.add_vline(x=mp, line=dict(color="#f59e0b", dash="dot"), annotation_text=f"マックスペイン {mp:,.0f}", annotation_font_color="#f59e0b", annotation_position="bottom")
+    fig.update_layout(barmode="relative", paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=320, margin=dict(l=10, r=10, t=20, b=20),
+                      font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+                      xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", title=dict(text="権利行使価格", font=dict(color="#94a3b8"))),
+                      yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", title=dict(text="建玉（枚）", font=dict(color="#94a3b8"))),
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="opt_oi_chart")
+    iv_c = cc[cc["impliedVolatility"] > 0.01]
+    iv_p = pp[pp["impliedVolatility"] > 0.01]
+    if len(iv_c) >= 5 and len(iv_p) >= 5:
+        f2 = go.Figure()
+        f2.add_trace(go.Scatter(x=iv_c["strike"], y=iv_c["impliedVolatility"] * 100, mode="lines+markers", name="コールIV", line=dict(color="#4ade80")))
+        f2.add_trace(go.Scatter(x=iv_p["strike"], y=iv_p["impliedVolatility"] * 100, mode="lines+markers", name="プットIV", line=dict(color="#f87171")))
+        f2.add_vline(x=spot, line=dict(color="#e2e8f0", dash="dash"))
+        f2.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=240, margin=dict(l=10, r=10, t=10, b=20),
+                         font=dict(color="#e2e8f0"), legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.15),
+                         xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                         yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", title=dict(text="IV（%）", font=dict(color="#94a3b8"))),
+                         hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(f2, use_container_width=True, key="opt_iv_chart")
+    else:
+        st.caption("IV（インプライド・ボラティリティ）のグラフは、取引時間外はYahooの値が無効になるため、表示できません（取引時間中に再読み込みしてください）。")
+    top_c = cc.sort_values("openInterest", ascending=False).head(3)
+    top_p = pp.sort_values("openInterest", ascending=False).head(3)
+    st.markdown("**建玉が大きい権利行使価格**（その価格帯に、売買が集中しているところ）：  \n"
+                + "コール：" + "、".join(f"{r.strike:,.0f}（{int(r.openInterest):,}枚）" for r in top_c.itertuples())
+                + "  \nプット：" + "、".join(f"{r.strike:,.0f}（{int(r.openInterest):,}枚）" for r in top_p.itertuples()))
+    st.caption("オプションの建玉は、**買いと売りの両方の合計**で、誰が買い手で誰が売り手かは分かりません。建玉が多い価格は、満期に近づくと、株価の動きに影響する（価格が引き寄せられる、跳ね返される）という見方がありますが、確実ではありません。"
+               "方向を予測するものではなく、市場が意識している価格帯の目安です。")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_cot_positions() -> dict | None:
+    """scripts/precompute_cot.py がGitHub Actionsで週1回生成する data/cot_positions.json を読む。"""
+    import json as _json_c
+    path = os.path.join(os.path.dirname(__file__), "data", "cot_positions.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = _json_c.load(f)
+        return d if d.get("markets") else None
+    except Exception:
+        return None
+
+
+def _render_cot():
+    d = _load_cot_positions()
+    if not d:
+        st.info("データがまだありません（GitHub Actionsが週1回更新します）。")
+        return
+    mk = d["markets"]
+    name = st.selectbox("市場", list(mk), key="cot_market")
+    rows = mk[name]["rows"]
+    df = pd.DataFrame(rows, columns=d["columns"])
+    df["date"] = pd.to_datetime(df["date"])
+    last = df.iloc[-1]
+    stale = (pd.Timestamp.now().normalize() - last["date"]).days > 45
+    c = st.columns(3)
+    for col, key, lab in ((c[0], "lev_net", "レバレッジドファンド（ヘッジファンド等）"), (c[1], "am_net", "アセットマネージャー（年金・投信等）"),
+                          (c[2], "dealer_net", "ディーラー（証券会社等）")):
+        pct = float((df[key] < last[key]).mean() * 100)
+        col.metric(lab, f"{int(last[key]):+,}枚", f"過去約3年の{pct:.0f}%点")
+    fig = go.Figure()
+    for key, lab, color in (("lev_net", "レバレッジドファンド", "#f59e0b"), ("am_net", "アセットマネージャー", "#60a5fa"), ("dealer_net", "ディーラー", "#94a3b8")):
+        fig.add_trace(go.Scatter(x=df["date"], y=df[key], mode="lines", name=lab, line=dict(color=color, width=2 if key != "dealer_net" else 1.2)))
+    fig.add_hline(y=0, line=dict(color="#475569", dash="dot"))
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", height=300, margin=dict(l=10, r=10, t=10, b=20), font=dict(color="#e2e8f0"),
+                      legend=dict(font=dict(color="#e2e8f0"), orientation="h", y=1.12),
+                      xaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b"),
+                      yaxis=dict(tickfont=dict(color="#94a3b8"), gridcolor="#1e293b", tickformat=",", title=dict(text="買い－売り（枚）", font=dict(color="#94a3b8"))),
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="cot_chart")
+    _gen = datetime.strptime(d["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(JST)
+    st.caption(
+        f"最新の報告日: {last['date'].strftime('%Y-%m-%d')}（毎週火曜時点の建玉を、金曜に公表。データ更新 {_gen.strftime('%m/%d')} JST）。"
+        + ("⚠️ この市場の最新の報告日が古い（約1.5か月以上前）ため、市場や取引の仕様が変わった可能性があります。" if stale else "")
+        + " 値は「買い建玉−売り建玉」で、プラスは買い越し、マイナスは売り越しです。"
+        "**レバレッジドファンドの売り越しは、現物との裁定取引（ベーシス取引）のヘッジを含み、必ずしも弱気を意味しません。**"
+        "アセットマネージャーは、反対側に買い越しが出やすい構造です。極端な偏り（過去3年で上位・下位10%）が、反転の目安になることがありますが、"
+        "タイミングは分かりません。出典: 米商品先物取引委員会（CFTC）TFF報告・先物のみ。投資助言ではありません。")
+
+
+def render_derivatives_market():
+    """🎛 先物・オプション市場：VIX期間構造、SKEW・VVIX、個別銘柄のオプション、先物ポジション（CFTC）。"""
+    st.markdown('<a id="derivatives"></a>', unsafe_allow_html=True)
+    st.markdown("### 🎛 先物・オプション市場の分析")
+    sec = st.radio("見る項目", ["VIX期間構造", "SKEW・VVIX", "個別銘柄のオプション", "先物ポジション（CFTC）"], horizontal=True, key="deriv_sec")
+    if sec == "VIX期間構造":
+        _render_vix_term()
+    elif sec == "SKEW・VVIX":
+        _render_skew_vvix()
+    elif sec == "個別銘柄のオプション":
+        _render_option_explorer()
+    else:
+        _render_cot()
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_rising_candidates() -> dict | None:
     """scripts/precompute_rising.py がGitHub Actionsで平日毎日生成する data/rising_candidates.json
@@ -41060,6 +41307,12 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
     # ★ 上昇銘柄スクリーナー（日米・S&P500 / S&P600 / 日経225）
     # ===================================================
     render_rising_screener()
+    st.divider()
+
+    # ===================================================
+    # ★ 先物・オプション市場の分析
+    # ===================================================
+    render_derivatives_market()
     st.divider()
 
     # ===================================================
