@@ -21546,7 +21546,11 @@ def render_optical_basket():
 
     # 共通日付でアライン
     basket_df = pd.DataFrame({s: basket_data[s] for s in basket_syms})
-    basket_df = basket_df.dropna(how="all").ffill()
+    basket_df = basket_df.dropna(how="all")
+    # 日米で休場日が違うため、先頭の日に一部の銘柄が欠けていると、基準日の構成が揃わず、
+    # バスケットの騰落が歪む（実際は大きく下落していてもプラスに見える）。全銘柄にデータがある日から始める。
+    _first_all = max(basket_df[c].first_valid_index() for c in basket_df.columns)
+    basket_df = basket_df.loc[_first_all:].ffill()
     # 等加重正規化（各銘柄を初日=100に基準化して平均）
     norm = basket_df.div(basket_df.iloc[0]) * 100
     basket_index = norm.mean(axis=1)
@@ -21554,7 +21558,9 @@ def render_optical_basket():
     # ベンチマーク正規化
     bench_series = {}
     for sym in bench_syms:
-        s = basket_data[sym].reindex(basket_index.index).ffill()
+        _bs = basket_data[sym]
+        # 基準日がその市場の休場日でも、直前の終値を引き継ぐ（先頭がNaNになってリターンが「nan%」になるのを防ぐ）
+        s = _bs.reindex(_bs.index.union(basket_index.index)).ffill().reindex(basket_index.index)
         bench_series[sym] = s / s.iloc[0] * 100
 
     # ── チャート描画 ───────────────────────────────
@@ -21598,7 +21604,7 @@ def render_optical_basket():
     perf_rows = []
     for sym in basket_syms:
         s = basket_data[sym]
-        ret = (s.iloc[-1] / s.iloc[0] - 1) * 100
+        ret = (basket_df[sym].iloc[-1] / basket_df[sym].iloc[0] - 1) * 100   # バスケットと同じ基準日で計算する
         info = OPTICAL_BASKET[sym]
         perf_rows.append({
             "銘柄": f"{info['flag']} {sym}",
