@@ -20938,6 +20938,131 @@ def _render_policy_watch():
         st.info("今後の予定はありません。")
 
 
+def _pressure_series(o: pd.Series, h: pd.Series, lo: pd.Series, c: pd.Series, v: pd.Series) -> pd.DataFrame:
+    """日足のOHLCVから、売り買いの圧力を推定する指標を作る（純粋関数）。
+    ・gap: 前日終値→寄り付き（％）／intraday: 寄り付き→引け（％）
+    ・clv: 終値が当日レンジのどこにあるか（0〜100。100=高値引け＝買い優勢、0=安値引け＝売り優勢）
+    ・mfv: 資金フロー（clvを-1〜+1にして出来高を掛けたもの。Chaikin Money Flowの材料）"""
+    rng = (h - lo).replace(0, float("nan"))
+    clv = ((2 * c - h - lo) / rng).fillna(0)
+    df = pd.DataFrame({
+        "gap": (o / c.shift(1) - 1) * 100,
+        "intraday": (c / o - 1) * 100,
+        "clv": (clv + 1) * 50,
+        "mfv": clv * v,
+        "vol": v,
+    })
+    df["cmf20"] = df["mfv"].rolling(20).sum() / df["vol"].rolling(20).sum().replace(0, float("nan")) * 100
+    df["vratio"] = df["vol"] / df["vol"].rolling(20).mean().shift(1)
+    return df
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _pressure_data() -> dict:
+    """光通信・半導体・メモリ・AIインフラ・AI資金繰りの各銘柄とSMHについて、売り買いの圧力指標を計算する。失敗時は {}。"""
+    groups = {g: v for g, v in _BREADTH_GROUPS.items() if g not in _BREADTH_REFERENCE_GROUPS}
+    syms = sorted({x for v in groups.values() for x in v} | {"SMH"})
+    try:
+        raw = yf.download(syms, period="6mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
+    except Exception as e:
+        logger.warning(f"[pressure] 取得失敗: {e}")
+        return {}
+    try:
+        op, hi, lw, cl, vo = (raw[k] for k in ("Open", "High", "Low", "Close", "Volume"))
+    except Exception:
+        return {}
+    per = {}
+    for t in syms:
+        if t in cl.columns and cl[t].dropna().shape[0] > 40:
+            per[t] = _pressure_series(op[t], hi[t], lw[t], cl[t], vo[t]).dropna(subset=["gap", "intraday"])
+    if not per:
+        return {}
+    grp = {}
+    for g, ss in groups.items():
+        dfs = [per[x] for x in ss if x in per]
+        if dfs:
+            grp[g] = pd.concat([d[["gap", "intraday", "clv", "cmf20"]] for d in dfs]).groupby(level=0).mean()
+    return {"per": per, "grp": grp, "groups": groups}
+
+
+def render_pressure_card():
+    """⚖️ 売り買いの圧力：日足から推定した『売りが強い日か、買いが強い日か』を、数値とグラフで見る。"""
+    st.markdown('<a id="pressure-card"></a>', unsafe_allow_html=True)
+    st.markdown("### ⚖️ 売り・買いの圧力（日足から推定）")
+    d = _pressure_data()
+    if not d:
+        st.info("データを取得できませんでした。")
+        return
+    per, grp, groups = d["per"], d["grp"], d["groups"]
+    # ── グループ別の最新日 ──
+    fmt = lambda v, suf="%": "—" if v is None or v != v else f"{v:+.1f}{suf}"   # noqa: E731
+    colr = lambda v: "#94a3b8" if v is None or v != v else ("#4ade80" if v >= 0 else "#f87171")   # noqa: E731
+    rows = []
+    for g, df in grp.items():
+        la = df.iloc[-1]
+        clv = float(la["clv"])
+        verdict = "🟢 買い優勢（高値圏で引け）" if clv >= 65 else "🔴 売り優勢（安値圏で引け）" if clv <= 35 else "⚪ 拮抗"
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{g}</td>'
+            f'<td style="color:{colr(la["gap"])}">{fmt(la["gap"])}</td><td style="color:{colr(la["intraday"])}">{fmt(la["intraday"])}</td>'
+            f'<td>{clv:.0f}%</td><td style="color:{colr(la["cmf20"])}">{fmt(la["cmf20"], "")}</td><td>{verdict}</td></tr>')
+    last_date = max(df.index[-1] for df in grp.values())
+    st.markdown(
+        f'<div style="font-size:12px;color:#94a3b8;margin-bottom:4px">最新日: {last_date.date()}（各グループは銘柄の平均）</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+        '<th style="padding:6px 8px">グループ</th><th>寄り付きのギャップ<div style="font-size:9px;font-weight:400">前日終値→寄り</div></th>'
+        '<th>日中の動き<div style="font-size:9px;font-weight:400">寄り→引け</div></th><th>終値の位置<div style="font-size:9px;font-weight:400">100%=高値引け</div></th>'
+        '<th>資金フロー(20日)<div style="font-size:9px;font-weight:400">＋買い／－売り</div></th><th>判定</th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+    # ── 光通信・SMHのグラフ（直近40営業日）──
+    sel = st.radio("グラフの対象", list(grp) + ["半導体ETF（SMH）"], horizontal=True, key="pr_sel")
+    df = per["SMH"][["gap", "intraday", "clv", "cmf20"]] if sel.startswith("半導体ETF") else grp[sel]
+    df = df.tail(40)
+    fig = go.Figure()
+    fig.add_bar(x=df.index, y=df["gap"], name="ギャップ（前日終値→寄り）", marker_color="#a78bfa")
+    fig.add_bar(x=df.index, y=df["intraday"], name="日中（寄り→引け）", marker_color="#38bdf8")
+    fig.add_scatter(x=df.index, y=df["clv"].rolling(3).mean(), name="終値の位置（3日平均・右軸）", yaxis="y2", line=dict(color="#fbbf24", width=2))
+    fig.update_layout(
+        barmode="relative", height=320, margin=dict(l=10, r=10, t=30, b=20), paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+        font=dict(color="#e2e8f0"), legend=dict(orientation="h", y=1.15, font=dict(color="#e2e8f0")),
+        xaxis=dict(tickfont=dict(color="#e2e8f0")),
+        yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", ticksuffix="%", title=dict(text="騰落（％）", font=dict(color="#e2e8f0"))),
+        yaxis2=dict(overlaying="y", side="right", range=[0, 100], tickfont=dict(color="#fbbf24"), showgrid=False, ticksuffix="%"),
+        hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key=f"pr_fig_{sel}")
+    st.caption("紫＝夜間〜寄り付きの動き、水色＝日中の動き。紫が大きなマイナスで水色がプラスなら『売りが寄り付きに集中し、日中は買われた』形です。"
+               "黄線（終値の位置）が高いほど、買いが強い日が続いています。")
+    # ── 銘柄別の最新日 ──
+    names = {x: x for v in groups.values() for x in v}
+    trs = []
+    for g, ss in groups.items():
+        for t in ss:
+            if t not in per:
+                continue
+            la = per[t].iloc[-1]
+            clv = float(la["clv"])
+            trs.append(
+                f'<tr style="border-top:1px solid #1e293b"><td style="padding:5px 8px;font-weight:600">{names[t]}<div style="font-size:9px;color:#94a3b8">{g}</div></td>'
+                f'<td style="color:{colr(la["gap"])}">{fmt(la["gap"])}</td><td style="color:{colr(la["intraday"])}">{fmt(la["intraday"])}</td>'
+                f'<td style="color:{"#4ade80" if clv >= 65 else "#f87171" if clv <= 35 else "#cbd5e1"}">{clv:.0f}%</td>'
+                f'<td style="color:{"#fbbf24" if (la["vratio"] or 0) >= 1.5 else "#cbd5e1"}">{"—" if la["vratio"] != la["vratio"] else format(la["vratio"], ".1f") + "倍"}</td>'
+                f'<td style="color:{colr(la["cmf20"])}">{fmt(la["cmf20"], "")}</td></tr>')
+    with st.expander("銘柄別の売り買いの圧力（最新日）", expanded=False):
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+            '<th style="padding:5px 8px">銘柄</th><th>ギャップ</th><th>日中</th><th>終値の位置</th><th>出来高倍率</th><th>資金フロー(20日)</th></tr></thead>'
+            f'<tbody>{"".join(trs)}</tbody></table>', unsafe_allow_html=True)
+    with st.expander("📖 指標の見方・限界", expanded=False):
+        st.markdown(
+            "- **ギャップ**: 前日終値から寄り付きまでの動き。夜間のニュースや時間外の売買が反映されます。\n"
+            "- **日中の動き**: 寄り付きから引けまで。ここがプラスなら、日中は買いが優勢でした。\n"
+            "- **終値の位置**: 当日の高値〜安値の間で、終値がどこにあるか。高値引け(100%)は買い、安値引け(0%)は売りの圧力を示唆します。\n"
+            "- **資金フロー(20日)**: 終値の位置に出来高を掛けて20日分を集計（Chaikin Money Flow）。プラスなら買い、マイナスなら売りが優勢な期間です。\n"
+            "- **出来高倍率**: その日の出来高÷直前20日の平均。1.5倍以上は黄色です。")
+        st.caption("※ 実際の注文板（買い注文と売り注文の数）は無料では取れません。ここは、日足の値段と出来高から推定した『圧力の目安』です。"
+                   "出来高が増えただけでは、買いか売りかは分かりません。売買の指示ではありません。")
+
+
 def _rsi14(c: pd.Series, n: int = 14) -> pd.Series:
     d = c.diff()
     up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
@@ -43130,6 +43255,10 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # 反転チェックリスト（下落局面の反転サインの自動判定）
     render_reversal_checklist()
+    st.divider()
+
+    # 売り・買いの圧力（日足からの推定）
+    render_pressure_card()
     st.divider()
 
     # メモリ株の見方（市況サイクル）
