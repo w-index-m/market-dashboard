@@ -1,0 +1,45 @@
+name: EDGAR watch (Anthropic IPO filings)
+
+on:
+  schedule:
+    - cron: "20 */6 * * *"   # 6時間おき
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1 にすると送信せずログにだけ表示"
+        default: ""
+
+# SEC EDGARで公開されたIPO関連書類（S-1など）を見つけたらLINE/Slackで知らせる。新しい書類が無ければ何も送らず、ファイルも更新しない。
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q requests
+      - name: Check EDGAR
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          EDGAR_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          WATCH_NAMES: "Anthropic"
+        run: python scripts/edgar_watch.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/edgar_watch.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update EDGAR watch state"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
