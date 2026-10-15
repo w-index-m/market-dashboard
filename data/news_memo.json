@@ -2,23 +2,65 @@
  "updated_at": "2026-10-15",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
-  {"date": "2026-10-14", "title": "米9月CPIが予想を上回る、金利・利上げ観測が上昇",
+  {
+   "date": "2026-10-14",
+   "title": "米9月CPIが予想を上回る、金利・利上げ観測が上昇",
    "summary": "総合CPIは前年比3.7%（予想3.6%、8月3.4%）、コアは2.6%（予想2.5%）。ガソリンが主因と報じられた。10年債利回りは5%台前半で、FOMC(10/28)の利上げ確率は約20%から約44%に上がったとの報道（CME）。S&P500は約1%、ナスダック100は約2%、半導体指数は4%超下落と報じられた。",
-   "status": "複数の報道で確認", "sources": ["https://qz.com/september-cpi-inflation-treasury-yields-101426", "https://www.schwab.com/learn/story/stock-market-update-open"]},
-  {"date": "2026-10-14", "title": "CoreWeaveの社債が急落、AIデータセンター投資の資金繰り不安が波及",
+   "status": "複数の報道で確認",
+   "sources": [
+    "https://qz.com/september-cpi-inflation-treasury-yields-101426",
+    "https://www.schwab.com/learn/story/stock-market-update-open"
+   ]
+  },
+  {
+   "date": "2026-10-14",
+   "title": "CoreWeaveの社債が急落、AIデータセンター投資の資金繰り不安が波及",
    "summary": "2032年償還債の利回りが一時15%に上昇（額面を大きく下回る水準）。株価は10〜16%安（報道により差）、Nebius・Iren・オラクルなども下落。債務は約520億ドル（リース含む）、4〜6月期の利払いは前年の2倍超と報じられた。CEOは受注残（約1,042億ドル）が返済を賄えると説明。",
-   "status": "複数の報道で確認", "sources": ["https://www.bloomberg.com/jp/news/articles/2026-10-14/TMWUVZKK3NYA00", "https://www.cnbc.com/2026/10/14/coreweave-put-options-ai-trade.html"]},
-  {"date": "2026-10-12", "title": "光通信株が急落、AI投資の資金調達への懸念（ブロードコム・インテルの発言報道）",
+   "status": "複数の報道で確認",
+   "sources": [
+    "https://www.bloomberg.com/jp/news/articles/2026-10-14/TMWUVZKK3NYA00",
+    "https://www.cnbc.com/2026/10/14/coreweave-put-options-ai-trade.html"
+   ]
+  },
+  {
+   "date": "2026-10-12",
+   "title": "光通信株が急落、AI投資の資金調達への懸念（ブロードコム・インテルの発言報道）",
    "summary": "LITE・COHR・AAOIが通常取引で8〜10%下落、時間外でさらに約2.5%安と報じられた。ブロードコムCEOが「AI拡大では資金へのアクセスが半導体不足より大きな制約になりうる」と述べた、との報道。3社から新しい会社発表はなかった。",
-   "status": "報道ベース（発言の原文は未確認）", "sources": ["https://247wallst.com/investing/2026/10/12/lumentum-falls-10-as-optics-selloff-hits-hardest-where-capacity-is-sold-out-applied-optoelectronics-drops-7-coherent-slides-7/"]},
-  {"date": "2026-10-14", "title": "Anthropicが上場前の投資家向けに7〜9月の売上168億ドル（前期比約+45%）を説明",
-   "summary": "調整後ベースで黒字との報道。成長率は前の四半期より鈍化しており、年末に年換算1,000億ドル超という期待に届かない可能性を指摘する声がある。SNS上の「月次ARR増加の軟化」などの数字は投稿者の推計で、裏づけは確認できていない。",
-   "status": "四半期売上は複数の報道で確認／ARRなどの推計は未確認", "sources": ["https://siliconangle.com/2026/10/14/ahead-of-ipo-anthropic-reveals-its-revenue-grow-45-sequentially-to-16-8b-in-q3/", "https://www.bloomberg.com/news/articles/2026-10-14/anthropic-revenue-jumps-to-16-8-billion-in-quarter-before-ipo"]},
-  {"date": "2026-10-13", "title": "中国CXMTのDRAM技術進展の報道でメモリ株が下落",
+   "status": "報道ベース（発言の原文は未確認）",
+   "sources": [
+    "https://247wallst.com/investing/2026/10/12/lumentum-falls-10-as-optics-selloff-hits-hardest-where-capacity-is-sold-out-applied-optoelectronics-drops-7-coherent-slides-7/"
+   ]
+  },
+  {
+   "date": "2026-10-14",
+   "title": "Anthropicが上場前の投資家向けに7〜9月の売上168億ドル（前期比約+45%）、調整後の黒字を説明",
+   "summary": "【確認できた報道】7〜9月の売上は168億ドル（4〜6月は115〜116億ドル、1〜3月は47〜48億ドルと報道により差）。前期比は約45〜46%増。調整後ベースで黒字、フリーキャッシュフローも黒字と投資家に説明（FT報道、非公開の説明会に出席した投資家が出所）。調整後の粗利率は約85%、調整後の営業利益率は11%超との報道もあるが、何を除いた「調整後」かは報じられていない。【食い違い・未確認】粗利率は、提携先（Amazonなど）との収益分配や学習コストの扱いで、44〜60%と見る分析もある。計算資源などの将来の支払い義務が5,180億ドルとする表があるが、S-1原文では未確認。顧客数・顧客集中の数字は見つからなかった。SNS上の「月次ARR増加の軟化」は投稿者の推計で、裏づけなし。【評価額・日程】想定される評価額は1.8〜2兆ドル（5月のシリーズHは9,650億ドル）。マーケティング開始は11/9の週、上場は感謝祭前を目標との報道（中間選挙後との報道もあり）。公開S-1は10/25頃との解説が1件あるが未確認。",
+   "status": "四半期売上・調整後黒字は複数の報道で確認／粗利率・支払い義務・日程は未確認（二次情報）",
+   "sources": [
+    "https://siliconangle.com/2026/10/14/ahead-of-ipo-anthropic-reveals-its-revenue-grow-45-sequentially-to-16-8b-in-q3/",
+    "https://www.bloomberg.com/news/articles/2026-10-14/anthropic-revenue-jumps-to-16-8-billion-in-quarter-before-ipo",
+    "https://ca.investing.com/news/stock-market-news/anthropic-tells-investors-q3-revenue-jumped-45-to-nearly-17-bln-ft-reports-4881760",
+    "https://finance.yahoo.com/technology/article/anthropic-q3-revenue-climbs-to-168-billion-report-221619202.html"
+   ]
+  },
+  {
+   "date": "2026-10-13",
+   "title": "中国CXMTのDRAM技術進展の報道でメモリ株が下落",
    "summary": "マイクロン・SKハイニックスが下落、キオクシアは一時10%超安。SKハイニックスのHBM4向け設備発注の遅れも報じられた。一方、2026年第4四半期のNAND価格は前期比15〜20%上昇との予測（TrendForce）もあり、足元の需要は強いとの見方が根強い。",
-   "status": "報道ベース", "sources": ["https://technology.org/2026/10/14/cxmt-4f2-dram-samsung-sk-hynix-shares-kospi", "https://freetonsha.com/2026/10/13/cxmt/"]},
-  {"date": "2026-06-29", "title": "NICTが既設光ファイバで毎秒450テラビット伝送の世界記録を発表（参考）",
+   "status": "報道ベース",
+   "sources": [
+    "https://technology.org/2026/10/14/cxmt-4f2-dram-samsung-sk-hynix-shares-kospi",
+    "https://freetonsha.com/2026/10/13/cxmt/"
+   ]
+  },
+  {
+   "date": "2026-06-29",
+   "title": "NICTが既設光ファイバで毎秒450テラビット伝送の世界記録を発表（参考）",
    "summary": "英国ロンドンの既設ファイバでの実証（往復39km、理想的な誤り訂正を仮定した値）。研究成果で、今回（10月）の株価の動きとの関係を示す報道は確認できていない。",
-   "status": "NICTの発表", "sources": ["https://www.nict.go.jp/press/2026/06/29-1.html"]}
+   "status": "NICTの発表",
+   "sources": [
+    "https://www.nict.go.jp/press/2026/06/29-1.html"
+   ]
+  }
  ]
 }
