@@ -30241,6 +30241,15 @@ def render_holdings_checklist():
             st.info("評価額を計算できませんでした。")
             return
         shock = st.slider("もし1日でこれだけ下がったら（影響額の試算）", -30, -5, -12, 1, key="hc_shock", format="%d%%")
+        # RSI(14)は保有銘柄ごとにその場で計算する（保有銘柄はリポジトリに保存しない。非公開データのため）
+        rsi_now = {}
+        try:
+            for _t, _sr in _fetch_ticker_close_prices(list(pos), period="1y").items():
+                _sr = _sr.dropna()
+                if len(_sr) > 40:
+                    rsi_now[_t] = float(_rsi14(_sr).iloc[-1])
+        except Exception as e:
+            logger.warning(f"[holdings_rsi] 取得失敗: {e}")
         stops = _load_stoplines(_u)
         opt_cache = _load_options_cache_all()
         theme_of = {}
@@ -30254,6 +30263,9 @@ def render_holdings_checklist():
                 "銘柄": t, "テーマ": theme_of.get(t, ""),
                 "比率(%)": round(val[t] / total * 100, 1),
                 f"{shock}%時の影響(万円)": round(val[t] * shock / 100 / 1e4, 1),
+                "RSI": (round(rsi_now[t]) if t in rsi_now else None),
+                "RSI状態": ("🔴25以下" if rsi_now.get(t, 99) <= 25 else "🟠30以下" if rsi_now.get(t, 99) <= 30
+                         else "🟡35以下" if rsi_now.get(t, 99) <= 35 else "🔺70以上" if rsi_now.get(t, 0) >= 70 else ""),
                 "現在値": round(px[t], 2), "取得単価": round(pos[t]["avg_cost"], 2),
                 "損切りライン(USD)": stops.get(t),
                 "次の決算日": earn,
@@ -30274,6 +30286,9 @@ def render_holdings_checklist():
                 st.error("保存に失敗しました（シートへの接続を確認してください）。")
         # 判定（損切りラインまでの距離・テーマ集中）
         notes = []
+        _low_rsi = [f"{t}（RSI {rsi_now[t]:.0f}）" for t in pos if rsi_now.get(t, 99) <= 30]
+        if _low_rsi:
+            notes.append("🟠 RSIが30以下の保有銘柄: " + "、".join(_low_rsi) + "（売られ過ぎ圏。反転を保証するものではありません）")
         for t in pos:
             sl = stops.get(t)
             if sl and px[t] > 0:
@@ -30304,7 +30319,9 @@ def render_holdings_checklist():
                     pass
         if notes:
             st.markdown("\n".join(f"- {n}" for n in notes))
-        st.caption("※ 米国株のみが対象です。損切りラインは、ご自身で決めた価格をそのまま使います（AIの提案ではありません）。"
+        st.caption("※ RSIは14日の終値ベースで、ページを開いたときに計算します（保有銘柄は公開リポジトリに保存しません）。個別株のRSIは、指数より値動きが荒く、"
+                   "過去の検証（指数・銘柄群）の数字はそのまま当てはまりません。"
+                   "米国株のみが対象です。損切りラインは、ご自身で決めた価格をそのまま使います（AIの提案ではありません）。"
                    "決算日は保存済みのオプションデータから取るため、無い銘柄は空欄です。影響額は為替・時間外を含まない単純な試算です。")
 
 
