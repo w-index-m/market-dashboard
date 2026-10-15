@@ -1461,7 +1461,109 @@
     "usdjpy": "down"
    },
    "scenario": "粘着的インフレで長期金利上昇継続、割高株価を圧迫。160円接近で介入・日銀利上げ警戒強まり円高誘発、株安連鎖"
+  },
+  {
+   "id": "2026-10-15-groq",
+   "date": "2026-10-15",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7718.94,
+     "chg20_pct": 2.21,
+     "date": "2026-10-14"
+    },
+    "nikkei": {
+     "value": 65492.809,
+     "chg20_pct": 2.31,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.19,
+     "chg20_pct": 3.68,
+     "date": "2026-10-14"
+    },
+    "usdjpy": {
+     "value": 157.767,
+     "chg20_pct": 1.12,
+     "date": "2026-10-15"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国金利上昇で株価は上昇、円は安全資産として円高へ"
+  },
+  {
+   "id": "2026-10-15-mistral",
+   "date": "2026-10-15",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7718.94,
+     "chg20_pct": 2.21,
+     "date": "2026-10-14"
+    },
+    "nikkei": {
+     "value": 65492.809,
+     "chg20_pct": 2.31,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.19,
+     "chg20_pct": 3.68,
+     "date": "2026-10-14"
+    },
+    "usdjpy": {
+     "value": 157.767,
+     "chg20_pct": 1.12,
+     "date": "2026-10-15"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米利上げペースの鈍化懸念とインフレ圧力高止まりで米長期金利上昇。Fedのハーキンズ発言や米景気減速リスクが株安要因。日米株は相関高まり、円安傾向継続（米国債利回り上昇+リスクオフ回避）"
+  },
+  {
+   "id": "2026-10-15-nvidia",
+   "date": "2026-10-15",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7718.94,
+     "chg20_pct": 2.21,
+     "date": "2026-10-14"
+    },
+    "nikkei": {
+     "value": 65492.809,
+     "chg20_pct": 2.31,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.19,
+     "chg20_pct": 3.68,
+     "date": "2026-10-14"
+    },
+    "usdjpy": {
+     "value": 157.767,
+     "chg20_pct": 1.12,
+     "date": "2026-10-15"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米長期金利ピークアウトでドル円調整、介入警戒で円高進行。株高継続も日経は円高で輸出株売り優勢。"
   }
  ],
- "updated_at": "2026-10-14T01:21:41Z"
+ "updated_at": "2026-10-15T00:46:49Z"
 }
