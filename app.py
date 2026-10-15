@@ -21096,6 +21096,18 @@ def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict
     tnx_now = float(tx.iloc[-1])
     tnx_rise40 = float(tx.iloc[-1] - tx.iloc[-40:].min())
     in_down = (dd <= -10) and (last < float(ma50.iloc[-1]))
+    # 価格の位置（年初来・52週の安値と高値、前回の安値）
+    _yr = px[px.index.year == px.index[-1].year]
+    ytd_low, ytd_high = float(_yr.min()), float(_yr.max())
+    ytd_low_date, ytd_high_date = str(_yr.idxmin().date()), str(_yr.idxmax().date())
+    w52 = px.iloc[-252:]
+    levels = {
+        "年初来安値": (ytd_low, ytd_low_date, (last / ytd_low - 1) * 100),
+        "年初来高値": (ytd_high, ytd_high_date, (last / ytd_high - 1) * 100),
+        "52週安値": (float(w52.min()), str(w52.idxmin().date()), (last / float(w52.min()) - 1) * 100),
+        "前回の安値（直近8日を除く120日）": (prev_low, prev_low_date, (last / prev_low - 1) * 100),
+    }
+    ytd_low_recent = str(_yr.idxmin()) >= str(px.index[-8].date())   # 年初来安値を直近8営業日で更新したか
     checks = {
         "下落局面にいる（高値から-10%以下かつ50日線の下）": (in_down, f"高値から{dd:+.1f}%"),
         "RSIが売られ過ぎ圏（30以下）に入った": (r_min10 < 30, f"RSI {r_now:.0f}（直近10日の最低 {r_min10:.0f}）"),
@@ -21104,6 +21116,7 @@ def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict
         "VIXがピーク（25以上）から15%以上低下した": (vix_peak10 >= 25 and vix_now <= vix_peak10 * 0.85, f"VIX {vix_now:.1f}／ピーク {vix_peak10:.1f}"),
         "金利が上げ止まった（20日高値から0.15pt以上低下）": (tnx_hi20 - tnx_now >= 0.15, f"10年債 {tnx_now:.2f}%（20日高値 {tnx_hi20:.2f}%）"),
         "前回の安値を割り込んでいない": (recent_low >= prev_low, f"前回の安値 {prev_low_date}／現在は{(last / prev_low - 1) * 100:+.1f}%"),
+        "年初来安値を直近8日で更新していない": (not ytd_low_recent, f"年初来安値 {ytd_low_date}／現在は{(last / ytd_low - 1) * 100:+.1f}%"),
         "20日線を回復した": (last > float(ma20.iloc[-1]), f"20日線から{(last / float(ma20.iloc[-1]) - 1) * 100:+.1f}%"),
         "3日続伸している": (bool(chg.iloc[-1] > 0 and chg.iloc[-2] > 0 and chg.iloc[-3] > 0), f"直近3日 {chg.iloc[-1] * 100:+.1f}%/{chg.iloc[-2] * 100:+.1f}%/{chg.iloc[-3] * 100:+.1f}%"),
     }
@@ -21114,7 +21127,7 @@ def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict
         kind = "金利上昇型：過去は金利が上げ止まるまで長引きやすかった（2022年は約200日）"
     else:
         kind = "低VIX型（VIXが高くない下落）：信用不安や需給の悪化が落ち着くまで続きやすかった"
-    return {"checks": checks, "kind": kind, "last": last, "dd": dd}
+    return {"checks": checks, "kind": kind, "last": last, "dd": dd, "levels": levels}
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -21239,6 +21252,22 @@ def render_reversal_checklist():
         '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
         f'<th style="padding:6px 8px">チェック項目</th>{hdr}</tr></thead><tbody>{"".join(rows)}</tbody></table>',
         unsafe_allow_html=True)
+    # 価格の位置（年初来・52週の安値と高値、前回の安値）
+    lv_rows = []
+    for lb in ("年初来安値", "年初来高値", "52週安値", "前回の安値（直近8日を除く120日）"):
+        tds = ""
+        for n in names:
+            val, dt_, gap = res[n]["levels"][lb]
+            pv = f"{val:,.2f}（" if n.startswith("SMH") else "（"
+            tds += (f'<td style="padding:6px 8px"><span style="font-size:11px;color:#cbd5e1">{pv}{dt_}）</span> '
+                    f'<b style="color:{"#4ade80" if gap >= 0 else "#f87171"}">現在比 {gap:+.1f}%</b></td>')
+        lv_rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600;font-size:12px">{lb}</td>{tds}</tr>')
+    st.markdown(
+        '<div style="margin-top:14px;font-weight:700;color:#e2e8f0">📍 価格の位置（安値・高値と現在の距離）</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0;margin-top:4px"><thead><tr style="color:#cbd5e1;text-align:left">'
+        f'<th style="padding:6px 8px"></th>{hdr}</tr></thead><tbody>{"".join(lv_rows)}</tbody></table>', unsafe_allow_html=True)
+    st.caption("※ 「現在比」は、現在の水準が、その安値・高値から何%離れているか。年初来安値に近づく（現在比が0%に近づく）ほど、安値の再テスト、割り込むと見方の見直しの目安です。"
+               "光通信バスケットは等加重の指数なので、価格は出さず、日付と現在比だけを出しています。")
     _render_rsi_overview()
     with st.expander("🕰 過去の同じような日の影響（光通信バスケット・2016年〜、2026-10-15時点）", expanded=False):
         st.markdown(
