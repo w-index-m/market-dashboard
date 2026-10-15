@@ -20702,6 +20702,50 @@ def _generate_optical_brief(date_key: str, facts: str, headlines: str) -> dict:
         return {"text": "", "model": "", "error": str(e)[:100]}
 
 
+def _load_news_memo() -> dict:
+    """data/news_memo.json（報道で確認できた内容の、日付・出所つきメモ）を読む。無ければ {}。"""
+    import json as _json_nm
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "data", "news_memo.json"), encoding="utf-8") as f_:
+            return _json_nm.load(f_)
+    except (OSError, ValueError):
+        return {}
+
+
+def _render_news_memo():
+    """📝 注目ニュースメモ（日付・確認状況・出所つき）。"""
+    memo = _load_news_memo()
+    items = memo.get("items") or []
+    if not items:
+        return
+    items = sorted(items, key=lambda x: x.get("date", ""), reverse=True)
+    parts = []
+    for it in items:
+        srcs = " ".join(f'<a href="{html.escape(u)}" target="_blank" style="color:#7dd3fc">[{i + 1}]</a>' for i, u in enumerate(it.get("sources", [])))
+        parts.append(
+            f'<div style="border-top:1px solid #334155;padding:8px 0"><div style="font-size:11px;color:#94a3b8">{html.escape(it.get("date", ""))}　'
+            f'<span style="color:#fbbf24">{html.escape(it.get("status", ""))}</span></div>'
+            f'<div style="font-size:14px;font-weight:700;color:#e2e8f0">{html.escape(it.get("title", ""))}</div>'
+            f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{html.escape(it.get("summary", ""))}</div>'
+            f'<div style="font-size:11px;margin-top:2px">出所: {srcs}</div></div>')
+    st.markdown("".join(parts), unsafe_allow_html=True)
+    st.caption(f"※ {memo.get('note', '')}（最終更新 {memo.get('updated_at', '')}）。自動では更新されません。")
+
+
+def _news_memo_for_prompt(days: int = 7) -> str:
+    """直近days日以内のメモを、AIに渡す材料の文字列にする（確認状況つき）。"""
+    memo = _load_news_memo()
+    today = datetime.now(JST).date()
+    out = []
+    for it in memo.get("items") or []:
+        try:
+            if (today - pd.Timestamp(it.get("date", "")).date()).days <= days:
+                out.append(f"[メモ {it['date']}・{it.get('status', '')}] {it.get('title', '')}: {it.get('summary', '')}")
+        except Exception:
+            continue
+    return "\n".join(out)
+
+
 def render_optical_brief():
     """📰 ページ上部の「光通信・AIインフラ株 今日の背景」。大きく動いた日だけAIが背景を要約する（静かな日はAIを呼ばない）。"""
     d = _fetch_breadth_returns()
@@ -20737,6 +20781,8 @@ def render_optical_brief():
         f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{desc}</div>'
         f'<div style="font-size:12px;color:#94a3b8;margin-top:6px">基準日 {d["date"]}　{chips}</div></div>',
         unsafe_allow_html=True)
+    with st.expander("📝 注目ニュースメモ（日付・確認状況・出所つき）", expanded=False):
+        _render_news_memo()
     with st.expander("📖 光通信の技術動向メモ（日付つき・参考）", expanded=False):
         st.markdown(
             "- **2026年6月29日（NICT発表）**: 英国ロンドンの既設光ファイバで、毎秒450テラビットの伝送に成功。"
@@ -20767,6 +20813,9 @@ def render_optical_brief():
         except Exception:
             continue
     heads = heads[:20]
+    _memo_txt = _news_memo_for_prompt()
+    if _memo_txt:
+        heads = _memo_txt.split("\n") + heads
     lines = [f"・光通信（中央値）{opt:+.1f}%、" + "、".join(f"{g}{v:+.1f}%" for g, v in grp.items() if g != "光通信")]
     lines.append("・主な値動き: " + "、".join(f"{x}{r_:+.1f}%" for x, r_ in movers))
     lines.append("・指数: " + "、".join(f"{_BREADTH_INDEXES[k]}{v:+.1f}%" for k, v in idx.items() if v is not None))
