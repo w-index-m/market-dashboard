@@ -5,7 +5,8 @@
 ・グループ別（光通信 / AIインフラ / 半導体大型 / メモリ / AIの資金繰り）の前日比の中央値、S&P500・ナスダック100・SMH、
   米10年債利回りとVIXを data/selloff_log.json に1日1行で追記する（公開データのみ。保有銘柄は一切含めない）。
 ・判定ルールは app.py の _breadth_verdict と同じ（変更するときは両方を揃えること）。
-・通知条件（どれか）: 光通信の中央値 ≤ -3% / SMH ≤ -3% / S&P500 ≤ -1.5% / 値動き±8%以上かつ出来高1.8倍以上の銘柄がある。
+・指数・バスケットのRSI(14)も毎日記録し、RSIが30・25を「新たに」下回った日は通知する（前回の記録では未達の場合のみ）。
+・通知条件（どれか）: 光通信の中央値 ≤ -3% / SMH ≤ -3% / S&P500 ≤ -1.5% / 値動き±8%以上かつ出来高1.8倍以上の銘柄がある / RSIが30・25を新たに下回った。
   条件に当てはまらない日は通知しない。
 環境変数: LINE_CHANNEL_ACCESS_TOKEN / SLACK_WEBHOOK_URL、SELLOFF_DRY_RUN=1 で送信せず標準出力に表示。
 """
@@ -27,6 +28,11 @@ GROUPS = {
     "AIの資金繰り（ネオクラウド等）": ["CRWV", "NBIS", "IREN", "ORCL"],
 }
 INDEXES = {"SPY": "S&P500", "QQQ": "ナスダック100", "SMH": "半導体ETF"}
+# RSI(14)を毎日記録する対象。ETFは1銘柄、バスケットは等加重の指数にして計算する（公開データのみ）
+RSI_ETFS = {"S&P500（SPY）": "SPY", "ナスダック100（QQQ）": "QQQ", "半導体ETF（SMH）": "SMH", "ハイテク（XLK）": "XLK",
+            "ソフトウェア（IGV）": "IGV", "小型株（IWM）": "IWM"}
+RSI_BASKETS = {"光通信バスケット": GROUPS["光通信"], "メモリ（MU・WDC・STX）": ["MU", "WDC", "STX"],
+               "AIインフラ（VRT・APH・ANET）": ["VRT", "APH", "ANET"]}
 MAX_ENTRIES = 600
 
 
@@ -42,6 +48,32 @@ def verdict(grp: dict, idx: dict) -> str:
     if len(weak) == 1:
         return "一部のテーマに限定"
     return "目立った広がりなし"
+
+
+def rsi14(c: pd.Series, n: int = 14) -> pd.Series:
+    d = c.diff()
+    up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    return 100 - 100 / (1 + up / dn.replace(0, float("nan")))
+
+
+def compute_rsi(close: pd.DataFrame) -> tuple:
+    """指数・バスケットのRSI(14)の最新値と、光通信の構成銘柄のうちRSI30未満の割合（%）を返す。"""
+    out = {}
+    for name, t in RSI_ETFS.items():
+        if t in close.columns:
+            c = close[t].dropna()
+            if len(c) > 40:
+                out[name] = round(float(rsi14(c).iloc[-1]), 1)
+    for name, names in RSI_BASKETS.items():
+        cols = [x for x in names if x in close.columns]
+        if cols:
+            b = (1 + close[cols].pct_change(fill_method=None).mean(axis=1, skipna=True).fillna(0)).cumprod()
+            if len(b) > 40:
+                out[name] = round(float(rsi14(b).iloc[-1]), 1)
+    cons = [float(rsi14(close[x].dropna()).iloc[-1]) for x in GROUPS["光通信"] if x in close.columns and close[x].dropna().shape[0] > 40]
+    share = round(sum(1 for v in cons if v < 30) / len(cons) * 100) if cons else None
+    return out, share
 
 
 def _post(text: str) -> None:
@@ -64,8 +96,8 @@ def _post(text: str) -> None:
 
 
 def main() -> None:
-    syms = sorted({s for v in GROUPS.values() for s in v} | set(INDEXES) | {"^TNX", "^VIX"})
-    raw = yf.download(syms, period="2mo", interval="1d", auto_adjust=False, progress=False, group_by="column")
+    syms = sorted({s for v in GROUPS.values() for s in v} | set(INDEXES) | set(RSI_ETFS.values()) | {"^TNX", "^VIX", "VRT", "APH", "ANET", "MU", "WDC", "STX"})
+    raw = yf.download(syms, period="6mo", interval="1d", auto_adjust=False, progress=False, group_by="column")
     close = raw["Close"].dropna(how="all")
     vol = raw["Volume"]
     if len(close) < 2:
@@ -97,6 +129,9 @@ def main() -> None:
         "vix": round(float(vix.iloc[-1]), 2) if len(vix) else None,
         "verdict": verdict(grp, idx),
     }
+    rsi_map, rsi_share = compute_rsi(close)
+    entry["rsi"] = rsi_map
+    entry["rsi_opt_low_share"] = rsi_share
     movers = [{"t": s, "ret": round(rets[s], 1), "vol": round(vr.get(s, 0), 1)}
               for g in GROUPS.values() for s in g if s in rets and abs(rets[s]) >= 8 and vr.get(s, 0) >= 1.8]
     if movers:
@@ -107,6 +142,7 @@ def main() -> None:
             log = json.load(f)
     except (OSError, ValueError):
         log = {"entries": []}
+    prev_rsi = next((e.get("rsi") for e in reversed(log.get("entries", [])) if e.get("date") != date and e.get("rsi")), {}) or {}
     entries = [e for e in log.get("entries", []) if e.get("date") != date] + [entry]
     entries.sort(key=lambda e: e["date"])
     log = {"updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "entries": entries[-MAX_ENTRIES:]}
@@ -123,6 +159,18 @@ def main() -> None:
         reasons.append(f"半導体ETF {smh:+.1f}%")
     if spy is not None and spy <= -1.5:
         reasons.append(f"S&P500 {spy:+.1f}%")
+    # RSIが30・25を「新たに」下回った（前回の記録では未達）ものだけ知らせる。毎日同じ通知を繰り返さない
+    rsi_new = []
+    for name, v in rsi_map.items():
+        pv = prev_rsi.get(name)
+        if pv is None:
+            continue
+        if v < 25 <= pv:
+            rsi_new.append(f"{name} RSI {v:.0f}（25を下回りました）")
+        elif v < 30 <= pv:
+            rsi_new.append(f"{name} RSI {v:.0f}（30を下回りました）")
+    if rsi_new:
+        reasons.append("RSI: " + "、".join(rsi_new))
     if movers:
         reasons.append("大きな値動き＋出来高急増: " + "、".join(f"{m['t']}{m['ret']:+.1f}%({m['vol']:.1f}倍)" for m in movers[:5]))
     if reasons:
@@ -130,6 +178,9 @@ def main() -> None:
         lines.append("・グループ別: " + "、".join(f"{g}{v:+.1f}%" for g, v in grp.items()))
         if entry["tnx"] is not None:
             lines.append(f"・米10年債 {entry['tnx']:.2f}%（{entry['tnx_bp']:+.0f}bp）／VIX {entry['vix']}")
+        _low = [f"{n} {v:.0f}" for n, v in sorted(rsi_map.items(), key=lambda x: x[1])[:3]]
+        if _low:
+            lines.append("・RSIの低い順: " + "、".join(_low))
         lines.append("※ 数値は前営業日の終値ベース。原因は断定できません。詳しくはダッシュボードで。")
         _post("\n".join(lines))
     else:

@@ -21141,10 +21141,11 @@ def _render_selloff_log():
             f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:5px 8px;white-space:nowrap">{e["date"]}</td>'
             f'<td>{e.get("verdict", "")}</td><td style="color:{col}">{fmt(opt)}</td><td>{fmt(ix.get("SMH"))}</td><td>{fmt(ix.get("SPY"))}</td>'
             f'<td>{"—" if e.get("tnx") is None else format(e["tnx"], ".2f") + "%"}</td><td>{"—" if e.get("vix") is None else e["vix"]}</td>'
+            f'<td>{"—" if not e.get("rsi") else str(round((e["rsi"].get("光通信バスケット") or 0))) + " / " + str(round((e["rsi"].get("半導体ETF（SMH）") or 0)))}</td>'
             f'<td style="font-size:11px;color:#cbd5e1">{mtxt}</td></tr>')
     st.markdown(
         '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
-        '<th style="padding:5px 8px">日付</th><th>判定</th><th>光通信</th><th>SMH</th><th>S&P500</th><th>米10年債</th><th>VIX</th><th>大きな動き</th></tr></thead>'
+        '<th style="padding:5px 8px">日付</th><th>判定</th><th>光通信</th><th>SMH</th><th>S&P500</th><th>米10年債</th><th>VIX</th><th>RSI(光通信/SMH)</th><th>大きな動き</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
     st.caption(f"※ 直近30営業日まで表示（記録は{len(ent)}日分、最終更新 {log.get('updated_at', '')}）。前営業日の終値ベースで、原因は断定できません。")
 
