@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import requests
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "data", "edgar_watch.json")
-UA = {"User-Agent": "market-dashboard-watch (github.com/w-index-m/market-dashboard)", "Accept-Encoding": "gzip, deflate"}
+UA = {"User-Agent": "market-dashboard-watch w-index-m@users.noreply.github.com", "Accept": "application/atom+xml, application/json, text/xml, */*"}
 FORMS = ("S-1", "S-1/A", "424B4", "424B1", "F-1", "F-1/A")
 
 
@@ -42,7 +42,7 @@ def _post(text: str) -> None:
 def search_atom(name: str, form: str) -> tuple:
     """EDGARの会社検索（Atomフィード）。Returns: (書類リスト, HTTPステータス)。"""
     r = requests.get("https://www.sec.gov/cgi-bin/browse-edgar",
-                     params={"company": name, "type": form, "owner": "include", "count": 40, "action": "getcurrent", "output": "atom"},
+                     params={"company": name, "type": form, "owner": "include", "count": 40, "action": "getcompany", "output": "atom"},
                      headers=UA, timeout=30)
     docs = []
     if r.status_code == 200 and r.text.strip().startswith("<"):
@@ -113,7 +113,7 @@ def main() -> None:
                 new_docs.append(x)
     print("diag:", " | ".join(diag))
     first_run = not state.get("initialized")
-    if new_docs or first_run:
+    if new_docs or first_run or diag != state.get("diag"):
         state["seen"] = seen
         state["initialized"] = True
         state["last_check"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
