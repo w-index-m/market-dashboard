@@ -1,0 +1,12 @@
+{
+ "seen": {},
+ "log": [],
+ "initialized": true,
+ "last_check": "2026-10-15T02:50:56Z",
+ "diag": [
+  "fts:Anthropic:403:0",
+  "atom:Anthropic:S-1:403:0",
+  "atom:Anthropic:S-1/A:403:0",
+  "atom:Anthropic:424B4:403:0"
+ ]
+}
