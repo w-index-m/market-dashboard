@@ -29,6 +29,7 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           EDGAR_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          EDGAR_CONTACT: ${{ secrets.EDGAR_CONTACT }}
           WATCH_NAMES: "Anthropic"
         run: python scripts/edgar_watch.py
       - name: Commit and push

@@ -3,8 +3,8 @@
 SEC EDGARで、指定した会社（既定: Anthropic）のIPO関連書類（S-1・S-1/A・424B4など）が新しく公開されたら、LINE・Slackへ知らせる。
 ・売買はしない。公開データのみ。結果は data/edgar_watch.json に、見つけた書類の一覧（提出番号・種類・日付・リンク）だけ保存する。
 ・新しい書類が無い日は何も送らず、ファイルも更新しない。
-環境変数: WATCH_NAMES（カンマ区切り、既定 "Anthropic"）、LINE_CHANNEL_ACCESS_TOKEN / SLACK_WEBHOOK_URL、EDGAR_DRY_RUN=1 で送信しない。
-SECは User-Agent に連絡先を求めるため、リポジトリ名を入れている（アクセス頻度は1日数回で、制限の範囲内）。
+環境変数: EDGAR_CONTACT（必須。SECに伝える連絡先メールアドレス。GitHubのSecretsに設定）、WATCH_NAMES（カンマ区切り、既定 "Anthropic"）、LINE_CHANNEL_ACCESS_TOKEN / SLACK_WEBHOOK_URL、EDGAR_DRY_RUN=1 で送信しない。
+SECは User-Agent に連絡先を求める（無いと403）。アクセス頻度は1日4回程度で、制限の範囲内。
 """
 import json
 import os
@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 import requests
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "data", "edgar_watch.json")
-UA = {"User-Agent": "market-dashboard-watch w-index-m@users.noreply.github.com", "Accept": "application/atom+xml, application/json, text/xml, */*"}
+def _ua() -> dict:
+    """SECは、User-Agentに連絡先（メールアドレス）を入れた自動アクセスだけを受け付ける。連絡先は環境変数 EDGAR_CONTACT（GitHubのSecrets）から取る。"""
+    contact = os.environ.get("EDGAR_CONTACT", "").strip()
+    return {"User-Agent": f"market-dashboard-watch {contact}", "Accept": "application/json, application/atom+xml, text/xml, */*"} if contact else {}
 FORMS = ("S-1", "S-1/A", "424B4", "424B1", "F-1", "F-1/A")
 
 
@@ -43,7 +46,7 @@ def search_atom(name: str, form: str) -> tuple:
     """EDGARの会社検索（Atomフィード）。Returns: (書類リスト, HTTPステータス)。"""
     r = requests.get("https://www.sec.gov/cgi-bin/browse-edgar",
                      params={"company": name, "type": form, "owner": "include", "count": 40, "action": "getcompany", "output": "atom"},
-                     headers=UA, timeout=30)
+                     headers=_ua(), timeout=30)
     docs = []
     if r.status_code == 200 and r.text.strip().startswith("<"):
         ns = {"a": "http://www.w3.org/2005/Atom"}
@@ -63,7 +66,7 @@ def search_fts(name: str) -> tuple:
     """EDGARの全文検索API。Returns: (書類リスト, HTTPステータス)。"""
     r = requests.get("https://efts.sec.gov/LATEST/search-index", params={"q": f'"{name}"', "forms": ",".join(FORMS), "dateRange": "custom",
                                                                           "startdt": "2026-01-01", "enddt": datetime.now(timezone.utc).strftime("%Y-%m-%d")},
-                     headers=UA, timeout=30)
+                     headers=_ua(), timeout=30)
     docs = []
     if r.status_code == 200:
         try:
@@ -82,6 +85,9 @@ def search_fts(name: str) -> tuple:
 
 
 def main() -> None:
+    if not _ua():
+        print("EDGAR_CONTACT が未設定のため、SECへのアクセスを行いません（SECは連絡先つきのUser-Agentを求めます）。GitHubのSecretsに EDGAR_CONTACT を設定してください。")
+        return
     names = [n.strip() for n in os.environ.get("WATCH_NAMES", "Anthropic").split(",") if n.strip()]
     try:
         with open(OUT, encoding="utf-8") as f:
