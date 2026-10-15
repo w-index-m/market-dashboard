@@ -20960,6 +20960,77 @@ def _reversal_data() -> dict:
             "vix": cl["^VIX"].dropna(), "tnx": cl["^TNX"].dropna()}
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _rsi_overview() -> dict:
+    """指数・銘柄群のRSI(14)の最新値と、光通信の構成銘柄のうちRSI30未満の割合を返す。失敗時は {}。"""
+    opt, mem, infra = _BREADTH_GROUPS["光通信"], ["MU", "WDC", "STX"], ["VRT", "APH", "ANET"]
+    etfs = {"S&P500（SPY）": "SPY", "ナスダック100（QQQ）": "QQQ", "半導体ETF（SMH）": "SMH", "ハイテク（XLK）": "XLK",
+            "ソフトウェア（IGV）": "IGV", "小型株（IWM）": "IWM"}
+    try:
+        raw = yf.download(list(etfs.values()) + opt + mem + infra, period="1y", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        cl = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[rsi_overview] 取得失敗: {e}")
+        return {}
+    if cl.empty:
+        return {}
+
+    def _bk(names):
+        cols = [c for c in names if c in cl.columns]
+        return (1 + cl[cols].pct_change(fill_method=None).mean(axis=1, skipna=True).fillna(0)).cumprod() if cols else None
+    series = {n: cl[t] for n, t in etfs.items() if t in cl.columns}
+    series["光通信バスケット"] = _bk(opt)
+    series["メモリ（MU・WDC・STX）"] = _bk(mem)
+    series["AIインフラ（VRT・APH・ANET）"] = _bk(infra)
+    rows = {}
+    for n, sr in series.items():
+        if sr is None:
+            continue
+        sr = sr.dropna()
+        if len(sr) > 40:
+            rows[n] = float(_rsi14(sr).iloc[-1])
+    cons = [float(_rsi14(cl[c].dropna()).iloc[-1]) for c in opt if c in cl.columns and cl[c].dropna().shape[0] > 40]
+    return {"rows": rows, "low_share": (sum(1 for v in cons if v < 30) / len(cons) * 100) if cons else None, "n": len(cons)}
+
+
+def _render_rsi_overview():
+    """RSI一覧（30・25のラインつき）。過去の検証で最も安定していた『光通信バスケット自身』に印を付ける。"""
+    d = _rsi_overview()
+    if not d or not d.get("rows"):
+        return
+    rows = []
+    for n, v in sorted(d["rows"].items(), key=lambda x: x[1]):
+        if v <= 25:
+            col, st_ = "#f87171", "🔴 25以下（極端に低い）"
+        elif v <= 30:
+            col, st_ = "#fb923c", "🟠 30以下（売られ過ぎ圏）"
+        elif v <= 35:
+            col, st_ = "#fbbf24", "🟡 35以下（30に接近）"
+        else:
+            col, st_ = "#94a3b8", "⚪ 30超"
+        star = " ⭐" if n == "光通信バスケット" else ""
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{n}{star}</td>'
+            f'<td style="color:{col};font-weight:700;font-size:15px">{v:.0f}</td>'
+            f'<td><div style="background:#0f172a;border-radius:4px;height:8px;width:160px;position:relative">'
+            f'<div style="background:{col};height:8px;border-radius:4px;width:{min(max(v, 0), 100) * 1.6:.0f}px"></div>'
+            f'<div style="position:absolute;left:{25 * 1.6:.0f}px;top:-2px;width:1px;height:12px;background:#f87171"></div>'
+            f'<div style="position:absolute;left:{30 * 1.6:.0f}px;top:-2px;width:1px;height:12px;background:#fb923c"></div></div></td>'
+            f'<td style="font-size:12px">{st_}</td></tr>')
+    ls = d.get("low_share")
+    ls_txt = "—" if ls is None else f"{ls:.0f}%"
+    st.markdown(
+        '<div style="margin-top:14px;font-weight:700;color:#e2e8f0">📊 RSI一覧（14日・赤線=25、橙線=30）</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0;margin-top:4px"><thead><tr style="color:#cbd5e1;text-align:left">'
+        '<th style="padding:6px 8px">対象</th><th>RSI</th><th></th><th>状態</th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+        f'<div style="font-size:12px;color:#cbd5e1;margin-top:6px">光通信の構成銘柄（{d.get("n", 0)}銘柄）のうち、RSIが30未満の割合: <b>{ls_txt}</b>'
+        '（過去の検証では、3分の1以上でそろった日の20日後が+6.2%・プラス82%、ただし事例11回）</div>',
+        unsafe_allow_html=True)
+    st.caption("⭐ 過去の検証（2016年〜）で、光通信の戻りの目安として最も安定していたのは、光通信バスケット自身のRSIでした（RSI30未満で20日後+7.4%・プラス77%、60日後+12.9%・プラス85%）。"
+               "ただし事例は13回で、差は偶然の範囲かもしれません。RSIが30前後では目立った優位はなく、25以下で傾向がはっきりしました。将来の保証ではありません。")
+
+
 def render_reversal_checklist():
     """🧭 反転チェックリスト：下落局面で「反転のサイン」とされる項目を、今の値で自動判定する（過去の検証結果つき）。"""
     st.markdown('<a id="reversal-checklist"></a>', unsafe_allow_html=True)
@@ -20994,6 +21065,7 @@ def render_reversal_checklist():
         '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
         f'<th style="padding:6px 8px">チェック項目</th>{hdr}</tr></thead><tbody>{"".join(rows)}</tbody></table>',
         unsafe_allow_html=True)
+    _render_rsi_overview()
     with st.expander("📚 過去の検証結果（SMH 2000年〜・QQQ 1999年〜・光通信 2016年〜、2026-10-15時点）", expanded=False):
         st.markdown(
             "**まず前提**: 下落局面で、その後20日以内にさらに5%下がる割合は、何もサインがなくても約5割（SMH 52%、QQQ 56%）でした。\n\n"
