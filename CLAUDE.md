@@ -203,6 +203,8 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 | rising-candidates.yml (weekdays) | precompute_rising.py | rising_candidates.json | 🔥上昇銘柄スクリーナー (S&P500 + S&P600=小型株指数 + 日経225, ~1,330 names) |
 | marks-backtest.yml (monthly) | precompute_marks_backtest.py | marks_backtest.json | 🧪 point-in-time backtest of Marks-style rules (S&P500, trailing PER; survivorship-biased) |
 | health-monitor.yml (daily) | health_monitor.py | LINE/Slack only when a workflow failed or data is stale | 🩺 Actions & data freshness monitor |
+| selloff-watch.yml (weekdays 22:45 UTC = 07:45 JST) | selloff_watch.py | selloff_log.json（1日1行: グループ別騰落・指数・米10年債・VIX・RSI・ボリンジャー%B・判定。公開データのみ） | 🔎 急落の広がり確認 / 📓 毎日の記録。条件（光通信-3%以下・SMH-3%以下・S&P-1.5%以下・±8%かつ出来高1.8倍・RSIが30/25を新たに下回る）でLINE/Slack通知 |
+| edgar-watch.yml (every 6h) | edgar_watch.py | edgar_watch.json（見つけた書類の一覧のみ） | SEC EDGARで Anthropic のS-1等が公開されたらLINE/Slack通知。**GitHub Secret `EDGAR_CONTACT`（連絡先メール）が必須**（SECはUser-Agentに連絡先が無いと403） |
 | tokyo-re-index.yml (weekly) | precompute_tokyo_re_index.py | tokyo_re_index.json | MLIT Tokyo residential price index card |
 | longterm-returns.yml (monthly) | precompute_longterm_returns.py | longterm_returns.json | 長期の複利シミュレーション (US stocks/REIT/Treasuries, total return) |
 | fundamentals-cache.yml (Sun/Wed) | precompute_fundamentals.py | **Google Sheet** `fundamentals_cache` tab (private, merged over time so quarterly history grows) | 📊 portfolio fundamentals (EPS/BPS/investment) |
@@ -221,6 +223,15 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 - **Macro section**: rate/inflation card helpers (BLS fallback, MOF JGB10Y CSV, official 3M Treasury yield instead of `^IRX`), J-REIT card (`render_reit_card`), Tokyo residential price index, `render_longterm_compounding_card` (fragment).
 - **Sidebar**: `render_server_metrics_panel` (cgroup memory/CPU, malloc_trim button; sampler thread started via `st.cache_resource`).
 - **Mode comparison table** is hand-written HTML (hover tooltip with top-10 tickers via `_order_for_display`); `_MODE_BASKET_DISPLAY_ORDER` only affects the tooltip.
+
+## Features added 2026-10-15/16 (where to look)
+
+- **ページ上部**: `render_optical_brief`（光通信・AIインフラ株 今日の背景。大きく動いた日だけAIが要約。`data/news_memo.json` の日付・確認状況・出所つきメモを表示し、直近7日分をAIの材料にも渡す。**メモは手動更新**）。
+- **急落まわり**: `render_selloff_breadth`（グループ: 光通信/AIインフラ/半導体大型/メモリ/AIの資金繰り。日韓メモリは参考表示で判定に含めない）、`render_reversal_checklist`（RSI・ボリンジャー・キーリバーサル・VIX・金利・安値からの距離。過去の検証結果は固定値で、`scripts/debug_*study*.py` の出力）、`render_pressure_card`（ギャップ/日中/終値の位置/CMFによる売り買い圧力の推定）、`render_memory_card`。
+- **保有まわり（非公開データ）**: `render_holdings_checklist`（自分で決めた損切りラインは非公開Sheet `claude_stoplines`、RSIは画面を開いたときに計算。**保有銘柄はリポジトリに保存しない**）、`render_holdings_selloff_overlap`。
+- **AI出力の検査**: `_grounding_note` / `_with_grounding`（材料に無い数字を警告）、個別株分析は `_check_trade_signal_text` も追加。個別株分析のプロンプトは計算済みの基準値とRSIの固定基準を渡す。Gemini 2.5は内部思考が出力枠を消費するため、`max_output_tokens` は大きめ（3000〜8000）。
+- **モード**: 🌐 `etf_core`（分散成長ETF: VT/VTI/VUG/VIG）を追加。
+- **データの落とし穴**: yfinanceの最新日が1日遅れることがある（ETFだけ前日で止まる等）。日米で休場日が違うため、バスケットの基準日は「全銘柄にデータがある最初の日」にそろえる（そろえないと騰落が歪む／`+nan%`）。
 
 ## Known data gotchas
 
