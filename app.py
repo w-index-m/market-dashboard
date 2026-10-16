@@ -21070,7 +21070,7 @@ def _rsi14(c: pd.Series, n: int = 14) -> pd.Series:
     return 100 - 100 / (1 + up / dn.replace(0, float("nan")))
 
 
-def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict:
+def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series, opens: pd.Series | None = None) -> dict:
     """価格系列（日次終値）から、反転チェックリストの各項目の値と、満たしたかどうかを計算する（純粋関数）。"""
     px = px.dropna()
     if len(px) < 130:
@@ -21096,6 +21096,21 @@ def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict
     tnx_now = float(tx.iloc[-1])
     tnx_rise40 = float(tx.iloc[-1] - tx.iloc[-40:].min())
     in_down = (dd <= -10) and (last < float(ma50.iloc[-1]))
+    # ボリンジャーバンド（20日・2σ）: %B=0で下限、1で上限。下限割れ後に内側へ戻ると、売られ過ぎからの回復の目安
+    _sd20 = px.rolling(20).std(ddof=0)
+    bb_lo, bb_up = ma20 - 2 * _sd20, ma20 + 2 * _sd20
+    pct_b = float((px.iloc[-1] - bb_lo.iloc[-1]) / (bb_up.iloc[-1] - bb_lo.iloc[-1])) if float(bb_up.iloc[-1] - bb_lo.iloc[-1]) > 0 else float("nan")
+    below10 = bool((px.iloc[-10:] < bb_lo.iloc[-10:]).any())
+    back_in = below10 and last >= float(bb_lo.iloc[-1])
+    # キーリバーサル: 寄りで-1%以上売られ（前日終値比）、日中+1%以上戻した日が直近3日にある（始値があるときだけ）
+    key_rev, key_txt = None, "（始値のデータなし）"
+    if opens is not None:
+        _o = opens.reindex(px.index)
+        _gap = (_o / px.shift(1) - 1) * 100
+        _intra = (px / _o - 1) * 100
+        _m = (_gap <= -1) & (_intra >= 1)
+        key_rev = bool(_m.iloc[-3:].any())
+        key_txt = f"直近日 ギャップ{_gap.iloc[-1]:+.1f}%／日中{_intra.iloc[-1]:+.1f}%"
     # 価格の位置（年初来・52週の安値と高値、前回の安値）
     _yr = px[px.index.year == px.index[-1].year]
     ytd_low, ytd_high = float(_yr.min()), float(_yr.max())
@@ -21115,6 +21130,9 @@ def _reversal_metrics_for(px: pd.Series, vix: pd.Series, tnx: pd.Series) -> dict
         "VIXが30以上に急騰した（ショック型の底の条件）": (float(vx.iloc[-10:].max()) >= 30, f"VIX {vix_now:.1f}（直近10日の最高 {vix_peak10:.1f}）"),
         "VIXがピーク（25以上）から15%以上低下した": (vix_peak10 >= 25 and vix_now <= vix_peak10 * 0.85, f"VIX {vix_now:.1f}／ピーク {vix_peak10:.1f}"),
         "金利が上げ止まった（20日高値から0.15pt以上低下）": (tnx_hi20 - tnx_now >= 0.15, f"10年債 {tnx_now:.2f}%（20日高値 {tnx_hi20:.2f}%）"),
+        "ボリンジャーバンド下限（-2σ）を直近10日で割り込んだ": (below10, f"%B {pct_b * 100:.0f}%（0%=下限、100%=上限）"),
+        "↑割り込み後、バンドの内側へ戻った（売られ過ぎからの回復）": (back_in, f"%B {pct_b * 100:.0f}%"),
+        **({"キーリバーサル（寄りで-1%以上売られ、日中+1%以上戻した日が直近3日にある）": (key_rev, key_txt)} if key_rev is not None else {}),
         "前回の安値を割り込んでいない": (recent_low >= prev_low, f"前回の安値 {prev_low_date}／現在は{(last / prev_low - 1) * 100:+.1f}%"),
         "年初来安値を直近8日で更新していない": (not ytd_low_recent, f"年初来安値 {ytd_low_date}／現在は{(last / ytd_low - 1) * 100:+.1f}%"),
         "20日線を回復した": (last > float(ma20.iloc[-1]), f"20日線から{(last / float(ma20.iloc[-1]) - 1) * 100:+.1f}%"),
@@ -21143,8 +21161,12 @@ def _reversal_data() -> dict:
     if cl.empty or "SMH" not in cl.columns:
         return {}
     rets = cl[[c for c in opt if c in cl.columns]].pct_change(fill_method=None).mean(axis=1, skipna=True).fillna(0)
+    try:
+        _smh_open = raw["Open"]["SMH"].dropna()
+    except Exception:
+        _smh_open = None
     return {"SMH": cl["SMH"].dropna(), "光通信バスケット": (1 + rets).cumprod(),
-            "vix": cl["^VIX"].dropna(), "tnx": cl["^TNX"].dropna()}
+            "vix": cl["^VIX"].dropna(), "tnx": cl["^TNX"].dropna(), "smh_open": _smh_open}
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -21226,25 +21248,38 @@ def render_reversal_checklist():
     if not d:
         st.info("データを取得できませんでした。")
         return
-    res = {k: _reversal_metrics_for(d[k], d["vix"], d["tnx"]) for k in ("SMH", "光通信バスケット")}
+    res = {k: _reversal_metrics_for(d[k], d["vix"], d["tnx"], d.get("smh_open") if k == "SMH" else None) for k in ("SMH", "光通信バスケット")}
     res = {k: v for k, v in res.items() if v}
     if not res:
         st.info("判定に必要なデータが足りません。")
         return
     names = list(res)
-    labels = list(next(iter(res.values()))["checks"])
+    labels = []
+    for _n in res:
+        for _lb in res[_n]["checks"]:
+            if _lb not in labels:
+                labels.append(_lb)
     hdr = "".join(f'<th style="padding:6px 8px">{n}</th>' for n in names)
     rows = []
     for lb in labels:
         tds = ""
         for n in names:
+            if lb not in res[n]["checks"]:
+                tds += '<td style="padding:6px 8px;color:#64748b;font-size:11px">—（データなし）</td>'
+                continue
             ok, txt = res[n]["checks"][lb]
             tds += (f'<td style="padding:6px 8px;vertical-align:top"><span style="font-size:15px">{"✅" if ok else "⬜"}</span> '
                     f'<span style="font-size:11px;color:#cbd5e1">{txt}</span></td>')
         rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600;font-size:12px">{lb}</td>{tds}</tr>')
     # 満たした数（「下落局面にいる」自体は数えない）
-    cnt = {n: sum(1 for lb in labels[1:] if res[n]["checks"][lb][0]) for n in names}
-    summ = "　".join(f"{n}: <b>{cnt[n]}/{len(labels) - 1}</b>" for n in names)
+    cnt = {n: sum(1 for lb in res[n]["checks"] if lb != labels[0] and res[n]["checks"][lb][0]) for n in names}
+    tot = {n: len(res[n]["checks"]) - 1 for n in names}
+
+    def _verdict(n):
+        r_ = cnt[n] / tot[n] if tot[n] else 0
+        return ("🟢 谷の可能性が高い（複数のサインがそろっている）" if r_ >= 0.6 else
+                "🟡 谷の可能性あり（確認中。数日の値動きを見たい）" if r_ >= 0.35 else "🔴 まだ谷とは言えない")
+    summ = "　".join(f"{n}: <b>{cnt[n]}/{tot[n]}</b> {_verdict(n)}" for n in names)
     kinds = "".join(f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">{n}の下落タイプ: {res[n]["kind"]}</div>' for n in names)
     st.markdown(
         f'<div style="background:#1e293b;border-left:4px solid #38bdf8;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
@@ -21345,10 +21380,11 @@ def _render_selloff_log():
             f'<td>{e.get("verdict", "")}</td><td style="color:{col}">{fmt(opt)}</td><td>{fmt(ix.get("SMH"))}</td><td>{fmt(ix.get("SPY"))}</td>'
             f'<td>{"—" if e.get("tnx") is None else format(e["tnx"], ".2f") + "%"}</td><td>{"—" if e.get("vix") is None else e["vix"]}</td>'
             f'<td>{"—" if not e.get("rsi") else str(round((e["rsi"].get("光通信バスケット") or 0))) + " / " + str(round((e["rsi"].get("半導体ETF（SMH）") or 0)))}</td>'
+            f'<td>{"—" if not e.get("bb_pct") else str(round(e["bb_pct"].get("光通信バスケット", 0))) + "% / " + str(round(e["bb_pct"].get("半導体ETF（SMH）", 0))) + "%"}</td>'
             f'<td style="font-size:11px;color:#cbd5e1">{mtxt}</td></tr>')
     st.markdown(
         '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
-        '<th style="padding:5px 8px">日付</th><th>判定</th><th>光通信</th><th>SMH</th><th>S&P500</th><th>米10年債</th><th>VIX</th><th>RSI(光通信/SMH)</th><th>大きな動き</th></tr></thead>'
+        '<th style="padding:5px 8px">日付</th><th>判定</th><th>光通信</th><th>SMH</th><th>S&P500</th><th>米10年債</th><th>VIX</th><th>RSI(光通信/SMH)</th><th>%B(光通信/SMH)</th><th>大きな動き</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
     st.caption(f"※ 直近30営業日まで表示（記録は{len(ent)}日分、最終更新 {log.get('updated_at', '')}）。前営業日の終値ベースで、原因は断定できません。")
 

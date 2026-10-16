@@ -57,6 +57,31 @@ def rsi14(c: pd.Series, n: int = 14) -> pd.Series:
     return 100 - 100 / (1 + up / dn.replace(0, float("nan")))
 
 
+def pct_b(c: pd.Series) -> float:
+    """ボリンジャーバンド（20日・2σ）の%B。0=下限、1=上限。0未満は下限割れ。"""
+    ma, sd = c.rolling(20).mean(), c.rolling(20).std(ddof=0)
+    lo, up = ma - 2 * sd, ma + 2 * sd
+    w = float(up.iloc[-1] - lo.iloc[-1])
+    return float((c.iloc[-1] - lo.iloc[-1]) / w) if w > 0 else float("nan")
+
+
+def compute_bb(close: pd.DataFrame) -> dict:
+    """RSIと同じ対象のボリンジャー%B（%表記）。"""
+    out = {}
+    for name, t in RSI_ETFS.items():
+        if t in close.columns:
+            c = close[t].dropna()
+            if len(c) > 25:
+                out[name] = round(pct_b(c) * 100, 0)
+    for name, names in RSI_BASKETS.items():
+        cols = [x for x in names if x in close.columns]
+        if cols:
+            b = (1 + close[cols].pct_change(fill_method=None).mean(axis=1, skipna=True).fillna(0)).cumprod()
+            if len(b) > 25:
+                out[name] = round(pct_b(b) * 100, 0)
+    return out
+
+
 def compute_rsi(close: pd.DataFrame) -> tuple:
     """指数・バスケットのRSI(14)の最新値と、光通信の構成銘柄のうちRSI30未満の割合（%）を返す。"""
     out = {}
@@ -131,6 +156,7 @@ def main() -> None:
     }
     rsi_map, rsi_share = compute_rsi(close)
     entry["rsi"] = rsi_map
+    entry["bb_pct"] = compute_bb(close)
     entry["rsi_opt_low_share"] = rsi_share
     movers = [{"t": s, "ret": round(rets[s], 1), "vol": round(vr.get(s, 0), 1)}
               for g in GROUPS.values() for s in g if s in rets and abs(rets[s]) >= 8 and vr.get(s, 0) >= 1.8]
