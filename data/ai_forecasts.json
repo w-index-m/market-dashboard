@@ -1631,7 +1631,109 @@
     "usdjpy": "up"
    },
    "scenario": "米FRB利上げペース見送りの可能性低く、インフレ圧力継続で長期金利上昇。米景気減速懸念からリスクオフ基調で株式下落。日米金利差拡大で円安加速。"
+  },
+  {
+   "id": "2026-10-17-gemini",
+   "date": "2026-10-17",
+   "model": "Gemini (gemini-3.8-flash)",
+   "snapshot": {
+    "sp500": {
+     "value": 7659.44,
+     "chg20_pct": 0.12,
+     "date": "2026-10-16"
+    },
+    "nikkei": {
+     "value": 64425.949,
+     "chg20_pct": 0.65,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.098,
+     "chg20_pct": 2.0,
+     "date": "2026-10-16"
+    },
+    "usdjpy": {
+     "value": 157.987,
+     "chg20_pct": 1.19,
+     "date": "2026-10-16"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米金利５％台定着による高金利負担から日米株は調整下落。過熱感から債券利回りは低下に転じ、介入警戒感も手伝い為替は円高へ修正される。"
+  },
+  {
+   "id": "2026-10-17-groq",
+   "date": "2026-10-17",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7659.44,
+     "chg20_pct": 0.12,
+     "date": "2026-10-16"
+    },
+    "nikkei": {
+     "value": 64425.949,
+     "chg20_pct": 0.65,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.098,
+     "chg20_pct": 2.0,
+     "date": "2026-10-16"
+    },
+    "usdjpy": {
+     "value": 157.987,
+     "chg20_pct": 1.19,
+     "date": "2026-10-16"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利上昇と企業収益改善が継続し、株価は上昇。円安はドル高進行で日銀政策維持の影響で推進。"
+  },
+  {
+   "id": "2026-10-17-mistral",
+   "date": "2026-10-17",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7659.44,
+     "chg20_pct": 0.12,
+     "date": "2026-10-16"
+    },
+    "nikkei": {
+     "value": 64425.949,
+     "chg20_pct": 0.65,
+     "date": "2026-10-15"
+    },
+    "tnx": {
+     "value": 5.098,
+     "chg20_pct": 2.0,
+     "date": "2026-10-16"
+    },
+    "usdjpy": {
+     "value": 157.987,
+     "chg20_pct": 1.19,
+     "date": "2026-10-16"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米FRBの利下げ遅延（インフレ持続）と米国債利回り上昇でリスク資産売り圧力強まる。日米株安、円安傾向。米国経済の強さと中国景気回復の不透明性が追い打ち。"
   }
  ],
- "updated_at": "2026-10-16T00:39:44Z"
+ "updated_at": "2026-10-17T00:43:15Z"
 }
