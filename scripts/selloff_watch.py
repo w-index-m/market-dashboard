@@ -129,6 +129,10 @@ def main() -> None:
         print("no data")
         return
     date = str(close.index[-1].date())
+    # Yahooの最新日が銘柄ごとにずれることがある（ETFだけ前日で止まる等）。最新日のデータが無い銘柄は、前日の動きを今日の動きと取り違えないよう除外する
+    stale = sorted(c for c in close.columns if close[c].last_valid_index() != close.index[-1])
+    for c in stale:
+        close[c] = float("nan")
     rets, vr = {}, {}
     for s in syms:
         if s in close.columns:
@@ -148,6 +152,7 @@ def main() -> None:
     tnx = close["^TNX"].dropna() if "^TNX" in close.columns else pd.Series(dtype=float)
     vix = close["^VIX"].dropna() if "^VIX" in close.columns else pd.Series(dtype=float)
     entry = {
+        "stale_skipped": stale[:12],
         "date": date, "groups": grp, "indexes": idx,
         "tnx": round(float(tnx.iloc[-1]), 3) if len(tnx) else None,
         "tnx_bp": round(float(tnx.iloc[-1] - tnx.iloc[-2]) * 100, 1) if len(tnx) >= 2 else None,
