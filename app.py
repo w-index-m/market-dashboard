@@ -12867,6 +12867,87 @@ def render_rising_screener():
         "シャープレシオは、(平均リターン−無リスク金利)÷標準偏差（年率）で、リスクに対して効率よく上がったかの目安です。投資助言ではありません。")
 
 
+def _lyte_compare_metrics(close: pd.DataFrame, opt_cols: list, semi_cols: list, etf: str = "LYTE") -> dict:
+    """上場の新しいETF（既定 LYTE）の上場日を基準（=100）にして、光通信バスケット（等加重）・半導体ETF・個別半導体平均と比べる（純粋関数）。
+    Returns: {"start": 上場日, "norm": 基準化したDataFrame, "rets": {名前: 騰落率%}, "corr": 日次騰落の相関, "n": 日数} / 取得できなければ {}。"""
+    if etf not in close.columns or close[etf].dropna().shape[0] < 5:
+        return {}
+    start = close[etf].first_valid_index()
+    c = close.loc[start:].ffill()
+    base = c.iloc[0]
+    norm = c / base * 100
+    out = pd.DataFrame(index=norm.index)
+    out[etf] = norm[etf]
+    ocs = [x for x in opt_cols if x in norm.columns and norm[x].notna().any()]
+    if ocs:
+        out["光通信バスケット（等加重）"] = norm[ocs].mean(axis=1)
+    for e in ("SMH", "SOXX"):
+        if e in norm.columns:
+            out[e] = norm[e]
+    scs = [x for x in semi_cols if x in norm.columns and x not in ("SMH", "SOXX") and norm[x].notna().any()]
+    if scs:
+        out["個別半導体平均（等加重）"] = norm[scs].mean(axis=1)
+    rets = {k: round(float(v.dropna().iloc[-1]) - 100, 1) for k, v in out.items() if v.dropna().shape[0] >= 2}
+    corr = None
+    if "光通信バスケット（等加重）" in out.columns:
+        d = out[[etf, "光通信バスケット（等加重）"]].pct_change().dropna()
+        if len(d) >= 5:
+            corr = round(float(d.corr().iloc[0, 1]), 2)
+    return {"start": str(pd.Timestamp(start).date()), "norm": out, "rets": rets, "corr": corr, "n": int(len(out))}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_lyte_compare() -> dict:
+    """フォトニクスETF（LYTE）と、光通信バスケット・半導体ETFの価格を、LYTEの上場日以降について取得して比べる。失敗時は {}。"""
+    opt = [t for t, _ in _OPTICAL_BASKET]
+    semi = [t for t, _ in _SEMI_BASKET]
+    try:
+        raw = yf.download(opt + semi + ["LYTE"], period="6mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        close = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[lyte_compare] 取得失敗: {e}")
+        return {}
+    return _lyte_compare_metrics(close, opt, semi, "LYTE")
+
+
+def render_lyte_compare():
+    """🆕 フォトニクスETF（LYTE）との同期間比較。LYTEは上場が新しい（2026年8月）ため、長期の比較は光通信バスケット（疑似ETF）で続ける。"""
+    d = _fetch_lyte_compare()
+    if not d:
+        return
+    norm, rets = d["norm"], d["rets"]
+    import plotly.graph_objects as go
+    st.markdown("#### 🆕 フォトニクスETF（LYTE）との同期間比較")
+    st.caption(f"LYTE（Roundhill Photonics & Optics ETF）の上場日 {d['start']} を100として比べます（{d['n']}営業日）。"
+               "LYTEは上場が新しく過去の期間が短いため、長い期間の比較は、これまでどおり光通信バスケット（疑似ETF）で続けます。")
+    colors = {"LYTE": "#f472b6", "光通信バスケット（等加重）": "#38bdf8", "SMH": "#f59e0b", "SOXX": "#fbbf24", "個別半導体平均（等加重）": "#fb923c"}
+    fig = go.Figure()
+    for col in norm.columns:
+        fig.add_trace(go.Scatter(x=norm.index, y=norm[col], name=col, line=dict(width=3.5 if col in ("LYTE", "光通信バスケット（等加重）") else 2,
+                                                                                    color=colors.get(col, "#94a3b8"),
+                                                                                    dash="dash" if col in ("SMH", "SOXX") else "solid")))
+    fig.add_hline(y=100, line_dash="dot", line_color="#475569", line_width=1)
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=340, margin=dict(l=10, r=10, t=20, b=10),
+                      yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="上場日=100", font=dict(color="#e2e8f0"))),
+                      xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"),
+                      legend=dict(orientation="h", y=-0.25, font=dict(color="#e2e8f0")), hovermode="x unified",
+                      hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="lyte_cmp_fig")
+    rows = "".join(
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{k}</td>'
+        f'<td style="color:{"#4ade80" if v >= 0 else "#f87171"};font-weight:700">{v:+.1f}%</td></tr>' for k, v in rets.items())
+    corr = d.get("corr")
+    extra = ""
+    if corr is not None and "LYTE" in rets and "光通信バスケット（等加重）" in rets:
+        gap = rets["LYTE"] - rets["光通信バスケット（等加重）"]
+        extra = (f'<div style="font-size:12px;color:#cbd5e1;margin-top:6px">光通信バスケット（疑似ETF）がLYTEをどれだけ再現しているか: '
+                 f'日々の動きの相関 <b>{corr:.2f}</b>、期間の騰落率の差（LYTE－バスケット） <b>{gap:+.1f}pt</b></div>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+                f'<th style="padding:6px 8px">対象</th><th>上場日からの騰落</th></tr></thead><tbody>{rows}</tbody></table>{extra}', unsafe_allow_html=True)
+    st.caption("※ LYTEはアクティブ運用で、保有銘柄・比率は運用会社の判断で変わります（疑似ETFは固定の等加重）。差は、銘柄の選び方・比率・費用（年0.65%程度）などによるものです。"
+               "上場から日が浅く、統計的な結論は出せません。")
+
+
 def render_optical_vs_semi():
     """📡 光通信・AI インフラ vs 半導体 パフォーマンス比較"""
     st.markdown('<a id="optical-semi"></a>', unsafe_allow_html=True)
@@ -13062,6 +13143,9 @@ def render_optical_vs_semi():
             f'{verdict}</div>',
             unsafe_allow_html=True,
         )
+
+    st.markdown("---")
+    render_lyte_compare()
 
     with st.expander("📖 各銘柄の役割メモ", expanded=False):
         st.markdown("""
