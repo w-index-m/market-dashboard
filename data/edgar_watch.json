@@ -2,9 +2,9 @@
  "seen": {},
  "log": [],
  "initialized": true,
- "last_check": "2026-10-19T13:20:03Z",
+ "last_check": "2026-10-19T22:23:04Z",
  "diag": [
-  "fts:Anthropic:500:0",
+  "fts:Anthropic:200:0",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0"
