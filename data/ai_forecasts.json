@@ -1733,7 +1733,143 @@
     "usdjpy": "up"
    },
    "scenario": "米FRBの利下げ遅延（インフレ持続）と米国債利回り上昇でリスク資産売り圧力強まる。日米株安、円安傾向。米国経済の強さと中国景気回復の不透明性が追い打ち。"
+  },
+  {
+   "id": "2026-10-20-groq",
+   "date": "2026-10-20",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7690.73,
+     "chg20_pct": -0.95,
+     "date": "2026-10-19"
+    },
+    "nikkei": {
+     "value": 64068.352,
+     "chg20_pct": 0.92,
+     "date": "2026-10-20"
+    },
+    "tnx": {
+     "value": 5.136,
+     "chg20_pct": 3.49,
+     "date": "2026-10-19"
+    },
+    "usdjpy": {
+     "value": 158.526,
+     "chg20_pct": 0.74,
+     "date": "2026-10-20"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国金利上昇と企業収益改善で株価上昇、円は安全資産需要で円高。"
+  },
+  {
+   "id": "2026-10-20-mistral",
+   "date": "2026-10-20",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7690.73,
+     "chg20_pct": -0.95,
+     "date": "2026-10-19"
+    },
+    "nikkei": {
+     "value": 64068.352,
+     "chg20_pct": 0.92,
+     "date": "2026-10-20"
+    },
+    "tnx": {
+     "value": 5.136,
+     "chg20_pct": 3.49,
+     "date": "2026-10-19"
+    },
+    "usdjpy": {
+     "value": 158.526,
+     "chg20_pct": 0.74,
+     "date": "2026-10-20"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米利上げペース見送りの可能性低下で長期金利上昇、リスクオフ基調が続き、日米株安。ドル円は米金利上昇と日本金融緩和の格差拡大で円安が強まる。"
+  },
+  {
+   "id": "2026-10-20-nvidia",
+   "date": "2026-10-20",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7690.73,
+     "chg20_pct": -0.95,
+     "date": "2026-10-19"
+    },
+    "nikkei": {
+     "value": 64068.352,
+     "chg20_pct": 0.92,
+     "date": "2026-10-20"
+    },
+    "tnx": {
+     "value": 5.136,
+     "chg20_pct": 3.49,
+     "date": "2026-10-19"
+    },
+    "usdjpy": {
+     "value": 158.526,
+     "chg20_pct": 0.74,
+     "date": "2026-10-20"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米長期金利上昇で株価調整、158円台で介入警戒感強まり円買い戻し"
+  },
+  {
+   "id": "2026-10-20-openrouter",
+   "date": "2026-10-20",
+   "model": "OpenRouter (minimax/minimax-m3.1-flash:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7690.73,
+     "chg20_pct": -0.95,
+     "date": "2026-10-19"
+    },
+    "nikkei": {
+     "value": 64068.352,
+     "chg20_pct": 0.92,
+     "date": "2026-10-20"
+    },
+    "tnx": {
+     "value": 5.136,
+     "chg20_pct": 3.49,
+     "date": "2026-10-19"
+    },
+    "usdjpy": {
+     "value": 158.526,
+     "chg20_pct": 0.74,
+     "date": "2026-10-20"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "長金利上昇が続き米株を圧박。対ドル利回り差と輸出株優勢で日経は上昇し、円安は根強い。"
   }
  ],
- "updated_at": "2026-10-17T00:43:15Z"
+ "updated_at": "2026-10-20T01:12:10Z"
 }
