@@ -2005,7 +2005,109 @@
     "usdjpy": "up"
    },
    "scenario": "米国景力錚化とFRB利上げ終了期待が高まり、ドル高円安が進行。米国株は景力錛化で上昇、日本株は円安で上昇、米国債利回りは上昇、ドル円は円安が進む。"
+  },
+  {
+   "id": "2026-10-22-groq",
+   "date": "2026-10-22",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7757.17,
+     "chg20_pct": 0.66,
+     "date": "2026-10-21"
+    },
+    "nikkei": {
+     "value": 64372.078,
+     "chg20_pct": 0.37,
+     "date": "2026-10-22"
+    },
+    "tnx": {
+     "value": 5.146,
+     "chg20_pct": 0.63,
+     "date": "2026-10-21"
+    },
+    "usdjpy": {
+     "value": 158.2,
+     "chg20_pct": -0.04,
+     "date": "2026-10-22"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国金利上昇で株価上昇、円は安全資産需要減少で円高"
+  },
+  {
+   "id": "2026-10-22-mistral",
+   "date": "2026-10-22",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7757.17,
+     "chg20_pct": 0.66,
+     "date": "2026-10-21"
+    },
+    "nikkei": {
+     "value": 64372.078,
+     "chg20_pct": 0.37,
+     "date": "2026-10-22"
+    },
+    "tnx": {
+     "value": 5.146,
+     "chg20_pct": 0.63,
+     "date": "2026-10-21"
+    },
+    "usdjpy": {
+     "value": 158.2,
+     "chg20_pct": -0.04,
+     "date": "2026-10-22"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fed利上げペース鈍化（インフレ減速・金利先物下落）で米国株高、日経も成長株需要回復。米国債利回り低下、ドル円はリスクオンで円安が継続。"
+  },
+  {
+   "id": "2026-10-22-nvidia",
+   "date": "2026-10-22",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7757.17,
+     "chg20_pct": 0.66,
+     "date": "2026-10-21"
+    },
+    "nikkei": {
+     "value": 64372.078,
+     "chg20_pct": 0.37,
+     "date": "2026-10-22"
+    },
+    "tnx": {
+     "value": 5.146,
+     "chg20_pct": 0.63,
+     "date": "2026-10-21"
+    },
+    "usdjpy": {
+     "value": 158.2,
+     "chg20_pct": -0.04,
+     "date": "2026-10-22"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米金利高止まりで株価調整、介入警戒でドル売り円買い進行"
   }
  ],
- "updated_at": "2026-10-21T00:50:20Z"
+ "updated_at": "2026-10-22T00:51:43Z"
 }
