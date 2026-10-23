@@ -2107,7 +2107,143 @@
     "usdjpy": "down"
    },
    "scenario": "米金利高止まりで株価調整、介入警戒でドル売り円買い進行"
+  },
+  {
+   "id": "2026-10-23-groq",
+   "date": "2026-10-23",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7663.43,
+     "chg20_pct": -0.53,
+     "date": "2026-10-22"
+    },
+    "nikkei": {
+     "value": 61818.719,
+     "chg20_pct": -4.92,
+     "date": "2026-10-23"
+    },
+    "tnx": {
+     "value": 4.953,
+     "chg20_pct": -4.05,
+     "date": "2026-10-22"
+    },
+    "usdjpy": {
+     "value": 156.394,
+     "chg20_pct": -1.52,
+     "date": "2026-10-23"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米国景気回復期待で株価上昇、日経は国内需減で下落。金利低下で債券利回り下がり、円は安全資産需要増で円高。"
+  },
+  {
+   "id": "2026-10-23-mistral",
+   "date": "2026-10-23",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7663.43,
+     "chg20_pct": -0.53,
+     "date": "2026-10-22"
+    },
+    "nikkei": {
+     "value": 61818.719,
+     "chg20_pct": -4.92,
+     "date": "2026-10-23"
+    },
+    "tnx": {
+     "value": 4.953,
+     "chg20_pct": -4.05,
+     "date": "2026-10-22"
+    },
+    "usdjpy": {
+     "value": 156.394,
+     "chg20_pct": -1.52,
+     "date": "2026-10-23"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米利下げ期待強まり（Fedのハイパータカンバック）、リスク資産回復。日米金利格差縮小で円安。米景気軟着陸確実性高まるも、米国債利回りは下落基調。"
+  },
+  {
+   "id": "2026-10-23-nvidia",
+   "date": "2026-10-23",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7663.43,
+     "chg20_pct": -0.53,
+     "date": "2026-10-22"
+    },
+    "nikkei": {
+     "value": 61818.719,
+     "chg20_pct": -4.92,
+     "date": "2026-10-23"
+    },
+    "tnx": {
+     "value": 4.953,
+     "chg20_pct": -4.05,
+     "date": "2026-10-22"
+    },
+    "usdjpy": {
+     "value": 156.394,
+     "chg20_pct": -1.52,
+     "date": "2026-10-23"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米金利の過度な低下が修正しドル円が円安へ。円安恩恵と自律反発で日経は上昇するが、高バリュエーションのS&Pは金利上昇で重くなる。"
+  },
+  {
+   "id": "2026-10-23-openrouter",
+   "date": "2026-10-23",
+   "model": "OpenRouter (recursive/flint-v1.0:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7663.43,
+     "chg20_pct": -0.53,
+     "date": "2026-10-22"
+    },
+    "nikkei": {
+     "value": 61818.719,
+     "chg20_pct": -4.92,
+     "date": "2026-10-23"
+    },
+    "tnx": {
+     "value": 4.953,
+     "chg20_pct": -4.05,
+     "date": "2026-10-22"
+    },
+    "usdjpy": {
+     "value": 156.394,
+     "chg20_pct": -1.52,
+     "date": "2026-10-23"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米景気減速と金融引き締め再期待でリスク資産は下落、円は高値圏へ戻る"
   }
  ],
- "updated_at": "2026-10-22T00:51:43Z"
+ "updated_at": "2026-10-23T00:53:14Z"
 }
