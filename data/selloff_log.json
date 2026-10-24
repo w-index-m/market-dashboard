@@ -1,5 +1,5 @@
 {
- "updated_at": "2026-10-23T00:58:09Z",
+ "updated_at": "2026-10-24T01:06:23Z",
  "entries": [
   {
    "date": "2026-10-14",
@@ -262,6 +262,40 @@
    "tnx": 4.953,
    "tnx_bp": -19.3,
    "vix": 19.03,
+   "verdict": "目立った広がりなし",
+   "rsi": {
+    "光通信バスケット": NaN,
+    "メモリ（MU・WDC・STX）": NaN,
+    "AIインフラ（VRT・APH・ANET）": NaN
+   },
+   "bb_pct": {
+    "光通信バスケット": NaN,
+    "メモリ（MU・WDC・STX）": NaN,
+    "AIインフラ（VRT・APH・ANET）": NaN
+   },
+   "rsi_opt_low_share": null
+  },
+  {
+   "stale_skipped": [
+    "AAOI",
+    "ALAB",
+    "AMAT",
+    "AMD",
+    "ANET",
+    "APH",
+    "AVGO",
+    "CIEN",
+    "COHR",
+    "CRDO",
+    "CRWV",
+    "GLW"
+   ],
+   "date": "2026-10-23",
+   "groups": {},
+   "indexes": {},
+   "tnx": 4.988,
+   "tnx_bp": 3.5,
+   "vix": 19.45,
    "verdict": "目立った広がりなし",
    "rsi": {
     "光通信バスケット": NaN,
