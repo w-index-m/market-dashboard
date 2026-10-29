@@ -1,5 +1,5 @@
 {
- "updated_at": "2026-10-15",
+ "updated_at": "2026-10-29",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
   {
@@ -60,6 +60,26 @@
    "status": "NICTの発表",
    "sources": [
     "https://www.nict.go.jp/press/2026/06/29-1.html"
+   ]
+  },
+  {
+   "date": "2026-10-28",
+   "title": "Vertivが7〜9月期決算で予想を上回り、通期見通しを引き上げ",
+   "summary": "売上は43.1億ドル（前年同期比+61%、オーガニック+55%）、調整後EPSは2.21ドル（会社見通しの中央値を0.41ドル上回る）、調整後営業利益率は25.2%。通期売上見通しを6.5億ドル引き上げ（中央値146.5億ドル）、10〜12月期の売上見通しは44.1億ドルで市場予想（43.2億ドル）を上回った。決算後に株価が約15%上昇したとの報道が1件あるが、他の出所では未確認。",
+   "status": "会社の8-Kで数字を確認／株価の反応は1件のみの報道",
+   "sources": [
+    "https://www.sec.gov/Archives/edgar/data/0001674101/000162828026067707/q32026exhibit991vrt10282026.htm",
+    "https://finance.yahoo.com/markets/stocks/articles/vertiv-nyse-vrt-beats-expectations-105935914.html"
+   ]
+  },
+  {
+   "date": "2026-10-28",
+   "title": "FOMCが政策金利を据え置き（10対2）、2人が利上げを主張。米株は3日続伸",
+   "summary": "政策金利は3.75〜4.00%で据え置き。反対はクリーブランド連銀のハマック総裁とクック理事で、どちらも利上げを支持した。S&P500は7,744（+0.28%）、ナスダックは26,550（+0.27%）で3日続伸、マイクロンは約6%高。ナスダックは10/6の最高値（27,600）から約3.8%下。引け後にAlphabetが決算を受けて約10%下落し、ナスダック100先物は約1.2%安と報じられた。",
+   "status": "複数の報道で確認",
+   "sources": [
+    "https://www.fool.com/coverage/stock-market-today/2026/10/28/stock-market-today-oct-28-markets-edge-higher-as-fed-holds-rates-steady/",
+    "https://www.bbntimes.com/technology/nasdaq-composite-rises-to-26-549-85-after-the-fed-decision-as-alphabet-sinks-10-and-microsoft-rises-after-hours"
    ]
   }
  ]

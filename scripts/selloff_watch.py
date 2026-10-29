@@ -120,17 +120,22 @@ def _post(text: str) -> None:
             print(f"Slack failed: {e}", file=sys.stderr)
 
 
-def main() -> None:
-    syms = sorted({s for v in GROUPS.values() for s in v} | set(INDEXES) | set(RSI_ETFS.values()) | {"^TNX", "^VIX", "VRT", "APH", "ANET", "MU", "WDC", "STX"})
-    raw = yf.download(syms, period="6mo", interval="1d", auto_adjust=False, progress=False, group_by="column")
-    close = raw["Close"].dropna(how="all")
-    vol = raw["Volume"]
-    if len(close) < 2:
-        print("no data")
-        return
-    date = str(close.index[-1].date())
-    # Yahooの最新日が銘柄ごとにずれることがある（ETFだけ前日で止まる等）。最新日のデータが無い銘柄は、前日の動きを今日の動きと取り違えないよう除外する
-    stale = sorted(c for c in close.columns if close[c].last_valid_index() != close.index[-1])
+EQUITY_SKIP = ("^TNX", "^VIX")
+
+
+def build_entry(close: pd.DataFrame, vol: pd.DataFrame, syms: list) -> tuple:
+    """closeの最終行を『その日』として、1日分の記録（entry）と、通知用の中間値（rets, vr）を作る。
+    ・『その日』は、株・ETFの過半数が最新の値を持つ最後の日。^TNX・^VIXだけが先に翌日の行を持つことがあり、
+      それを基準にすると全銘柄が『古い』扱いになってしまう（2026-10-19〜23の記録が空になった不具合）ため、金利・VIXは基準に使わない。
+    ・その日のデータが無い銘柄（ETFだけ1日遅れる等）は、前日の動きを取り違えないよう除外する。"""
+    eq_cols = [c for c in close.columns if c not in EQUITY_SKIP]
+    last_by = close[eq_cols].apply(lambda c: c.last_valid_index()).dropna()
+    counts = last_by.value_counts()
+    day = max(d for d, n in counts.items() if n >= max(3, len(eq_cols) * 0.5))
+    close = close.loc[:day].copy()
+    vol = vol.loc[:day]
+    date = str(day.date())
+    stale = sorted(c for c in eq_cols if close[c].last_valid_index() != day)
     for c in stale:
         close[c] = float("nan")
     rets, vr = {}, {}
@@ -167,14 +172,47 @@ def main() -> None:
               for g in GROUPS.values() for s in g if s in rets and abs(rets[s]) >= 8 and vr.get(s, 0) >= 1.8]
     if movers:
         entry["movers"] = movers
+    return entry, grp, idx, rsi_map, movers
+
+
+def _entry_is_empty(e: dict) -> bool:
+    return not e.get("groups") or not e.get("rsi")
+
+
+def main() -> None:
+    syms = sorted({s for v in GROUPS.values() for s in v} | set(INDEXES) | set(RSI_ETFS.values()) | {"^TNX", "^VIX", "VRT", "APH", "ANET", "MU", "WDC", "STX"})
+    raw = yf.download(syms, period="6mo", interval="1d", auto_adjust=False, progress=False, group_by="column")
+    close = raw["Close"].dropna(how="all")
+    vol = raw["Volume"]
+    if len(close) < 2:
+        print("no data")
+        return
+    entry, grp, idx, rsi_map, movers = build_entry(close, vol, syms)
+    date = entry["date"]
 
     try:
         with open(OUT, encoding="utf-8") as f:
             log = json.load(f)
     except (OSError, ValueError):
         log = {"entries": []}
+    # 過去の記録のうち、値が空だった日（上の不具合の影響）を、取得できる範囲で作り直す
+    redo = [e["date"] for e in log.get("entries", []) if _entry_is_empty(e) and e.get("date") != date]
+    fixed = {}
+    for d in redo:
+        try:
+            sub_close = close.loc[:d]
+            if len(sub_close) < 30:
+                continue
+            e2, *_ = build_entry(sub_close, vol.loc[:d], syms)
+            if e2["date"] == d and not _entry_is_empty(e2):
+                fixed[d] = e2
+        except Exception as ex:
+            print(f"redo {d} failed: {type(ex).__name__}")
+    if fixed:
+        print("rebuilt:", sorted(fixed))
     prev_rsi = next((e.get("rsi") for e in reversed(log.get("entries", [])) if e.get("date") != date and e.get("rsi")), {}) or {}
-    entries = [e for e in log.get("entries", []) if e.get("date") != date] + [entry]
+    base = [fixed.get(e["date"], e) for e in log.get("entries", []) if e.get("date") != date]
+    entries = base + [entry]
     entries.sort(key=lambda e: e["date"])
     log = {"updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "entries": entries[-MAX_ENTRIES:]}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
