@@ -1,5 +1,5 @@
 {
- "updated_at": "2026-10-29T01:57:12Z",
+ "updated_at": "2026-10-29T03:04:18Z",
  "entries": [
   {
    "date": "2026-10-14",
@@ -140,174 +140,231 @@
    "rsi_opt_low_share": 0
   },
   {
-   "stale_skipped": [
-    "AAOI",
-    "ALAB",
-    "AMAT",
-    "AMD",
-    "ANET",
-    "APH",
-    "AVGO",
-    "CIEN",
-    "COHR",
-    "CRDO",
-    "CRWV",
-    "GLW"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-19",
-   "groups": {},
-   "indexes": {},
+   "groups": {
+    "光通信": 2.35,
+    "AIインフラ（電源・接続）": 1.17,
+    "半導体（大型）": 1.76,
+    "メモリ・ストレージ": 4.47,
+    "AIの資金繰り（ネオクラウド等）": 1.9
+   },
+   "indexes": {
+    "SPY": 0.42,
+    "QQQ": 1.21,
+    "SMH": 1.61
+   },
    "tnx": 5.136,
    "tnx_bp": 3.8,
    "vix": 18.44,
    "verdict": "目立った広がりなし",
    "rsi": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 47.1,
+    "ナスダック100（QQQ）": 41.2,
+    "半導体ETF（SMH）": 35.8,
+    "ハイテク（XLK）": 38.8,
+    "ソフトウェア（IGV）": 47.1,
+    "小型株（IWM）": 33.8,
+    "光通信バスケット": 35.9,
+    "メモリ（MU・WDC・STX）": 32.7,
+    "AIインフラ（VRT・APH・ANET）": 33.2
    },
    "bb_pct": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 30.0,
+    "ナスダック100（QQQ）": 3.0,
+    "半導体ETF（SMH）": 2.0,
+    "ハイテク（XLK）": 0.0,
+    "ソフトウェア（IGV）": 25.0,
+    "小型株（IWM）": 6.0,
+    "光通信バスケット": 6.0,
+    "メモリ（MU・WDC・STX）": 8.0,
+    "AIインフラ（VRT・APH・ANET）": -5.0
    },
-   "rsi_opt_low_share": null
+   "rsi_opt_low_share": 0
   },
   {
-   "stale_skipped": [
-    "AAOI",
-    "ALAB",
-    "AMAT",
-    "AMD",
-    "ANET",
-    "APH",
-    "AVGO",
-    "CIEN",
-    "COHR",
-    "CRDO",
-    "CRWV",
-    "GLW"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-20",
-   "groups": {},
-   "indexes": {},
+   "groups": {
+    "光通信": -0.68,
+    "AIインフラ（電源・接続）": -0.96,
+    "半導体（大型）": -0.29,
+    "メモリ・ストレージ": 0.87,
+    "AIの資金繰り（ネオクラウド等）": 0.95
+   },
+   "indexes": {
+    "SPY": 0.34,
+    "QQQ": -0.1,
+    "SMH": -0.38
+   },
    "tnx": 5.117,
    "tnx_bp": -1.9,
    "vix": 17.31,
    "verdict": "目立った広がりなし",
    "rsi": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 49.7,
+    "ナスダック100（QQQ）": 40.8,
+    "半導体ETF（SMH）": 35.2,
+    "ハイテク（XLK）": 38.1,
+    "ソフトウェア（IGV）": 49.2,
+    "小型株（IWM）": 42.9,
+    "光通信バスケット": 35.4,
+    "メモリ（MU・WDC・STX）": 34.9,
+    "AIインフラ（VRT・APH・ANET）": 31.9
    },
    "bb_pct": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 43.0,
+    "ナスダック100（QQQ）": 8.0,
+    "半導体ETF（SMH）": 7.0,
+    "ハイテク（XLK）": 5.0,
+    "ソフトウェア（IGV）": 35.0,
+    "小型株（IWM）": 35.0,
+    "光通信バスケット": 10.0,
+    "メモリ（MU・WDC・STX）": 16.0,
+    "AIインフラ（VRT・APH・ANET）": -1.0
    },
-   "rsi_opt_low_share": null
+   "rsi_opt_low_share": 0
   },
   {
-   "stale_skipped": [
-    "AAOI",
-    "ALAB",
-    "AMAT",
-    "AMD",
-    "ANET",
-    "APH",
-    "AVGO",
-    "CIEN",
-    "COHR",
-    "CRDO",
-    "CRWV",
-    "GLW"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-21",
-   "groups": {},
-   "indexes": {},
+   "groups": {
+    "光通信": 2.24,
+    "AIインフラ（電源・接続）": 1.85,
+    "半導体（大型）": 1.39,
+    "メモリ・ストレージ": 2.59,
+    "AIの資金繰り（ネオクラウド等）": -0.21
+   },
+   "indexes": {
+    "SPY": 0.53,
+    "QQQ": 1.05,
+    "SMH": 1.89
+   },
    "tnx": 5.146,
    "tnx_bp": 2.9,
    "vix": 16.68,
    "verdict": "目立った広がりなし",
    "rsi": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 53.5,
+    "ナスダック100（QQQ）": 46.0,
+    "半導体ETF（SMH）": 40.3,
+    "ハイテク（XLK）": 44.5,
+    "ソフトウェア（IGV）": 53.2,
+    "小型株（IWM）": 44.2,
+    "光通信バスケット": 38.2,
+    "メモリ（MU・WDC・STX）": 39.2,
+    "AIインフラ（VRT・APH・ANET）": 36.4
    },
    "bb_pct": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 60.0,
+    "ナスダック100（QQQ）": 24.0,
+    "半導体ETF（SMH）": 19.0,
+    "ハイテク（XLK）": 22.0,
+    "ソフトウェア（IGV）": 56.0,
+    "小型株（IWM）": 41.0,
+    "光通信バスケット": 18.0,
+    "メモリ（MU・WDC・STX）": 25.0,
+    "AIインフラ（VRT・APH・ANET）": 13.0
    },
-   "rsi_opt_low_share": null
+   "rsi_opt_low_share": 0
   },
   {
-   "stale_skipped": [
-    "AAOI",
-    "ALAB",
-    "AMAT",
-    "AMD",
-    "ANET",
-    "APH",
-    "AVGO",
-    "CIEN",
-    "COHR",
-    "CRDO",
-    "CRWV",
-    "GLW"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-22",
-   "groups": {},
-   "indexes": {},
+   "groups": {
+    "光通信": -11.75,
+    "AIインフラ（電源・接続）": -7.81,
+    "半導体（大型）": -4.52,
+    "メモリ・ストレージ": -7.14,
+    "AIの資金繰り（ネオクラウド等）": -7.8
+   },
+   "indexes": {
+    "SPY": -1.18,
+    "QQQ": -2.86,
+    "SMH": -5.99
+   },
    "tnx": 4.953,
    "tnx_bp": -19.3,
    "vix": 19.03,
-   "verdict": "目立った広がりなし",
+   "verdict": "半導体全体に波及",
    "rsi": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 45.2,
+    "ナスダック100（QQQ）": 36.5,
+    "半導体ETF（SMH）": 31.6,
+    "ハイテク（XLK）": 36.4,
+    "ソフトウェア（IGV）": 53.0,
+    "小型株（IWM）": 44.6,
+    "光通信バスケット": 31.7,
+    "メモリ（MU・WDC・STX）": 33.6,
+    "AIインフラ（VRT・APH・ANET）": 28.4
    },
    "bb_pct": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 20.0,
+    "ナスダック100（QQQ）": -3.0,
+    "半導体ETF（SMH）": 0.0,
+    "ハイテク（XLK）": 2.0,
+    "ソフトウェア（IGV）": 54.0,
+    "小型株（IWM）": 44.0,
+    "光通信バスケット": 2.0,
+    "メモリ（MU・WDC・STX）": 13.0,
+    "AIインフラ（VRT・APH・ANET）": -6.0
    },
-   "rsi_opt_low_share": null
+   "rsi_opt_low_share": 17,
+   "movers": [
+    {
+     "t": "COHR",
+     "ret": -12.5,
+     "vol": 1.8
+    },
+    {
+     "t": "AMAT",
+     "ret": -8.2,
+     "vol": 2.0
+    }
+   ]
   },
   {
-   "stale_skipped": [
-    "AAOI",
-    "ALAB",
-    "AMAT",
-    "AMD",
-    "ANET",
-    "APH",
-    "AVGO",
-    "CIEN",
-    "COHR",
-    "CRDO",
-    "CRWV",
-    "GLW"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-23",
-   "groups": {},
-   "indexes": {},
+   "groups": {
+    "光通信": 0.12,
+    "AIインフラ（電源・接続）": -0.26,
+    "半導体（大型）": 1.49,
+    "メモリ・ストレージ": -1.82,
+    "AIの資金繰り（ネオクラウド等）": -1.32
+   },
+   "indexes": {
+    "SPY": -0.52,
+    "QQQ": -0.01,
+    "SMH": 0.74
+   },
    "tnx": 4.988,
    "tnx_bp": 3.5,
    "vix": 19.45,
    "verdict": "目立った広がりなし",
    "rsi": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 42.1,
+    "ナスダック100（QQQ）": 36.5,
+    "半導体ETF（SMH）": 33.4,
+    "ハイテク（XLK）": 38.1,
+    "ソフトウェア（IGV）": 56.8,
+    "小型株（IWM）": 43.1,
+    "光通信バスケット": 31.7,
+    "メモリ（MU・WDC・STX）": 33.1,
+    "AIインフラ（VRT・APH・ANET）": 29.4
    },
    "bb_pct": {
-    "光通信バスケット": NaN,
-    "メモリ（MU・WDC・STX）": NaN,
-    "AIインフラ（VRT・APH・ANET）": NaN
+    "S&P500（SPY）": 8.0,
+    "ナスダック100（QQQ）": 5.0,
+    "半導体ETF（SMH）": 9.0,
+    "ハイテク（XLK）": 11.0,
+    "ソフトウェア（IGV）": 72.0,
+    "小型株（IWM）": 39.0,
+    "光通信バスケット": 8.0,
+    "メモリ（MU・WDC・STX）": 16.0,
+    "AIインフラ（VRT・APH・ANET）": 3.0
    },
-   "rsi_opt_low_share": null
+   "rsi_opt_low_share": 0
   },
   {
    "stale_skipped": [],
@@ -396,14 +453,12 @@
    "rsi_opt_low_share": 0
   },
   {
-   "stale_skipped": [
-    "AVGO"
-   ],
+   "stale_skipped": [],
    "date": "2026-10-28",
    "groups": {
     "光通信": 3.68,
     "AIインフラ（電源・接続）": 3.67,
-    "半導体（大型）": 1.26,
+    "半導体（大型）": 1.91,
     "メモリ・ストレージ": 5.19,
     "AIの資金繰り（ネオクラウド等）": 7.14
    },
