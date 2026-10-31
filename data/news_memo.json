@@ -1,5 +1,5 @@
 {
- "updated_at": "2026-10-29",
+ "updated_at": "2026-10-31",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
   {
@@ -80,6 +80,17 @@
    "sources": [
     "https://www.fool.com/coverage/stock-market-today/2026/10/28/stock-market-today-oct-28-markets-edge-higher-as-fed-holds-rates-steady/",
     "https://www.bbntimes.com/technology/nasdaq-composite-rises-to-26-549-85-after-the-fed-decision-as-alphabet-sinks-10-and-microsoft-rises-after-hours"
+   ]
+  },
+  {
+   "date": "2026-10-30",
+   "title": "Blackstone、Anthropicは上場後も「ジャンク（投機的）格付け」になる可能性が高いと投資家に説明（FT報道）",
+   "summary": "以前は年末までに投資適格を見込んでいたが、BB（ジャンクの最上位）を見込む方針に変わった、と報じられた。Blackstoneの運用ファンドは、630億ドル規模のチップ調達案件（Project North Star）の劣後債に約90億ドルを10%超の利回りで投資し、優先ローンはBroadcomが保証。同案件にはKBRAがBB+、Morningstar DBRSがBBを付与済みで、Fitch・Moody's・S&Pは上場後の見込み。Anthropicは現金1,120億ドル超を保有し、上場で約1,000億ドルの調達を見込む。2045年までの計算資源への支出は8,000億ドル超との報道。Blackstoneの説明は正式な格付けではなく、結果は異なりうる。優先・劣後の金額など、数字は報道ごとに食い違う。",
+   "status": "報道ベース（FT報道を引用した二次情報。FT原文は未確認）",
+   "sources": [
+    "https://www.tradingview.com/news/seekingalpha:89b0b236c094b:0-anthropic-may-get-junk-credit-rating-after-its-ipo-blackstone-says-report/",
+    "https://www.tipranks.com/news/anthropic-could-get-junk-credit-rating-after-ipo-warns-blackstone-bx",
+    "https://invezz.com/ie/news/2026/10/30/anthropic-ipo-blackstone-warns-ai-firm-may-receive-junk-credit-rating-report/"
    ]
   }
  ]
