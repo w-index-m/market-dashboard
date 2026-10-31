@@ -1,71 +1,8 @@
 {
- "generated_at": "2026-10-30T21:23:48Z",
+ "generated_at": "2026-10-31T20:24:53Z",
  "universe_source": "SPSM",
  "universe_size": 606,
  "candidates": {
-  "RHP": {
-   "name": "RYMAN HOSPITALITY PROPERTIES",
-   "price": 133.18,
-   "market_cap": 9187326976,
-   "gross_margin": 35.2,
-   "insider_pct": 2.9,
-   "roe": 22.6,
-   "debt_ebitda": 4.95
-  },
-  "TGTX": {
-   "name": "TG THERAPEUTICS INC",
-   "price": 61.18,
-   "market_cap": 9365653504,
-   "gross_margin": 82.4,
-   "insider_pct": 7.5,
-   "roe": 100.3,
-   "debt_ebitda": 5.53
-  },
-  "GKOS": {
-   "name": "GLAUKOS CORP",
-   "price": 237.6,
-   "market_cap": 14065177600,
-   "gross_margin": 81.1,
-   "insider_pct": 3.6,
-   "roe": -22.8,
-   "debt_ebitda": null
-  },
-  "LTH": {
-   "name": "LIFE TIME GROUP HOLDINGS INC",
-   "price": 45.1,
-   "market_cap": 10129617920,
-   "gross_margin": 47.9,
-   "insider_pct": 8.7,
-   "roe": 13.0,
-   "debt_ebitda": 4.8
-  },
-  "PAYC": {
-   "name": "PAYCOM SOFTWARE INC",
-   "price": 264.2,
-   "market_cap": 11907922944,
-   "gross_margin": 88.1,
-   "insider_pct": 14.1,
-   "roe": 41.1,
-   "debt_ebitda": 1.34
-  },
-  "MTCH": {
-   "name": "MATCH GROUP INC",
-   "price": 41.41,
-   "market_cap": 9659567104,
-   "gross_margin": 74.9,
-   "insider_pct": 0.8,
-   "roe": null,
-   "debt_ebitda": 3.09
-  },
-  "PTGX": {
-   "name": "PROTAGONIST THERAPEUTICS INC",
-   "price": 144.85,
-   "market_cap": 9372995584,
-   "gross_margin": 100.0,
-   "insider_pct": 0.7,
-   "roe": 11.0,
-   "debt_ebitda": 0.15
-  },
   "JXN": {
    "name": "JACKSON FINANCIAL INC A",
    "price": 134.93,
@@ -84,6 +21,51 @@
    "roe": 16.1,
    "debt_ebitda": 2.32
   },
+  "MTCH": {
+   "name": "MATCH GROUP INC",
+   "price": 41.41,
+   "market_cap": 9505707008,
+   "gross_margin": 74.9,
+   "insider_pct": 0.8,
+   "roe": null,
+   "debt_ebitda": 3.09
+  },
+  "PAYC": {
+   "name": "PAYCOM SOFTWARE INC",
+   "price": 264.2,
+   "market_cap": 11907922944,
+   "gross_margin": 88.1,
+   "insider_pct": 14.1,
+   "roe": 41.1,
+   "debt_ebitda": 1.34
+  },
+  "LTH": {
+   "name": "LIFE TIME GROUP HOLDINGS INC",
+   "price": 45.1,
+   "market_cap": 10129617920,
+   "gross_margin": 47.9,
+   "insider_pct": 8.6,
+   "roe": 13.0,
+   "debt_ebitda": 4.8
+  },
+  "TGTX": {
+   "name": "TG THERAPEUTICS INC",
+   "price": 61.18,
+   "market_cap": 9364764672,
+   "gross_margin": 82.4,
+   "insider_pct": 7.5,
+   "roe": 100.3,
+   "debt_ebitda": 5.53
+  },
+  "PTGX": {
+   "name": "PROTAGONIST THERAPEUTICS INC",
+   "price": 144.85,
+   "market_cap": 9372995584,
+   "gross_margin": 100.0,
+   "insider_pct": 0.7,
+   "roe": 11.0,
+   "debt_ebitda": 0.15
+  },
   "VSAT": {
    "name": "VIASAT INC",
    "price": 77.02,
@@ -93,50 +75,23 @@
    "roe": 0.2,
    "debt_ebitda": 4.98
   },
-  "ESI": {
-   "name": "ELEMENT SOLUTIONS INC",
-   "price": 34.27,
-   "market_cap": 8351287808,
-   "gross_margin": 36.7,
-   "insider_pct": 6.6,
-   "roe": 7.4,
-   "debt_ebitda": 3.54
+  "RHP": {
+   "name": "RYMAN HOSPITALITY PROPERTIES",
+   "price": 133.18,
+   "market_cap": 9187326976,
+   "gross_margin": 35.2,
+   "insider_pct": 2.9,
+   "roe": 22.6,
+   "debt_ebitda": 4.95
   },
-  "RAL": {
-   "name": "RALLIANT CORP",
-   "price": 67.21,
-   "market_cap": 7436114944,
-   "gross_margin": 51.0,
-   "insider_pct": 0.2,
-   "roe": -53.9,
-   "debt_ebitda": 3.09
-  },
-  "KMX": {
-   "name": "CARMAX INC",
-   "price": 55.58,
-   "market_cap": 7889181184,
-   "gross_margin": 11.7,
-   "insider_pct": 0.5,
-   "roe": 4.7,
-   "debt_ebitda": 16.03
-  },
-  "ALKS": {
-   "name": "ALKERMES PLC",
-   "price": 45.34,
-   "market_cap": 7606386176,
-   "gross_margin": 87.2,
-   "insider_pct": 1.4,
-   "roe": 3.9,
-   "debt_ebitda": 5.52
-  },
-  "EMN": {
-   "name": "EASTMAN CHEMICAL CO",
-   "price": 66.53,
-   "market_cap": 7606150144,
-   "gross_margin": 19.7,
-   "insider_pct": 0.9,
-   "roe": 7.3,
-   "debt_ebitda": 3.92
+  "GKOS": {
+   "name": "GLAUKOS CORP",
+   "price": 237.6,
+   "market_cap": 14065177600,
+   "gross_margin": 81.1,
+   "insider_pct": 3.6,
+   "roe": -22.8,
+   "debt_ebitda": null
   },
   "VSXY": {
    "name": "VICTORIA S SECRET + CO",
@@ -156,185 +111,23 @@
    "roe": null,
    "debt_ebitda": 6.06
   },
-  "LW": {
-   "name": "LAMB WESTON HOLDINGS INC",
-   "price": 54.08,
-   "market_cap": 7451166720,
-   "gross_margin": 20.2,
-   "insider_pct": 2.7,
-   "roe": 14.2,
-   "debt_ebitda": 3.7
+  "RAL": {
+   "name": "RALLIANT CORP",
+   "price": 67.21,
+   "market_cap": 7436114944,
+   "gross_margin": 51.0,
+   "insider_pct": 0.2,
+   "roe": -53.9,
+   "debt_ebitda": 3.09
   },
-  "TRNO": {
-   "name": "TERRENO REALTY CORP",
-   "price": 65.56,
-   "market_cap": 7144093184,
-   "gross_margin": 76.2,
-   "insider_pct": 1.9,
-   "roe": 9.3,
-   "debt_ebitda": 3.12
-  },
-  "LNC": {
-   "name": "LINCOLN NATIONAL CORP",
-   "price": 41.01,
-   "market_cap": 7851254784,
-   "gross_margin": 27.1,
-   "insider_pct": 0.3,
-   "roe": 22.6,
-   "debt_ebitda": null
-  },
-  "EPAM": {
-   "name": "EPAM SYSTEMS INC",
-   "price": 140.51,
-   "market_cap": 7248486400,
-   "gross_margin": 29.5,
-   "insider_pct": 3.3,
-   "roe": 11.2,
-   "debt_ebitda": 0.2
-  },
-  "FSS": {
-   "name": "FEDERAL SIGNAL CORP",
-   "price": 112.67,
-   "market_cap": 6877558272,
-   "gross_margin": 29.1,
-   "insider_pct": 2.6,
-   "roe": 20.5,
-   "debt_ebitda": 0.87
-  },
-  "BLDR": {
-   "name": "BUILDERS FIRSTSOURCE INC",
-   "price": 64.91,
-   "market_cap": 6984510976,
-   "gross_margin": 28.5,
-   "insider_pct": 2.7,
-   "roe": 1.0,
-   "debt_ebitda": 5.84
-  },
-  "MAC": {
-   "name": "MACERICH CO/THE",
-   "price": 24.34,
-   "market_cap": 7181039104,
-   "gross_margin": 54.9,
-   "insider_pct": 0.4,
-   "roe": -6.2,
-   "debt_ebitda": 9.15
-  },
-  "CAG": {
-   "name": "CONAGRA BRANDS INC",
-   "price": 14.57,
-   "market_cap": 6955885568,
-   "gross_margin": 23.8,
-   "insider_pct": 0.7,
-   "roe": -24.9,
-   "debt_ebitda": 4.68
-  },
-  "MATX": {
-   "name": "MATSON INC",
-   "price": 223.85,
-   "market_cap": 6693889024,
-   "gross_margin": 23.0,
-   "insider_pct": 1.9,
-   "roe": 17.2,
-   "debt_ebitda": 1.06
-  },
-  "AWI": {
-   "name": "ARMSTRONG WORLD INDUSTRIES",
-   "price": 166.34,
-   "market_cap": 6958650880,
-   "gross_margin": 39.8,
-   "insider_pct": 1.6,
-   "roe": 36.0,
-   "debt_ebitda": 1.2
-  },
-  "MHK": {
-   "name": "MOHAWK INDUSTRIES INC",
-   "price": 139.41,
-   "market_cap": 9443375104,
-   "gross_margin": 25.6,
-   "insider_pct": 16.2,
-   "roe": 5.5,
-   "debt_ebitda": 1.57
-  },
-  "GTES": {
-   "name": "GATES INDUSTRIAL CORP LTD",
-   "price": 23.83,
-   "market_cap": 6032592384,
-   "gross_margin": 40.5,
-   "insider_pct": 2.0,
-   "roe": 10.4,
-   "debt_ebitda": 3.19
-  },
-  "LGND": {
-   "name": "LIGAND PHARMACEUTICALS",
-   "price": 322.75,
-   "market_cap": 6434217472,
-   "gross_margin": 63.2,
-   "insider_pct": 2.3,
-   "roe": 5.4,
-   "debt_ebitda": 16.26
-  },
-  "MGY": {
-   "name": "MAGNOLIA OIL + GAS CORP   A",
-   "price": 26.5,
-   "market_cap": 7279419392,
-   "gross_margin": 82.2,
-   "insider_pct": 14.3,
-   "roe": 20.9,
-   "debt_ebitda": 0.4
-  },
-  "ZWS": {
-   "name": "ZURN ELKAY WATER SOLUTIONS C",
-   "price": 44.8,
-   "market_cap": 7396165120,
-   "gross_margin": 50.4,
-   "insider_pct": 11.7,
-   "roe": 17.6,
-   "debt_ebitda": 1.1
-  },
-  "RNG": {
-   "name": "RINGCENTRAL INC CLASS A",
-   "price": 81.42,
-   "market_cap": 6799071232,
-   "gross_margin": 72.2,
-   "insider_pct": 1.0,
-   "roe": null,
-   "debt_ebitda": 2.35
-  },
-  "TAP": {
-   "name": "MOLSON COORS BEVERAGE CO   B",
-   "price": 40.12,
-   "market_cap": 7480531968,
-   "gross_margin": 37.0,
-   "insider_pct": 12.8,
-   "roe": -19.5,
-   "debt_ebitda": 3.5
-  },
-  "NE": {
-   "name": "NOBLE CORP PLC",
-   "price": 49.0,
-   "market_cap": 7823428608,
-   "gross_margin": 34.1,
-   "insider_pct": 20.7,
-   "roe": 1.2,
-   "debt_ebitda": 2.14
-  },
-  "ESE": {
-   "name": "ESCO TECHNOLOGIES INC",
-   "price": 237.7,
-   "market_cap": 6158228992,
-   "gross_margin": 42.0,
-   "insider_pct": 16.8,
-   "roe": 9.5,
-   "debt_ebitda": 0.49
-  },
-  "LYFT": {
-   "name": "LYFT INC A",
-   "price": 16.16,
-   "market_cap": 6117210624,
-   "gross_margin": 38.0,
-   "insider_pct": 1.4,
-   "roe": 152.6,
-   "debt_ebitda": 27.73
+  "ESI": {
+   "name": "ELEMENT SOLUTIONS INC",
+   "price": 34.27,
+   "market_cap": 8351121408,
+   "gross_margin": 36.7,
+   "insider_pct": 6.6,
+   "roe": 7.4,
+   "debt_ebitda": 3.54
   },
   "POOL": {
    "name": "POOL CORP",
@@ -345,6 +138,195 @@
    "roe": 30.4,
    "debt_ebitda": 2.38
   },
+  "KMX": {
+   "name": "CARMAX INC",
+   "price": 55.58,
+   "market_cap": 7889181184,
+   "gross_margin": 11.7,
+   "insider_pct": 0.5,
+   "roe": 4.7,
+   "debt_ebitda": 16.03
+  },
+  "LW": {
+   "name": "LAMB WESTON HOLDINGS INC",
+   "price": 54.08,
+   "market_cap": 7451166720,
+   "gross_margin": 20.2,
+   "insider_pct": 2.7,
+   "roe": 14.2,
+   "debt_ebitda": 3.7
+  },
+  "ALKS": {
+   "name": "ALKERMES PLC",
+   "price": 45.34,
+   "market_cap": 7606386176,
+   "gross_margin": 87.2,
+   "insider_pct": 1.4,
+   "roe": 3.9,
+   "debt_ebitda": 5.52
+  },
+  "EMN": {
+   "name": "EASTMAN CHEMICAL CO",
+   "price": 66.53,
+   "market_cap": 7606351872,
+   "gross_margin": 20.6,
+   "insider_pct": 0.9,
+   "roe": null,
+   "debt_ebitda": 3.59
+  },
+  "TRNO": {
+   "name": "TERRENO REALTY CORP",
+   "price": 65.56,
+   "market_cap": 7144093184,
+   "gross_margin": 76.2,
+   "insider_pct": 1.9,
+   "roe": 9.3,
+   "debt_ebitda": 3.12
+  },
+  "FSS": {
+   "name": "FEDERAL SIGNAL CORP",
+   "price": 112.67,
+   "market_cap": 6874724352,
+   "gross_margin": 29.1,
+   "insider_pct": 2.6,
+   "roe": 20.5,
+   "debt_ebitda": 0.87
+  },
+  "AWI": {
+   "name": "ARMSTRONG WORLD INDUSTRIES",
+   "price": 166.34,
+   "market_cap": 6958650880,
+   "gross_margin": 39.8,
+   "insider_pct": 1.6,
+   "roe": 36.0,
+   "debt_ebitda": 1.2
+  },
+  "EPAM": {
+   "name": "EPAM SYSTEMS INC",
+   "price": 140.51,
+   "market_cap": 7248486400,
+   "gross_margin": 29.5,
+   "insider_pct": 3.3,
+   "roe": 11.2,
+   "debt_ebitda": 0.2
+  },
+  "MAC": {
+   "name": "MACERICH CO/THE",
+   "price": 24.34,
+   "market_cap": 7181039104,
+   "gross_margin": 54.9,
+   "insider_pct": 0.4,
+   "roe": -6.2,
+   "debt_ebitda": 9.15
+  },
+  "LNC": {
+   "name": "LINCOLN NATIONAL CORP",
+   "price": 41.01,
+   "market_cap": 7851254784,
+   "gross_margin": 27.1,
+   "insider_pct": 0.3,
+   "roe": 22.6,
+   "debt_ebitda": null
+  },
+  "CAG": {
+   "name": "CONAGRA BRANDS INC",
+   "price": 14.57,
+   "market_cap": 6955885568,
+   "gross_margin": 23.8,
+   "insider_pct": 0.7,
+   "roe": -24.9,
+   "debt_ebitda": 4.68
+  },
+  "GTES": {
+   "name": "GATES INDUSTRIAL CORP LTD",
+   "price": 23.83,
+   "market_cap": 5984440832,
+   "gross_margin": 41.0,
+   "insider_pct": 2.0,
+   "roe": 10.3,
+   "debt_ebitda": 3.11
+  },
+  "MATX": {
+   "name": "MATSON INC",
+   "price": 223.85,
+   "market_cap": 6693889024,
+   "gross_margin": 23.0,
+   "insider_pct": 1.9,
+   "roe": 17.2,
+   "debt_ebitda": 1.06
+  },
+  "BLDR": {
+   "name": "BUILDERS FIRSTSOURCE INC",
+   "price": 64.91,
+   "market_cap": 6984726528,
+   "gross_margin": 28.5,
+   "insider_pct": 2.7,
+   "roe": 1.0,
+   "debt_ebitda": 5.91
+  },
+  "MHK": {
+   "name": "MOHAWK INDUSTRIES INC",
+   "price": 139.41,
+   "market_cap": 8104386560,
+   "gross_margin": 26.0,
+   "insider_pct": 16.2,
+   "roe": 6.2,
+   "debt_ebitda": 1.47
+  },
+  "ESE": {
+   "name": "ESCO TECHNOLOGIES INC",
+   "price": 237.7,
+   "market_cap": 6158228992,
+   "gross_margin": 42.0,
+   "insider_pct": 16.8,
+   "roe": 9.5,
+   "debt_ebitda": 0.49
+  },
+  "LGND": {
+   "name": "LIGAND PHARMACEUTICALS",
+   "price": 322.75,
+   "market_cap": 6434217472,
+   "gross_margin": 88.5,
+   "insider_pct": 2.3,
+   "roe": 5.4,
+   "debt_ebitda": 9.64
+  },
+  "TAP": {
+   "name": "MOLSON COORS BEVERAGE CO   B",
+   "price": 40.12,
+   "market_cap": 7480531968,
+   "gross_margin": 37.0,
+   "insider_pct": 12.8,
+   "roe": -19.5,
+   "debt_ebitda": 3.5
+  },
+  "ZWS": {
+   "name": "ZURN ELKAY WATER SOLUTIONS C",
+   "price": 44.8,
+   "market_cap": 7396165120,
+   "gross_margin": 50.4,
+   "insider_pct": 11.7,
+   "roe": 17.6,
+   "debt_ebitda": 1.1
+  },
+  "MGY": {
+   "name": "MAGNOLIA OIL + GAS CORP   A",
+   "price": 26.5,
+   "market_cap": 7279419392,
+   "gross_margin": 82.2,
+   "insider_pct": 14.3,
+   "roe": 20.9,
+   "debt_ebitda": 0.4
+  },
+  "RNG": {
+   "name": "RINGCENTRAL INC CLASS A",
+   "price": 81.42,
+   "market_cap": 6799071232,
+   "gross_margin": 72.2,
+   "insider_pct": 1.0,
+   "roe": null,
+   "debt_ebitda": 2.35
+  },
   "MXL": {
    "name": "MAXLINEAR INC",
    "price": 67.47,
@@ -353,6 +335,15 @@
    "insider_pct": 5.9,
    "roe": -5.9,
    "debt_ebitda": 4.9
+  },
+  "LYFT": {
+   "name": "LYFT INC A",
+   "price": 16.16,
+   "market_cap": 6117210624,
+   "gross_margin": 38.0,
+   "insider_pct": 1.4,
+   "roe": 152.6,
+   "debt_ebitda": 27.73
   },
   "NPO": {
    "name": "ENPRO INC",
@@ -363,14 +354,14 @@
    "roe": 2.9,
    "debt_ebitda": 1.97
   },
-  "SNEX": {
-   "name": "STONEX GROUP INC",
-   "price": 52.83,
-   "market_cap": 6372182528,
-   "gross_margin": 1.7,
-   "insider_pct": 9.3,
-   "roe": 21.9,
-   "debt_ebitda": null
+  "NE": {
+   "name": "NOBLE CORP PLC",
+   "price": 49.0,
+   "market_cap": 7823428608,
+   "gross_margin": 34.1,
+   "insider_pct": 20.7,
+   "roe": 1.2,
+   "debt_ebitda": 2.14
   },
   "BOX": {
    "name": "BOX INC   CLASS A",
@@ -381,15 +372,6 @@
    "roe": 70.2,
    "debt_ebitda": 4.21
   },
-  "TFX": {
-   "name": "TELEFLEX INC",
-   "price": 139.77,
-   "market_cap": 5922390016,
-   "gross_margin": 55.1,
-   "insider_pct": 0.6,
-   "roe": -0.7,
-   "debt_ebitda": 7.27
-  },
   "CZR": {
    "name": "CAESARS ENTERTAINMENT INC",
    "price": 29.09,
@@ -398,24 +380,6 @@
    "insider_pct": 0.8,
    "roe": -12.6,
    "debt_ebitda": 7.51
-  },
-  "EPRT": {
-   "name": "ESSENTIAL PROPERTIES REALTY",
-   "price": 26.75,
-   "market_cap": 5800625152,
-   "gross_margin": 98.4,
-   "insider_pct": 0.6,
-   "roe": 6.2,
-   "debt_ebitda": 5.11
-  },
-  "MKTX": {
-   "name": "MARKETAXESS HOLDINGS INC",
-   "price": 165.3,
-   "market_cap": 5818096640,
-   "gross_margin": 61.1,
-   "insider_pct": 0.7,
-   "roe": 21.9,
-   "debt_ebitda": 0.35
   },
   "FTDR": {
    "name": "FRONTDOOR INC",
@@ -426,14 +390,23 @@
    "roe": 101.9,
    "debt_ebitda": 2.29
   },
-  "OUT": {
-   "name": "OUTFRONT MEDIA INC",
-   "price": 32.0,
-   "market_cap": 5636327936,
-   "gross_margin": 51.4,
-   "insider_pct": 1.1,
-   "roe": 35.0,
-   "debt_ebitda": 8.37
+  "MKTX": {
+   "name": "MARKETAXESS HOLDINGS INC",
+   "price": 165.3,
+   "market_cap": 5818096640,
+   "gross_margin": 61.1,
+   "insider_pct": 0.7,
+   "roe": 21.9,
+   "debt_ebitda": 0.35
+  },
+  "TFX": {
+   "name": "TELEFLEX INC",
+   "price": 139.77,
+   "market_cap": 5922390016,
+   "gross_margin": 55.1,
+   "insider_pct": 0.6,
+   "roe": -0.7,
+   "debt_ebitda": 7.27
   },
   "PLXS": {
    "name": "PLEXUS CORP",
@@ -444,6 +417,33 @@
    "roe": 13.4,
    "debt_ebitda": 0.86
   },
+  "SNEX": {
+   "name": "STONEX GROUP INC",
+   "price": 52.83,
+   "market_cap": 6372182528,
+   "gross_margin": 1.7,
+   "insider_pct": 9.3,
+   "roe": 21.9,
+   "debt_ebitda": null
+  },
+  "EPRT": {
+   "name": "ESSENTIAL PROPERTIES REALTY",
+   "price": 26.75,
+   "market_cap": 5799901184,
+   "gross_margin": 98.4,
+   "insider_pct": 0.6,
+   "roe": 6.2,
+   "debt_ebitda": 5.11
+  },
+  "OUT": {
+   "name": "OUTFRONT MEDIA INC",
+   "price": 32.0,
+   "market_cap": 5636327936,
+   "gross_margin": 51.4,
+   "insider_pct": 1.1,
+   "roe": 35.0,
+   "debt_ebitda": 8.37
+  },
   "JBTM": {
    "name": "JBT MAREL CORP",
    "price": 109.17,
@@ -452,33 +452,6 @@
    "insider_pct": 0.7,
    "roe": 4.4,
    "debt_ebitda": 2.63
-  },
-  "CWST": {
-   "name": "CASELLA WASTE SYSTEMS INC A",
-   "price": 93.33,
-   "market_cap": 5939525632,
-   "gross_margin": 33.4,
-   "insider_pct": 0.6,
-   "roe": 0.4,
-   "debt_ebitda": 3.45
-  },
-  "ACIW": {
-   "name": "ACI WORLDWIDE INC",
-   "price": 56.34,
-   "market_cap": 5687818240,
-   "gross_margin": 49.1,
-   "insider_pct": 1.2,
-   "roe": 15.6,
-   "debt_ebitda": 2.25
-  },
-  "SXT": {
-   "name": "SENSIENT TECHNOLOGIES CORP",
-   "price": 117.63,
-   "market_cap": 5006663680,
-   "gross_margin": 34.9,
-   "insider_pct": 1.3,
-   "roe": 13.1,
-   "debt_ebitda": 2.46
   },
   "TENB": {
    "name": "TENABLE HOLDINGS INC",
@@ -498,6 +471,24 @@
    "roe": 10.7,
    "debt_ebitda": null
   },
+  "CWST": {
+   "name": "CASELLA WASTE SYSTEMS INC A",
+   "price": 93.33,
+   "market_cap": 5939525632,
+   "gross_margin": 33.4,
+   "insider_pct": 0.6,
+   "roe": 0.4,
+   "debt_ebitda": 3.45
+  },
+  "ACIW": {
+   "name": "ACI WORLDWIDE INC",
+   "price": 56.34,
+   "market_cap": 5687818240,
+   "gross_margin": 49.1,
+   "insider_pct": 1.2,
+   "roe": 15.6,
+   "debt_ebitda": 2.25
+  },
   "AROC": {
    "name": "ARCHROCK INC",
    "price": 31.7,
@@ -507,23 +498,32 @@
    "roe": 22.2,
    "debt_ebitda": 2.76
   },
-  "MBGL": {
-   "name": "MOBILITY GLOBAL INC",
-   "price": 18.91,
-   "market_cap": 6051200000,
-   "gross_margin": 70.9,
-   "insider_pct": 0.6,
-   "roe": null,
-   "debt_ebitda": 2.8
+  "SXT": {
+   "name": "SENSIENT TECHNOLOGIES CORP",
+   "price": 117.63,
+   "market_cap": 5006536704,
+   "gross_margin": 35.6,
+   "insider_pct": 1.3,
+   "roe": 13.7,
+   "debt_ebitda": 2.38
   },
   "MMSI": {
    "name": "MERIT MEDICAL SYSTEMS INC",
    "price": 86.24,
-   "market_cap": 5149426688,
-   "gross_margin": 49.5,
+   "market_cap": 5167073280,
+   "gross_margin": 49.4,
    "insider_pct": 2.4,
-   "roe": 9.2,
-   "debt_ebitda": 2.42
+   "roe": 9.8,
+   "debt_ebitda": 2.31
+  },
+  "MBGL": {
+   "name": "MOBILITY GLOBAL INC",
+   "price": 18.91,
+   "market_cap": 5579909120,
+   "gross_margin": 70.9,
+   "insider_pct": 0.6,
+   "roe": null,
+   "debt_ebitda": 2.8
   },
   "VCTR": {
    "name": "VICTORY CAPITAL HOLDING   A",
@@ -534,6 +534,15 @@
    "roe": 19.0,
    "debt_ebitda": 1.26
   },
+  "ECG": {
+   "name": "EVERUS CONSTRUCTION GROUP",
+   "price": 102.63,
+   "market_cap": 5240681472,
+   "gross_margin": 13.0,
+   "insider_pct": 0.3,
+   "roe": 39.5,
+   "debt_ebitda": 1.0
+  },
   "TTD": {
    "name": "TRADE DESK INC/THE  CLASS A",
    "price": 12.29,
@@ -542,33 +551,6 @@
    "insider_pct": 2.6,
    "roe": 15.4,
    "debt_ebitda": 0.62
-  },
-  "ECG": {
-   "name": "EVERUS CONSTRUCTION GROUP",
-   "price": 102.63,
-   "market_cap": 5238400000,
-   "gross_margin": 13.0,
-   "insider_pct": 0.3,
-   "roe": 39.5,
-   "debt_ebitda": 1.0
-  },
-  "PTCT": {
-   "name": "PTC THERAPEUTICS INC",
-   "price": 59.97,
-   "market_cap": 5005144064,
-   "gross_margin": 50.0,
-   "insider_pct": 7.3,
-   "roe": null,
-   "debt_ebitda": 17.63
-  },
-  "MSGK": {
-   "name": "MSG KNICKERBOCKERS CORP",
-   "price": 312.9,
-   "market_cap": 7534612992,
-   "gross_margin": 33.6,
-   "insider_pct": 3.5,
-   "roe": null,
-   "debt_ebitda": 34.22
   },
   "BCPC": {
    "name": "BALCHEM CORP",
@@ -579,6 +561,15 @@
    "roe": 13.0,
    "debt_ebitda": 0.51
   },
+  "PTCT": {
+   "name": "PTC THERAPEUTICS INC",
+   "price": 59.97,
+   "market_cap": 5010150912,
+   "gross_margin": 55.2,
+   "insider_pct": 7.3,
+   "roe": null,
+   "debt_ebitda": 9.5
+  },
   "HRI": {
    "name": "HERC HOLDINGS INC",
    "price": 165.76,
@@ -588,41 +579,23 @@
    "roe": 6.3,
    "debt_ebitda": 9.89
   },
+  "MSGK": {
+   "name": "MSG KNICKERBOCKERS CORP",
+   "price": 312.9,
+   "market_cap": 7534612992,
+   "gross_margin": 33.6,
+   "insider_pct": 3.5,
+   "roe": null,
+   "debt_ebitda": 34.22
+  },
   "GVA": {
    "name": "GRANITE CONSTRUCTION INC",
    "price": 123.62,
-   "market_cap": 5455355392,
+   "market_cap": 5455386624,
    "gross_margin": 16.1,
    "insider_pct": 0.9,
    "roe": -21.7,
    "debt_ebitda": 2.93
-  },
-  "PI": {
-   "name": "IMPINJ INC",
-   "price": 179.66,
-   "market_cap": 5544232448,
-   "gross_margin": 53.5,
-   "insider_pct": 2.7,
-   "roe": -3.8,
-   "debt_ebitda": 16.58
-  },
-  "URBN": {
-   "name": "URBAN OUTFITTERS INC",
-   "price": 90.72,
-   "market_cap": 7771091968,
-   "gross_margin": 36.0,
-   "insider_pct": 33.8,
-   "roe": 20.9,
-   "debt_ebitda": 1.56
-  },
-  "ADT": {
-   "name": "ADT INC",
-   "price": 9.86,
-   "market_cap": 7203313664,
-   "gross_margin": 80.7,
-   "insider_pct": 1.9,
-   "roe": 17.2,
-   "debt_ebitda": 2.89
   },
   "RITM": {
    "name": "RITHM CAPITAL CORP",
@@ -633,14 +606,41 @@
    "roe": 5.7,
    "debt_ebitda": null
   },
-  "RDNT": {
-   "name": "RADNET INC",
-   "price": 73.49,
-   "market_cap": 5783498240,
-   "gross_margin": 17.3,
-   "insider_pct": 10.0,
-   "roe": 1.5,
-   "debt_ebitda": 7.91
+  "ADT": {
+   "name": "ADT INC",
+   "price": 9.86,
+   "market_cap": 7203036672,
+   "gross_margin": 80.7,
+   "insider_pct": 1.9,
+   "roe": 17.2,
+   "debt_ebitda": 2.89
+  },
+  "URBN": {
+   "name": "URBAN OUTFITTERS INC",
+   "price": 90.72,
+   "market_cap": 7771091968,
+   "gross_margin": 36.0,
+   "insider_pct": 33.8,
+   "roe": 20.9,
+   "debt_ebitda": 1.56
+  },
+  "PI": {
+   "name": "IMPINJ INC",
+   "price": 179.66,
+   "market_cap": 5544232448,
+   "gross_margin": 53.5,
+   "insider_pct": 2.7,
+   "roe": -3.8,
+   "debt_ebitda": 16.58
+  },
+  "AX": {
+   "name": "AXOS FINANCIAL INC",
+   "price": 90.38,
+   "market_cap": 5126445056,
+   "gross_margin": 0.0,
+   "insider_pct": 4.4,
+   "roe": 16.7,
+   "debt_ebitda": null
   },
   "NSIT": {
    "name": "INSIGHT ENTERPRISES INC",
@@ -651,23 +651,14 @@
    "roe": 13.1,
    "debt_ebitda": 2.78
   },
-  "AX": {
-   "name": "AXOS FINANCIAL INC",
-   "price": 90.38,
-   "market_cap": 5138826240,
-   "gross_margin": 0.0,
-   "insider_pct": 4.4,
-   "roe": 16.8,
-   "debt_ebitda": null
-  },
-  "KRMN": {
-   "name": "KARMAN HOLDINGS INC",
-   "price": 39.95,
-   "market_cap": 5294722048,
-   "gross_margin": 41.7,
-   "insider_pct": 6.9,
-   "roe": 9.5,
-   "debt_ebitda": 5.69
+  "RDNT": {
+   "name": "RADNET INC",
+   "price": 73.49,
+   "market_cap": 5783498240,
+   "gross_margin": 17.3,
+   "insider_pct": 10.0,
+   "roe": 1.5,
+   "debt_ebitda": 7.91
   },
   "ABCB": {
    "name": "AMERIS BANCORP",
@@ -687,15 +678,6 @@
    "roe": null,
    "debt_ebitda": 5.45
   },
-  "MTRN": {
-   "name": "MATERION CORP",
-   "price": 221.94,
-   "market_cap": 4623836672,
-   "gross_margin": 16.0,
-   "insider_pct": 1.7,
-   "roe": 9.5,
-   "debt_ebitda": 2.49
-  },
   "AGX": {
    "name": "ARGAN INC",
    "price": 344.11,
@@ -705,14 +687,32 @@
    "roe": 39.8,
    "debt_ebitda": 0.06
   },
-  "CE": {
-   "name": "CELANESE CORP",
-   "price": 49.3,
-   "market_cap": 5410621952,
-   "gross_margin": 21.4,
-   "insider_pct": 0.4,
-   "roe": -22.2,
-   "debt_ebitda": 7.39
+  "KRMN": {
+   "name": "KARMAN HOLDINGS INC",
+   "price": 39.95,
+   "market_cap": 5294722048,
+   "gross_margin": 41.7,
+   "insider_pct": 6.9,
+   "roe": 9.5,
+   "debt_ebitda": 5.69
+  },
+  "MTRN": {
+   "name": "MATERION CORP",
+   "price": 221.94,
+   "market_cap": 4623836672,
+   "gross_margin": 16.0,
+   "insider_pct": 1.7,
+   "roe": 9.5,
+   "debt_ebitda": 2.49
+  },
+  "PECO": {
+   "name": "PHILLIPS EDISON + COMPANY IN",
+   "price": 38.83,
+   "market_cap": 5481691136,
+   "gross_margin": 71.1,
+   "insider_pct": 0.6,
+   "roe": 7.6,
+   "debt_ebitda": 5.35
   },
   "CON": {
    "name": "CONCENTRA GROUP HOLDINGS PAR",
@@ -732,24 +732,6 @@
    "roe": 4.6,
    "debt_ebitda": 3.76
   },
-  "PECO": {
-   "name": "PHILLIPS EDISON + COMPANY IN",
-   "price": 38.83,
-   "market_cap": 5492369408,
-   "gross_margin": 71.1,
-   "insider_pct": 0.6,
-   "roe": 7.6,
-   "debt_ebitda": 5.35
-  },
-  "PTEN": {
-   "name": "PATTERSON UTI ENERGY INC",
-   "price": 13.32,
-   "market_cap": 5080046080,
-   "gross_margin": 24.1,
-   "insider_pct": 1.9,
-   "roe": -0.8,
-   "debt_ebitda": 1.37
-  },
   "RELY": {
    "name": "REMITLY GLOBAL INC",
    "price": 24.15,
@@ -758,6 +740,15 @@
    "insider_pct": 5.3,
    "roe": 32.2,
    "debt_ebitda": 0.19
+  },
+  "CE": {
+   "name": "CELANESE CORP",
+   "price": 49.3,
+   "market_cap": 5410621952,
+   "gross_margin": 21.4,
+   "insider_pct": 0.4,
+   "roe": -22.2,
+   "debt_ebitda": 7.39
   },
   "IRDM": {
    "name": "IRIDIUM COMMUNICATIONS INC",
@@ -768,23 +759,23 @@
    "roe": 31.7,
    "debt_ebitda": 5.53
   },
+  "PTEN": {
+   "name": "PATTERSON UTI ENERGY INC",
+   "price": 13.32,
+   "market_cap": 5056507392,
+   "gross_margin": 24.1,
+   "insider_pct": 1.9,
+   "roe": -0.8,
+   "debt_ebitda": 1.37
+  },
   "POWL": {
    "name": "POWELL INDUSTRIES INC",
    "price": 156.26,
-   "market_cap": 5692952064,
+   "market_cap": 5692809216,
    "gross_margin": 30.1,
    "insider_pct": 20.5,
    "roe": 28.3,
    "debt_ebitda": 0.01
-  },
-  "EBC": {
-   "name": "EASTERN BANKSHARES INC",
-   "price": 22.39,
-   "market_cap": 5116373504,
-   "gross_margin": 0.0,
-   "insider_pct": 1.3,
-   "roe": 9.5,
-   "debt_ebitda": null
   },
   "IBP": {
    "name": "INSTALLED BUILDING PRODUCTS",
@@ -795,6 +786,15 @@
    "roe": 38.5,
    "debt_ebitda": 2.49
   },
+  "EBC": {
+   "name": "EASTERN BANKSHARES INC",
+   "price": 22.39,
+   "market_cap": 5116373504,
+   "gross_margin": 0.0,
+   "insider_pct": 1.3,
+   "roe": 9.5,
+   "debt_ebitda": null
+  },
   "HASI": {
    "name": "HA SUSTAINABLE INFRASTRUCTUR",
    "price": 37.22,
@@ -803,24 +803,6 @@
    "insider_pct": 2.2,
    "roe": 3.4,
    "debt_ebitda": null
-  },
-  "RDN": {
-   "name": "RADIAN GROUP INC",
-   "price": 35.54,
-   "market_cap": 4701988864,
-   "gross_margin": 69.3,
-   "insider_pct": 1.7,
-   "roe": 12.0,
-   "debt_ebitda": 1.49
-  },
-  "SIG": {
-   "name": "SIGNET JEWELERS LTD",
-   "price": 117.59,
-   "market_cap": 4505724416,
-   "gross_margin": 39.3,
-   "insider_pct": 1.4,
-   "roe": 19.9,
-   "debt_ebitda": 1.93
   },
   "INSW": {
    "name": "INTERNATIONAL SEAWAYS INC",
@@ -831,86 +813,86 @@
    "roe": 37.4,
    "debt_ebitda": 0.81
   },
+  "SIG": {
+   "name": "SIGNET JEWELERS LTD",
+   "price": 117.59,
+   "market_cap": 4505724416,
+   "gross_margin": 39.3,
+   "insider_pct": 1.4,
+   "roe": 19.9,
+   "debt_ebitda": 1.93
+  },
   "PIPR": {
    "name": "PIPER SANDLER COS",
    "price": 63.81,
    "market_cap": 4509471232,
-   "gross_margin": 91.8,
+   "gross_margin": 91.4,
    "insider_pct": 3.8,
-   "roe": 24.5,
+   "roe": null,
    "debt_ebitda": null
-  },
-  "LKQ": {
-   "name": "LKQ CORP",
-   "price": 18.56,
-   "market_cap": 4684544000,
-   "gross_margin": 38.1,
-   "insider_pct": 0.4,
-   "roe": 4.0,
-   "debt_ebitda": 3.93
   },
   "CSW": {
    "name": "CSW INDUSTRIALS INC",
    "price": 286.16,
    "market_cap": 4662159872,
-   "gross_margin": 42.2,
+   "gross_margin": 42.3,
    "insider_pct": 4.0,
    "roe": 11.2,
-   "debt_ebitda": 2.46
+   "debt_ebitda": 2.71
+  },
+  "RDN": {
+   "name": "RADIAN GROUP INC",
+   "price": 35.54,
+   "market_cap": 4701988864,
+   "gross_margin": 69.3,
+   "insider_pct": 1.7,
+   "roe": 12.0,
+   "debt_ebitda": 1.49
+  },
+  "LKQ": {
+   "name": "LKQ CORP",
+   "price": 18.56,
+   "market_cap": 4684508160,
+   "gross_margin": 38.1,
+   "insider_pct": 0.4,
+   "roe": 4.0,
+   "debt_ebitda": 3.93
   },
   "LAUR": {
    "name": "LAUREATE EDUCATION INC",
    "price": 33.22,
    "market_cap": 4509478400,
    "gross_margin": 37.7,
-   "insider_pct": 8.8,
+   "insider_pct": 9.0,
    "roe": 34.1,
    "debt_ebitda": 1.34
-  },
-  "WHD": {
-   "name": "CACTUS INC   A",
-   "price": 65.7,
-   "market_cap": 5274357248,
-   "gross_margin": 33.2,
-   "insider_pct": 1.0,
-   "roe": 13.1,
-   "debt_ebitda": 0.15
-  },
-  "VIRT": {
-   "name": "VIRTU FINANCIAL INC CLASS A",
-   "price": 53.76,
-   "market_cap": 4747044352,
-   "gross_margin": 65.8,
-   "insider_pct": 5.2,
-   "roe": 53.6,
-   "debt_ebitda": null
   },
   "MRCY": {
    "name": "MERCURY SYSTEMS INC",
    "price": 77.54,
    "market_cap": 4719362560,
    "gross_margin": 28.6,
-   "insider_pct": 1.1,
+   "insider_pct": 1.2,
    "roe": -2.0,
    "debt_ebitda": 6.27
   },
-  "LUMN": {
-   "name": "LUMEN TECHNOLOGIES INC",
-   "price": 4.88,
-   "market_cap": 5033453568,
-   "gross_margin": 47.8,
-   "insider_pct": 8.0,
-   "roe": null,
-   "debt_ebitda": 6.04
+  "WHD": {
+   "name": "CACTUS INC   A",
+   "price": 65.7,
+   "market_cap": 5306313728,
+   "gross_margin": 28.6,
+   "insider_pct": 1.0,
+   "roe": 14.2,
+   "debt_ebitda": 0.13
   },
-  "MIR": {
-   "name": "MIRION TECHNOLOGIES INC",
-   "price": 18.37,
-   "market_cap": 4574913536,
-   "gross_margin": 48.1,
-   "insider_pct": 3.5,
-   "roe": 1.6,
-   "debt_ebitda": 5.33
+  "RXO": {
+   "name": "RXO INC",
+   "price": 27.49,
+   "market_cap": 4534504448,
+   "gross_margin": 14.5,
+   "insider_pct": 0.8,
+   "roe": -5.7,
+   "debt_ebitda": 6.27
   },
   "SEI": {
    "name": "SOLARIS ENERGY INFRASTRUCTUR",
@@ -921,23 +903,32 @@
    "roe": 8.1,
    "debt_ebitda": 9.31
   },
-  "CRGY": {
-   "name": "CRESCENT ENERGY INC A",
-   "price": 14.2,
-   "market_cap": 5586323968,
-   "gross_margin": 62.2,
-   "insider_pct": 4.0,
-   "roe": 1.5,
-   "debt_ebitda": 2.56
+  "LUMN": {
+   "name": "LUMEN TECHNOLOGIES INC",
+   "price": 4.88,
+   "market_cap": 5027917824,
+   "gross_margin": 47.8,
+   "insider_pct": 8.0,
+   "roe": null,
+   "debt_ebitda": 6.04
   },
-  "RXO": {
-   "name": "RXO INC",
-   "price": 27.49,
-   "market_cap": 4534779392,
-   "gross_margin": 14.5,
-   "insider_pct": 0.8,
-   "roe": -5.7,
-   "debt_ebitda": 6.27
+  "VIRT": {
+   "name": "VIRTU FINANCIAL INC CLASS A",
+   "price": 53.76,
+   "market_cap": 4747044352,
+   "gross_margin": 65.8,
+   "insider_pct": 5.2,
+   "roe": 53.6,
+   "debt_ebitda": null
+  },
+  "MIR": {
+   "name": "MIRION TECHNOLOGIES INC",
+   "price": 18.37,
+   "market_cap": 4574913536,
+   "gross_margin": 48.2,
+   "insider_pct": 3.5,
+   "roe": 1.6,
+   "debt_ebitda": 5.3
   },
   "HCC": {
    "name": "WARRIOR MET COAL INC",
@@ -948,14 +939,23 @@
    "roe": 10.0,
    "debt_ebitda": 0.53
   },
-  "CRC": {
-   "name": "CALIFORNIA RESOURCES CORP",
-   "price": 55.46,
-   "market_cap": 4925951488,
-   "gross_margin": 56.8,
-   "insider_pct": 4.9,
-   "roe": -3.6,
-   "debt_ebitda": 2.48
+  "CRGY": {
+   "name": "CRESCENT ENERGY INC A",
+   "price": 14.2,
+   "market_cap": 4691732480,
+   "gross_margin": 62.2,
+   "insider_pct": 4.0,
+   "roe": 1.5,
+   "debt_ebitda": 2.56
+  },
+  "UCB": {
+   "name": "UNITED COMMUNITY BANKS/GA",
+   "price": 36.73,
+   "market_cap": 4428738048,
+   "gross_margin": 0.0,
+   "insider_pct": 0.4,
+   "roe": 4.1,
+   "debt_ebitda": null
   },
   "ENVA": {
    "name": "ENOVA INTERNATIONAL INC",
@@ -964,24 +964,6 @@
    "gross_margin": 83.7,
    "insider_pct": 4.6,
    "roe": 26.8,
-   "debt_ebitda": null
-  },
-  "FULT": {
-   "name": "FULTON FINANCIAL CORP",
-   "price": 23.47,
-   "market_cap": 4480764416,
-   "gross_margin": 0.0,
-   "insider_pct": 0.9,
-   "roe": 11.6,
-   "debt_ebitda": null
-  },
-  "UCB": {
-   "name": "UNITED COMMUNITY BANKS/GA",
-   "price": 36.73,
-   "market_cap": 4398925312,
-   "gross_margin": 0.0,
-   "insider_pct": 0.4,
-   "roe": 4.1,
    "debt_ebitda": null
   },
   "MC": {
@@ -993,23 +975,14 @@
    "roe": 41.5,
    "debt_ebitda": null
   },
-  "ROAD": {
-   "name": "CONSTRUCTION PARTNERS INC A",
-   "price": 89.8,
-   "market_cap": 5096649216,
-   "gross_margin": 15.8,
-   "insider_pct": 1.3,
-   "roe": 15.0,
-   "debt_ebitda": 3.73
-  },
-  "YOU": {
-   "name": "CLEAR SECURE INC  CLASS A",
-   "price": 45.99,
-   "market_cap": 4732879360,
-   "gross_margin": 66.7,
-   "insider_pct": 7.3,
-   "roe": 119.2,
-   "debt_ebitda": 0.4
+  "FULT": {
+   "name": "FULTON FINANCIAL CORP",
+   "price": 23.47,
+   "market_cap": 4480764416,
+   "gross_margin": 0.0,
+   "insider_pct": 0.9,
+   "roe": 11.6,
+   "debt_ebitda": null
   },
   "MYRG": {
    "name": "MYR GROUP INC/DELAWARE",
@@ -1020,15 +993,6 @@
    "roe": 26.9,
    "debt_ebitda": 0.83
   },
-  "CVSA": {
-   "name": "COVISTA INC",
-   "price": 124.33,
-   "market_cap": 4209839616,
-   "gross_margin": 57.3,
-   "insider_pct": 2.7,
-   "roe": 18.6,
-   "debt_ebitda": 2.04
-  },
   "SKY": {
    "name": "CHAMPION HOMES INC",
    "price": 84.7,
@@ -1038,32 +1002,41 @@
    "roe": 12.6,
    "debt_ebitda": 0.43
   },
-  "DK": {
-   "name": "DELEK US HOLDINGS INC",
-   "price": 73.57,
-   "market_cap": 4504850944,
-   "gross_margin": 10.4,
-   "insider_pct": 2.6,
-   "roe": 78.8,
-   "debt_ebitda": 3.23
+  "YOU": {
+   "name": "CLEAR SECURE INC  CLASS A",
+   "price": 45.99,
+   "market_cap": 4732879360,
+   "gross_margin": 66.7,
+   "insider_pct": 7.3,
+   "roe": 119.2,
+   "debt_ebitda": 0.4
   },
-  "CATY": {
-   "name": "CATHAY GENERAL BANCORP",
-   "price": 64.4,
-   "market_cap": 4296370176,
-   "gross_margin": 0.0,
-   "insider_pct": 4.7,
-   "roe": 12.2,
-   "debt_ebitda": null
+  "CRC": {
+   "name": "CALIFORNIA RESOURCES CORP",
+   "price": 55.46,
+   "market_cap": 4925951488,
+   "gross_margin": 56.8,
+   "insider_pct": 4.9,
+   "roe": -3.6,
+   "debt_ebitda": 2.48
   },
-  "OPLN": {
-   "name": "OPENLANE INC",
-   "price": 39.01,
-   "market_cap": 4761945088,
-   "gross_margin": 45.8,
-   "insider_pct": 7.9,
-   "roe": 11.1,
-   "debt_ebitda": 5.56
+  "CVSA": {
+   "name": "COVISTA INC",
+   "price": 124.33,
+   "market_cap": 4134624000,
+   "gross_margin": 57.4,
+   "insider_pct": 2.7,
+   "roe": 19.3,
+   "debt_ebitda": 1.65
+  },
+  "ROAD": {
+   "name": "CONSTRUCTION PARTNERS INC A",
+   "price": 89.8,
+   "market_cap": 5096649216,
+   "gross_margin": 15.8,
+   "insider_pct": 1.3,
+   "roe": 15.0,
+   "debt_ebitda": 3.73
   },
   "VSEC": {
    "name": "VSE CORP",
@@ -1074,6 +1047,15 @@
    "roe": 4.3,
    "debt_ebitda": 4.62
   },
+  "DK": {
+   "name": "DELEK US HOLDINGS INC",
+   "price": 73.57,
+   "market_cap": 4504850944,
+   "gross_margin": 10.4,
+   "insider_pct": 2.6,
+   "roe": 78.8,
+   "debt_ebitda": 3.23
+  },
   "BMI": {
    "name": "BADGER METER INC",
    "price": 148.38,
@@ -1083,14 +1065,32 @@
    "roe": 18.7,
    "debt_ebitda": 0.11
   },
+  "CATY": {
+   "name": "CATHAY GENERAL BANCORP",
+   "price": 64.4,
+   "market_cap": 4296370176,
+   "gross_margin": 0.0,
+   "insider_pct": 4.7,
+   "roe": 12.2,
+   "debt_ebitda": null
+  },
   "RHI": {
    "name": "ROBERT HALF INC",
    "price": 43.73,
-   "market_cap": 4476282368,
+   "market_cap": 4475779584,
    "gross_margin": 37.3,
    "insider_pct": 3.6,
    "roe": null,
    "debt_ebitda": 1.97
+  },
+  "OPLN": {
+   "name": "OPENLANE INC",
+   "price": 39.01,
+   "market_cap": 4761945088,
+   "gross_margin": 45.8,
+   "insider_pct": 7.9,
+   "roe": 11.1,
+   "debt_ebitda": 5.56
   },
   "CNR": {
    "name": "CORE NATURAL RESOURCES INC",
@@ -1114,28 +1114,19 @@
    "name": "INTEGER HOLDINGS CORP",
    "price": 126.59,
    "market_cap": 4303722496,
-   "gross_margin": 25.0,
+   "gross_margin": 25.1,
    "insider_pct": 0.9,
    "roe": 6.0,
-   "debt_ebitda": 4.27
+   "debt_ebitda": 4.22
   },
   "SKT": {
    "name": "TANGER INC",
    "price": 36.76,
-   "market_cap": 4394359808,
+   "market_cap": 4394244096,
    "gross_margin": 73.1,
    "insider_pct": 2.4,
    "roe": 19.4,
    "debt_ebitda": 5.79
-  },
-  "CVCO": {
-   "name": "CAVCO INDUSTRIES INC",
-   "price": 619.0,
-   "market_cap": 4759739904,
-   "gross_margin": 21.9,
-   "insider_pct": 1.6,
-   "roe": 16.7,
-   "debt_ebitda": 0.16
   },
   "PSMT": {
    "name": "PRICESMART INC",
@@ -1146,37 +1137,10 @@
    "roe": 12.3,
    "debt_ebitda": 0.99
   },
-  "ICUI": {
-   "name": "ICU MEDICAL INC",
-   "price": 163.78,
-   "market_cap": 4095652608,
-   "gross_margin": 38.3,
-   "insider_pct": 1.8,
-   "roe": 1.4,
-   "debt_ebitda": 3.95
-  },
-  "MTH": {
-   "name": "MERITAGE HOMES CORP",
-   "price": 64.47,
-   "market_cap": 4153365248,
-   "gross_margin": 18.0,
-   "insider_pct": 2.6,
-   "roe": 5.8,
-   "debt_ebitda": 4.66
-  },
-  "VCYT": {
-   "name": "VERACYTE INC",
-   "price": 50.01,
-   "market_cap": 4020340224,
-   "gross_margin": 73.8,
-   "insider_pct": 0.5,
-   "roe": 8.8,
-   "debt_ebitda": 0.35
-  },
   "WK": {
    "name": "WORKIVA INC",
    "price": 83.61,
-   "market_cap": 4549762560,
+   "market_cap": 4692137472,
    "gross_margin": 80.2,
    "insider_pct": 4.0,
    "roe": null,
@@ -1200,32 +1164,50 @@
    "roe": 15.9,
    "debt_ebitda": null
   },
+  "VCYT": {
+   "name": "VERACYTE INC",
+   "price": 50.01,
+   "market_cap": 4020340224,
+   "gross_margin": 73.8,
+   "insider_pct": 0.5,
+   "roe": 8.8,
+   "debt_ebitda": 0.35
+  },
   "INDV": {
    "name": "INDIVIOR PHARMACEUTICALS INC",
    "price": 35.37,
    "market_cap": 4174907392,
-   "gross_margin": 88.4,
+   "gross_margin": 85.7,
    "insider_pct": 1.8,
    "roe": null,
-   "debt_ebitda": 0.72
+   "debt_ebitda": 0.77
   },
-  "AZZ": {
-   "name": "AZZ INC",
-   "price": 134.44,
-   "market_cap": 4022818560,
-   "gross_margin": 24.1,
-   "insider_pct": 1.7,
-   "roe": 12.3,
-   "debt_ebitda": 1.45
+  "ICUI": {
+   "name": "ICU MEDICAL INC",
+   "price": 163.78,
+   "market_cap": 4095652608,
+   "gross_margin": 38.3,
+   "insider_pct": 1.8,
+   "roe": 1.4,
+   "debt_ebitda": 3.95
   },
-  "AIR": {
-   "name": "AAR CORP",
-   "price": 100.26,
-   "market_cap": 4029871872,
-   "gross_margin": 19.1,
-   "insider_pct": 2.4,
-   "roe": 12.9,
-   "debt_ebitda": 2.71
+  "CVCO": {
+   "name": "CAVCO INDUSTRIES INC",
+   "price": 619.0,
+   "market_cap": 4742723072,
+   "gross_margin": 21.5,
+   "insider_pct": 1.6,
+   "roe": 16.6,
+   "debt_ebitda": 0.16
+  },
+  "MTH": {
+   "name": "MERITAGE HOMES CORP",
+   "price": 64.47,
+   "market_cap": 4153365248,
+   "gross_margin": 18.0,
+   "insider_pct": 2.6,
+   "roe": 5.8,
+   "debt_ebitda": 4.66
   },
   "HP": {
    "name": "HELMERICH + PAYNE",
@@ -1236,14 +1218,14 @@
    "roe": -4.6,
    "debt_ebitda": 2.25
   },
-  "MDU": {
-   "name": "MDU RESOURCES GROUP INC",
-   "price": 19.72,
-   "market_cap": 4148091136,
-   "gross_margin": 34.8,
-   "insider_pct": 0.4,
-   "roe": 6.9,
-   "debt_ebitda": 4.92
+  "AZZ": {
+   "name": "AZZ INC",
+   "price": 134.44,
+   "market_cap": 4022818560,
+   "gross_margin": 24.1,
+   "insider_pct": 1.7,
+   "roe": 12.3,
+   "debt_ebitda": 1.45
   },
   "VSH": {
    "name": "VISHAY INTERTECHNOLOGY INC",
@@ -1253,24 +1235,6 @@
    "insider_pct": 1.2,
    "roe": 1.1,
    "debt_ebitda": 3.79
-  },
-  "APLE": {
-   "name": "APPLE HOSPITALITY REIT INC",
-   "price": 18.52,
-   "market_cap": 4372251648,
-   "gross_margin": 42.9,
-   "insider_pct": 7.1,
-   "roe": 5.5,
-   "debt_ebitda": 3.56
-  },
-  "ITRI": {
-   "name": "ITRON INC",
-   "price": 95.82,
-   "market_cap": 4202706176,
-   "gross_margin": 40.7,
-   "insider_pct": 1.8,
-   "roe": 16.4,
-   "debt_ebitda": 4.27
   },
   "SFBS": {
    "name": "SERVISFIRST BANCSHARES INC",
@@ -1290,6 +1254,42 @@
    "roe": 30.8,
    "debt_ebitda": 1.94
   },
+  "AIR": {
+   "name": "AAR CORP",
+   "price": 100.26,
+   "market_cap": 4029871872,
+   "gross_margin": 19.1,
+   "insider_pct": 2.4,
+   "roe": 12.9,
+   "debt_ebitda": 2.71
+  },
+  "APLE": {
+   "name": "APPLE HOSPITALITY REIT INC",
+   "price": 18.52,
+   "market_cap": 4372251648,
+   "gross_margin": 42.9,
+   "insider_pct": 7.1,
+   "roe": 5.5,
+   "debt_ebitda": 3.56
+  },
+  "MDU": {
+   "name": "MDU RESOURCES GROUP INC",
+   "price": 19.72,
+   "market_cap": 4148091136,
+   "gross_margin": 34.8,
+   "insider_pct": 0.4,
+   "roe": 6.9,
+   "debt_ebitda": 4.92
+  },
+  "ITRI": {
+   "name": "ITRON INC",
+   "price": 95.82,
+   "market_cap": 4202706176,
+   "gross_margin": 40.7,
+   "insider_pct": 1.8,
+   "roe": 16.4,
+   "debt_ebitda": 4.27
+  },
   "CNK": {
    "name": "CINEMARK HOLDINGS INC",
    "price": 39.19,
@@ -1299,23 +1299,14 @@
    "roe": 45.8,
    "debt_ebitda": 4.51
   },
-  "QTWO": {
-   "name": "Q2 HOLDINGS INC",
-   "price": 67.08,
-   "market_cap": 4144306176,
-   "gross_margin": 58.4,
-   "insider_pct": 0.8,
-   "roe": 17.2,
-   "debt_ebitda": 0.28
-  },
-  "WSFS": {
-   "name": "WSFS FINANCIAL CORP",
-   "price": 78.47,
-   "market_cap": 4032416512,
-   "gross_margin": 0.0,
-   "insider_pct": 1.0,
-   "roe": 12.5,
-   "debt_ebitda": null
+  "PRIM": {
+   "name": "PRIMORIS SERVICES CORP",
+   "price": 72.77,
+   "market_cap": 3917378304,
+   "gross_margin": 8.6,
+   "insider_pct": 1.2,
+   "roe": 8.9,
+   "debt_ebitda": 3.98
   },
   "CPB": {
    "name": "THE CAMPBELL S COMPANY",
@@ -1326,14 +1317,14 @@
    "roe": 10.1,
    "debt_ebitda": 4.6
   },
-  "PRIM": {
-   "name": "PRIMORIS SERVICES CORP",
-   "price": 72.77,
-   "market_cap": 3948131584,
-   "gross_margin": 8.6,
-   "insider_pct": 1.2,
-   "roe": 8.9,
-   "debt_ebitda": 3.98
+  "QTWO": {
+   "name": "Q2 HOLDINGS INC",
+   "price": 67.08,
+   "market_cap": 4144306176,
+   "gross_margin": 58.4,
+   "insider_pct": 0.8,
+   "roe": 17.2,
+   "debt_ebitda": 0.28
   },
   "BFH": {
    "name": "BREAD FINANCIAL HOLDINGS INC",
@@ -1352,15 +1343,6 @@
    "insider_pct": 1.8,
    "roe": 19.4,
    "debt_ebitda": null
-  },
-  "DIOD": {
-   "name": "DIODES INC",
-   "price": 80.13,
-   "market_cap": 3690123008,
-   "gross_margin": 31.7,
-   "insider_pct": 2.6,
-   "roe": 4.7,
-   "debt_ebitda": 0.4
   },
   "MRP": {
    "name": "MILLROSE PROPERTIES",
@@ -1387,7 +1369,34 @@
    "gross_margin": 35.4,
    "insider_pct": 7.5,
    "roe": 14.5,
-   "debt_ebitda": 1.73
+   "debt_ebitda": 1.75
+  },
+  "DIOD": {
+   "name": "DIODES INC",
+   "price": 80.13,
+   "market_cap": 3690123008,
+   "gross_margin": 31.7,
+   "insider_pct": 2.6,
+   "roe": 4.7,
+   "debt_ebitda": 0.4
+  },
+  "WSFS": {
+   "name": "WSFS FINANCIAL CORP",
+   "price": 78.47,
+   "market_cap": 4009079808,
+   "gross_margin": 0.0,
+   "insider_pct": 1.0,
+   "roe": 12.5,
+   "debt_ebitda": null
+  },
+  "INDB": {
+   "name": "INDEPENDENT BANK CORP/MA",
+   "price": 82.74,
+   "market_cap": 3919319296,
+   "gross_margin": 0.0,
+   "insider_pct": 1.7,
+   "roe": 9.3,
+   "debt_ebitda": null
   },
   "CWEN": {
    "name": "CLEARWAY ENERGY INC C",
@@ -1402,28 +1411,10 @@
    "name": "BOOT BARN HOLDINGS INC",
    "price": 132.24,
    "market_cap": 3954568960,
-   "gross_margin": 38.6,
+   "gross_margin": 37.9,
    "insider_pct": 0.5,
    "roe": 19.6,
-   "debt_ebitda": 2.04
-  },
-  "INDB": {
-   "name": "INDEPENDENT BANK CORP/MA",
-   "price": 82.74,
-   "market_cap": 3919319296,
-   "gross_margin": 0.0,
-   "insider_pct": 1.7,
-   "roe": 9.3,
-   "debt_ebitda": null
-  },
-  "TDW": {
-   "name": "TIDEWATER INC",
-   "price": 87.33,
-   "market_cap": 4345211904,
-   "gross_margin": 48.1,
-   "insider_pct": 1.7,
-   "roe": 19.4,
-   "debt_ebitda": 1.64
+   "debt_ebitda": 2.12
   },
   "AMRX": {
    "name": "AMNEAL PHARMACEUTICALS INC",
@@ -1434,6 +1425,15 @@
    "roe": 613.0,
    "debt_ebitda": 4.05
   },
+  "TDW": {
+   "name": "TIDEWATER INC",
+   "price": 87.33,
+   "market_cap": 4345211904,
+   "gross_margin": 48.1,
+   "insider_pct": 1.7,
+   "roe": 19.4,
+   "debt_ebitda": 1.64
+  },
   "KFY": {
    "name": "KORN FERRY",
    "price": 76.55,
@@ -1443,32 +1443,14 @@
    "roe": 14.5,
    "debt_ebitda": 1.42
   },
-  "AXTI": {
-   "name": "AXT INC",
-   "price": 55.06,
-   "market_cap": 3610461184,
-   "gross_margin": 32.2,
-   "insider_pct": 4.0,
-   "roe": 1.0,
-   "debt_ebitda": 7.55
-  },
-  "LAZ": {
-   "name": "LAZARD INC",
-   "price": 38.35,
-   "market_cap": 3745349888,
-   "gross_margin": 89.4,
-   "insider_pct": 0.9,
-   "roe": 19.8,
-   "debt_ebitda": null
-  },
-  "PJT": {
-   "name": "PJT PARTNERS INC   A",
-   "price": 149.71,
-   "market_cap": 6377227776,
-   "gross_margin": 95.3,
-   "insider_pct": 7.1,
-   "roe": 37.6,
-   "debt_ebitda": null
+  "GFF": {
+   "name": "GRIFFON CORP",
+   "price": 101.09,
+   "market_cap": 4578842624,
+   "gross_margin": 41.3,
+   "insider_pct": 18.3,
+   "roe": 227.5,
+   "debt_ebitda": 2.64
   },
   "KTB": {
    "name": "KONTOOR BRANDS INC",
@@ -1479,14 +1461,32 @@
    "roe": 49.5,
    "debt_ebitda": 2.11
   },
-  "GFF": {
-   "name": "GRIFFON CORP",
-   "price": 101.09,
-   "market_cap": 4636657664,
-   "gross_margin": 41.3,
-   "insider_pct": 18.3,
-   "roe": 227.5,
-   "debt_ebitda": 2.64
+  "PJT": {
+   "name": "PJT PARTNERS INC   A",
+   "price": 149.71,
+   "market_cap": 6377227776,
+   "gross_margin": 95.3,
+   "insider_pct": 7.1,
+   "roe": 37.6,
+   "debt_ebitda": null
+  },
+  "LAZ": {
+   "name": "LAZARD INC",
+   "price": 38.35,
+   "market_cap": 3745349888,
+   "gross_margin": 89.4,
+   "insider_pct": 0.9,
+   "roe": 19.8,
+   "debt_ebitda": null
+  },
+  "AXTI": {
+   "name": "AXT INC",
+   "price": 55.06,
+   "market_cap": 3610461184,
+   "gross_margin": 44.0,
+   "insider_pct": 4.0,
+   "roe": 6.1,
+   "debt_ebitda": 2.69
   },
   "CVBF": {
    "name": "CVB FINANCIAL CORP",
@@ -1497,15 +1497,6 @@
    "roe": 8.6,
    "debt_ebitda": null
   },
-  "OTTR": {
-   "name": "OTTER TAIL CORP",
-   "price": 90.35,
-   "market_cap": 3793396992,
-   "gross_margin": 42.2,
-   "insider_pct": 2.1,
-   "roe": 10.7,
-   "debt_ebitda": 2.83
-  },
   "ATMU": {
    "name": "ATMUS FILTRATION TECHNOLOGIE",
    "price": 45.69,
@@ -1515,6 +1506,15 @@
    "roe": 55.8,
    "debt_ebitda": 3.09
   },
+  "OTTR": {
+   "name": "OTTER TAIL CORP",
+   "price": 90.35,
+   "market_cap": 3793396992,
+   "gross_margin": 42.2,
+   "insider_pct": 2.1,
+   "roe": 10.7,
+   "debt_ebitda": 2.83
+  },
   "CHEF": {
    "name": "CHEFS  WAREHOUSE INC/THE",
    "price": 104.23,
@@ -1523,15 +1523,6 @@
    "insider_pct": 9.5,
    "roe": 16.2,
    "debt_ebitda": 3.45
-  },
-  "ASO": {
-   "name": "ACADEMY SPORTS + OUTDOORS IN",
-   "price": 59.2,
-   "market_cap": 3645470464,
-   "gross_margin": 35.8,
-   "insider_pct": 1.6,
-   "roe": 18.6,
-   "debt_ebitda": 2.82
   },
   "UNF": {
    "name": "UNIFIRST CORP/MA",
@@ -1545,29 +1536,29 @@
   "SKYW": {
    "name": "SKYWEST INC",
    "price": 82.33,
-   "market_cap": 3196736000,
-   "gross_margin": 30.9,
+   "market_cap": 3265230848,
+   "gross_margin": 30.4,
    "insider_pct": 1.3,
-   "roe": 15.3,
-   "debt_ebitda": 2.5
-  },
-  "TPC": {
-   "name": "TUTOR PERINI CORP",
-   "price": 79.82,
-   "market_cap": 4199705600,
-   "gross_margin": 11.5,
-   "insider_pct": 9.9,
-   "roe": 13.7,
-   "debt_ebitda": 1.47
+   "roe": 15.1,
+   "debt_ebitda": 2.46
   },
   "WSBC": {
    "name": "WESBANCO INC",
    "price": 38.49,
-   "market_cap": 3694429184,
+   "market_cap": 3694467840,
    "gross_margin": 0.0,
    "insider_pct": 2.1,
    "roe": 8.8,
    "debt_ebitda": null
+  },
+  "ASO": {
+   "name": "ACADEMY SPORTS + OUTDOORS IN",
+   "price": 59.2,
+   "market_cap": 3645470464,
+   "gross_margin": 35.8,
+   "insider_pct": 1.6,
+   "roe": 18.6,
+   "debt_ebitda": 2.82
   },
   "LIF": {
    "name": "LIFE360 INC",
@@ -1605,14 +1596,14 @@
    "roe": 3.4,
    "debt_ebitda": 3.51
   },
-  "PARR": {
-   "name": "PAR PACIFIC HOLDINGS INC",
-   "price": 76.24,
-   "market_cap": 3819595520,
-   "gross_margin": 23.1,
-   "insider_pct": 2.6,
-   "roe": 53.5,
-   "debt_ebitda": 0.88
+  "TPC": {
+   "name": "TUTOR PERINI CORP",
+   "price": 79.82,
+   "market_cap": 4196066816,
+   "gross_margin": 11.5,
+   "insider_pct": 9.9,
+   "roe": 13.7,
+   "debt_ebitda": 1.47
   },
   "ARQT": {
    "name": "ARCUTIS BIOTHERAPEUTICS INC",
@@ -1632,15 +1623,6 @@
    "roe": 8.7,
    "debt_ebitda": null
   },
-  "OGN": {
-   "name": "ORGANON + CO",
-   "price": 13.84,
-   "market_cap": 3634514688,
-   "gross_margin": 53.4,
-   "insider_pct": 0.5,
-   "roe": 24.0,
-   "debt_ebitda": 5.47
-  },
   "DORM": {
    "name": "DORMAN PRODUCTS INC",
    "price": 136.01,
@@ -1650,23 +1632,14 @@
    "roe": 13.3,
    "debt_ebitda": 1.33
   },
-  "BRC": {
-   "name": "BRADY CORPORATION   CL A",
-   "price": 82.77,
-   "market_cap": 3881848064,
-   "gross_margin": 51.7,
-   "insider_pct": 3.7,
-   "roe": 16.1,
-   "debt_ebitda": 0.24
-  },
-  "LXP": {
-   "name": "LXP INDUSTRIAL TRUST",
-   "price": 61.18,
-   "market_cap": 3607254016,
-   "gross_margin": 79.8,
-   "insider_pct": 2.7,
-   "roe": 5.9,
-   "debt_ebitda": 5.75
+  "PARR": {
+   "name": "PAR PACIFIC HOLDINGS INC",
+   "price": 76.24,
+   "market_cap": 3819595520,
+   "gross_margin": 23.1,
+   "insider_pct": 2.6,
+   "roe": 53.5,
+   "debt_ebitda": 0.88
   },
   "STEP": {
    "name": "STEPSTONE GROUP INC CLASS A",
@@ -1677,50 +1650,23 @@
    "roe": -61.4,
    "debt_ebitda": null
   },
-  "PLMR": {
-   "name": "PALOMAR HOLDINGS INC",
-   "price": 140.32,
-   "market_cap": 3719023616,
-   "gross_margin": 27.4,
-   "insider_pct": 2.7,
-   "roe": 22.2,
-   "debt_ebitda": 1.02
+  "BRC": {
+   "name": "BRADY CORPORATION   CL A",
+   "price": 82.77,
+   "market_cap": 3881848064,
+   "gross_margin": 51.7,
+   "insider_pct": 3.7,
+   "roe": 16.1,
+   "debt_ebitda": 0.24
   },
-  "FFBC": {
-   "name": "FIRST FINANCIAL BANCORP",
-   "price": 32.35,
-   "market_cap": 3402842112,
-   "gross_margin": 0.0,
-   "insider_pct": 1.2,
-   "roe": 10.7,
-   "debt_ebitda": null
-  },
-  "HNI": {
-   "name": "HNI CORP",
-   "price": 49.02,
-   "market_cap": 3538351872,
-   "gross_margin": 41.9,
-   "insider_pct": 2.1,
-   "roe": 0.3,
-   "debt_ebitda": 3.66
-  },
-  "ABG": {
-   "name": "ASBURY AUTOMOTIVE GROUP",
-   "price": 198.03,
-   "market_cap": 3555017984,
-   "gross_margin": 17.1,
-   "insider_pct": 0.9,
-   "roe": null,
-   "debt_ebitda": 5.73
-  },
-  "NIC": {
-   "name": "NICOLET BANKSHARES INC",
-   "price": 171.56,
-   "market_cap": 3595470592,
-   "gross_margin": 0.0,
-   "insider_pct": 8.7,
-   "roe": 10.2,
-   "debt_ebitda": null
+  "OGN": {
+   "name": "ORGANON + CO",
+   "price": 13.84,
+   "market_cap": 3634682880,
+   "gross_margin": 54.2,
+   "insider_pct": 0.5,
+   "roe": 20.3,
+   "debt_ebitda": 5.41
   },
   "SLG": {
    "name": "SL GREEN REALTY CORP",
@@ -1731,14 +1677,68 @@
    "roe": 0.9,
    "debt_ebitda": 11.56
   },
-  "ACLS": {
-   "name": "AXCELIS TECHNOLOGIES INC",
-   "price": 100.07,
-   "market_cap": 3090310400,
-   "gross_margin": 43.0,
-   "insider_pct": 0.7,
-   "roe": 8.9,
-   "debt_ebitda": 0.7
+  "ABG": {
+   "name": "ASBURY AUTOMOTIVE GROUP",
+   "price": 198.03,
+   "market_cap": 3555017984,
+   "gross_margin": 17.1,
+   "insider_pct": 0.9,
+   "roe": null,
+   "debt_ebitda": 5.73
+  },
+  "MWA": {
+   "name": "MUELLER WATER PRODUCTS INC A",
+   "price": 22.79,
+   "market_cap": 3558104320,
+   "gross_margin": 38.1,
+   "insider_pct": 1.1,
+   "roe": 21.7,
+   "debt_ebitda": 1.26
+  },
+  "PLMR": {
+   "name": "PALOMAR HOLDINGS INC",
+   "price": 140.32,
+   "market_cap": 3692897536,
+   "gross_margin": 27.4,
+   "insider_pct": 2.7,
+   "roe": 22.2,
+   "debt_ebitda": 1.02
+  },
+  "HNI": {
+   "name": "HNI CORP",
+   "price": 49.02,
+   "market_cap": 3538351872,
+   "gross_margin": 41.9,
+   "insider_pct": 2.1,
+   "roe": 0.3,
+   "debt_ebitda": 3.66
+  },
+  "FFBC": {
+   "name": "FIRST FINANCIAL BANCORP",
+   "price": 32.35,
+   "market_cap": 3402842112,
+   "gross_margin": 0.0,
+   "insider_pct": 1.2,
+   "roe": 10.7,
+   "debt_ebitda": null
+  },
+  "LXP": {
+   "name": "LXP INDUSTRIAL TRUST",
+   "price": 61.18,
+   "market_cap": 3607254016,
+   "gross_margin": 79.8,
+   "insider_pct": 2.7,
+   "roe": 5.9,
+   "debt_ebitda": 5.75
+  },
+  "NIC": {
+   "name": "NICOLET BANKSHARES INC",
+   "price": 171.56,
+   "market_cap": 3595470592,
+   "gross_margin": 0.0,
+   "insider_pct": 8.7,
+   "roe": 10.2,
+   "debt_ebitda": null
   },
   "ENPH": {
    "name": "ENPHASE ENERGY INC",
@@ -1749,6 +1749,15 @@
    "roe": 8.1,
    "debt_ebitda": 7.04
   },
+  "ACLS": {
+   "name": "AXCELIS TECHNOLOGIES INC",
+   "price": 100.07,
+   "market_cap": 3090310400,
+   "gross_margin": 43.0,
+   "insider_pct": 0.7,
+   "roe": 8.9,
+   "debt_ebitda": 0.7
+  },
   "WAY": {
    "name": "WAYSTAR HOLDING CORP",
    "price": 28.0,
@@ -1757,15 +1766,6 @@
    "insider_pct": 2.5,
    "roe": 3.8,
    "debt_ebitda": 3.41
-  },
-  "AMTM": {
-   "name": "AMENTUM HOLDINGS INC",
-   "price": 21.87,
-   "market_cap": 5347355648,
-   "gross_margin": 10.5,
-   "insider_pct": 1.2,
-   "roe": 4.3,
-   "debt_ebitda": 3.8
   },
   "GNW": {
    "name": "GENWORTH FINANCIAL INC",
@@ -1776,33 +1776,6 @@
    "roe": 3.4,
    "debt_ebitda": 4.41
   },
-  "SFNC": {
-   "name": "SIMMONS FIRST NATL CORP CL A",
-   "price": 23.17,
-   "market_cap": 3348384512,
-   "gross_margin": 0.0,
-   "insider_pct": 1.2,
-   "roe": 7.8,
-   "debt_ebitda": null
-  },
-  "AWR": {
-   "name": "AMERICAN STATES WATER CO",
-   "price": 86.32,
-   "market_cap": 3421347072,
-   "gross_margin": 57.6,
-   "insider_pct": 0.8,
-   "roe": 13.7,
-   "debt_ebitda": 3.3
-  },
-  "HIW": {
-   "name": "HIGHWOODS PROPERTIES INC",
-   "price": 30.98,
-   "market_cap": 3479780608,
-   "gross_margin": 67.3,
-   "insider_pct": 1.3,
-   "roe": 7.6,
-   "debt_ebitda": 7.16
-  },
   "NATL": {
    "name": "NCR ATLEOS CORP",
    "price": 45.82,
@@ -1811,6 +1784,15 @@
    "insider_pct": 1.3,
    "roe": 48.5,
    "debt_ebitda": 3.42
+  },
+  "AMTM": {
+   "name": "AMENTUM HOLDINGS INC",
+   "price": 21.87,
+   "market_cap": 5347355648,
+   "gross_margin": 10.5,
+   "insider_pct": 1.2,
+   "roe": 4.3,
+   "debt_ebitda": 3.8
   },
   "WSC": {
    "name": "WILLSCOT HOLDINGS CORP",
@@ -1821,6 +1803,24 @@
    "roe": -7.1,
    "debt_ebitda": 6.47
   },
+  "HIW": {
+   "name": "HIGHWOODS PROPERTIES INC",
+   "price": 30.98,
+   "market_cap": 3479572992,
+   "gross_margin": 67.3,
+   "insider_pct": 1.3,
+   "roe": 7.6,
+   "debt_ebitda": 7.16
+  },
+  "AWR": {
+   "name": "AMERICAN STATES WATER CO",
+   "price": 86.32,
+   "market_cap": 3421347072,
+   "gross_margin": 57.6,
+   "insider_pct": 0.8,
+   "roe": 13.7,
+   "debt_ebitda": 3.3
+  },
   "DAVE": {
    "name": "DAVE INC",
    "price": 316.79,
@@ -1829,6 +1829,15 @@
    "insider_pct": 10.4,
    "roe": 104.8,
    "debt_ebitda": 1.16
+  },
+  "SFNC": {
+   "name": "SIMMONS FIRST NATL CORP CL A",
+   "price": 23.17,
+   "market_cap": 3348384512,
+   "gross_margin": 0.0,
+   "insider_pct": 1.2,
+   "roe": 7.8,
+   "debt_ebitda": null
   },
   "CBU": {
    "name": "COMMUNITY FINANCIAL SYSTEM I",
@@ -1848,6 +1857,24 @@
    "roe": 131.8,
    "debt_ebitda": 1.08
   },
+  "FRSH": {
+   "name": "FRESHWORKS INC CL A",
+   "price": 14.72,
+   "market_cap": 3840753664,
+   "gross_margin": 85.0,
+   "insider_pct": 8.2,
+   "roe": 19.7,
+   "debt_ebitda": 0.6
+  },
+  "BNL": {
+   "name": "BROADSTONE NET LEASE INC",
+   "price": 17.1,
+   "market_cap": 3640531968,
+   "gross_margin": 94.7,
+   "insider_pct": 1.1,
+   "roe": 5.0,
+   "debt_ebitda": 7.03
+  },
   "TDS": {
    "name": "TELEPHONE AND DATA SYSTEMS",
    "price": 34.3,
@@ -1856,24 +1883,6 @@
    "insider_pct": 8.4,
    "roe": 11.8,
    "debt_ebitda": 3.87
-  },
-  "HAYW": {
-   "name": "HAYWARD HOLDINGS INC",
-   "price": 16.12,
-   "market_cap": 3359249152,
-   "gross_margin": 48.0,
-   "insider_pct": 2.3,
-   "roe": 10.9,
-   "debt_ebitda": 3.26
-  },
-  "NHI": {
-   "name": "NATL HEALTH INVESTORS INC",
-   "price": 67.04,
-   "market_cap": 3292363520,
-   "gross_margin": 73.9,
-   "insider_pct": 2.4,
-   "roe": 10.7,
-   "debt_ebitda": 4.41
   },
   "LRN": {
    "name": "STRIDE INC",
@@ -1884,59 +1893,14 @@
    "roe": 20.9,
    "debt_ebitda": 1.17
   },
-  "BNL": {
-   "name": "BROADSTONE NET LEASE INC",
-   "price": 17.1,
-   "market_cap": 3640531968,
-   "gross_margin": 94.7,
-   "insider_pct": 1.1,
-   "roe": 5.0,
-   "debt_ebitda": 7.01
-  },
-  "SHOO": {
-   "name": "STEVEN MADDEN LTD",
-   "price": 43.5,
-   "market_cap": 3183203584,
-   "gross_margin": 46.9,
-   "insider_pct": 2.2,
-   "roe": 15.9,
-   "debt_ebitda": 1.36
-  },
-  "FRSH": {
-   "name": "FRESHWORKS INC CL A",
-   "price": 14.72,
-   "market_cap": 3840753664,
-   "gross_margin": 85.0,
-   "insider_pct": 8.2,
-   "roe": 19.7,
-   "debt_ebitda": 0.6
-  },
-  "MWA": {
-   "name": "MUELLER WATER PRODUCTS INC A",
-   "price": 22.79,
-   "market_cap": 3558104320,
-   "gross_margin": 38.1,
-   "insider_pct": 1.1,
-   "roe": 21.7,
-   "debt_ebitda": 1.26
-  },
-  "CPK": {
-   "name": "CHESAPEAKE UTILITIES CORP",
-   "price": 136.41,
-   "market_cap": 3444992512,
-   "gross_margin": 40.3,
-   "insider_pct": 1.3,
-   "roe": 9.5,
-   "debt_ebitda": 4.46
-  },
-  "BFAM": {
-   "name": "BRIGHT HORIZONS FAMILY SOLUT",
-   "price": 54.98,
-   "market_cap": 2673968896,
-   "gross_margin": 25.5,
-   "insider_pct": 1.1,
-   "roe": 14.9,
-   "debt_ebitda": 4.32
+  "NHI": {
+   "name": "NATL HEALTH INVESTORS INC",
+   "price": 67.04,
+   "market_cap": 3292363520,
+   "gross_margin": 73.9,
+   "insider_pct": 2.4,
+   "roe": 10.7,
+   "debt_ebitda": 4.41
   },
   "ALRM": {
    "name": "ALARM.COM HOLDINGS INC",
@@ -1947,23 +1911,32 @@
    "roe": 13.3,
    "debt_ebitda": 3.38
   },
-  "NMIH": {
-   "name": "NMI HOLDINGS INC",
-   "price": 42.67,
-   "market_cap": 3209545472,
-   "gross_margin": 76.4,
-   "insider_pct": 1.6,
-   "roe": 15.4,
-   "debt_ebitda": 0.78
+  "HAYW": {
+   "name": "HAYWARD HOLDINGS INC",
+   "price": 16.12,
+   "market_cap": 3359249152,
+   "gross_margin": 48.0,
+   "insider_pct": 2.3,
+   "roe": 10.9,
+   "debt_ebitda": 3.26
   },
-  "TDC": {
-   "name": "TERADATA CORP",
-   "price": 34.25,
-   "market_cap": 3185250048,
-   "gross_margin": 61.3,
-   "insider_pct": 1.0,
-   "roe": 119.1,
-   "debt_ebitda": 0.29
+  "BFAM": {
+   "name": "BRIGHT HORIZONS FAMILY SOLUT",
+   "price": 54.98,
+   "market_cap": 2673968896,
+   "gross_margin": 24.3,
+   "insider_pct": 1.1,
+   "roe": -13.0,
+   "debt_ebitda": 4.73
+  },
+  "CPK": {
+   "name": "CHESAPEAKE UTILITIES CORP",
+   "price": 136.41,
+   "market_cap": 3444992512,
+   "gross_margin": 40.3,
+   "insider_pct": 1.3,
+   "roe": 9.5,
+   "debt_ebitda": 4.46
   },
   "MHO": {
    "name": "M/I HOMES INC",
@@ -1974,23 +1947,41 @@
    "roe": 8.7,
    "debt_ebitda": 2.48
   },
+  "NMIH": {
+   "name": "NMI HOLDINGS INC",
+   "price": 42.67,
+   "market_cap": 3209545472,
+   "gross_margin": 76.4,
+   "insider_pct": 1.6,
+   "roe": 15.4,
+   "debt_ebitda": 0.78
+  },
+  "SHOO": {
+   "name": "STEVEN MADDEN LTD",
+   "price": 43.5,
+   "market_cap": 3183203584,
+   "gross_margin": 46.9,
+   "insider_pct": 2.2,
+   "roe": 15.9,
+   "debt_ebitda": 1.36
+  },
+  "TDC": {
+   "name": "TERADATA CORP",
+   "price": 34.25,
+   "market_cap": 3185250048,
+   "gross_margin": 61.3,
+   "insider_pct": 1.0,
+   "roe": 119.1,
+   "debt_ebitda": 0.29
+  },
   "OSIS": {
    "name": "OSI SYSTEMS INC",
    "price": 199.44,
    "market_cap": 3136823552,
-   "gross_margin": 33.2,
+   "gross_margin": 32.9,
    "insider_pct": 4.7,
-   "roe": 17.3,
-   "debt_ebitda": 3.92
-  },
-  "SBCF": {
-   "name": "SEACOAST BANKING CORP/FL",
-   "price": 33.03,
-   "market_cap": 3195123968,
-   "gross_margin": 0.0,
-   "insider_pct": 1.3,
-   "roe": 7.0,
-   "debt_ebitda": null
+   "roe": 18.4,
+   "debt_ebitda": 3.95
   },
   "KAI": {
    "name": "KADANT INC",
@@ -2000,6 +1991,15 @@
    "insider_pct": 0.7,
    "roe": 11.3,
    "debt_ebitda": 2.12
+  },
+  "SBCF": {
+   "name": "SEACOAST BANKING CORP/FL",
+   "price": 33.03,
+   "market_cap": 3195123968,
+   "gross_margin": 0.0,
+   "insider_pct": 1.3,
+   "roe": 7.0,
+   "debt_ebitda": null
   },
   "HWKN": {
    "name": "HAWKINS INC",
@@ -2028,15 +2028,6 @@
    "roe": -14.7,
    "debt_ebitda": 9.54
   },
-  "ATRC": {
-   "name": "ATRICURE INC",
-   "price": 61.25,
-   "market_cap": 3115560704,
-   "gross_margin": 76.3,
-   "insider_pct": 3.8,
-   "roe": 2.2,
-   "debt_ebitda": 2.2
-  },
   "ABM": {
    "name": "ABM INDUSTRIES INC",
    "price": 53.48,
@@ -2045,24 +2036,6 @@
    "insider_pct": 1.6,
    "roe": 9.2,
    "debt_ebitda": 4.09
-  },
-  "FHB": {
-   "name": "FIRST HAWAIIAN INC",
-   "price": 25.2,
-   "market_cap": 3066370048,
-   "gross_margin": 0.0,
-   "insider_pct": 0.7,
-   "roe": 9.9,
-   "debt_ebitda": null
-  },
-  "SPSC": {
-   "name": "SPS COMMERCE INC",
-   "price": 82.99,
-   "market_cap": 2987654656,
-   "gross_margin": 69.8,
-   "insider_pct": 1.4,
-   "roe": 8.3,
-   "debt_ebitda": 0.03
   },
   "AVA": {
    "name": "AVISTA CORP",
@@ -2073,14 +2046,14 @@
    "roe": 8.3,
    "debt_ebitda": 5.25
   },
-  "FIBK": {
-   "name": "FIRST INTERSTATE BANCSYS A",
-   "price": 37.65,
-   "market_cap": 3520839936,
-   "gross_margin": 0.0,
-   "insider_pct": 8.6,
-   "roe": 9.5,
-   "debt_ebitda": null
+  "ATRC": {
+   "name": "ATRICURE INC",
+   "price": 61.25,
+   "market_cap": 3115560704,
+   "gross_margin": 76.3,
+   "insider_pct": 3.8,
+   "roe": 2.2,
+   "debt_ebitda": 2.2
   },
   "CWK": {
    "name": "CUSHMAN + WAKEFIELD LTD",
@@ -2091,14 +2064,32 @@
    "roe": 3.5,
    "debt_ebitda": 5.21
   },
-  "AEO": {
-   "name": "AMERICAN EAGLE OUTFITTERS",
-   "price": 19.61,
-   "market_cap": 3286113024,
-   "gross_margin": 37.4,
-   "insider_pct": 8.9,
-   "roe": 20.0,
-   "debt_ebitda": 3.37
+  "SPSC": {
+   "name": "SPS COMMERCE INC",
+   "price": 82.99,
+   "market_cap": 2941242624,
+   "gross_margin": 70.2,
+   "insider_pct": 1.4,
+   "roe": 8.8,
+   "debt_ebitda": 0.03
+  },
+  "FHB": {
+   "name": "FIRST HAWAIIAN INC",
+   "price": 25.2,
+   "market_cap": 3066370048,
+   "gross_margin": 0.0,
+   "insider_pct": 0.7,
+   "roe": 9.9,
+   "debt_ebitda": null
+  },
+  "FIBK": {
+   "name": "FIRST INTERSTATE BANCSYS A",
+   "price": 37.65,
+   "market_cap": 3520839936,
+   "gross_margin": 0.0,
+   "insider_pct": 8.6,
+   "roe": 9.5,
+   "debt_ebitda": null
   },
   "BKU": {
    "name": "BANKUNITED INC",
@@ -2112,7 +2103,7 @@
   "EXTR": {
    "name": "EXTREME NETWORKS INC",
    "price": 22.61,
-   "market_cap": 2989064704,
+   "market_cap": 2966226176,
    "gross_margin": 61.9,
    "insider_pct": 3.1,
    "roe": 67.1,
@@ -2130,47 +2121,20 @@
   "OSW": {
    "name": "ONESPAWORLD HOLDINGS LTD",
    "price": 30.22,
-   "market_cap": 3067290880,
+   "market_cap": 3025170432,
    "gross_margin": 13.7,
-   "insider_pct": 3.6,
+   "insider_pct": 3.7,
    "roe": null,
    "debt_ebitda": 0.71
   },
-  "GPI": {
-   "name": "GROUP 1 AUTOMOTIVE INC",
-   "price": 260.8,
-   "market_cap": 3109316096,
-   "gross_margin": 15.9,
-   "insider_pct": 2.4,
-   "roe": null,
-   "debt_ebitda": 5.74
-  },
-  "SPHR": {
-   "name": "SPHERE ENTERTAINMENT CO",
-   "price": 109.14,
-   "market_cap": 3919611136,
-   "gross_margin": 54.7,
-   "insider_pct": 6.7,
-   "roe": -3.1,
-   "debt_ebitda": 3.59
-  },
-  "CACC": {
-   "name": "CREDIT ACCEPTANCE CORP",
-   "price": 464.89,
-   "market_cap": 4825827840,
-   "gross_margin": 94.7,
-   "insider_pct": 36.7,
-   "roe": 31.9,
-   "debt_ebitda": null
-  },
-  "PENG": {
-   "name": "PENGUIN SOLUTIONS INC",
-   "price": 51.93,
-   "market_cap": 2661033472,
-   "gross_margin": 27.6,
-   "insider_pct": 3.0,
-   "roe": 27.6,
-   "debt_ebitda": 3.73
+  "AEO": {
+   "name": "AMERICAN EAGLE OUTFITTERS",
+   "price": 19.61,
+   "market_cap": 3286113024,
+   "gross_margin": 37.4,
+   "insider_pct": 8.9,
+   "roe": 20.0,
+   "debt_ebitda": 3.37
   },
   "CURB": {
    "name": "CURBLINE PROPERTIES CORP",
@@ -2190,6 +2154,24 @@
    "roe": 11.0,
    "debt_ebitda": null
   },
+  "GPI": {
+   "name": "GROUP 1 AUTOMOTIVE INC",
+   "price": 260.8,
+   "market_cap": 3115857664,
+   "gross_margin": 15.9,
+   "insider_pct": 2.4,
+   "roe": 12.4,
+   "debt_ebitda": 6.22
+  },
+  "PENG": {
+   "name": "PENGUIN SOLUTIONS INC",
+   "price": 51.93,
+   "market_cap": 2661033472,
+   "gross_margin": 27.6,
+   "insider_pct": 3.0,
+   "roe": 27.6,
+   "debt_ebitda": 3.73
+  },
   "DNOW": {
    "name": "DNOW INC",
    "price": 16.31,
@@ -2199,14 +2181,14 @@
    "roe": -11.6,
    "debt_ebitda": 4.3
   },
-  "SXI": {
-   "name": "STANDEX INTERNATIONAL CORP",
-   "price": 243.55,
-   "market_cap": 2991150848,
-   "gross_margin": 41.7,
-   "insider_pct": 1.8,
-   "roe": 17.2,
-   "debt_ebitda": 2.96
+  "SPHR": {
+   "name": "SPHERE ENTERTAINMENT CO",
+   "price": 109.14,
+   "market_cap": 3919611136,
+   "gross_margin": 54.7,
+   "insider_pct": 6.7,
+   "roe": -3.1,
+   "debt_ebitda": 3.59
   },
   "VGNT": {
    "name": "VERSIGENT PLC",
@@ -2217,14 +2199,23 @@
    "roe": null,
    "debt_ebitda": 2.58
   },
-  "DRH": {
-   "name": "DIAMONDROCK HOSPITALITY CO",
-   "price": 14.25,
-   "market_cap": 2926794752,
-   "gross_margin": 29.5,
-   "insider_pct": 1.3,
-   "roe": 9.9,
-   "debt_ebitda": 3.99
+  "CACC": {
+   "name": "CREDIT ACCEPTANCE CORP",
+   "price": 464.89,
+   "market_cap": 4712806400,
+   "gross_margin": 93.6,
+   "insider_pct": 37.6,
+   "roe": 22.7,
+   "debt_ebitda": null
+  },
+  "SXI": {
+   "name": "STANDEX INTERNATIONAL CORP",
+   "price": 243.55,
+   "market_cap": 2991150848,
+   "gross_margin": 42.4,
+   "insider_pct": 1.8,
+   "roe": 18.1,
+   "debt_ebitda": 2.78
   },
   "KN": {
    "name": "KNOWLES CORP",
@@ -2235,6 +2226,15 @@
    "roe": 9.9,
    "debt_ebitda": 0.96
   },
+  "DRH": {
+   "name": "DIAMONDROCK HOSPITALITY CO",
+   "price": 14.25,
+   "market_cap": 2926794752,
+   "gross_margin": 29.5,
+   "insider_pct": 1.3,
+   "roe": 9.9,
+   "debt_ebitda": 3.99
+  },
   "NOG": {
    "name": "NORTHERN OIL AND GAS INC",
    "price": 28.35,
@@ -2243,24 +2243,6 @@
    "insider_pct": 2.9,
    "roe": -22.0,
    "debt_ebitda": 2.27
-  },
-  "AGYS": {
-   "name": "AGILYSYS INC",
-   "price": 115.8,
-   "market_cap": 3267390208,
-   "gross_margin": 63.8,
-   "insider_pct": 3.6,
-   "roe": 13.6,
-   "debt_ebitda": 0.31
-  },
-  "PRK": {
-   "name": "PARK NATIONAL CORP",
-   "price": 175.58,
-   "market_cap": 3171705344,
-   "gross_margin": 0.0,
-   "insider_pct": 2.2,
-   "roe": 13.1,
-   "debt_ebitda": null
   },
   "DGII": {
    "name": "DIGI INTERNATIONAL INC",
@@ -2271,19 +2253,28 @@
    "roe": 7.5,
    "debt_ebitda": 1.03
   },
-  "WDFC": {
-   "name": "WD 40 CO",
-   "price": 220.61,
-   "market_cap": 2954515712,
-   "gross_margin": 55.3,
-   "insider_pct": 0.9,
-   "roe": 30.4,
-   "debt_ebitda": 0.84
+  "PRK": {
+   "name": "PARK NATIONAL CORP",
+   "price": 175.58,
+   "market_cap": 3171705344,
+   "gross_margin": 0.0,
+   "insider_pct": 2.2,
+   "roe": 13.1,
+   "debt_ebitda": null
+  },
+  "AGYS": {
+   "name": "AGILYSYS INC",
+   "price": 115.8,
+   "market_cap": 3267390208,
+   "gross_margin": 63.8,
+   "insider_pct": 3.6,
+   "roe": 13.6,
+   "debt_ebitda": 0.31
   },
   "CWT": {
    "name": "CALIFORNIA WATER SERVICE GRP",
    "price": 48.5,
-   "market_cap": 3049534464,
+   "market_cap": 3049532416,
    "gross_margin": 53.6,
    "insider_pct": 0.6,
    "roe": 7.6,
@@ -2297,6 +2288,15 @@
    "insider_pct": 0.9,
    "roe": -0.3,
    "debt_ebitda": null
+  },
+  "WDFC": {
+   "name": "WD 40 CO",
+   "price": 220.61,
+   "market_cap": 2954515712,
+   "gross_margin": 55.3,
+   "insider_pct": 0.9,
+   "roe": 30.4,
+   "debt_ebitda": 0.84
   },
   "AGO": {
    "name": "ASSURED GUARANTY LTD",
@@ -2319,16 +2319,16 @@
   "WT": {
    "name": "WISDOMTREE INC",
    "price": 20.71,
-   "market_cap": 3137815808,
-   "gross_margin": 53.3,
+   "market_cap": 3130399232,
+   "gross_margin": 54.0,
    "insider_pct": 9.5,
-   "roe": 18.7,
-   "debt_ebitda": 4.34
+   "roe": 27.0,
+   "debt_ebitda": 3.82
   },
   "SHAK": {
    "name": "SHAKE SHACK INC   CLASS A",
    "price": 70.48,
-   "market_cap": 3015241728,
+   "market_cap": 3019288320,
    "gross_margin": 40.4,
    "insider_pct": 4.4,
    "roe": 7.9,
@@ -2361,24 +2361,6 @@
    "roe": 1.3,
    "debt_ebitda": 1.59
   },
-  "FIVN": {
-   "name": "FIVE9 INC",
-   "price": 36.34,
-   "market_cap": 2715452928,
-   "gross_margin": 55.1,
-   "insider_pct": 2.9,
-   "roe": 7.9,
-   "debt_ebitda": 5.57
-  },
-  "MGEE": {
-   "name": "MGE ENERGY INC",
-   "price": 73.73,
-   "market_cap": 2783051008,
-   "gross_margin": 41.2,
-   "insider_pct": 0.3,
-   "roe": 11.0,
-   "debt_ebitda": 3.24
-  },
   "BOH": {
    "name": "BANK OF HAWAII CORP",
    "price": 69.77,
@@ -2387,6 +2369,24 @@
    "insider_pct": 1.9,
    "roe": 13.6,
    "debt_ebitda": null
+  },
+  "MGEE": {
+   "name": "MGE ENERGY INC",
+   "price": 73.73,
+   "market_cap": 2785815296,
+   "gross_margin": 41.2,
+   "insider_pct": 0.3,
+   "roe": 11.0,
+   "debt_ebitda": 3.24
+  },
+  "FIVN": {
+   "name": "FIVE9 INC",
+   "price": 36.34,
+   "market_cap": 2715452928,
+   "gross_margin": 55.1,
+   "insider_pct": 2.9,
+   "roe": 7.9,
+   "debt_ebitda": 5.57
   },
   "UNFI": {
    "name": "UNITED NATURAL FOODS INC",
@@ -2397,15 +2397,6 @@
    "roe": 5.3,
    "debt_ebitda": 4.81
   },
-  "COCO": {
-   "name": "VITA COCO CO INC/THE",
-   "price": 58.48,
-   "market_cap": 3337094400,
-   "gross_margin": 38.9,
-   "insider_pct": 8.7,
-   "roe": 32.0,
-   "debt_ebitda": 0.1
-  },
   "KSS": {
    "name": "KOHLS CORP",
    "price": 24.31,
@@ -2414,24 +2405,6 @@
    "insider_pct": 4.2,
    "roe": 6.7,
    "debt_ebitda": 5.38
-  },
-  "MARA": {
-   "name": "MARA HOLDINGS INC",
-   "price": 6.77,
-   "market_cap": 2615246336,
-   "gross_margin": 40.1,
-   "insider_pct": 0.8,
-   "roe": -105.6,
-   "debt_ebitda": null
-  },
-  "AAP": {
-   "name": "ADVANCE AUTO PARTS INC",
-   "price": 45.11,
-   "market_cap": 2724644096,
-   "gross_margin": 45.1,
-   "insider_pct": 0.8,
-   "roe": 4.9,
-   "debt_ebitda": 8.95
   },
   "CUBI": {
    "name": "CUSTOMERS BANCORP INC",
@@ -2442,6 +2415,24 @@
    "roe": 13.6,
    "debt_ebitda": null
   },
+  "COCO": {
+   "name": "VITA COCO CO INC/THE",
+   "price": 58.48,
+   "market_cap": 3337094400,
+   "gross_margin": 38.9,
+   "insider_pct": 8.7,
+   "roe": 32.0,
+   "debt_ebitda": 0.1
+  },
+  "AAP": {
+   "name": "ADVANCE AUTO PARTS INC",
+   "price": 45.11,
+   "market_cap": 2724644096,
+   "gross_margin": 45.1,
+   "insider_pct": 0.8,
+   "roe": 4.9,
+   "debt_ebitda": 8.95
+  },
   "POWI": {
    "name": "POWER INTEGRATIONS INC",
    "price": 43.86,
@@ -2450,6 +2441,24 @@
    "insider_pct": 1.7,
    "roe": 3.6,
    "debt_ebitda": 0.0
+  },
+  "MARA": {
+   "name": "MARA HOLDINGS INC",
+   "price": 6.77,
+   "market_cap": 2615246336,
+   "gross_margin": 40.1,
+   "insider_pct": 0.8,
+   "roe": -105.6,
+   "debt_ebitda": null
+  },
+  "JOE": {
+   "name": "ST JOE CO/THE",
+   "price": 70.02,
+   "market_cap": 3957869824,
+   "gross_margin": 46.1,
+   "insider_pct": 0.4,
+   "roe": 15.6,
+   "debt_ebitda": 2.47
   },
   "NBTB": {
    "name": "N B T BANCORP INC",
@@ -2460,15 +2469,6 @@
    "roe": 11.5,
    "debt_ebitda": null
   },
-  "MCY": {
-   "name": "MERCURY GENERAL CORP",
-   "price": 102.42,
-   "market_cap": null,
-   "gross_margin": 26.8,
-   "insider_pct": 52.0,
-   "roe": 39.0,
-   "debt_ebitda": 0.76
-  },
   "ACHC": {
    "name": "ACADIA HEALTHCARE CO INC",
    "price": 29.96,
@@ -2478,32 +2478,14 @@
    "roe": -41.4,
    "debt_ebitda": 4.84
   },
-  "BTU": {
-   "name": "PEABODY ENERGY CORP",
-   "price": 22.18,
-   "market_cap": 2703741952,
-   "gross_margin": 10.4,
-   "insider_pct": 1.0,
-   "roe": -4.8,
-   "debt_ebitda": 1.53
-  },
-  "AAMI": {
-   "name": "ACADIAN ASSET MANAGEMENT INC",
-   "price": 88.92,
-   "market_cap": 3155782144,
-   "gross_margin": 40.9,
-   "insider_pct": 0.5,
-   "roe": 106.8,
-   "debt_ebitda": 1.48
-  },
-  "JOE": {
-   "name": "ST JOE CO/THE",
-   "price": 70.02,
-   "market_cap": 3957869824,
-   "gross_margin": 46.1,
-   "insider_pct": 0.4,
-   "roe": 15.6,
-   "debt_ebitda": 2.47
+  "MCY": {
+   "name": "MERCURY GENERAL CORP",
+   "price": 102.42,
+   "market_cap": 5672903168,
+   "gross_margin": 26.8,
+   "insider_pct": 52.0,
+   "roe": 39.0,
+   "debt_ebitda": 0.76
   },
   "CALM": {
    "name": "CAL MAINE FOODS INC",
@@ -2532,6 +2514,24 @@
    "roe": 7.5,
    "debt_ebitda": 0.21
   },
+  "BTU": {
+   "name": "PEABODY ENERGY CORP",
+   "price": 22.18,
+   "market_cap": 2703741952,
+   "gross_margin": 10.4,
+   "insider_pct": 1.0,
+   "roe": -4.8,
+   "debt_ebitda": 1.53
+  },
+  "AAMI": {
+   "name": "ACADIAN ASSET MANAGEMENT INC",
+   "price": 88.92,
+   "market_cap": 3155782144,
+   "gross_margin": 40.9,
+   "insider_pct": 0.5,
+   "roe": 106.8,
+   "debt_ebitda": 1.48
+  },
   "NHC": {
    "name": "NATIONAL HEALTHCARE CORP",
    "price": 206.14,
@@ -2540,6 +2540,33 @@
    "insider_pct": 18.8,
    "roe": 13.3,
    "debt_ebitda": 0.16
+  },
+  "FUL": {
+   "name": "H.B. FULLER CO.",
+   "price": 49.7,
+   "market_cap": 2675307264,
+   "gross_margin": 32.7,
+   "insider_pct": 0.3,
+   "roe": 9.6,
+   "debt_ebitda": 3.58
+  },
+  "DAN": {
+   "name": "DANA INC",
+   "price": 23.11,
+   "market_cap": 2335508736,
+   "gross_margin": 9.8,
+   "insider_pct": 1.7,
+   "roe": -3.3,
+   "debt_ebitda": 2.51
+  },
+  "ACAD": {
+   "name": "ACADIA PHARMACEUTICALS INC",
+   "price": 20.59,
+   "market_cap": 3525746688,
+   "gross_margin": 62.1,
+   "insider_pct": 0.3,
+   "roe": 35.7,
+   "debt_ebitda": 0.75
   },
   "FBK": {
    "name": "FB FINANCIAL CORP",
@@ -2550,15 +2577,6 @@
    "roe": 11.9,
    "debt_ebitda": null
   },
-  "ACAD": {
-   "name": "ACADIA PHARMACEUTICALS INC",
-   "price": 20.59,
-   "market_cap": 3547770624,
-   "gross_margin": 62.1,
-   "insider_pct": 0.3,
-   "roe": 35.7,
-   "debt_ebitda": 0.75
-  },
   "NEOG": {
    "name": "NEOGEN CORP",
    "price": 11.82,
@@ -2567,15 +2585,6 @@
    "insider_pct": 0.8,
    "roe": -2.7,
    "debt_ebitda": 7.1
-  },
-  "DAN": {
-   "name": "DANA INC",
-   "price": 23.11,
-   "market_cap": 2335508736,
-   "gross_margin": 9.8,
-   "insider_pct": 1.7,
-   "roe": -3.3,
-   "debt_ebitda": 2.51
   },
   "FBNC": {
    "name": "FIRST BANCORP/NC",
@@ -2595,24 +2604,6 @@
    "roe": 23.1,
    "debt_ebitda": 1.57
   },
-  "FUL": {
-   "name": "H.B. FULLER CO.",
-   "price": 49.7,
-   "market_cap": 2675307264,
-   "gross_margin": 32.7,
-   "insider_pct": 0.3,
-   "roe": 9.6,
-   "debt_ebitda": 3.58
-  },
-  "AKR": {
-   "name": "ACADIA REALTY TRUST",
-   "price": 19.03,
-   "market_cap": 2774496512,
-   "gross_margin": 70.6,
-   "insider_pct": 0.5,
-   "roe": 5.7,
-   "debt_ebitda": 6.98
-  },
   "ADMA": {
    "name": "ADMA BIOLOGICS INC",
    "price": 11.41,
@@ -2625,11 +2616,29 @@
   "VECO": {
    "name": "VEECO INSTRUMENTS INC",
    "price": 38.87,
-   "market_cap": 2372371456,
+   "market_cap": 2376109056,
    "gross_margin": 37.9,
    "insider_pct": 2.2,
    "roe": 2.6,
    "debt_ebitda": 5.3
+  },
+  "AKR": {
+   "name": "ACADIA REALTY TRUST",
+   "price": 19.03,
+   "market_cap": 2774442496,
+   "gross_margin": 70.6,
+   "insider_pct": 0.5,
+   "roe": 5.7,
+   "debt_ebitda": 6.98
+  },
+  "BHE": {
+   "name": "BENCHMARK ELECTRONICS INC",
+   "price": 68.37,
+   "market_cap": 2445276416,
+   "gross_margin": 10.0,
+   "insider_pct": 1.8,
+   "roe": 5.0,
+   "debt_ebitda": 1.87
   },
   "TRMK": {
    "name": "TRUSTMARK CORP",
@@ -2643,29 +2652,11 @@
   "APAM": {
    "name": "ARTISAN PARTNERS ASSET MA  A",
    "price": 36.58,
-   "market_cap": 2597049600,
+   "market_cap": 2597879040,
    "gross_margin": 46.2,
    "insider_pct": 2.2,
    "roe": 58.5,
    "debt_ebitda": 0.73
-  },
-  "COHU": {
-   "name": "COHU INC",
-   "price": 50.79,
-   "market_cap": 2404318976,
-   "gross_margin": 44.4,
-   "insider_pct": 2.6,
-   "roe": -2.8,
-   "debt_ebitda": 10.47
-  },
-  "BHE": {
-   "name": "BENCHMARK ELECTRONICS INC",
-   "price": 68.37,
-   "market_cap": 2445276416,
-   "gross_margin": 10.4,
-   "insider_pct": 1.8,
-   "roe": 5.0,
-   "debt_ebitda": 1.63
   },
   "NGVT": {
    "name": "INGEVITY CORP",
@@ -2676,23 +2667,23 @@
    "roe": 30.1,
    "debt_ebitda": 3.32
   },
-  "VVX": {
-   "name": "V2X INC",
-   "price": 80.37,
-   "market_cap": 2519226624,
-   "gross_margin": 8.5,
-   "insider_pct": 1.0,
-   "roe": 8.3,
-   "debt_ebitda": 3.53
+  "BBT": {
+   "name": "BEACON FINANCIAL CORP",
+   "price": 30.62,
+   "market_cap": 2566448640,
+   "gross_margin": 0.0,
+   "insider_pct": 1.4,
+   "roe": 9.1,
+   "debt_ebitda": null
   },
-  "CRVL": {
-   "name": "CORVEL CORP",
-   "price": 82.22,
-   "market_cap": 4153472512,
-   "gross_margin": 24.8,
-   "insider_pct": 38.9,
-   "roe": 30.7,
-   "debt_ebitda": 0.15
+  "COHU": {
+   "name": "COHU INC",
+   "price": 50.79,
+   "market_cap": 2404318976,
+   "gross_margin": 44.5,
+   "insider_pct": 2.6,
+   "roe": -2.8,
+   "debt_ebitda": 10.58
   },
   "WRBY": {
    "name": "WARBY PARKER INC CLASS A",
@@ -2712,14 +2703,14 @@
    "roe": 15.2,
    "debt_ebitda": 4.67
   },
-  "BBT": {
-   "name": "BEACON FINANCIAL CORP",
-   "price": 30.62,
-   "market_cap": 2566448640,
-   "gross_margin": 0.0,
-   "insider_pct": 1.4,
+  "IOSP": {
+   "name": "INNOSPEC INC",
+   "price": 99.89,
+   "market_cap": 2460395264,
+   "gross_margin": 27.5,
+   "insider_pct": 1.3,
    "roe": 9.1,
-   "debt_ebitda": null
+   "debt_ebitda": 0.25
   },
   "ADEA": {
    "name": "ADEIA INC",
@@ -2730,32 +2721,23 @@
    "roe": 27.9,
    "debt_ebitda": 1.41
   },
-  "IOSP": {
-   "name": "INNOSPEC INC",
-   "price": 99.89,
-   "market_cap": 2460395264,
-   "gross_margin": 27.5,
-   "insider_pct": 1.3,
-   "roe": 9.1,
-   "debt_ebitda": 0.25
+  "CRVL": {
+   "name": "CORVEL CORP",
+   "price": 82.22,
+   "market_cap": 4153472512,
+   "gross_margin": 24.8,
+   "insider_pct": 38.9,
+   "roe": 30.7,
+   "debt_ebitda": 0.15
   },
-  "UE": {
-   "name": "URBAN EDGE PROPERTIES",
-   "price": 19.93,
-   "market_cap": 2744104704,
-   "gross_margin": 65.0,
-   "insider_pct": 0.1,
-   "roe": 7.8,
-   "debt_ebitda": 6.51
-  },
-  "PLUS": {
-   "name": "EPLUS INC",
-   "price": 92.91,
-   "market_cap": 2424060928,
-   "gross_margin": 25.1,
-   "insider_pct": 2.2,
-   "roe": 11.7,
-   "debt_ebitda": 0.65
+  "VVX": {
+   "name": "V2X INC",
+   "price": 80.37,
+   "market_cap": 2519226624,
+   "gross_margin": 8.5,
+   "insider_pct": 1.0,
+   "roe": 8.3,
+   "debt_ebitda": 3.53
   },
   "UCTT": {
    "name": "ULTRA CLEAN HOLDINGS INC",
@@ -2769,11 +2751,29 @@
   "PEB": {
    "name": "PEBBLEBROOK HOTEL TRUST",
    "price": 21.54,
-   "market_cap": 2430632192,
+   "market_cap": 2405890560,
    "gross_margin": 25.3,
    "insider_pct": 2.6,
    "roe": -1.6,
    "debt_ebitda": 7.5
+  },
+  "PLUS": {
+   "name": "EPLUS INC",
+   "price": 92.91,
+   "market_cap": 2429743872,
+   "gross_margin": 25.1,
+   "insider_pct": 2.2,
+   "roe": 11.7,
+   "debt_ebitda": 0.65
+  },
+  "UE": {
+   "name": "URBAN EDGE PROPERTIES",
+   "price": 19.93,
+   "market_cap": 2744104704,
+   "gross_margin": 64.6,
+   "insider_pct": 0.1,
+   "roe": 7.8,
+   "debt_ebitda": 6.45
   },
   "CARG": {
    "name": "CARGURUS INC",
@@ -2787,20 +2787,29 @@
   "GPOR": {
    "name": "GULFPORT ENERGY CORP",
    "price": 166.53,
-   "market_cap": 2944894208,
+   "market_cap": 2992484096,
    "gross_margin": 68.1,
    "insider_pct": 2.1,
    "roe": 27.4,
    "debt_ebitda": 0.91
   },
+  "DXC": {
+   "name": "DXC TECHNOLOGY CO",
+   "price": 14.98,
+   "market_cap": 2328950528,
+   "gross_margin": 22.3,
+   "insider_pct": 1.8,
+   "roe": 3.3,
+   "debt_ebitda": 2.88
+  },
   "FCPT": {
    "name": "FOUR CORNERS PROPERTY TRUST",
    "price": 22.47,
-   "market_cap": 2466226432,
-   "gross_margin": 85.6,
+   "market_cap": 2466064384,
+   "gross_margin": 85.8,
    "insider_pct": 1.3,
-   "roe": 7.6,
-   "debt_ebitda": 5.36
+   "roe": 7.5,
+   "debt_ebitda": 6.49
   },
   "PATK": {
    "name": "PATRICK INDUSTRIES INC",
@@ -2810,15 +2819,6 @@
    "insider_pct": 4.1,
    "roe": 11.5,
    "debt_ebitda": 3.83
-  },
-  "DXC": {
-   "name": "DXC TECHNOLOGY CO",
-   "price": 14.98,
-   "market_cap": 2393484800,
-   "gross_margin": 23.0,
-   "insider_pct": 1.8,
-   "roe": 4.0,
-   "debt_ebitda": 3.05
   },
   "IVT": {
    "name": "INVENTRUST PROPERTIES CORP",
@@ -2832,11 +2832,20 @@
   "SUPN": {
    "name": "SUPERNUS PHARMACEUTICALS INC",
    "price": 41.92,
-   "market_cap": 2440755968,
-   "gross_margin": 72.9,
+   "market_cap": 2441241088,
+   "gross_margin": 73.5,
    "insider_pct": 4.3,
-   "roe": -10.5,
-   "debt_ebitda": 0.36
+   "roe": -4.2,
+   "debt_ebitda": 0.31
+  },
+  "LCII": {
+   "name": "LCI INDUSTRIES",
+   "price": 98.98,
+   "market_cap": 2406353152,
+   "gross_margin": 25.7,
+   "insider_pct": 3.5,
+   "roe": 15.0,
+   "debt_ebitda": 2.62
   },
   "SHO": {
    "name": "SUNSTONE HOTEL INVESTORS INC",
@@ -2847,14 +2856,14 @@
    "roe": 2.8,
    "debt_ebitda": 4.26
   },
-  "LCII": {
-   "name": "LCI INDUSTRIES",
-   "price": 98.98,
-   "market_cap": 2406353152,
-   "gross_margin": 25.7,
-   "insider_pct": 3.5,
-   "roe": 15.0,
-   "debt_ebitda": 2.62
+  "LTC": {
+   "name": "LTC PROPERTIES INC",
+   "price": 44.75,
+   "market_cap": 2412273920,
+   "gross_margin": 60.5,
+   "insider_pct": 2.1,
+   "roe": 11.8,
+   "debt_ebitda": 5.91
   },
   "RRR": {
    "name": "RED ROCK RESORTS INC CLASS A",
@@ -2874,6 +2883,24 @@
    "roe": 51.7,
    "debt_ebitda": 1.0
   },
+  "CALY": {
+   "name": "CALLAWAY GOLF COMPANY",
+   "price": 15.16,
+   "market_cap": 2725124608,
+   "gross_margin": 44.3,
+   "insider_pct": 13.3,
+   "roe": 3.5,
+   "debt_ebitda": 1.11
+  },
+  "GOLF": {
+   "name": "ACUSHNET HOLDINGS CORP",
+   "price": 85.26,
+   "market_cap": 4979614208,
+   "gross_margin": 47.5,
+   "insider_pct": 52.1,
+   "roe": 25.2,
+   "debt_ebitda": 2.9
+  },
   "BANF": {
    "name": "BANCFIRST CORP",
    "price": 110.31,
@@ -2881,33 +2908,6 @@
    "gross_margin": 0.0,
    "insider_pct": 31.0,
    "roe": null,
-   "debt_ebitda": null
-  },
-  "LTC": {
-   "name": "LTC PROPERTIES INC",
-   "price": 44.75,
-   "market_cap": 2412273920,
-   "gross_margin": 60.5,
-   "insider_pct": 2.1,
-   "roe": 11.8,
-   "debt_ebitda": 5.91
-  },
-  "CALY": {
-   "name": "CALLAWAY GOLF COMPANY",
-   "price": 15.16,
-   "market_cap": 2706219520,
-   "gross_margin": 44.3,
-   "insider_pct": 13.3,
-   "roe": 3.5,
-   "debt_ebitda": 1.11
-  },
-  "BANR": {
-   "name": "BANNER CORPORATION",
-   "price": 69.21,
-   "market_cap": 2535817728,
-   "gross_margin": 0.0,
-   "insider_pct": 1.7,
-   "roe": 10.0,
    "debt_ebitda": null
   },
   "ROG": {
@@ -2928,50 +2928,32 @@
    "roe": 16.1,
    "debt_ebitda": 0.27
   },
-  "GOLF": {
-   "name": "ACUSHNET HOLDINGS CORP",
-   "price": 85.26,
-   "market_cap": 4979614208,
-   "gross_margin": 47.5,
-   "insider_pct": 52.1,
-   "roe": 25.2,
-   "debt_ebitda": 2.9
-  },
   "TMDX": {
    "name": "TRANSMEDICS GROUP INC",
    "price": 65.99,
-   "market_cap": 2288212736,
+   "market_cap": 2280674560,
    "gross_margin": 58.7,
    "insider_pct": 3.6,
    "roe": 36.3,
    "debt_ebitda": 7.5
+  },
+  "BANR": {
+   "name": "BANNER CORPORATION",
+   "price": 69.21,
+   "market_cap": 2352095488,
+   "gross_margin": 0.0,
+   "insider_pct": 1.7,
+   "roe": 10.0,
+   "debt_ebitda": null
   },
   "MD": {
    "name": "PEDIATRIX MEDICAL GROUP INC",
    "price": 29.82,
    "market_cap": 2329679104,
    "gross_margin": 26.1,
-   "insider_pct": 2.0,
+   "insider_pct": 2.1,
    "roe": 17.2,
-   "debt_ebitda": 2.35
-  },
-  "HHH": {
-   "name": "HOWARD HUGHES HOLDINGS INC",
-   "price": 76.23,
-   "market_cap": 4552414720,
-   "gross_margin": 41.9,
-   "insider_pct": 1.1,
-   "roe": 7.5,
-   "debt_ebitda": 6.75
-  },
-  "PBH": {
-   "name": "PRESTIGE CONSUMER HEALTHCARE",
-   "price": 49.06,
-   "market_cap": 2324194048,
-   "gross_margin": 54.8,
-   "insider_pct": 1.4,
-   "roe": 9.1,
-   "debt_ebitda": 6.35
+   "debt_ebitda": 2.34
   },
   "NEO": {
    "name": "NEOGENOMICS INC",
@@ -2982,6 +2964,15 @@
    "roe": -3.9,
    "debt_ebitda": 14.67
   },
+  "HHH": {
+   "name": "HOWARD HUGHES HOLDINGS INC",
+   "price": 76.23,
+   "market_cap": 4552414720,
+   "gross_margin": 41.9,
+   "insider_pct": 1.1,
+   "roe": 7.5,
+   "debt_ebitda": 6.75
+  },
   "KMT": {
    "name": "KENNAMETAL INC",
    "price": 29.1,
@@ -2990,15 +2981,6 @@
    "insider_pct": 0.8,
    "roe": 23.9,
    "debt_ebitda": 1.23
-  },
-  "ADUS": {
-   "name": "ADDUS HOMECARE CORP",
-   "price": 125.54,
-   "market_cap": 2344371712,
-   "gross_margin": 32.0,
-   "insider_pct": 2.8,
-   "roe": 9.7,
-   "debt_ebitda": 0.68
   },
   "SEZL": {
    "name": "SEZZLE INC",
@@ -3018,6 +3000,24 @@
    "roe": 17.1,
    "debt_ebitda": 1.18
   },
+  "PBH": {
+   "name": "PRESTIGE CONSUMER HEALTHCARE",
+   "price": 49.06,
+   "market_cap": 2324194048,
+   "gross_margin": 54.8,
+   "insider_pct": 1.4,
+   "roe": 9.1,
+   "debt_ebitda": 6.35
+  },
+  "ADUS": {
+   "name": "ADDUS HOMECARE CORP",
+   "price": 125.54,
+   "market_cap": 2343175936,
+   "gross_margin": 32.0,
+   "insider_pct": 2.8,
+   "roe": 9.7,
+   "debt_ebitda": 0.68
+  },
   "DXPE": {
    "name": "DXP ENTERPRISES INC",
    "price": 174.46,
@@ -3026,33 +3026,6 @@
    "insider_pct": 17.7,
    "roe": 18.5,
    "debt_ebitda": 3.81
-  },
-  "TRN": {
-   "name": "TRINITY INDUSTRIES INC",
-   "price": 29.46,
-   "market_cap": 2303361792,
-   "gross_margin": 24.6,
-   "insider_pct": 1.2,
-   "roe": 29.1,
-   "debt_ebitda": 9.07
-  },
-  "PHIN": {
-   "name": "PHINIA INC",
-   "price": 62.92,
-   "market_cap": 2262583040,
-   "gross_margin": 22.1,
-   "insider_pct": 1.9,
-   "roe": 12.1,
-   "debt_ebitda": 2.02
-  },
-  "PPLI": {
-   "name": "PEOPLE INC",
-   "price": 35.62,
-   "market_cap": 2652404992,
-   "gross_margin": 66.3,
-   "insider_pct": 3.5,
-   "roe": 9.0,
-   "debt_ebitda": 8.33
   },
   "PBI": {
    "name": "PITNEY BOWES INC",
@@ -3063,14 +3036,14 @@
    "roe": null,
    "debt_ebitda": 3.86
   },
-  "TALO": {
-   "name": "TALOS ENERGY INC",
-   "price": 18.23,
-   "market_cap": 3043780352,
-   "gross_margin": 71.4,
-   "insider_pct": 12.4,
-   "roe": -17.8,
-   "debt_ebitda": 1.19
+  "PHIN": {
+   "name": "PHINIA INC",
+   "price": 62.92,
+   "market_cap": 2262583040,
+   "gross_margin": 22.1,
+   "insider_pct": 2.0,
+   "roe": 12.1,
+   "debt_ebitda": 2.02
   },
   "NWBI": {
    "name": "NORTHWEST BANCSHARES INC",
@@ -3081,6 +3054,15 @@
    "roe": 10.7,
    "debt_ebitda": null
   },
+  "PPLI": {
+   "name": "PEOPLE INC",
+   "price": 35.62,
+   "market_cap": 2652404992,
+   "gross_margin": 66.3,
+   "insider_pct": 3.5,
+   "roe": 9.0,
+   "debt_ebitda": 8.33
+  },
   "PTON": {
    "name": "PELOTON INTERACTIVE INC A",
    "price": 5.12,
@@ -3090,14 +3072,14 @@
    "roe": null,
    "debt_ebitda": 6.78
   },
-  "PRGO": {
-   "name": "PERRIGO CO PLC",
-   "price": 15.78,
-   "market_cap": 2183443456,
-   "gross_margin": 33.3,
-   "insider_pct": 0.4,
-   "roe": -48.7,
-   "debt_ebitda": 5.65
+  "TRN": {
+   "name": "TRINITY INDUSTRIES INC",
+   "price": 29.46,
+   "market_cap": 2303361792,
+   "gross_margin": 24.6,
+   "insider_pct": 1.3,
+   "roe": 29.1,
+   "debt_ebitda": 9.29
   },
   "WAFD": {
    "name": "WAFD INC",
@@ -3108,6 +3090,24 @@
    "roe": 8.5,
    "debt_ebitda": null
   },
+  "TALO": {
+   "name": "TALOS ENERGY INC",
+   "price": 18.23,
+   "market_cap": 3043780352,
+   "gross_margin": 71.4,
+   "insider_pct": 11.5,
+   "roe": -17.8,
+   "debt_ebitda": 1.19
+  },
+  "PRGO": {
+   "name": "PERRIGO CO PLC",
+   "price": 15.78,
+   "market_cap": 2189778688,
+   "gross_margin": 33.3,
+   "insider_pct": 0.4,
+   "roe": -48.7,
+   "debt_ebitda": 5.65
+  },
   "FTRE": {
    "name": "FORTREA HOLDINGS INC",
    "price": 21.29,
@@ -3116,15 +3116,6 @@
    "insider_pct": 1.2,
    "roe": -12.3,
    "debt_ebitda": 9.47
-  },
-  "CALX": {
-   "name": "CALIX INC",
-   "price": 36.82,
-   "market_cap": 2318333952,
-   "gross_margin": 56.6,
-   "insider_pct": 9.7,
-   "roe": 6.9,
-   "debt_ebitda": 0.18
   },
   "PGNY": {
    "name": "PROGYNY INC",
@@ -3135,24 +3126,6 @@
    "roe": 16.2,
    "debt_ebitda": 0.21
   },
-  "ECPG": {
-   "name": "ENCORE CAPITAL GROUP INC",
-   "price": 99.98,
-   "market_cap": 2120512512,
-   "gross_margin": 100.0,
-   "insider_pct": 3.9,
-   "roe": 30.5,
-   "debt_ebitda": 5.61
-  },
-  "KWR": {
-   "name": "QUAKER CHEMICAL CORPORATION",
-   "price": 150.95,
-   "market_cap": 2597502464,
-   "gross_margin": 36.1,
-   "insider_pct": 22.2,
-   "roe": 7.2,
-   "debt_ebitda": 3.22
-  },
   "VCEL": {
    "name": "VERICEL CORP",
    "price": 40.26,
@@ -3162,14 +3135,41 @@
    "roe": 7.2,
    "debt_ebitda": 2.99
   },
+  "CALX": {
+   "name": "CALIX INC",
+   "price": 36.82,
+   "market_cap": 2318333952,
+   "gross_margin": 56.6,
+   "insider_pct": 9.7,
+   "roe": 6.9,
+   "debt_ebitda": 0.18
+  },
+  "ECPG": {
+   "name": "ENCORE CAPITAL GROUP INC",
+   "price": 99.98,
+   "market_cap": 2120512512,
+   "gross_margin": 100.0,
+   "insider_pct": 3.9,
+   "roe": 30.5,
+   "debt_ebitda": 5.61
+  },
   "NWL": {
    "name": "NEWELL BRANDS INC",
    "price": 5.18,
    "market_cap": 2206161920,
    "gross_margin": 35.5,
    "insider_pct": 1.4,
-   "roe": -8.6,
-   "debt_ebitda": 6.28
+   "roe": -12.8,
+   "debt_ebitda": 5.71
+  },
+  "KWR": {
+   "name": "QUAKER CHEMICAL CORPORATION",
+   "price": 150.95,
+   "market_cap": 2595126272,
+   "gross_margin": 35.8,
+   "insider_pct": 22.2,
+   "roe": 7.0,
+   "debt_ebitda": 3.19
   },
   "OFG": {
    "name": "OFG BANCORP",
@@ -3179,6 +3179,15 @@
    "insider_pct": 1.0,
    "roe": 16.6,
    "debt_ebitda": null
+  },
+  "TILE": {
+   "name": "INTERFACE INC",
+   "price": 36.81,
+   "market_cap": 2127635072,
+   "gross_margin": 40.5,
+   "insider_pct": 2.2,
+   "roe": 23.2,
+   "debt_ebitda": 1.26
   },
   "HTO": {
    "name": "H2O AMERICA",
@@ -3198,15 +3207,6 @@
    "roe": 11.4,
    "debt_ebitda": null
   },
-  "TILE": {
-   "name": "INTERFACE INC",
-   "price": 36.81,
-   "market_cap": 2127635072,
-   "gross_margin": 40.5,
-   "insider_pct": 2.2,
-   "roe": 23.2,
-   "debt_ebitda": 1.26
-  },
   "MAN": {
    "name": "MANPOWERGROUP INC",
    "price": 46.3,
@@ -3225,32 +3225,23 @@
    "roe": 8.1,
    "debt_ebitda": 116.58
   },
-  "CLSK": {
-   "name": "CLEANSPARK INC",
-   "price": 7.67,
-   "market_cap": 1969787008,
-   "gross_margin": 47.0,
-   "insider_pct": 4.0,
-   "roe": -68.6,
-   "debt_ebitda": null
-  },
   "ANDE": {
    "name": "ANDERSONS INC/THE",
    "price": 64.29,
-   "market_cap": 2184289280,
+   "market_cap": 2189335296,
    "gross_margin": 7.2,
    "insider_pct": 4.0,
    "roe": 12.2,
    "debt_ebitda": 2.98
   },
-  "HCI": {
-   "name": "HCI GROUP INC",
-   "price": 197.87,
-   "market_cap": 2461278464,
-   "gross_margin": 59.7,
-   "insider_pct": 14.7,
-   "roe": 35.0,
-   "debt_ebitda": 0.14
+  "NWN": {
+   "name": "NORTHWEST NATURAL HOLDING CO",
+   "price": 49.93,
+   "market_cap": 2101730304,
+   "gross_margin": 45.0,
+   "insider_pct": 0.6,
+   "roe": 8.3,
+   "debt_ebitda": 5.52
   },
   "IPAR": {
    "name": "INTERPARFUMS INC",
@@ -3261,14 +3252,32 @@
    "roe": 19.1,
    "debt_ebitda": 0.6
   },
+  "HCI": {
+   "name": "HCI GROUP INC",
+   "price": 197.87,
+   "market_cap": 2461278464,
+   "gross_margin": 59.7,
+   "insider_pct": 14.7,
+   "roe": 35.0,
+   "debt_ebitda": 0.14
+  },
   "CNS": {
    "name": "COHEN + STEERS INC",
    "price": 72.48,
-   "market_cap": 3727032832,
+   "market_cap": 3727858176,
    "gross_margin": 46.6,
    "insider_pct": 45.8,
    "roe": null,
    "debt_ebitda": 0.65
+  },
+  "CLSK": {
+   "name": "CLEANSPARK INC",
+   "price": 7.67,
+   "market_cap": 1969787008,
+   "gross_margin": 47.0,
+   "insider_pct": 4.0,
+   "roe": -68.6,
+   "debt_ebitda": null
   },
   "INSP": {
    "name": "INSPIRE MEDICAL SYSTEMS INC",
@@ -3297,42 +3306,6 @@
    "roe": 25.9,
    "debt_ebitda": 3.94
   },
-  "NWN": {
-   "name": "NORTHWEST NATURAL HOLDING CO",
-   "price": 49.93,
-   "market_cap": 2101730304,
-   "gross_margin": 45.0,
-   "insider_pct": 0.6,
-   "roe": 8.3,
-   "debt_ebitda": 5.52
-  },
-  "CHCO": {
-   "name": "CITY HOLDING CO",
-   "price": 142.69,
-   "market_cap": 2005079936,
-   "gross_margin": 0.0,
-   "insider_pct": 3.7,
-   "roe": 16.6,
-   "debt_ebitda": null
-  },
-  "DBD": {
-   "name": "DIEBOLD NIXDORF INC",
-   "price": 55.05,
-   "market_cap": 1848924416,
-   "gross_margin": 26.0,
-   "insider_pct": 1.7,
-   "roe": 7.7,
-   "debt_ebitda": 2.42
-  },
-  "EPAC": {
-   "name": "ENERPAC TOOL GROUP CORP",
-   "price": 40.56,
-   "market_cap": 2090590976,
-   "gross_margin": 49.2,
-   "insider_pct": 1.7,
-   "roe": 20.2,
-   "debt_ebitda": 1.16
-  },
   "WOR": {
    "name": "WORTHINGTON ENTERPRISES INC",
    "price": 62.75,
@@ -3341,6 +3314,24 @@
    "insider_pct": 37.3,
    "roe": 16.2,
    "debt_ebitda": 2.35
+  },
+  "EPAC": {
+   "name": "ENERPAC TOOL GROUP CORP",
+   "price": 40.56,
+   "market_cap": 2080958592,
+   "gross_margin": 49.2,
+   "insider_pct": 1.7,
+   "roe": 20.2,
+   "debt_ebitda": 1.16
+  },
+  "CHCO": {
+   "name": "CITY HOLDING CO",
+   "price": 142.69,
+   "market_cap": 2004103936,
+   "gross_margin": 0.0,
+   "insider_pct": 3.7,
+   "roe": 16.6,
+   "debt_ebitda": null
   },
   "CENTA": {
    "name": "CENTRAL GARDEN AND PET CO A",
@@ -3360,14 +3351,14 @@
    "roe": 28.3,
    "debt_ebitda": 1.75
   },
-  "CC": {
-   "name": "CHEMOURS CO/THE",
-   "price": 13.53,
-   "market_cap": 2036251264,
-   "gross_margin": 15.4,
-   "insider_pct": 0.4,
-   "roe": -319.4,
-   "debt_ebitda": 8.5
+  "DBD": {
+   "name": "DIEBOLD NIXDORF INC",
+   "price": 55.05,
+   "market_cap": 1848924416,
+   "gross_margin": 26.0,
+   "insider_pct": 1.7,
+   "roe": 7.7,
+   "debt_ebitda": 2.42
   },
   "FA": {
    "name": "FIRST ADVANTAGE CORP",
@@ -3378,14 +3369,14 @@
    "roe": 1.9,
    "debt_ebitda": 4.85
   },
-  "RCUS": {
-   "name": "ARCUS BIOSCIENCES INC",
-   "price": 18.19,
-   "market_cap": 2287813888,
-   "gross_margin": 0.0,
-   "insider_pct": 25.6,
-   "roe": -90.8,
-   "debt_ebitda": null
+  "CC": {
+   "name": "CHEMOURS CO/THE",
+   "price": 13.53,
+   "market_cap": 2036251264,
+   "gross_margin": 15.4,
+   "insider_pct": 0.4,
+   "roe": -319.4,
+   "debt_ebitda": 8.5
   },
   "XNCR": {
    "name": "XENCOR INC",
@@ -3396,32 +3387,23 @@
    "roe": -29.1,
    "debt_ebitda": null
   },
-  "PENN": {
-   "name": "PENN ENTERTAINMENT INC",
-   "price": 15.89,
-   "market_cap": 2131890048,
-   "gross_margin": 35.2,
-   "insider_pct": 1.6,
-   "roe": -37.6,
-   "debt_ebitda": 12.68
+  "PRDO": {
+   "name": "PERDOCEO EDUCATION CORP",
+   "price": 29.81,
+   "market_cap": 1865421952,
+   "gross_margin": 79.9,
+   "insider_pct": 1.2,
+   "roe": 17.6,
+   "debt_ebitda": 0.46
   },
-  "KALU": {
-   "name": "KAISER ALUMINUM CORP",
-   "price": 116.28,
-   "market_cap": 1901072384,
-   "gross_margin": 13.4,
-   "insider_pct": 1.5,
-   "roe": 24.5,
-   "debt_ebitda": 2.31
-  },
-  "KMPR": {
-   "name": "KEMPER CORP",
-   "price": 33.22,
-   "market_cap": 1955802112,
-   "gross_margin": 25.4,
-   "insider_pct": 1.3,
-   "roe": -19.7,
-   "debt_ebitda": 12.27
+  "RCUS": {
+   "name": "ARCUS BIOSCIENCES INC",
+   "price": 18.19,
+   "market_cap": 2316194304,
+   "gross_margin": 0.0,
+   "insider_pct": 25.6,
+   "roe": -90.8,
+   "debt_ebitda": null
   },
   "WU": {
    "name": "WESTERN UNION CO",
@@ -3441,6 +3423,15 @@
    "roe": 29.6,
    "debt_ebitda": null
   },
+  "KMPR": {
+   "name": "KEMPER CORP",
+   "price": 33.22,
+   "market_cap": 1957427200,
+   "gross_margin": 25.4,
+   "insider_pct": 1.3,
+   "roe": -19.7,
+   "debt_ebitda": 12.27
+  },
   "PAYO": {
    "name": "PAYONEER GLOBAL INC",
    "price": 7.15,
@@ -3454,55 +3445,37 @@
    "name": "MINERALS TECHNOLOGIES INC",
    "price": 62.74,
    "market_cap": 1953018624,
-   "gross_margin": 24.5,
+   "gross_margin": 23.9,
    "insider_pct": 1.2,
    "roe": -3.8,
-   "debt_ebitda": 2.53
+   "debt_ebitda": 2.56
+  },
+  "KALU": {
+   "name": "KAISER ALUMINUM CORP",
+   "price": 116.28,
+   "market_cap": 1901072384,
+   "gross_margin": 13.4,
+   "insider_pct": 1.5,
+   "roe": 24.5,
+   "debt_ebitda": 2.31
+  },
+  "PENN": {
+   "name": "PENN ENTERTAINMENT INC",
+   "price": 15.89,
+   "market_cap": 2131890048,
+   "gross_margin": 35.2,
+   "insider_pct": 1.6,
+   "roe": -37.6,
+   "debt_ebitda": 12.68
   },
   "WKC": {
    "name": "WORLD KINECT CORP",
    "price": 37.34,
-   "market_cap": 1910001536,
-   "gross_margin": 2.7,
+   "market_cap": 1911808000,
+   "gross_margin": 2.5,
    "insider_pct": 4.0,
-   "roe": -12.3,
-   "debt_ebitda": 2.14
-  },
-  "XHR": {
-   "name": "XENIA HOTELS + RESORTS INC",
-   "price": 20.45,
-   "market_cap": 2023083392,
-   "gross_margin": 26.1,
-   "insider_pct": 0.7,
-   "roe": -0.6,
-   "debt_ebitda": 5.73
-  },
-  "HRMY": {
-   "name": "HARMONY BIOSCIENCES HOLDINGS",
-   "price": 38.76,
-   "market_cap": 2257242368,
-   "gross_margin": 75.4,
-   "insider_pct": 1.2,
-   "roe": 20.5,
-   "debt_ebitda": 0.63
-  },
-  "PRDO": {
-   "name": "PERDOCEO EDUCATION CORP",
-   "price": 29.81,
-   "market_cap": 1865421952,
-   "gross_margin": 79.9,
-   "insider_pct": 1.2,
-   "roe": 17.6,
-   "debt_ebitda": 0.46
-  },
-  "GRBK": {
-   "name": "GREEN BRICK PARTNERS INC",
-   "price": 60.86,
-   "market_cap": 2582461696,
-   "gross_margin": 29.6,
-   "insider_pct": 8.5,
-   "roe": 14.7,
-   "debt_ebitda": 0.99
+   "roe": -11.4,
+   "debt_ebitda": 1.93
   },
   "HMN": {
    "name": "HORACE MANN EDUCATORS",
@@ -3513,23 +3486,32 @@
    "roe": 12.4,
    "debt_ebitda": 2.11
   },
-  "SEDG": {
-   "name": "SOLAREDGE TECHNOLOGIES INC",
-   "price": 30.05,
-   "market_cap": 1848848640,
-   "gross_margin": 21.3,
-   "insider_pct": 1.1,
-   "roe": -58.4,
-   "debt_ebitda": null
+  "XHR": {
+   "name": "XENIA HOTELS + RESORTS INC",
+   "price": 20.45,
+   "market_cap": 2023083392,
+   "gross_margin": 26.1,
+   "insider_pct": 0.7,
+   "roe": -0.6,
+   "debt_ebitda": 5.73
   },
-  "ATEN": {
-   "name": "A10 NETWORKS INC",
-   "price": 24.48,
-   "market_cap": 1777468928,
-   "gross_margin": 79.4,
-   "insider_pct": 1.6,
-   "roe": 19.4,
-   "debt_ebitda": 3.37
+  "GRBK": {
+   "name": "GREEN BRICK PARTNERS INC",
+   "price": 60.86,
+   "market_cap": 2582461696,
+   "gross_margin": 30.0,
+   "insider_pct": 8.5,
+   "roe": 14.7,
+   "debt_ebitda": 0.99
+  },
+  "HRMY": {
+   "name": "HARMONY BIOSCIENCES HOLDINGS",
+   "price": 38.76,
+   "market_cap": 2257242368,
+   "gross_margin": 75.4,
+   "insider_pct": 1.2,
+   "roe": 20.5,
+   "debt_ebitda": 0.63
   },
   "MSGR": {
    "name": "MSG RANGERS CORP",
@@ -3538,6 +3520,15 @@
    "gross_margin": 0.0,
    "insider_pct": 0.0,
    "roe": null,
+   "debt_ebitda": null
+  },
+  "SEDG": {
+   "name": "SOLAREDGE TECHNOLOGIES INC",
+   "price": 30.05,
+   "market_cap": 1848848640,
+   "gross_margin": 21.3,
+   "insider_pct": 1.1,
+   "roe": -58.4,
    "debt_ebitda": null
   },
   "PRLB": {
@@ -3549,10 +3540,28 @@
    "roe": 5.1,
    "debt_ebitda": 0.05
   },
+  "ATEN": {
+   "name": "A10 NETWORKS INC",
+   "price": 24.48,
+   "market_cap": 1777468928,
+   "gross_margin": 79.4,
+   "insider_pct": 1.6,
+   "roe": 19.4,
+   "debt_ebitda": 3.37
+  },
+  "AIN": {
+   "name": "ALBANY INTL CORP CL A",
+   "price": 67.0,
+   "market_cap": 1901831552,
+   "gross_margin": 34.2,
+   "insider_pct": 0.7,
+   "roe": 11.6,
+   "debt_ebitda": 1.68
+  },
   "EVTC": {
    "name": "EVERTEC INC",
    "price": 31.54,
-   "market_cap": 1884595328,
+   "market_cap": 1943505664,
    "gross_margin": 51.1,
    "insider_pct": 1.4,
    "roe": 14.8,
@@ -3567,32 +3576,14 @@
    "roe": 18.3,
    "debt_ebitda": 3.73
   },
-  "CPRI": {
-   "name": "CAPRI HOLDINGS LTD",
-   "price": 18.68,
-   "market_cap": 2144391296,
-   "gross_margin": 62.5,
-   "insider_pct": 2.6,
-   "roe": 144.6,
-   "debt_ebitda": 7.14
-  },
   "OLN": {
    "name": "OLIN CORP",
    "price": 17.6,
    "market_cap": 2006091776,
-   "gross_margin": 6.9,
+   "gross_margin": 6.7,
    "insider_pct": 0.4,
-   "roe": -10.6,
-   "debt_ebitda": 5.42
-  },
-  "AIN": {
-   "name": "ALBANY INTL CORP CL A",
-   "price": 67.0,
-   "market_cap": 1902800000,
-   "gross_margin": 34.2,
-   "insider_pct": 0.7,
-   "roe": 11.6,
-   "debt_ebitda": 1.68
+   "roe": -12.1,
+   "debt_ebitda": 6.75
   },
   "AMN": {
    "name": "AMN HEALTHCARE SERVICES INC",
@@ -3603,14 +3594,41 @@
    "roe": 15.6,
    "debt_ebitda": 2.52
   },
+  "DV": {
+   "name": "DOUBLEVERIFY HOLDINGS INC",
+   "price": 13.56,
+   "market_cap": 2117833856,
+   "gross_margin": 82.4,
+   "insider_pct": 1.3,
+   "roe": 5.4,
+   "debt_ebitda": 0.78
+  },
+  "CPRI": {
+   "name": "CAPRI HOLDINGS LTD",
+   "price": 18.68,
+   "market_cap": 1930572544,
+   "gross_margin": 63.3,
+   "insider_pct": 2.6,
+   "roe": null,
+   "debt_ebitda": 6.84
+  },
   "RUN": {
    "name": "SUNRUN INC",
    "price": 7.48,
-   "market_cap": 1784348672,
+   "market_cap": 1801535360,
    "gross_margin": 35.3,
    "insider_pct": 2.8,
    "roe": -19.9,
    "debt_ebitda": 18.12
+  },
+  "ARR": {
+   "name": "ARMOUR RESIDENTIAL REIT INC",
+   "price": 12.45,
+   "market_cap": 1762335360,
+   "gross_margin": 100.0,
+   "insider_pct": 0.2,
+   "roe": -2.3,
+   "debt_ebitda": null
   },
   "LMAT": {
    "name": "LEMAITRE VASCULAR INC",
@@ -3621,14 +3639,23 @@
    "roe": 16.8,
    "debt_ebitda": 2.29
   },
-  "DV": {
-   "name": "DOUBLEVERIFY HOLDINGS INC",
-   "price": 13.56,
-   "market_cap": 2117833856,
-   "gross_margin": 82.4,
-   "insider_pct": 1.3,
-   "roe": 5.4,
-   "debt_ebitda": 0.78
+  "CTS": {
+   "name": "CTS CORP",
+   "price": 61.26,
+   "market_cap": 1745763712,
+   "gross_margin": 40.6,
+   "insider_pct": 2.1,
+   "roe": 13.0,
+   "debt_ebitda": 0.66
+  },
+  "STBA": {
+   "name": "S + T BANCORP INC",
+   "price": 50.55,
+   "market_cap": 1782670592,
+   "gross_margin": 0.0,
+   "insider_pct": 1.6,
+   "roe": 10.0,
+   "debt_ebitda": null
   },
   "BLKB": {
    "name": "BLACKBAUD INC",
@@ -3639,14 +3666,14 @@
    "roe": 131.1,
    "debt_ebitda": 3.83
   },
-  "ARR": {
-   "name": "ARMOUR RESIDENTIAL REIT INC",
-   "price": 12.45,
-   "market_cap": 1762335360,
-   "gross_margin": 100.0,
-   "insider_pct": 0.2,
-   "roe": -2.3,
-   "debt_ebitda": null
+  "THRM": {
+   "name": "GENTHERM INC",
+   "price": 30.95,
+   "market_cap": 1686000640,
+   "gross_margin": 23.7,
+   "insider_pct": 1.2,
+   "roe": 1.3,
+   "debt_ebitda": 2.15
   },
   "ALGT": {
    "name": "ALLEGIANT TRAVEL CO",
@@ -3660,20 +3687,20 @@
   "NTST": {
    "name": "NETSTREIT CORP",
    "price": 17.52,
-   "market_cap": 1785816704,
+   "market_cap": 1711226624,
    "gross_margin": 90.8,
    "insider_pct": 0.5,
    "roe": 1.3,
    "debt_ebitda": 6.25
   },
-  "CTS": {
-   "name": "CTS CORP",
-   "price": 61.26,
-   "market_cap": 1745763712,
-   "gross_margin": 40.6,
-   "insider_pct": 2.1,
-   "roe": 13.0,
-   "debt_ebitda": 0.66
+  "MFP": {
+   "name": "MIDERA FOOD PROCESSI INC",
+   "price": 40.12,
+   "market_cap": 1814645888,
+   "gross_margin": 35.3,
+   "insider_pct": 0.4,
+   "roe": null,
+   "debt_ebitda": 2.02
   },
   "HOPE": {
    "name": "HOPE BANCORP INC",
@@ -3682,24 +3709,6 @@
    "gross_margin": 0.0,
    "insider_pct": 4.8,
    "roe": 5.9,
-   "debt_ebitda": null
-  },
-  "STBA": {
-   "name": "S + T BANCORP INC",
-   "price": 50.55,
-   "market_cap": 1782670592,
-   "gross_margin": 0.0,
-   "insider_pct": 1.6,
-   "roe": 10.0,
-   "debt_ebitda": null
-  },
-  "DCOM": {
-   "name": "DIME COMMERCIAL BANCSHARES I",
-   "price": 41.76,
-   "market_cap": 1843979392,
-   "gross_margin": 0.0,
-   "insider_pct": 3.6,
-   "roe": 9.6,
    "debt_ebitda": null
   },
   "ZD": {
@@ -3711,6 +3720,15 @@
    "roe": -1.5,
    "debt_ebitda": 2.19
   },
+  "DCOM": {
+   "name": "DIME COMMERCIAL BANCSHARES I",
+   "price": 41.76,
+   "market_cap": 1843979392,
+   "gross_margin": 0.0,
+   "insider_pct": 3.6,
+   "roe": 9.6,
+   "debt_ebitda": null
+  },
   "PLAB": {
    "name": "PHOTRONICS INC",
    "price": 27.58,
@@ -3720,15 +3738,6 @@
    "roe": 13.8,
    "debt_ebitda": 0.01
   },
-  "MFP": {
-   "name": "MIDERA FOOD PROCESSI INC",
-   "price": 40.12,
-   "market_cap": 1814645888,
-   "gross_margin": 35.3,
-   "insider_pct": 0.4,
-   "roe": null,
-   "debt_ebitda": 2.02
-  },
   "SDGR": {
    "name": "SCHRODINGER INC",
    "price": 27.14,
@@ -3737,24 +3746,6 @@
    "insider_pct": 3.0,
    "roe": -16.2,
    "debt_ebitda": null
-  },
-  "DEI": {
-   "name": "DOUGLAS EMMETT INC",
-   "price": 10.13,
-   "market_cap": 2036946304,
-   "gross_margin": 63.2,
-   "insider_pct": 3.5,
-   "roe": -1.9,
-   "debt_ebitda": 9.82
-  },
-  "THRM": {
-   "name": "GENTHERM INC",
-   "price": 30.95,
-   "market_cap": 1686000640,
-   "gross_margin": 23.7,
-   "insider_pct": 1.2,
-   "roe": 1.3,
-   "debt_ebitda": 2.15
   },
   "SONO": {
    "name": "SONOS INC",
@@ -3783,6 +3774,15 @@
    "roe": 14.7,
    "debt_ebitda": 3.15
   },
+  "DEI": {
+   "name": "DOUGLAS EMMETT INC",
+   "price": 10.13,
+   "market_cap": 2036946304,
+   "gross_margin": 63.2,
+   "insider_pct": 3.5,
+   "roe": -1.9,
+   "debt_ebitda": 9.82
+  },
   "BXMT": {
    "name": "BLACKSTONE MORTGAGE TRU CL A",
    "price": 11.0,
@@ -3791,15 +3791,6 @@
    "insider_pct": 1.3,
    "roe": -11.7,
    "debt_ebitda": null
-  },
-  "SBH": {
-   "name": "SALLY BEAUTY HOLDINGS INC",
-   "price": 18.15,
-   "market_cap": 1699244544,
-   "gross_margin": 52.1,
-   "insider_pct": 1.4,
-   "roe": 23.5,
-   "debt_ebitda": 3.89
   },
   "STRA": {
    "name": "STRATEGIC EDUCATION INC",
@@ -3810,23 +3801,14 @@
    "roe": 8.2,
    "debt_ebitda": 0.43
   },
-  "VSTS": {
-   "name": "VESTIS CORP",
-   "price": 14.83,
-   "market_cap": 1959934336,
-   "gross_margin": 26.3,
-   "insider_pct": 16.6,
-   "roe": -0.6,
-   "debt_ebitda": 5.32
-  },
-  "WWW": {
-   "name": "WOLVERINE WORLD WIDE INC",
-   "price": 20.8,
-   "market_cap": 1706979712,
-   "gross_margin": 47.1,
+  "SBH": {
+   "name": "SALLY BEAUTY HOLDINGS INC",
+   "price": 18.15,
+   "market_cap": 1699244544,
+   "gross_margin": 52.1,
    "insider_pct": 1.4,
-   "roe": 27.6,
-   "debt_ebitda": 3.76
+   "roe": 23.5,
+   "debt_ebitda": 3.89
   },
   "HCSG": {
    "name": "HEALTHCARE SERVICES GROUP",
@@ -3837,59 +3819,23 @@
    "roe": 20.4,
    "debt_ebitda": 0.15
   },
-  "WERN": {
-   "name": "WERNER ENTERPRISES INC",
-   "price": 27.71,
-   "market_cap": 1661966976,
-   "gross_margin": 18.4,
-   "insider_pct": 1.1,
-   "roe": -2.0,
-   "debt_ebitda": 2.79
-  },
-  "CVI": {
-   "name": "CVR ENERGY INC",
-   "price": 58.37,
-   "market_cap": 5867971072,
-   "gross_margin": 10.9,
-   "insider_pct": 0.0,
-   "roe": 24.3,
-   "debt_ebitda": 2.33
-  },
-  "NSP": {
-   "name": "INSPERITY INC",
-   "price": 48.68,
-   "market_cap": 1859345792,
-   "gross_margin": 13.0,
-   "insider_pct": 6.2,
-   "roe": 4.6,
-   "debt_ebitda": 9.9
-  },
-  "AMR": {
-   "name": "ALPHA METALLURGICAL RESOURCE",
-   "price": 159.19,
-   "market_cap": 2016595840,
-   "gross_margin": 10.0,
-   "insider_pct": 30.0,
-   "roe": -3.0,
-   "debt_ebitda": 0.08
+  "WWW": {
+   "name": "WOLVERINE WORLD WIDE INC",
+   "price": 20.8,
+   "market_cap": 1706979712,
+   "gross_margin": 47.1,
+   "insider_pct": 1.4,
+   "roe": 27.6,
+   "debt_ebitda": 3.76
   },
   "OMCL": {
    "name": "OMNICELL INC",
    "price": 36.65,
-   "market_cap": 1666802048,
-   "gross_margin": 45.5,
+   "market_cap": 1671785600,
+   "gross_margin": 45.6,
    "insider_pct": 2.1,
    "roe": 3.5,
-   "debt_ebitda": 1.86
-  },
-  "GTY": {
-   "name": "GETTY REALTY CORP",
-   "price": 28.0,
-   "market_cap": 1879463936,
-   "gross_margin": 96.6,
-   "insider_pct": 5.6,
-   "roe": 8.9,
-   "debt_ebitda": 5.78
+   "debt_ebitda": 1.85
   },
   "NBHC": {
    "name": "NATIONAL BANK HOLD CL A",
@@ -3900,6 +3846,60 @@
    "roe": 3.6,
    "debt_ebitda": null
   },
+  "VSTS": {
+   "name": "VESTIS CORP",
+   "price": 14.83,
+   "market_cap": 1959934336,
+   "gross_margin": 26.3,
+   "insider_pct": 16.6,
+   "roe": -0.6,
+   "debt_ebitda": 5.32
+  },
+  "WERN": {
+   "name": "WERNER ENTERPRISES INC",
+   "price": 27.71,
+   "market_cap": 1661217664,
+   "gross_margin": 18.4,
+   "insider_pct": 1.1,
+   "roe": -2.0,
+   "debt_ebitda": 2.79
+  },
+  "NSP": {
+   "name": "INSPERITY INC",
+   "price": 48.68,
+   "market_cap": 1854518400,
+   "gross_margin": 13.0,
+   "insider_pct": 6.3,
+   "roe": 4.6,
+   "debt_ebitda": 9.69
+  },
+  "AMR": {
+   "name": "ALPHA METALLURGICAL RESOURCE",
+   "price": 159.19,
+   "market_cap": 2016595840,
+   "gross_margin": 10.0,
+   "insider_pct": 30.0,
+   "roe": -3.0,
+   "debt_ebitda": 0.08
+  },
+  "CVI": {
+   "name": "CVR ENERGY INC",
+   "price": 58.37,
+   "market_cap": 5867971072,
+   "gross_margin": 10.9,
+   "insider_pct": 0.0,
+   "roe": 24.3,
+   "debt_ebitda": 2.33
+  },
+  "GTY": {
+   "name": "GETTY REALTY CORP",
+   "price": 28.0,
+   "market_cap": 1879463936,
+   "gross_margin": 96.6,
+   "insider_pct": 5.6,
+   "roe": 8.9,
+   "debt_ebitda": 5.78
+  },
   "AZTA": {
    "name": "AZENTA INC",
    "price": 39.06,
@@ -3908,69 +3908,6 @@
    "insider_pct": 1.3,
    "roe": -7.0,
    "debt_ebitda": 1.64
-  },
-  "CBRL": {
-   "name": "CRACKER BARREL OLD COUNTRY",
-   "price": 70.05,
-   "market_cap": 1565787776,
-   "gross_margin": 31.8,
-   "insider_pct": 1.6,
-   "roe": 6.7,
-   "debt_ebitda": 8.53
-  },
-  "RSI": {
-   "name": "RUSH STREET INTERACTIVE INC",
-   "price": 12.12,
-   "market_cap": 2960273920,
-   "gross_margin": 35.5,
-   "insider_pct": 2.6,
-   "roe": 32.5,
-   "debt_ebitda": 0.0
-  },
-  "ARLO": {
-   "name": "ARLO TECHNOLOGIES INC",
-   "price": 14.47,
-   "market_cap": 1557164544,
-   "gross_margin": 44.6,
-   "insider_pct": 3.1,
-   "roe": 22.1,
-   "debt_ebitda": 0.53
-  },
-  "ICHR": {
-   "name": "ICHOR HOLDINGS LTD",
-   "price": 38.9,
-   "market_cap": 1456969472,
-   "gross_margin": 12.7,
-   "insider_pct": 1.4,
-   "roe": -5.2,
-   "debt_ebitda": 4.19
-  },
-  "BL": {
-   "name": "BLACKLINE INC",
-   "price": 33.81,
-   "market_cap": 1965215488,
-   "gross_margin": 75.6,
-   "insider_pct": 9.5,
-   "roe": 7.0,
-   "debt_ebitda": 10.71
-  },
-  "ASTH": {
-   "name": "ASTRANA HEALTH INC",
-   "price": 36.53,
-   "market_cap": 1812047488,
-   "gross_margin": 10.5,
-   "insider_pct": 22.8,
-   "roe": 6.9,
-   "debt_ebitda": 5.6
-  },
-  "ALG": {
-   "name": "ALAMO GROUP INC",
-   "price": 147.76,
-   "market_cap": 1798381696,
-   "gross_margin": 24.2,
-   "insider_pct": 1.2,
-   "roe": 8.8,
-   "debt_ebitda": 1.36
   },
   "HUBG": {
    "name": "HUB GROUP INC CL A",
@@ -3981,6 +3918,51 @@
    "roe": 6.2,
    "debt_ebitda": 1.5
   },
+  "CBRL": {
+   "name": "CRACKER BARREL OLD COUNTRY",
+   "price": 70.05,
+   "market_cap": 1565787776,
+   "gross_margin": 31.8,
+   "insider_pct": 1.6,
+   "roe": 6.7,
+   "debt_ebitda": 8.53
+  },
+  "BL": {
+   "name": "BLACKLINE INC",
+   "price": 33.81,
+   "market_cap": 1965215488,
+   "gross_margin": 75.6,
+   "insider_pct": 9.5,
+   "roe": 7.0,
+   "debt_ebitda": 10.71
+  },
+  "ICHR": {
+   "name": "ICHOR HOLDINGS LTD",
+   "price": 38.9,
+   "market_cap": 1456969472,
+   "gross_margin": 12.7,
+   "insider_pct": 1.4,
+   "roe": -5.2,
+   "debt_ebitda": 4.19
+  },
+  "ARLO": {
+   "name": "ARLO TECHNOLOGIES INC",
+   "price": 14.47,
+   "market_cap": 1557164544,
+   "gross_margin": 44.6,
+   "insider_pct": 3.1,
+   "roe": 22.1,
+   "debt_ebitda": 0.53
+  },
+  "RSI": {
+   "name": "RUSH STREET INTERACTIVE INC",
+   "price": 12.12,
+   "market_cap": 2806680064,
+   "gross_margin": 35.5,
+   "insider_pct": 2.6,
+   "roe": 32.5,
+   "debt_ebitda": 0.0
+  },
   "INVA": {
    "name": "INNOVIVA INC",
    "price": 21.22,
@@ -3990,23 +3972,14 @@
    "roe": 36.7,
    "debt_ebitda": 1.7
   },
-  "EFOR": {
-   "name": "EVERFORTH INC",
-   "price": 38.18,
-   "market_cap": 1565379968,
-   "gross_margin": 28.3,
-   "insider_pct": 3.4,
-   "roe": 3.7,
-   "debt_ebitda": 4.27
-  },
-  "INVX": {
-   "name": "INNOVEX INTERNATIONAL INC",
-   "price": 28.08,
-   "market_cap": 1963797888,
-   "gross_margin": 32.4,
-   "insider_pct": 1.6,
-   "roe": 6.0,
-   "debt_ebitda": 0.43
+  "ASTH": {
+   "name": "ASTRANA HEALTH INC",
+   "price": 36.53,
+   "market_cap": 1812047488,
+   "gross_margin": 10.5,
+   "insider_pct": 22.8,
+   "roe": 6.9,
+   "debt_ebitda": 5.6
   },
   "CNXC": {
    "name": "CONCENTRIX CORP",
@@ -4017,14 +3990,32 @@
    "roe": -78.2,
    "debt_ebitda": 4.24
   },
-  "LKFN": {
-   "name": "LAKELAND FINANCIAL CORP",
-   "price": 60.09,
-   "market_cap": 1484292096,
-   "gross_margin": 0.0,
-   "insider_pct": 2.8,
-   "roe": 15.4,
-   "debt_ebitda": null
+  "INVX": {
+   "name": "INNOVEX INTERNATIONAL INC",
+   "price": 28.08,
+   "market_cap": 1960556544,
+   "gross_margin": 33.6,
+   "insider_pct": 1.6,
+   "roe": 4.5,
+   "debt_ebitda": 0.4
+  },
+  "ALG": {
+   "name": "ALAMO GROUP INC",
+   "price": 147.76,
+   "market_cap": 1798381696,
+   "gross_margin": 24.2,
+   "insider_pct": 1.2,
+   "roe": 8.8,
+   "debt_ebitda": 1.36
+  },
+  "EFOR": {
+   "name": "EVERFORTH INC",
+   "price": 38.18,
+   "market_cap": 1569197952,
+   "gross_margin": 28.3,
+   "insider_pct": 3.4,
+   "roe": 3.7,
+   "debt_ebitda": 4.27
   },
   "SAFT": {
    "name": "SAFETY INSURANCE GROUP INC",
@@ -4035,14 +4026,14 @@
    "roe": 7.8,
    "debt_ebitda": 0.63
   },
-  "ALHC": {
-   "name": "ALIGNMENT HEALTHCARE INC",
-   "price": 7.27,
-   "market_cap": 1508053504,
-   "gross_margin": 12.5,
-   "insider_pct": 2.6,
-   "roe": 20.0,
-   "debt_ebitda": 3.78
+  "LKFN": {
+   "name": "LAKELAND FINANCIAL CORP",
+   "price": 60.09,
+   "market_cap": 1484292096,
+   "gross_margin": 0.0,
+   "insider_pct": 2.8,
+   "roe": 15.4,
+   "debt_ebitda": null
   },
   "EFC": {
    "name": "ELLINGTON FINANCIAL INC",
@@ -4053,32 +4044,32 @@
    "roe": 12.2,
    "debt_ebitda": null
   },
+  "ALHC": {
+   "name": "ALIGNMENT HEALTHCARE INC",
+   "price": 7.27,
+   "market_cap": 1521381248,
+   "gross_margin": 11.9,
+   "insider_pct": 2.5,
+   "roe": 13.2,
+   "debt_ebitda": 4.41
+  },
   "DFIN": {
    "name": "DONNELLEY FINANCIAL SOLUTION",
    "price": 66.89,
-   "market_cap": 1638804992,
+   "market_cap": 1628986624,
    "gross_margin": 64.7,
-   "insider_pct": 5.5,
+   "insider_pct": 5.6,
    "roe": 23.4,
    "debt_ebitda": 0.82
   },
   "SCL": {
    "name": "STEPAN CO",
    "price": 69.61,
-   "market_cap": 1581074560,
+   "market_cap": 1582412160,
    "gross_margin": 12.0,
    "insider_pct": 5.8,
    "roe": 0.4,
-   "debt_ebitda": 1.58
-  },
-  "GNL": {
-   "name": "GLOBAL NET LEASE INC",
-   "price": 6.97,
-   "market_cap": 1612285440,
-   "gross_margin": 85.7,
-   "insider_pct": 9.1,
-   "roe": -1.0,
-   "debt_ebitda": 7.3
+   "debt_ebitda": 2.95
   },
   "HE": {
    "name": "HAWAIIAN ELECTRIC INDS",
@@ -4098,6 +4089,24 @@
    "roe": -26.1,
    "debt_ebitda": null
   },
+  "ANIP": {
+   "name": "ANI PHARMACEUTICALS INC",
+   "price": 72.0,
+   "market_cap": 1653865344,
+   "gross_margin": 60.4,
+   "insider_pct": 5.4,
+   "roe": 20.5,
+   "debt_ebitda": 2.99
+  },
+  "GNL": {
+   "name": "GLOBAL NET LEASE INC",
+   "price": 6.97,
+   "market_cap": 1612285440,
+   "gross_margin": 85.7,
+   "insider_pct": 9.1,
+   "roe": -1.0,
+   "debt_ebitda": 7.3
+  },
   "IIPR": {
    "name": "INNOVATIVE INDUSTRIAL PROPER",
    "price": 52.04,
@@ -4110,38 +4119,11 @@
   "SNDR": {
    "name": "SCHNEIDER NATIONAL INC CL B",
    "price": 29.23,
-   "market_cap": 5124045312,
-   "gross_margin": 16.0,
+   "market_cap": 5126178816,
+   "gross_margin": 15.9,
    "insider_pct": 50.3,
-   "roe": 3.7,
-   "debt_ebitda": 0.67
-  },
-  "ANIP": {
-   "name": "ANI PHARMACEUTICALS INC",
-   "price": 72.0,
-   "market_cap": 1653865344,
-   "gross_margin": 60.4,
-   "insider_pct": 5.4,
-   "roe": 20.5,
-   "debt_ebitda": 2.99
-  },
-  "MBC": {
-   "name": "MASTERBRAND INC",
-   "price": 7.26,
-   "market_cap": 1477341056,
-   "gross_margin": 26.9,
-   "insider_pct": 1.6,
-   "roe": -5.8,
-   "debt_ebitda": 10.21
-  },
-  "SAM": {
-   "name": "BOSTON BEER COMPANY INC A",
-   "price": 201.31,
-   "market_cap": 2043308160,
-   "gross_margin": 49.1,
-   "insider_pct": 9.6,
-   "roe": -8.9,
-   "debt_ebitda": 0.15
+   "roe": 4.6,
+   "debt_ebitda": 0.64
   },
   "PCRX": {
    "name": "PACIRA BIOSCIENCES INC",
@@ -4151,6 +4133,15 @@
    "insider_pct": 1.3,
    "roe": 2.0,
    "debt_ebitda": 3.32
+  },
+  "MBC": {
+   "name": "MASTERBRAND INC",
+   "price": 7.26,
+   "market_cap": 1477341056,
+   "gross_margin": 26.9,
+   "insider_pct": 1.6,
+   "roe": -5.8,
+   "debt_ebitda": 10.21
   },
   "MLKN": {
    "name": "MILLERKNOLL INC",
@@ -4170,6 +4161,15 @@
    "roe": 45.8,
    "debt_ebitda": 1.39
   },
+  "SAM": {
+   "name": "BOSTON BEER COMPANY INC A",
+   "price": 201.31,
+   "market_cap": 2043308160,
+   "gross_margin": 49.1,
+   "insider_pct": 9.6,
+   "roe": -8.9,
+   "debt_ebitda": 0.15
+  },
   "TFIN": {
    "name": "TRIUMPH FINANCIAL INC",
    "price": 62.1,
@@ -4188,15 +4188,6 @@
    "roe": 6.7,
    "debt_ebitda": null
   },
-  "NSSC": {
-   "name": "NAPCO SECURITY TECHNOLOGIES",
-   "price": 39.35,
-   "market_cap": 1407487872,
-   "gross_margin": 59.0,
-   "insider_pct": 3.5,
-   "roe": 23.9,
-   "debt_ebitda": 0.08
-  },
   "STC": {
    "name": "STEWART INFORMATION SERVICES",
    "price": 44.5,
@@ -4206,10 +4197,19 @@
    "roe": 8.6,
    "debt_ebitda": 2.84
   },
+  "NSSC": {
+   "name": "NAPCO SECURITY TECHNOLOGIES",
+   "price": 39.35,
+   "market_cap": 1407487872,
+   "gross_margin": 59.0,
+   "insider_pct": 2.2,
+   "roe": 23.9,
+   "debt_ebitda": 0.08
+  },
   "ENR": {
    "name": "ENERGIZER HOLDINGS INC",
    "price": 23.15,
-   "market_cap": 1585396224,
+   "market_cap": 1585161216,
    "gross_margin": 36.9,
    "insider_pct": 12.9,
    "roe": 42.2,
@@ -4233,23 +4233,14 @@
    "roe": -3.4,
    "debt_ebitda": 9.99
   },
-  "MCRI": {
-   "name": "MONARCH CASINO + RESORT INC",
-   "price": 110.54,
-   "market_cap": 1949481728,
-   "gross_margin": 68.0,
-   "insider_pct": 33.0,
-   "roe": 20.4,
-   "debt_ebitda": 0.06
-  },
-  "CNMD": {
-   "name": "CONMED CORP",
-   "price": 44.29,
-   "market_cap": 1319989248,
-   "gross_margin": 54.8,
-   "insider_pct": 0.4,
-   "roe": 7.1,
-   "debt_ebitda": 3.8
+  "WABC": {
+   "name": "WESTAMERICA BANCORPORATION",
+   "price": 60.73,
+   "market_cap": 1401891328,
+   "gross_margin": 0.0,
+   "insider_pct": 3.6,
+   "roe": 12.9,
+   "debt_ebitda": null
   },
   "BJRI": {
    "name": "BJ S RESTAURANTS INC",
@@ -4260,41 +4251,32 @@
    "roe": 10.4,
    "debt_ebitda": 3.37
   },
-  "WABC": {
-   "name": "WESTAMERICA BANCORPORATION",
-   "price": 60.73,
-   "market_cap": 1401891328,
-   "gross_margin": 0.0,
-   "insider_pct": 3.6,
-   "roe": 12.9,
-   "debt_ebitda": null
+  "CNMD": {
+   "name": "CONMED CORP",
+   "price": 44.29,
+   "market_cap": 1319989248,
+   "gross_margin": 54.8,
+   "insider_pct": 0.4,
+   "roe": 7.1,
+   "debt_ebitda": 3.8
   },
   "PRG": {
    "name": "PROG HOLDINGS INC",
    "price": 34.75,
    "market_cap": 1355134464,
-   "gross_margin": 36.1,
+   "gross_margin": 36.7,
    "insider_pct": 4.4,
-   "roe": 17.1,
-   "debt_ebitda": 1.96
+   "roe": 17.3,
+   "debt_ebitda": 1.82
   },
   "ADNT": {
    "name": "ADIENT PLC",
    "price": 16.69,
-   "market_cap": 1308719360,
+   "market_cap": 1286747776,
    "gross_margin": 6.6,
    "insider_pct": 1.2,
    "roe": 5.8,
    "debt_ebitda": 3.41
-  },
-  "ACT": {
-   "name": "ENACT HOLDINGS INC",
-   "price": 47.18,
-   "market_cap": 6486479360,
-   "gross_margin": 73.2,
-   "insider_pct": 80.9,
-   "roe": 12.9,
-   "debt_ebitda": null
   },
   "EPC": {
    "name": "EDGEWELL PERSONAL CARE CO",
@@ -4305,6 +4287,15 @@
    "roe": -1.3,
    "debt_ebitda": 4.86
   },
+  "MCRI": {
+   "name": "MONARCH CASINO + RESORT INC",
+   "price": 110.54,
+   "market_cap": 1949481728,
+   "gross_margin": 68.0,
+   "insider_pct": 33.0,
+   "roe": 20.4,
+   "debt_ebitda": 0.06
+  },
   "ENOV": {
    "name": "ENOVIS CORP",
    "price": 19.91,
@@ -4313,6 +4304,15 @@
    "insider_pct": 1.6,
    "roe": -54.1,
    "debt_ebitda": 3.6
+  },
+  "ACT": {
+   "name": "ENACT HOLDINGS INC",
+   "price": 47.18,
+   "market_cap": 6486479360,
+   "gross_margin": 73.2,
+   "insider_pct": 80.9,
+   "roe": 12.9,
+   "debt_ebitda": null
   },
   "FLO": {
    "name": "FLOWERS FOODS INC",
@@ -4341,15 +4341,6 @@
    "roe": 13.6,
    "debt_ebitda": null
   },
-  "CCS": {
-   "name": "CENTURY COMMUNITIES INC",
-   "price": 52.59,
-   "market_cap": 1486472192,
-   "gross_margin": 17.7,
-   "insider_pct": 14.1,
-   "roe": 4.2,
-   "debt_ebitda": 9.03
-  },
   "UTI": {
    "name": "UNIVERSAL TECHNICAL INSTITUT",
    "price": 22.64,
@@ -4359,14 +4350,14 @@
    "roe": 10.5,
    "debt_ebitda": 4.37
   },
-  "REYN": {
-   "name": "REYNOLDS CONSUMER PRODUCTS I",
-   "price": 23.63,
-   "market_cap": 4980990464,
-   "gross_margin": 25.1,
-   "insider_pct": 74.1,
-   "roe": 15.4,
-   "debt_ebitda": 2.39
+  "CCS": {
+   "name": "CENTURY COMMUNITIES INC",
+   "price": 52.59,
+   "market_cap": 1486472192,
+   "gross_margin": 17.7,
+   "insider_pct": 14.1,
+   "roe": 4.2,
+   "debt_ebitda": 9.09
   },
   "USPH": {
    "name": "U.S. PHYSICAL THERAPY INC",
@@ -4377,23 +4368,14 @@
    "roe": 6.5,
    "debt_ebitda": 3.78
   },
-  "GO": {
-   "name": "GROCERY OUTLET HOLDING CORP",
-   "price": 12.93,
-   "market_cap": 1281162624,
-   "gross_margin": 30.0,
-   "insider_pct": 6.1,
-   "roe": -38.1,
-   "debt_ebitda": 9.11
-  },
-  "GT": {
-   "name": "GOODYEAR TIRE + RUBBER CO",
-   "price": 4.29,
-   "market_cap": 1235085696,
-   "gross_margin": 18.1,
-   "insider_pct": 4.1,
-   "roe": -61.5,
-   "debt_ebitda": 8.36
+  "TMP": {
+   "name": "TOMPKINS FINANCIAL CORP",
+   "price": 99.52,
+   "market_cap": 1428156672,
+   "gross_margin": 0.0,
+   "insider_pct": 6.5,
+   "roe": 20.9,
+   "debt_ebitda": null
   },
   "COTY": {
    "name": "COTY INC CL A",
@@ -4404,41 +4386,23 @@
    "roe": -16.1,
    "debt_ebitda": 4.16
   },
-  "CERT": {
-   "name": "CERTARA INC",
-   "price": 11.02,
-   "market_cap": 1680977408,
-   "gross_margin": 61.6,
-   "insider_pct": 2.7,
-   "roe": -2.2,
-   "debt_ebitda": 3.2
+  "GT": {
+   "name": "GOODYEAR TIRE + RUBBER CO",
+   "price": 4.29,
+   "market_cap": 1235085696,
+   "gross_margin": 18.1,
+   "insider_pct": 4.1,
+   "roe": -61.5,
+   "debt_ebitda": 8.36
   },
-  "TMP": {
-   "name": "TOMPKINS FINANCIAL CORP",
-   "price": 99.52,
-   "market_cap": 1431386624,
-   "gross_margin": 0.0,
-   "insider_pct": 6.5,
-   "roe": 20.9,
-   "debt_ebitda": null
-  },
-  "JJSF": {
-   "name": "J + J SNACK FOODS CORP",
-   "price": 85.39,
-   "market_cap": 1595222528,
-   "gross_margin": 30.3,
-   "insider_pct": 22.3,
-   "roe": 5.3,
-   "debt_ebitda": 1.23
-  },
-  "ADIG": {
-   "name": "ADI GLOBAL DISTRIB",
-   "price": 17.48,
-   "market_cap": 1327137536,
-   "gross_margin": 21.9,
-   "insider_pct": 0.0,
-   "roe": null,
-   "debt_ebitda": 4.88
+  "GO": {
+   "name": "GROCERY OUTLET HOLDING CORP",
+   "price": 12.93,
+   "market_cap": 1281162624,
+   "gross_margin": 30.0,
+   "insider_pct": 6.1,
+   "roe": -38.1,
+   "debt_ebitda": 9.11
   },
   "USLM": {
    "name": "UNITED STATES LIME + MINERAL",
@@ -4448,6 +4412,33 @@
    "insider_pct": 62.6,
    "roe": 21.4,
    "debt_ebitda": 0.02
+  },
+  "REYN": {
+   "name": "REYNOLDS CONSUMER PRODUCTS I",
+   "price": 23.63,
+   "market_cap": 4980432896,
+   "gross_margin": 25.1,
+   "insider_pct": 74.1,
+   "roe": 15.4,
+   "debt_ebitda": 2.39
+  },
+  "CERT": {
+   "name": "CERTARA INC",
+   "price": 11.02,
+   "market_cap": 1680977408,
+   "gross_margin": 61.6,
+   "insider_pct": 2.7,
+   "roe": -2.2,
+   "debt_ebitda": 3.2
+  },
+  "JJSF": {
+   "name": "J + J SNACK FOODS CORP",
+   "price": 85.39,
+   "market_cap": 1595222528,
+   "gross_margin": 30.3,
+   "insider_pct": 22.3,
+   "roe": 5.3,
+   "debt_ebitda": 1.23
   },
   "LZB": {
    "name": "LA Z BOY INC",
@@ -4461,29 +4452,47 @@
   "CRI": {
    "name": "CARTER S INC",
    "price": 31.54,
-   "market_cap": 1157870720,
-   "gross_margin": 48.6,
+   "market_cap": 1157281536,
+   "gross_margin": 49.1,
    "insider_pct": 4.8,
-   "roe": 20.7,
-   "debt_ebitda": 3.45
+   "roe": 22.9,
+   "debt_ebitda": 3.17
+  },
+  "ADIG": {
+   "name": "ADI GLOBAL DISTRIB",
+   "price": 17.48,
+   "market_cap": 1327137536,
+   "gross_margin": 21.9,
+   "insider_pct": 0.0,
+   "roe": null,
+   "debt_ebitda": 4.88
   },
   "UFCS": {
    "name": "UNITED FIRE GROUP INC",
    "price": 56.83,
-   "market_cap": 1460840192,
+   "market_cap": 1458039936,
    "gross_margin": 12.9,
    "insider_pct": 17.2,
    "roe": 15.5,
    "debt_ebitda": 0.73
   },
+  "ROCK": {
+   "name": "GIBRALTAR INDUSTRIES INC",
+   "price": 40.1,
+   "market_cap": 1190323840,
+   "gross_margin": 25.4,
+   "insider_pct": 1.0,
+   "roe": 6.2,
+   "debt_ebitda": 6.8
+  },
   "MPT": {
    "name": "MEDICAL PROPERTIES TRUST INC",
    "price": 2.25,
    "market_cap": 1343603200,
-   "gross_margin": 95.8,
+   "gross_margin": 95.7,
    "insider_pct": 8.8,
    "roe": 5.4,
-   "debt_ebitda": 9.44
+   "debt_ebitda": 9.84
   },
   "GBX": {
    "name": "GREENBRIER COMPANIES INC",
@@ -4494,14 +4503,14 @@
    "roe": 4.7,
    "debt_ebitda": 8.13
   },
-  "ROCK": {
-   "name": "GIBRALTAR INDUSTRIES INC",
-   "price": 40.1,
-   "market_cap": 1189442944,
-   "gross_margin": 25.4,
-   "insider_pct": 1.0,
-   "roe": 6.2,
-   "debt_ebitda": 6.8
+  "WD": {
+   "name": "WALKER + DUNLOP INC",
+   "price": 34.79,
+   "market_cap": 1194192640,
+   "gross_margin": 100.0,
+   "insider_pct": 4.0,
+   "roe": 2.4,
+   "debt_ebitda": null
   },
   "SCSC": {
    "name": "SCANSOURCE INC",
@@ -4512,15 +4521,6 @@
    "roe": 8.7,
    "debt_ebitda": 0.87
   },
-  "DCH": {
-   "name": "DAUCH CORPORATION",
-   "price": 4.78,
-   "market_cap": 1135750016,
-   "gross_margin": 11.3,
-   "insider_pct": 2.7,
-   "roe": -15.0,
-   "debt_ebitda": 5.4
-  },
   "HLIT": {
    "name": "HARMONIC INC",
    "price": 10.23,
@@ -4530,23 +4530,14 @@
    "roe": 6.5,
    "debt_ebitda": 2.03
   },
-  "WD": {
-   "name": "WALKER + DUNLOP INC",
-   "price": 34.79,
-   "market_cap": 1194192640,
-   "gross_margin": 100.0,
-   "insider_pct": 4.0,
-   "roe": 2.4,
-   "debt_ebitda": null
-  },
-  "HFWA": {
-   "name": "HERITAGE FINANCIAL CORP",
-   "price": 28.47,
-   "market_cap": 1155223680,
-   "gross_margin": 0.0,
-   "insider_pct": 1.4,
-   "roe": 7.8,
-   "debt_ebitda": null
+  "DCH": {
+   "name": "DAUCH CORPORATION",
+   "price": 4.78,
+   "market_cap": 1135750016,
+   "gross_margin": 11.3,
+   "insider_pct": 2.7,
+   "roe": -15.0,
+   "debt_ebitda": 5.4
   },
   "PFBC": {
    "name": "PREFERRED BANK/LOS ANGELES",
@@ -4555,6 +4546,24 @@
    "gross_margin": 0.0,
    "insider_pct": 7.9,
    "roe": 16.9,
+   "debt_ebitda": null
+  },
+  "CRK": {
+   "name": "COMSTOCK RESOURCES INC",
+   "price": 14.72,
+   "market_cap": 4322094592,
+   "gross_margin": 56.8,
+   "insider_pct": 73.3,
+   "roe": 19.0,
+   "debt_ebitda": 3.22
+  },
+  "HFWA": {
+   "name": "HERITAGE FINANCIAL CORP",
+   "price": 28.47,
+   "market_cap": 1155223680,
+   "gross_margin": 0.0,
+   "insider_pct": 1.4,
+   "roe": 7.8,
    "debt_ebitda": null
   },
   "WEN": {
@@ -4566,15 +4575,6 @@
    "roe": 108.0,
    "debt_ebitda": 8.93
   },
-  "VYX": {
-   "name": "NCR VOYIX CORP",
-   "price": 8.48,
-   "market_cap": 1170832768,
-   "gross_margin": 25.8,
-   "insider_pct": 0.9,
-   "roe": 5.3,
-   "debt_ebitda": 5.23
-  },
   "AORT": {
    "name": "ARTIVION INC",
    "price": 22.58,
@@ -4583,15 +4583,6 @@
    "insider_pct": 4.3,
    "roe": -0.7,
    "debt_ebitda": 6.4
-  },
-  "UPWK": {
-   "name": "UPWORK INC",
-   "price": 9.15,
-   "market_cap": 1142865792,
-   "gross_margin": 77.2,
-   "insider_pct": 5.3,
-   "roe": 16.7,
-   "debt_ebitda": 2.54
   },
   "GSHD": {
    "name": "GOOSEHEAD INSURANCE INC  A",
@@ -4602,6 +4593,24 @@
    "roe": null,
    "debt_ebitda": 3.53
   },
+  "UPWK": {
+   "name": "UPWORK INC",
+   "price": 9.15,
+   "market_cap": 1142865792,
+   "gross_margin": 77.2,
+   "insider_pct": 5.3,
+   "roe": 16.7,
+   "debt_ebitda": 2.54
+  },
+  "VYX": {
+   "name": "NCR VOYIX CORP",
+   "price": 8.48,
+   "market_cap": 1170832768,
+   "gross_margin": 25.8,
+   "insider_pct": 0.9,
+   "roe": 5.3,
+   "debt_ebitda": 5.23
+  },
   "XPEL": {
    "name": "XPEL INC",
    "price": 45.65,
@@ -4610,15 +4619,6 @@
    "insider_pct": 9.4,
    "roe": 19.4,
    "debt_ebitda": 0.76
-  },
-  "TRUP": {
-   "name": "TRUPANION INC",
-   "price": 30.13,
-   "market_cap": 1314284800,
-   "gross_margin": 22.6,
-   "insider_pct": 15.7,
-   "roe": 6.1,
-   "debt_ebitda": 2.62
   },
   "TNC": {
    "name": "TENNANT CO",
@@ -4638,10 +4638,28 @@
    "roe": 19.6,
    "debt_ebitda": 0.15
   },
+  "TRUP": {
+   "name": "TRUPANION INC",
+   "price": 30.13,
+   "market_cap": 1321881728,
+   "gross_margin": 22.6,
+   "insider_pct": 15.7,
+   "roe": 6.1,
+   "debt_ebitda": 2.62
+  },
+  "UPBD": {
+   "name": "UPBOUND GROUP INC",
+   "price": 20.7,
+   "market_cap": 1206859264,
+   "gross_margin": 49.7,
+   "insider_pct": 3.9,
+   "roe": 15.5,
+   "debt_ebitda": 3.7
+  },
   "PRSU": {
    "name": "PURSUIT ATTRACTIONS AND HOSP",
    "price": 55.15,
-   "market_cap": 1513826944,
+   "market_cap": 1503618304,
    "gross_margin": 92.5,
    "insider_pct": 1.0,
    "roe": 8.9,
@@ -4656,23 +4674,14 @@
    "roe": 7.7,
    "debt_ebitda": 2.58
   },
-  "CRK": {
-   "name": "COMSTOCK RESOURCES INC",
-   "price": 14.72,
-   "market_cap": 4322094592,
-   "gross_margin": 56.8,
-   "insider_pct": 73.3,
-   "roe": 19.0,
-   "debt_ebitda": 3.22
-  },
-  "UPBD": {
-   "name": "UPBOUND GROUP INC",
-   "price": 20.7,
-   "market_cap": 1206797696,
-   "gross_margin": 49.1,
-   "insider_pct": 3.9,
-   "roe": 12.7,
-   "debt_ebitda": 3.58
+  "VTOL": {
+   "name": "BRISTOW GROUP INC",
+   "price": 41.99,
+   "market_cap": 1244667648,
+   "gross_margin": 27.2,
+   "insider_pct": 3.2,
+   "roe": 10.1,
+   "debt_ebitda": 4.13
   },
   "SLVM": {
    "name": "SYLVAMO CORP",
@@ -4682,15 +4691,6 @@
    "insider_pct": 0.9,
    "roe": 7.9,
    "debt_ebitda": 2.79
-  },
-  "VTOL": {
-   "name": "BRISTOW GROUP INC",
-   "price": 41.99,
-   "market_cap": 1244667648,
-   "gross_margin": 27.2,
-   "insider_pct": 3.2,
-   "roe": 10.1,
-   "debt_ebitda": 4.13
   },
   "LQDT": {
    "name": "LIQUIDITY SERVICES INC",
@@ -4704,20 +4704,11 @@
   "TRIP": {
    "name": "TRIPADVISOR INC",
    "price": 9.22,
-   "market_cap": 1072849984,
+   "market_cap": 1080577920,
    "gross_margin": 64.0,
    "insider_pct": 1.4,
    "roe": -0.2,
    "debt_ebitda": 8.13
-  },
-  "GTM": {
-   "name": "ZOOMINFO TECHNOLOGIES INC",
-   "price": 4.36,
-   "market_cap": 1269239808,
-   "gross_margin": 86.5,
-   "insider_pct": 13.2,
-   "roe": -45.4,
-   "debt_ebitda": 4.49
   },
   "DLX": {
    "name": "DELUXE CORP",
@@ -4728,14 +4719,14 @@
    "roe": 15.0,
    "debt_ebitda": 3.55
   },
-  "LNN": {
-   "name": "LINDSAY CORP",
-   "price": 107.63,
-   "market_cap": 1094477056,
-   "gross_margin": 28.9,
-   "insider_pct": 1.3,
-   "roe": 10.7,
-   "debt_ebitda": 1.53
+  "GTM": {
+   "name": "ZOOMINFO TECHNOLOGIES INC",
+   "price": 4.36,
+   "market_cap": 1269239808,
+   "gross_margin": 86.5,
+   "insider_pct": 13.2,
+   "roe": -45.4,
+   "debt_ebitda": 4.49
   },
   "UVV": {
    "name": "UNIVERSAL CORP/VA",
@@ -4746,15 +4737,6 @@
    "roe": 2.3,
    "debt_ebitda": 5.26
   },
-  "DEA": {
-   "name": "EASTERLY GOVERNMENT PROPERTI",
-   "price": 22.33,
-   "market_cap": 1094299648,
-   "gross_margin": 67.5,
-   "insider_pct": 5.8,
-   "roe": 1.1,
-   "debt_ebitda": 7.7
-  },
   "HZO": {
    "name": "MARINEMAX INC",
    "price": 52.76,
@@ -4764,10 +4746,28 @@
    "roe": 0.5,
    "debt_ebitda": 9.66
   },
+  "DEA": {
+   "name": "EASTERLY GOVERNMENT PROPERTI",
+   "price": 22.33,
+   "market_cap": 1094299648,
+   "gross_margin": 67.5,
+   "insider_pct": 5.8,
+   "roe": 1.1,
+   "debt_ebitda": 7.7
+  },
+  "LNN": {
+   "name": "LINDSAY CORP",
+   "price": 107.63,
+   "market_cap": 1094477056,
+   "gross_margin": 28.9,
+   "insider_pct": 1.3,
+   "roe": 10.7,
+   "debt_ebitda": 1.53
+  },
   "AAT": {
    "name": "AMERICAN ASSETS TRUST INC",
    "price": 21.86,
-   "market_cap": 1696024576,
+   "market_cap": 1695734272,
    "gross_margin": 62.2,
    "insider_pct": 1.8,
    "roe": 2.6,
@@ -4776,11 +4776,11 @@
   "MSEX": {
    "name": "MIDDLESEX WATER CO",
    "price": 56.79,
-   "market_cap": 1070147712,
-   "gross_margin": 53.7,
+   "market_cap": 1086374528,
+   "gross_margin": 54.5,
    "insider_pct": 2.3,
-   "roe": 9.8,
-   "debt_ebitda": 4.52
+   "roe": 10.1,
+   "debt_ebitda": 4.35
   },
   "CPF": {
    "name": "CENTRAL PACIFIC FINANCIAL CO",
@@ -4789,24 +4789,6 @@
    "gross_margin": 0.0,
    "insider_pct": 1.9,
    "roe": 14.9,
-   "debt_ebitda": null
-  },
-  "CSR": {
-   "name": "CENTERSPACE",
-   "price": 58.44,
-   "market_cap": 1034305216,
-   "gross_margin": 59.3,
-   "insider_pct": 0.7,
-   "roe": 3.4,
-   "debt_ebitda": 7.45
-  },
-  "CFFN": {
-   "name": "CAPITOL FEDERAL FINANCIAL IN",
-   "price": 8.43,
-   "market_cap": 1040372160,
-   "gross_margin": 0.0,
-   "insider_pct": 8.3,
-   "roe": 8.4,
    "debt_ebitda": null
   },
   "UTL": {
@@ -4827,6 +4809,24 @@
    "roe": null,
    "debt_ebitda": 1.82
   },
+  "CFFN": {
+   "name": "CAPITOL FEDERAL FINANCIAL IN",
+   "price": 8.43,
+   "market_cap": 1040372160,
+   "gross_margin": 0.0,
+   "insider_pct": 8.3,
+   "roe": 8.4,
+   "debt_ebitda": null
+  },
+  "CSR": {
+   "name": "CENTERSPACE",
+   "price": 58.44,
+   "market_cap": 1034305216,
+   "gross_margin": 59.3,
+   "insider_pct": 0.7,
+   "roe": 3.4,
+   "debt_ebitda": 7.45
+  },
   "UAA": {
    "name": "UNDER ARMOUR INC CLASS A",
    "price": 4.99,
@@ -4845,15 +4845,6 @@
    "roe": 18.2,
    "debt_ebitda": 0.6
   },
-  "TRST": {
-   "name": "TRUSTCO BANK CORP NY",
-   "price": 56.26,
-   "market_cap": 957980608,
-   "gross_margin": 0.0,
-   "insider_pct": 3.5,
-   "roe": 10.0,
-   "debt_ebitda": null
-  },
   "JBLU": {
    "name": "JETBLUE AIRWAYS CORP",
    "price": 2.85,
@@ -4863,14 +4854,23 @@
    "roe": -55.4,
    "debt_ebitda": 112.6
   },
-  "QDEL": {
-   "name": "QUIDELORTHO CORP",
-   "price": 13.25,
-   "market_cap": 908624384,
-   "gross_margin": 44.9,
-   "insider_pct": 0.9,
-   "roe": -45.9,
-   "debt_ebitda": 6.35
+  "APOG": {
+   "name": "APOGEE ENTERPRISES INC",
+   "price": 45.24,
+   "market_cap": 945316992,
+   "gross_margin": 23.5,
+   "insider_pct": 2.8,
+   "roe": 13.1,
+   "debt_ebitda": 2.38
+  },
+  "TRST": {
+   "name": "TRUSTCO BANK CORP NY",
+   "price": 56.26,
+   "market_cap": 957980608,
+   "gross_margin": 0.0,
+   "insider_pct": 3.5,
+   "roe": 10.0,
+   "debt_ebitda": null
   },
   "CNXN": {
    "name": "PC CONNECTION INC",
@@ -4890,10 +4890,19 @@
    "roe": 11.5,
    "debt_ebitda": null
   },
+  "QDEL": {
+   "name": "QUIDELORTHO CORP",
+   "price": 13.25,
+   "market_cap": 908624384,
+   "gross_margin": 44.9,
+   "insider_pct": 0.9,
+   "roe": -45.9,
+   "debt_ebitda": 6.35
+  },
   "SBSI": {
    "name": "SOUTHSIDE BANCSHARES INC",
    "price": 33.66,
-   "market_cap": 1003640192,
+   "market_cap": 1002439680,
    "gross_margin": 0.0,
    "insider_pct": 4.6,
    "roe": 11.8,
@@ -4908,6 +4917,15 @@
    "roe": 6.2,
    "debt_ebitda": 4.02
   },
+  "ASTE": {
+   "name": "ASTEC INDUSTRIES INC",
+   "price": 39.27,
+   "market_cap": 904206208,
+   "gross_margin": 26.2,
+   "insider_pct": 1.2,
+   "roe": 2.9,
+   "debt_ebitda": 2.91
+  },
   "QNST": {
    "name": "QUINSTREET INC",
    "price": 17.4,
@@ -4916,15 +4934,6 @@
    "insider_pct": 3.3,
    "roe": 28.6,
    "debt_ebitda": 1.33
-  },
-  "APOG": {
-   "name": "APOGEE ENTERPRISES INC",
-   "price": 45.24,
-   "market_cap": 945316992,
-   "gross_margin": 23.5,
-   "insider_pct": 2.8,
-   "roe": 13.1,
-   "debt_ebitda": 2.38
   },
   "EGBN": {
    "name": "EAGLE BANCORP INC",
@@ -4935,24 +4944,6 @@
    "roe": 3.8,
    "debt_ebitda": null
   },
-  "DMC": {
-   "name": "DEL MONTE CORP",
-   "price": 27.35,
-   "market_cap": 1289488640,
-   "gross_margin": 9.6,
-   "insider_pct": 18.4,
-   "roe": 4.1,
-   "debt_ebitda": 2.77
-  },
-  "ASTE": {
-   "name": "ASTEC INDUSTRIES INC",
-   "price": 39.27,
-   "market_cap": 902920576,
-   "gross_margin": 26.2,
-   "insider_pct": 1.2,
-   "roe": 2.9,
-   "debt_ebitda": 2.91
-  },
   "UNIT": {
    "name": "UNITI GROUP INC",
    "price": 5.06,
@@ -4961,6 +4952,24 @@
    "insider_pct": 1.9,
    "roe": null,
    "debt_ebitda": 7.7
+  },
+  "LGIH": {
+   "name": "LGI HOMES INC",
+   "price": 44.37,
+   "market_cap": 1030816256,
+   "gross_margin": 19.6,
+   "insider_pct": 12.6,
+   "roe": 3.2,
+   "debt_ebitda": 21.69
+  },
+  "DMC": {
+   "name": "DEL MONTE CORP",
+   "price": 27.35,
+   "market_cap": 1289488640,
+   "gross_margin": 9.6,
+   "insider_pct": 18.4,
+   "roe": 4.1,
+   "debt_ebitda": 2.77
   },
   "EIG": {
    "name": "EMPLOYERS HOLDINGS INC",
@@ -4971,24 +4980,6 @@
    "roe": 3.0,
    "debt_ebitda": 3.13
   },
-  "LGIH": {
-   "name": "LGI HOMES INC",
-   "price": 44.37,
-   "market_cap": 1031525824,
-   "gross_margin": 19.6,
-   "insider_pct": 12.6,
-   "roe": 3.2,
-   "debt_ebitda": 21.69
-  },
-  "WGO": {
-   "name": "WINNEBAGO INDUSTRIES",
-   "price": 30.61,
-   "market_cap": 870675200,
-   "gross_margin": 13.0,
-   "insider_pct": 4.1,
-   "roe": 2.8,
-   "debt_ebitda": 3.88
-  },
   "SMPL": {
    "name": "SIMPLY GOOD FOODS CO/THE",
    "price": 11.25,
@@ -4997,15 +4988,6 @@
    "insider_pct": 9.4,
    "roe": -9.6,
    "debt_ebitda": 1.93
-  },
-  "WINA": {
-   "name": "WINMARK CORP",
-   "price": 285.69,
-   "market_cap": 1016826432,
-   "gross_margin": 92.4,
-   "insider_pct": 17.2,
-   "roe": null,
-   "debt_ebitda": 1.13
   },
   "AMPH": {
    "name": "AMPHASTAR PHARMACEUTICALS IN",
@@ -5016,41 +4998,32 @@
    "roe": 10.3,
    "debt_ebitda": 3.54
   },
-  "PAHC": {
-   "name": "PHIBRO ANIMAL HEALTH CORP A",
-   "price": 38.88,
-   "market_cap": 1578590464,
-   "gross_margin": 33.3,
-   "insider_pct": 0.9,
-   "roe": 29.7,
-   "debt_ebitda": 3.26
-  },
-  "SMP": {
-   "name": "STANDARD MOTOR PRODS",
-   "price": 42.41,
-   "market_cap": 947451776,
-   "gross_margin": 32.0,
-   "insider_pct": 5.1,
-   "roe": 12.5,
-   "debt_ebitda": 2.82
+  "WINA": {
+   "name": "WINMARK CORP",
+   "price": 285.69,
+   "market_cap": 1016826432,
+   "gross_margin": 92.4,
+   "insider_pct": 17.2,
+   "roe": null,
+   "debt_ebitda": 1.13
   },
   "FIZZ": {
    "name": "NATIONAL BEVERAGE CORP",
    "price": 35.3,
-   "market_cap": 3304620032,
+   "market_cap": 3304507136,
    "gross_margin": 36.2,
    "insider_pct": 74.6,
    "roe": 40.1,
    "debt_ebitda": 0.24
   },
-  "CXM": {
-   "name": "SPRINKLR INC A",
-   "price": 6.81,
-   "market_cap": 1581086848,
-   "gross_margin": 65.6,
-   "insider_pct": 8.0,
-   "roe": 4.4,
-   "debt_ebitda": 0.81
+  "WGO": {
+   "name": "WINNEBAGO INDUSTRIES",
+   "price": 30.61,
+   "market_cap": 870675200,
+   "gross_margin": 13.0,
+   "insider_pct": 4.1,
+   "roe": 2.8,
+   "debt_ebitda": 3.88
   },
   "IART": {
    "name": "INTEGRA LIFESCIENCES HOLDING",
@@ -5061,6 +5034,15 @@
    "roe": 1.2,
    "debt_ebitda": 6.3
   },
+  "PAHC": {
+   "name": "PHIBRO ANIMAL HEALTH CORP A",
+   "price": 38.88,
+   "market_cap": 1578590464,
+   "gross_margin": 33.3,
+   "insider_pct": 0.9,
+   "roe": 29.7,
+   "debt_ebitda": 3.26
+  },
   "OI": {
    "name": "O I GLASS INC",
    "price": 5.12,
@@ -5070,15 +5052,6 @@
    "roe": -116.7,
    "debt_ebitda": 6.14
   },
-  "KOP": {
-   "name": "KOPPERS HOLDINGS INC",
-   "price": 41.5,
-   "market_cap": 784830080,
-   "gross_margin": 22.4,
-   "insider_pct": 7.1,
-   "roe": -19.0,
-   "debt_ebitda": 3.79
-  },
   "HSTM": {
    "name": "HEALTHSTREAM INC",
    "price": 33.7,
@@ -5087,6 +5060,33 @@
    "insider_pct": 29.5,
    "roe": 6.0,
    "debt_ebitda": 0.3
+  },
+  "SMP": {
+   "name": "STANDARD MOTOR PRODS",
+   "price": 42.41,
+   "market_cap": 947516224,
+   "gross_margin": 32.0,
+   "insider_pct": 5.1,
+   "roe": 12.9,
+   "debt_ebitda": 2.31
+  },
+  "CXM": {
+   "name": "SPRINKLR INC A",
+   "price": 6.81,
+   "market_cap": 1581086848,
+   "gross_margin": 65.6,
+   "insider_pct": 8.0,
+   "roe": 4.4,
+   "debt_ebitda": 0.81
+  },
+  "KOP": {
+   "name": "KOPPERS HOLDINGS INC",
+   "price": 41.5,
+   "market_cap": 784830080,
+   "gross_margin": 22.4,
+   "insider_pct": 7.1,
+   "roe": -19.0,
+   "debt_ebitda": 3.79
   },
   "FUN": {
    "name": "SIX FLAGS ENTERTAINMENT CORP",
@@ -5106,6 +5106,15 @@
    "roe": 10.9,
    "debt_ebitda": 0.16
   },
+  "LZ": {
+   "name": "LEGALZOOMCOM INC",
+   "price": 6.72,
+   "market_cap": 1150899584,
+   "gross_margin": 66.7,
+   "insider_pct": 5.1,
+   "roe": 10.5,
+   "debt_ebitda": 0.34
+  },
   "COLL": {
    "name": "COLLEGIUM PHARMACEUTICAL INC",
    "price": 23.8,
@@ -5114,6 +5123,24 @@
    "insider_pct": 1.1,
    "roe": 17.6,
    "debt_ebitda": 3.01
+  },
+  "AESI": {
+   "name": "ATLAS ENERGY SOLUTIONS INC",
+   "price": 9.22,
+   "market_cap": 1152531840,
+   "gross_margin": 23.4,
+   "insider_pct": 34.3,
+   "roe": -9.9,
+   "debt_ebitda": 9.67
+  },
+  "SAH": {
+   "name": "SONIC AUTOMOTIVE INC CLASS A",
+   "price": 63.23,
+   "market_cap": 1999086080,
+   "gross_margin": 15.7,
+   "insider_pct": 39.3,
+   "roe": null,
+   "debt_ebitda": 7.37
   },
   "STAA": {
    "name": "STAAR SURGICAL CO",
@@ -5124,42 +5151,6 @@
    "roe": 1.1,
    "debt_ebitda": 0.72
   },
-  "MTUS": {
-   "name": "METALLUS INC",
-   "price": 21.12,
-   "market_cap": 875408896,
-   "gross_margin": 8.2,
-   "insider_pct": 14.3,
-   "roe": 1.2,
-   "debt_ebitda": 0.22
-  },
-  "AESI": {
-   "name": "ATLAS ENERGY SOLUTIONS INC",
-   "price": 9.22,
-   "market_cap": 1151629568,
-   "gross_margin": 23.4,
-   "insider_pct": 34.3,
-   "roe": -9.9,
-   "debt_ebitda": 9.67
-  },
-  "LZ": {
-   "name": "LEGALZOOMCOM INC",
-   "price": 6.72,
-   "market_cap": 1150899584,
-   "gross_margin": 66.7,
-   "insider_pct": 5.1,
-   "roe": 10.5,
-   "debt_ebitda": 0.34
-  },
-  "FG": {
-   "name": "F+G ANNUITIES + LIFE INC",
-   "price": 21.13,
-   "market_cap": 2766660864,
-   "gross_margin": 32.8,
-   "insider_pct": 2.7,
-   "roe": 9.2,
-   "debt_ebitda": 2.94
-  },
   "VRTS": {
    "name": "VIRTUS INVESTMENT PARTNERS",
    "price": 118.23,
@@ -5169,32 +5160,14 @@
    "roe": 10.7,
    "debt_ebitda": 2.53
   },
-  "SAH": {
-   "name": "SONIC AUTOMOTIVE INC CLASS A",
-   "price": 63.23,
-   "market_cap": 1999003904,
-   "gross_margin": 15.7,
-   "insider_pct": 39.3,
-   "roe": 20.6,
-   "debt_ebitda": 7.12
-  },
-  "TR": {
-   "name": "TOOTSIE ROLL INDS",
-   "price": 36.86,
-   "market_cap": 2770510336,
-   "gross_margin": 34.5,
-   "insider_pct": 57.7,
-   "roe": 10.3,
-   "debt_ebitda": 0.11
-  },
-  "MRTN": {
-   "name": "MARTEN TRANSPORT LTD",
-   "price": 11.72,
-   "market_cap": 957074816,
-   "gross_margin": 22.3,
-   "insider_pct": 29.3,
-   "roe": 1.7,
-   "debt_ebitda": 0.0
+  "MTUS": {
+   "name": "METALLUS INC",
+   "price": 21.12,
+   "market_cap": 879179328,
+   "gross_margin": 8.2,
+   "insider_pct": 14.3,
+   "roe": 1.2,
+   "debt_ebitda": 0.22
   },
   "RUSHB": {
    "name": "RUSH ENTERPRISES INC   CL B",
@@ -5205,14 +5178,14 @@
    "roe": 12.0,
    "debt_ebitda": 2.31
   },
-  "JBGS": {
-   "name": "JBG SMITH PROPERTIES",
-   "price": 11.88,
-   "market_cap": 917497088,
-   "gross_margin": 48.9,
-   "insider_pct": 0.5,
-   "roe": -10.9,
-   "debt_ebitda": 13.42
+  "FG": {
+   "name": "F+G ANNUITIES + LIFE INC",
+   "price": 21.13,
+   "market_cap": 2766660864,
+   "gross_margin": 32.8,
+   "insider_pct": 2.7,
+   "roe": 9.2,
+   "debt_ebitda": 2.94
   },
   "FOXF": {
    "name": "FOX FACTORY HOLDING CORP",
@@ -5223,14 +5196,32 @@
    "roe": -36.8,
    "debt_ebitda": 4.73
   },
-  "AHCO": {
-   "name": "ADAPTHEALTH CORP",
-   "price": 5.81,
-   "market_cap": 775107200,
-   "gross_margin": 19.2,
-   "insider_pct": 8.3,
-   "roe": -15.2,
-   "debt_ebitda": 3.54
+  "JBGS": {
+   "name": "JBG SMITH PROPERTIES",
+   "price": 11.88,
+   "market_cap": 917497088,
+   "gross_margin": 48.9,
+   "insider_pct": 0.5,
+   "roe": -10.9,
+   "debt_ebitda": 13.42
+  },
+  "MRTN": {
+   "name": "MARTEN TRANSPORT LTD",
+   "price": 11.72,
+   "market_cap": 956224704,
+   "gross_margin": 22.3,
+   "insider_pct": 29.3,
+   "roe": 1.7,
+   "debt_ebitda": 0.0
+  },
+  "TR": {
+   "name": "TOOTSIE ROLL INDS",
+   "price": 36.86,
+   "market_cap": 2770510336,
+   "gross_margin": 34.5,
+   "insider_pct": 57.7,
+   "roe": 10.3,
+   "debt_ebitda": 0.11
   },
   "CRSR": {
    "name": "CORSAIR GAMING INC",
@@ -5241,6 +5232,24 @@
    "roe": 5.8,
    "debt_ebitda": 2.27
   },
+  "PMT": {
+   "name": "PENNYMAC MORTGAGE INVESTMENT",
+   "price": 7.47,
+   "market_cap": 651401600,
+   "gross_margin": 61.5,
+   "insider_pct": 1.2,
+   "roe": 4.5,
+   "debt_ebitda": null
+  },
+  "AHCO": {
+   "name": "ADAPTHEALTH CORP",
+   "price": 5.81,
+   "market_cap": 790474560,
+   "gross_margin": 19.2,
+   "insider_pct": 8.3,
+   "roe": -15.2,
+   "debt_ebitda": 3.54
+  },
   "MMI": {
    "name": "MARCUS + MILLICHAP INC",
    "price": 28.0,
@@ -5249,15 +5258,6 @@
    "insider_pct": 3.9,
    "roe": 2.4,
    "debt_ebitda": 3.56
-  },
-  "PMT": {
-   "name": "PENNYMAC MORTGAGE INVESTMENT",
-   "price": 7.47,
-   "market_cap": null,
-   "gross_margin": 82.9,
-   "insider_pct": 1.2,
-   "roe": 8.9,
-   "debt_ebitda": null
   },
   "PZZA": {
    "name": "PAPA JOHN S INTL INC",
@@ -5281,9 +5281,9 @@
    "name": "ADAMAS TRUST INC",
    "price": 6.54,
    "market_cap": 590593024,
-   "gross_margin": 78.7,
+   "gross_margin": 55.1,
    "insider_pct": 6.7,
-   "roe": 16.4,
+   "roe": 2.5,
    "debt_ebitda": null
   },
   "SCHL": {
@@ -5295,21 +5295,30 @@
    "roe": 7.4,
    "debt_ebitda": 6.18
   },
+  "RES": {
+   "name": "RPC INC",
+   "price": 6.17,
+   "market_cap": 1367108864,
+   "gross_margin": 23.3,
+   "insider_pct": 57.6,
+   "roe": -3.0,
+   "debt_ebitda": 0.23
+  },
   "FMC": {
    "name": "FMC CORP",
    "price": 6.2,
-   "market_cap": 964385152,
-   "gross_margin": 31.9,
+   "market_cap": 964462080,
+   "gross_margin": 18.0,
    "insider_pct": 20.7,
-   "roe": -88.4,
-   "debt_ebitda": 16.35
+   "roe": -218.9,
+   "debt_ebitda": null
   },
   "NAVI": {
    "name": "NAVIENT HOLDINGS INC",
    "price": 9.3,
    "market_cap": 872189568,
    "gross_margin": 100.0,
-   "insider_pct": null,
+   "insider_pct": 2.3,
    "roe": -2.0,
    "debt_ebitda": null
   },
@@ -5321,6 +5330,15 @@
    "insider_pct": 2.5,
    "roe": null,
    "debt_ebitda": 4.69
+  },
+  "JBSS": {
+   "name": "JOHN B. SANFILIPPO + SON INC",
+   "price": 53.9,
+   "market_cap": 630278656,
+   "gross_margin": 17.7,
+   "insider_pct": 1.6,
+   "roe": 15.4,
+   "debt_ebitda": 1.41
   },
   "UA": {
    "name": "UNDER ARMOUR INC CLASS C",
@@ -5340,24 +5358,6 @@
    "roe": null,
    "debt_ebitda": 10.32
   },
-  "RES": {
-   "name": "RPC INC",
-   "price": 6.17,
-   "market_cap": 1367623808,
-   "gross_margin": 23.3,
-   "insider_pct": 57.6,
-   "roe": -3.0,
-   "debt_ebitda": 0.23
-  },
-  "JBSS": {
-   "name": "JOHN B. SANFILIPPO + SON INC",
-   "price": 53.9,
-   "market_cap": 630278656,
-   "gross_margin": 17.7,
-   "insider_pct": 1.6,
-   "roe": 15.4,
-   "debt_ebitda": 1.41
-  },
   "SAFE": {
    "name": "SAFEHOLD INC",
    "price": 11.3,
@@ -5366,24 +5366,6 @@
    "insider_pct": 22.9,
    "roe": 4.6,
    "debt_ebitda": 13.47
-  },
-  "HTLD": {
-   "name": "HEARTLAND EXPRESS INC",
-   "price": 10.22,
-   "market_cap": 790339264,
-   "gross_margin": 27.5,
-   "insider_pct": 51.5,
-   "roe": -1.7,
-   "debt_ebitda": 1.22
-  },
-  "WRLD": {
-   "name": "WORLD ACCEPTANCE CORP",
-   "price": 164.47,
-   "market_cap": 766498112,
-   "gross_margin": 70.1,
-   "insider_pct": 18.8,
-   "roe": 13.9,
-   "debt_ebitda": 5.55
   },
   "CENT": {
    "name": "CENTRAL GARDEN + PET CO",
@@ -5394,6 +5376,33 @@
    "roe": 10.0,
    "debt_ebitda": 4.16
   },
+  "WRLD": {
+   "name": "WORLD ACCEPTANCE CORP",
+   "price": 164.47,
+   "market_cap": 766498112,
+   "gross_margin": 70.1,
+   "insider_pct": 18.8,
+   "roe": 13.9,
+   "debt_ebitda": 5.55
+  },
+  "HTLD": {
+   "name": "HEARTLAND EXPRESS INC",
+   "price": 10.22,
+   "market_cap": 790339264,
+   "gross_margin": 27.5,
+   "insider_pct": 51.5,
+   "roe": -1.7,
+   "debt_ebitda": 1.22
+  },
+  "AGNT": {
+   "name": "AGNT INC",
+   "price": 3.88,
+   "market_cap": 637576832,
+   "gross_margin": 6.8,
+   "insider_pct": 36.9,
+   "roe": -6.9,
+   "debt_ebitda": null
+  },
   "BFS": {
    "name": "SAUL CENTERS INC",
    "price": 29.09,
@@ -5403,15 +5412,6 @@
    "roe": 9.6,
    "debt_ebitda": 8.89
   },
-  "AGNT": {
-   "name": "AGNT INC",
-   "price": 3.88,
-   "market_cap": 648417600,
-   "gross_margin": 6.8,
-   "insider_pct": 36.9,
-   "roe": -6.9,
-   "debt_ebitda": null
-  },
   "DFH": {
    "name": "DREAM FINDERS HOMES INC   A",
    "price": 9.79,
@@ -5419,7 +5419,7 @@
    "gross_margin": 19.4,
    "insider_pct": 20.2,
    "roe": 6.6,
-   "debt_ebitda": 13.85
+   "debt_ebitda": 12.1
   }
  }
 }
