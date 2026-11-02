@@ -21,6 +21,9 @@ def _ua() -> dict:
     contact = os.environ.get("EDGAR_CONTACT", "").strip()
     return {"User-Agent": f"market-dashboard-watch {contact}", "Accept": "application/json, application/atom+xml, text/xml, */*"} if contact else {}
 FORMS = ("S-1", "S-1/A", "424B4", "424B1", "F-1", "F-1/A")
+# 会社ごとの監視設定: (対象の書類, 検索の開始日)。合併の当事者（Lumentum・Marvell）は、8-K・登録書類(S-4)・委任状(DEFM14A)・425（合併の連絡）を見る
+FORMS_MA = ("8-K", "S-4", "S-4/A", "DEFM14A", "425", "15-12G", "SC 13D")
+CONFIG = {"Lumentum": (FORMS_MA, "2026-11-02"), "Marvell": (FORMS_MA, "2026-11-02")}
 
 
 def _post(text: str) -> None:
@@ -62,10 +65,10 @@ def search_atom(name: str, form: str) -> tuple:
     return docs, r.status_code
 
 
-def search_fts(name: str) -> tuple:
+def search_fts(name: str, forms: tuple = FORMS, startdt: str = "2026-01-01") -> tuple:
     """EDGARの全文検索API。Returns: (書類リスト, HTTPステータス)。"""
-    r = requests.get("https://efts.sec.gov/LATEST/search-index", params={"q": f'"{name}"', "forms": ",".join(FORMS), "dateRange": "custom",
-                                                                          "startdt": "2026-01-01", "enddt": datetime.now(timezone.utc).strftime("%Y-%m-%d")},
+    r = requests.get("https://efts.sec.gov/LATEST/search-index", params={"q": f'"{name}"', "forms": ",".join(forms), "dateRange": "custom",
+                                                                          "startdt": startdt, "enddt": datetime.now(timezone.utc).strftime("%Y-%m-%d")},
                      headers=_ua(), timeout=30)
     docs = []
     if r.status_code == 200:
@@ -99,12 +102,13 @@ def main() -> None:
     for name in names:
         found = []
         try:
-            d, code = search_fts(name)
+            forms, startdt = CONFIG.get(name, (FORMS, "2026-01-01"))
+            d, code = search_fts(name, forms, startdt)
             diag.append(f"fts:{name}:{code}:{len(d)}")
             found += d
         except Exception as e:
             diag.append(f"fts:{name}:ERR:{type(e).__name__}")
-        for form in ("S-1", "S-1/A", "424B4"):
+        for form in (("S-1", "S-1/A", "424B4") if name not in CONFIG else ()):
             try:
                 d, code = search_atom(name, form)
                 d = [x for x in d if re.search(name, x["title"], re.I)]
@@ -128,10 +132,10 @@ def main() -> None:
         with open(OUT, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=1)
     if new_docs and not first_run:
-        lines = ["📄 SEC EDGAR: IPO関連書類が新しく見つかりました"]
+        lines = ["📄 SEC EDGAR: 監視中の会社の書類が新しく見つかりました"]
         for x in new_docs[:8]:
             lines.append(f"・{x['title']}（{x.get('updated', '')}）\n  {x['url']}")
-        lines.append("※ 内容の要約はこのあとClaudeに依頼してください。公開データのみ。")
+        lines.append("※ 内容の要約はこのあとClaudeに依頼してください（LITE合併の契約書・S-4など）。公開データのみ。")
         _post("\n".join(lines))
     elif new_docs:
         print(f"first run: recorded {len(new_docs)} existing docs without notifying")

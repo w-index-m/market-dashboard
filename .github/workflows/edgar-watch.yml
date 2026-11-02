@@ -1,4 +1,4 @@
-name: EDGAR watch (Anthropic IPO filings)
+name: EDGAR watch (Anthropic IPO filings + Marvell/Lumentum merger filings)
 
 on:
   schedule:
@@ -30,7 +30,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           EDGAR_DRY_RUN: ${{ github.event.inputs.dry_run }}
           EDGAR_CONTACT: ${{ secrets.EDGAR_CONTACT }}
-          WATCH_NAMES: "Anthropic"
+          WATCH_NAMES: "Anthropic,Lumentum,Marvell"
         run: python scripts/edgar_watch.py
       - name: Commit and push
         run: |
