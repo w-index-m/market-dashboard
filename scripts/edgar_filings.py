@@ -1,5 +1,5 @@
 """SEC EDGARの提出書類一覧（data.sec.gov）から、指定会社の直近の提出書類と、合併契約に関する8-Kの主要条項を表示する（公開データのみ）。
-環境変数: EDGAR_CONTACT（必須）、FILING_CIKS（カンマ区切り、既定 Lumentum=1633978, Marvell=1058057）。"""
+環境変数: EDGAR_CONTACT（必須）、FILING_CIKS（カンマ区切り、既定 Lumentum=1633978, Marvell Technology, Inc.=1835632（旧Bermuda法人の1058057は2021年で止まっている））。"""
 import os
 import re
 import sys
@@ -11,7 +11,7 @@ if not contact:
     print("EDGAR_CONTACT 未設定")
     sys.exit(0)
 H = {"User-Agent": f"market-dashboard-watch {contact}", "Accept": "application/json, text/html, */*"}
-CIKS = [c.strip() for c in os.environ.get("FILING_CIKS", "1633978,1058057").split(",") if c.strip()]
+CIKS = [c.strip() for c in os.environ.get("FILING_CIKS", "1633978,1835632").split(",") if c.strip()]
 KEYS = ["Termination Fee", "Outside Date", "Exchange Ratio", "Required Regulatory", "HSR", "antitrust", "SAMR", "Financing", "Board of Directors of the Combined", "stockholder approval", "Voting Agreement"]
 
 
@@ -35,6 +35,15 @@ for cik in CIKS:
     for d, f, it, acc, doc, desc in rows:
         print(f"- {d} {f} items={it} {desc}\n  https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{doc}")
     for d, f, it, acc, doc, desc in rows:
+        if f == "8-K" and d >= "2026-11-02" and "2.02" in it:
+            # 決算の8-K: 添付の決算発表（Exhibit 99.1）の冒頭を表示する
+            base = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/"
+            idx = requests.get(base, headers=H, timeout=30)
+            exs = re.findall(r'href="([^"]*ex99[^"]*\.htm)"', idx.text, re.I) if idx.status_code == 200 else []
+            if exs:
+                t = requests.get("https://www.sec.gov" + exs[0] if exs[0].startswith("/") else base + exs[0], headers=H, timeout=40)
+                txt = strip_html(t.text) if t.status_code == 200 else ""
+                print(f"\n#### 決算発表 {d} {exs[0]} 本文{len(txt):,}文字\n{txt[:3200]}")
         if f == "8-K" and d >= "2026-11-02" and ("1.01" in it or "8.01" in it or "7.01" in it):
             url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{doc}"
             t = requests.get(url, headers=H, timeout=40)
