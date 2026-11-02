@@ -1,14 +1,30 @@
 {
- "seen": {},
+ "seen": {
+  "0001628280-26-068655": {
+   "title": "8-K Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000162828026068655/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442714": {
+   "title": "8-K Marvell Technology, Inc.  (MRVL)  (CIK 0001835632)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1835632/000119312526442714/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442717": {
+   "title": "8-K Marvell Technology, Inc.  (MRVL)  (CIK 0001835632)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1835632/000119312526442717/",
+   "date": "2026-11-02"
+  }
+ },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-02T13:09:59Z",
+ "last_check": "2026-11-02T13:12:39Z",
  "diag": [
   "fts:Anthropic:200:0",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0",
-  "fts:Lumentum:200:0",
-  "fts:Marvell:200:0"
+  "fts:Lumentum:200:2",
+  "fts:Marvell:200:5"
  ]
 }
