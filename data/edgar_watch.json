@@ -14,17 +14,52 @@
    "title": "8-K Marvell Technology, Inc.  (MRVL)  (CIK 0001835632)",
    "url": "https://www.sec.gov/Archives/edgar/data/1835632/000119312526442717/",
    "date": "2026-11-02"
+  },
+  "0001628280-26-068676": {
+   "title": "S-1/A Anthropic, PBC  (CIK 0002130357)",
+   "url": "https://www.sec.gov/Archives/edgar/data/2130357/000162828026068676/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442765": {
+   "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526442765/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442758": {
+   "title": "8-K Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526442758/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442762": {
+   "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526442762/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442760": {
+   "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526442760/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442723": {
+   "title": "425 Marvell Technology, Inc.  (MRVL)  (CIK 0001835632)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1835632/000119312526442723/",
+   "date": "2026-11-02"
+  },
+  "0001193125-26-442728": {
+   "title": "425 Marvell Technology, Inc.  (MRVL)  (CIK 0001835632)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1835632/000119312526442728/",
+   "date": "2026-11-02"
   }
  },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-02T13:12:39Z",
+ "last_check": "2026-11-02T15:57:33Z",
  "diag": [
-  "fts:Anthropic:200:0",
+  "fts:Anthropic:200:5",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0",
-  "fts:Lumentum:200:2",
-  "fts:Marvell:200:5"
+  "fts:Lumentum:200:9",
+  "fts:Marvell:200:7"
  ]
 }
