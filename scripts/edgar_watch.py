@@ -22,7 +22,7 @@ def _ua() -> dict:
     return {"User-Agent": f"market-dashboard-watch {contact}", "Accept": "application/json, application/atom+xml, text/xml, */*"} if contact else {}
 FORMS = ("S-1", "S-1/A", "424B4", "424B1", "F-1", "F-1/A")
 # 会社ごとの監視設定: (対象の書類, 検索の開始日)。合併の当事者（Lumentum・Marvell）は、8-K・登録書類(S-4)・委任状(DEFM14A)・425（合併の連絡）を見る
-FORMS_MA = ("8-K", "S-4", "S-4/A", "DEFM14A", "425", "15-12G", "SC 13D")
+FORMS_MA = ("8-K", "S-4", "425", "DEFM14A", "SC 13D")   # EDGAR全文検索は、未対応の書類名（S-4/A・15-12G等）を1つでも含むと0件になるため、確認済みのものだけ指定する
 CONFIG = {"Lumentum": (FORMS_MA, "2026-11-02"), "Marvell": (FORMS_MA, "2026-11-02")}
 
 
