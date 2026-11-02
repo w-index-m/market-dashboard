@@ -2,11 +2,13 @@
  "seen": {},
  "log": [],
  "initialized": true,
- "last_check": "2026-10-19T22:23:04Z",
+ "last_check": "2026-11-02T13:09:59Z",
  "diag": [
   "fts:Anthropic:200:0",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
-  "atom:Anthropic:424B4:200:0"
+  "atom:Anthropic:424B4:200:0",
+  "fts:Lumentum:200:0",
+  "fts:Marvell:200:0"
  ]
 }
