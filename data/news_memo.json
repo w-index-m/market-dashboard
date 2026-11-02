@@ -1,5 +1,5 @@
 {
- "updated_at": "2026-10-31",
+ "updated_at": "2026-11-02",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
   {
@@ -91,6 +91,16 @@
     "https://www.tradingview.com/news/seekingalpha:89b0b236c094b:0-anthropic-may-get-junk-credit-rating-after-its-ipo-blackstone-says-report/",
     "https://www.tipranks.com/news/anthropic-could-get-junk-credit-rating-after-ipo-warns-blackstone-bx",
     "https://invezz.com/ie/news/2026/10/30/anthropic-ipo-blackstone-warns-ai-firm-may-receive-junk-credit-rating-report/"
+   ]
+  },
+  {
+   "date": "2026-11-02",
+   "title": "MarvellがLumentumを全株式交換で買収すると発表（想定企業価値1,150億ドル）",
+   "summary": "Lumentum株1株につきMarvell株4.500株を交換（固定比率）。想定価格は1株約1,132ドルで、10/28の終値（報道前）に対し約23.9%のプレミアム。統合後の持ち分はMarvell側約67%・Lumentum側約33%。完了は2028年上半期の見込み。両社の取締役会は承認済み。10/30に交渉入りが報じられて以降、Marvellは約22%、Lumentumは約8%下落していたと報じられた。発表当日のプレマーケットは、Marvell約+2.8%、Lumentumは売買停止後に一時+4.2%まで上げたあと下落。全株式交換のため、Lumentumの受取価値はMarvell株価×4.5で決まり、1,132ドルは報道前の株価での数字。",
+   "status": "会社の発表（画面）と複数の報道で確認／株価の動きは時間帯により変わる",
+   "sources": [
+    "https://www.marketscreener.com/news/marvell-to-buy-lumentum-in-115-billion-deal-in-ai-data-center-bet-ce785fd8d181f52d",
+    "https://www.investing.com/news/company-news/marvell-to-acquire-lumentum-for-115-billion-in-allstock-deal-93CH-4991177"
    ]
   }
  ]
