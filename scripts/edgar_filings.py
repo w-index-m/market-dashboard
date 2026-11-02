@@ -51,6 +51,11 @@ for cik in CIKS:
             print(f"\n#### 合併関連8-K {d} items={it} 本文{len(txt):,}文字")
             i1 = txt.find("Item 1.01")
             print(txt[i1:i1 + 3800] if i1 >= 0 else txt[:3000])
+            # 解約条項（アウトサイドデート・解約違約金）の本文を、まとまりで表示する
+            for key, width in (("terminated by either", 1400), ("Termination Fees", 1800), ("Charter Amendment", 700)):
+                m0 = re.search(re.escape(key), txt, re.I)
+                if m0:
+                    print(f"\n[[{key}]] {txt[max(0, m0.start() - 200):m0.start() + width]}")
             for k in KEYS:
                 m = re.search(re.escape(k), txt, re.I)
                 if m:
