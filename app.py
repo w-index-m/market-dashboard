@@ -20830,6 +20830,92 @@ def _news_memo_for_prompt(days: int = 7) -> str:
     return "\n".join(out)
 
 
+# Marvell×Lumentum 合併（2026-11-02発表、MarvellのForm 8-Kより）: 全株式交換・固定比率。発表時の「1株約1,132ドル・プレミアム23.9%」は10/28終値が基準
+_LITE_MRVL_RATIO = 4.5
+_LITE_MRVL_HEADLINE = 1132.0
+_LITE_MRVL_PREMIUM = 0.239
+_LITE_MRVL_CLOSE_SCENARIOS = (("2028年6月末（会社の見込み＝2028年上半期の終わり）", "2028-06-30"), ("2028年8月1日（契約上の最長の期限）", "2028-08-01"))
+
+
+def _lite_mrvl_spread_metrics(lite: float, mrvl: float, today) -> dict:
+    """LITEとMRVLの株価から、交換比率で決まる理論価値・スプレッド・完了までの年率換算を計算する（純粋関数）。
+    年率換算は『MRVL株価が今のままで、指定日に完了する』と仮定した、スプレッドが縮む分の年率。"""
+    implied = _LITE_MRVL_RATIO * mrvl
+    unaffected_lite = _LITE_MRVL_HEADLINE / (1 + _LITE_MRVL_PREMIUM)
+    unaffected_mrvl = _LITE_MRVL_HEADLINE / _LITE_MRVL_RATIO
+    out = {
+        "implied": implied, "spread": implied - lite, "spread_pct": (implied / lite - 1) * 100,
+        "premium_now_pct": (implied / unaffected_lite - 1) * 100,
+        "lite_vs_unaffected_pct": (lite / unaffected_lite - 1) * 100,
+        "mrvl_vs_unaffected_pct": (mrvl / unaffected_mrvl - 1) * 100,
+        "unaffected_lite": unaffected_lite, "unaffected_mrvl": unaffected_mrvl, "ann": [],
+    }
+    for label, d in _LITE_MRVL_CLOSE_SCENARIOS:
+        days = (pd.Timestamp(d).date() - pd.Timestamp(today).date()).days
+        if days > 0 and implied > 0 and lite > 0:
+            out["ann"].append((label, days, ((implied / lite) ** (365 / days) - 1) * 100))
+    return out
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_lite_mrvl_prices() -> dict:
+    """LITEとMRVLの日次終値（直近6か月）を取得する。失敗時は {}。"""
+    try:
+        raw = yf.download(["LITE", "MRVL"], period="6mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        cl = raw["Close"].dropna(how="all")
+        return {"LITE": cl["LITE"].dropna(), "MRVL": cl["MRVL"].dropna()}
+    except Exception as e:
+        logger.warning(f"[lite_mrvl] 取得失敗: {e}")
+        return {}
+
+
+def render_lite_merger_card():
+    """🔀 Marvell×Lumentum 合併スプレッド：LITEが、MRVL株価×4.5（理論価値）に対してどれだけ安く取引されているかを見る。"""
+    st.markdown('<a id="lite-merger"></a>', unsafe_allow_html=True)
+    st.markdown("### 🔀 LITE 買収スプレッド（Marvell×Lumentum）")
+    d = _fetch_lite_mrvl_prices()
+    if not d or len(d["LITE"]) < 3 or len(d["MRVL"]) < 3:
+        st.info("株価データを取得できませんでした。")
+        return
+    lite_s, mrvl_s = d["LITE"], d["MRVL"]
+    last_day = min(lite_s.index[-1], mrvl_s.index[-1])
+    lite, mrvl = float(lite_s.loc[:last_day].iloc[-1]), float(mrvl_s.loc[:last_day].iloc[-1])
+    m = _lite_mrvl_spread_metrics(lite, mrvl, datetime.now(JST).date())
+    sc = "#4ade80" if m["spread_pct"] >= 0 else "#f87171"
+    ann_html = "".join(f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">・{lb}に完了（MRVL株価が今のままなら）: スプレッドが縮む分は<b>年率{a:+.1f}%</b>（{dy}日後）</div>' for lb, dy, a in m["ann"])
+    st.markdown(
+        f'<div style="background:#1e293b;border-left:4px solid #38bdf8;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
+        f'<div style="font-size:12px;color:#94a3b8">基準日 {last_day.date()}（終値。時間外は含みません）</div>'
+        f'<div style="font-size:15px;margin-top:4px">LITE <b>${lite:,.2f}</b>　MRVL <b>${mrvl:,.2f}</b>　→　理論価値（MRVL×{_LITE_MRVL_RATIO}） <b>${m["implied"]:,.2f}</b></div>'
+        f'<div style="font-size:20px;font-weight:900;color:{sc};margin-top:4px">スプレッド {m["spread"]:+,.2f}ドル（{m["spread_pct"]:+.1f}%）'
+        f'<span style="font-size:11px;color:#94a3b8;font-weight:400">　＝LITEが理論価値より{"安い" if m["spread"] >= 0 else "高い"}</span></div>'
+        f'{ann_html}</div>'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+        '<th style="padding:6px 8px">項目</th><th>数値</th></tr></thead><tbody>'
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">発表時の1株あたり価値（10/28終値基準）</td><td>${_LITE_MRVL_HEADLINE:,.0f}（プレミアム{_LITE_MRVL_PREMIUM * 100:.1f}%）</td></tr>'
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">報道前（10/28）のLITE／MRVL（逆算）</td><td>${m["unaffected_lite"]:,.0f}／${m["unaffected_mrvl"]:,.0f}</td></tr>'
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">今の理論価値の、報道前LITEに対するプレミアム</td><td style="color:{"#4ade80" if m["premium_now_pct"] >= 0 else "#f87171"}">{m["premium_now_pct"]:+.1f}%</td></tr>'
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">LITEの、報道前に対する騰落</td><td>{m["lite_vs_unaffected_pct"]:+.1f}%</td></tr>'
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">MRVLの、報道前に対する騰落</td><td>{m["mrvl_vs_unaffected_pct"]:+.1f}%</td></tr>'
+        '</tbody></table>', unsafe_allow_html=True)
+    # 推移: LITE ÷ MRVL（理論は4.5）
+    both = pd.concat([lite_s.rename("LITE"), mrvl_s.rename("MRVL")], axis=1).dropna().tail(45)
+    if len(both) >= 3:
+        import plotly.graph_objects as go
+        ratio = both["LITE"] / both["MRVL"]
+        fig = go.Figure()
+        fig.add_scatter(x=ratio.index, y=ratio, name="LITE ÷ MRVL（実際）", line=dict(color="#38bdf8", width=3))
+        fig.add_hline(y=_LITE_MRVL_RATIO, line_dash="dash", line_color="#fbbf24", annotation_text="交換比率 4.5（スプレッド0）", annotation_font_color="#fbbf24")
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=260, margin=dict(l=10, r=10, t=20, b=10),
+                          yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="LITE ÷ MRVL", font=dict(color="#e2e8f0"))),
+                          xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"), showlegend=False,
+                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(fig, use_container_width=True, key="lite_mrvl_ratio")
+        st.caption("LITE÷MRVLが4.5より低いほど、LITEが理論価値より安い（スプレッドが大きい）状態です。発表（11/2）前は、買収の観測で、4.5より大きく離れていました。")
+    st.caption("※ 交換比率4.500、完了見込み2028年上半期、最長の期限2028年8月1日（MarvellのForm 8-Kより）。年率換算は、MRVL株価が変わらず、予定どおり完了し、"
+               "配当などを考えない単純な計算で、実際の損益や、破談のリスク、MRVL株価の変動は含みません。売買の指示ではありません。")
+
+
 def render_optical_brief():
     """📰 ページ上部の「光通信・AIインフラ株 今日の背景」。大きく動いた日だけAIが背景を要約する（静かな日はAIを呼ばない）。"""
     d = _fetch_breadth_returns()
@@ -43328,6 +43414,9 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # ★ 光通信・AIインフラ株 今日の背景（大きく動いた日だけAIが要約）
     render_optical_brief()
+
+    # LITE買収スプレッド（MarvellによるLumentum買収。LITEの値段が、MRVL×4.5に連動する）
+    render_lite_merger_card()
 
     # ===================================================
     # ★ 米国経済イベントカレンダー（バックグラウンド並列取得）
