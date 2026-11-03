@@ -3203,7 +3203,109 @@
     "usdjpy": "down"
    },
    "scenario": "米経済指標鈍化で利下げ期待と景気後退懸念が並存、円キャリー解消で日米株安・円高・債券高"
+  },
+  {
+   "id": "2026-11-03-groq",
+   "date": "2026-11-03",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7541.4,
+     "chg20_pct": -2.99,
+     "date": "2026-11-02"
+    },
+    "nikkei": {
+     "value": 63081.859,
+     "chg20_pct": -7.65,
+     "date": "2026-11-02"
+    },
+    "tnx": {
+     "value": 4.894,
+     "chg20_pct": -7.85,
+     "date": "2026-11-02"
+    },
+    "usdjpy": {
+     "value": 157.871,
+     "chg20_pct": -0.06,
+     "date": "2026-11-03"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米国金利低下で資金流入が続き、株価は回復。日経は米国株上昇に連動しつつ、国内景気懸念が残る。"
+  },
+  {
+   "id": "2026-11-03-mistral",
+   "date": "2026-11-03",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7541.4,
+     "chg20_pct": -2.99,
+     "date": "2026-11-02"
+    },
+    "nikkei": {
+     "value": 63081.859,
+     "chg20_pct": -7.65,
+     "date": "2026-11-02"
+    },
+    "tnx": {
+     "value": 4.894,
+     "chg20_pct": -7.85,
+     "date": "2026-11-02"
+    },
+    "usdjpy": {
+     "value": 157.871,
+     "chg20_pct": -0.06,
+     "date": "2026-11-03"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fedの利下げ期待強まり（米景気減速、インフレ低迷）で米長期金利低下。S&P500はリスク資産回復、日経は日本経済の停滞（消費減退、企業利益悪化）で下落。ドル円は米利下げと日本の金融緩和差で円安。"
+  },
+  {
+   "id": "2026-11-03-nvidia",
+   "date": "2026-11-03",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7541.4,
+     "chg20_pct": -2.99,
+     "date": "2026-11-02"
+    },
+    "nikkei": {
+     "value": 63081.859,
+     "chg20_pct": -7.65,
+     "date": "2026-11-02"
+    },
+    "tnx": {
+     "value": 4.894,
+     "chg20_pct": -7.85,
+     "date": "2026-11-02"
+    },
+    "usdjpy": {
+     "value": 157.871,
+     "chg20_pct": -0.06,
+     "date": "2026-11-03"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "ディスインフレ継続で米利下げ観測強まる。日米金利差縮小・日銀利上げ警戒で円高、過度な売り一巡で株反発"
   }
  ],
- "updated_at": "2026-10-31T01:46:24Z"
+ "updated_at": "2026-11-03T03:40:46Z"
 }
