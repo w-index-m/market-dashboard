@@ -99,17 +99,22 @@
    "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978), Marvell Technology, Inc.  (CIK 0001835632)",
    "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526443872/",
    "date": "2026-11-02"
+  },
+  "0001193125-26-445616": {
+   "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526445616/",
+   "date": "2026-11-03"
   }
  },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-03T00:59:15Z",
+ "last_check": "2026-11-03T23:24:58Z",
  "diag": [
   "fts:Anthropic:200:5",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0",
-  "fts:Lumentum:200:19",
+  "fts:Lumentum:200:20",
   "fts:Marvell:200:15"
  ]
 }
