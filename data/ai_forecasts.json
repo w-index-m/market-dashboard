@@ -3829,7 +3829,109 @@
     "usdjpy": "down"
    },
    "scenario": "米国景気鈍化とGPIB円安是正で株安債券安が進み、円高方向へ"
+  },
+  {
+   "id": "2026-11-06-groq",
+   "date": "2026-11-06",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7353.73,
+     "chg20_pct": -5.3,
+     "date": "2026-11-05"
+    },
+    "nikkei": {
+     "value": 57858.609,
+     "chg20_pct": -17.39,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.837,
+     "chg20_pct": -7.53,
+     "date": "2026-11-05"
+    },
+    "usdjpy": {
+     "value": 157.888,
+     "chg20_pct": -0.11,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米国景気回復期待と日銀緩和継続で株価上昇、金利低下、円安が進む"
+  },
+  {
+   "id": "2026-11-06-mistral",
+   "date": "2026-11-06",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7353.73,
+     "chg20_pct": -5.3,
+     "date": "2026-11-05"
+    },
+    "nikkei": {
+     "value": 57858.609,
+     "chg20_pct": -17.39,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.837,
+     "chg20_pct": -7.53,
+     "date": "2026-11-05"
+    },
+    "usdjpy": {
+     "value": 157.888,
+     "chg20_pct": -0.11,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fed利下げ期待（7月FOMC）と米景気回復、日銀金融緩和継続で米株上昇。日経は企業業績悪化、米利下げ遅れで下落。米10年債利回り低下。円安は米日金利格差拡大で継続"
+  },
+  {
+   "id": "2026-11-06-openrouter",
+   "date": "2026-11-06",
+   "model": "OpenRouter (recursive/flint-v1.0:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7353.73,
+     "chg20_pct": -5.3,
+     "date": "2026-11-05"
+    },
+    "nikkei": {
+     "value": 57858.609,
+     "chg20_pct": -17.39,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.837,
+     "chg20_pct": -7.53,
+     "date": "2026-11-05"
+    },
+    "usdjpy": {
+     "value": 157.888,
+     "chg20_pct": -0.11,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米金融緩和観測とリスク離れで株が下落、金利は低下、円高に振れる"
   }
  ],
- "updated_at": "2026-11-05T02:44:17Z"
+ "updated_at": "2026-11-06T02:46:30Z"
 }
