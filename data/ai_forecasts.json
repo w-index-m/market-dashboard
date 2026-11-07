@@ -1652,7 +1652,33 @@
     "tnx": "up",
     "usdjpy": "up"
    },
-   "scenario": "米国金利上昇と企業収益改善が続き、株価は上昇。日経は円高圧力緩和と輸出企業好調で上昇。米10年債利回りは引き上げ継続。ドル円は円安圧力で上昇。"
+   "scenario": "米国金利上昇と企業収益改善が続き、株価は上昇。日経は円高圧力緩和と輸出企業好調で上昇。米10年債利回りは引き上げ継続。ドル円は円安圧力で上昇。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.74,
+     "nikkei": -12.1,
+     "tnx": -8.34,
+     "usdjpy": 0.38
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "外れ",
+    "reason": "全ての予想方向と実績が逆転、筋書きと矛盾",
+    "judge_model": "Mistral (open-mistral-nemo)"
+   }
   },
   {
    "id": "2026-10-08-mistral",
@@ -1686,7 +1712,33 @@
     "tnx": "down",
     "usdjpy": "up"
    },
-   "scenario": "米利上げピーク懸念と金融緩和期待で米長期金利低下、リスク資産売り戻し。日米景気減速懸念から株安、ドル円は原油高・米金利上昇圧力で円安維持。"
+   "scenario": "米利上げピーク懸念と金融緩和期待で米長期金利低下、リスク資産売り戻し。日米景気減速懸念から株安、ドル円は原油高・米金利上昇圧力で円安維持。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.74,
+     "nikkei": -12.1,
+     "tnx": -8.34,
+     "usdjpy": 0.38
+    },
+    "hits": {
+     "sp500": true,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "当たり",
+    "reason": "全指標が予想方向と一致し、筋書きと整合",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-08-nvidia",
@@ -1720,7 +1772,33 @@
     "tnx": "down",
     "usdjpy": "down"
    },
-   "scenario": "長期金利ピークアウトでドル円調整・円高進行。高バリュエーション株は利確売り優勢で下落。"
+   "scenario": "長期金利ピークアウトでドル円調整・円高進行。高バリュエーション株は利確売り優勢で下落。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.74,
+     "nikkei": -12.1,
+     "tnx": -8.34,
+     "usdjpy": 0.38
+    },
+    "hits": {
+     "sp500": true,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": false
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "一部当たり",
+    "reason": "米10年利回り・株価は予想通り下がったが、ドル円は円高ではなく円安に転じた",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-08-openrouter",
@@ -1754,7 +1832,33 @@
     "tnx": "up",
     "usdjpy": "up"
    },
-   "scenario": "FRB利下げ鈍化で金利高持続、リスク資産はやや調整。日経は円安で堅調。ドル円は利差で円安拡大。"
+   "scenario": "FRB利下げ鈍化で金利高持続、リスク資産はやや調整。日経は円安で堅調。ドル円は利差で円安拡大。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.74,
+     "nikkei": -12.1,
+     "tnx": -8.34,
+     "usdjpy": 0.38
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "外れ",
+    "reason": "利下げ鈍化で金利高持続とリスク資産調整が予想されたが、実際はS&P・日経・10年利回りが下落し、ドル円は円高。筋書きと矛",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-09-groq",
@@ -1788,7 +1892,33 @@
     "tnx": "up",
     "usdjpy": "up"
    },
-   "scenario": "米国金利上昇でドル高、日経は企業業績改善で上昇、S&Pは成長株が牽引"
+   "scenario": "米国金利上昇でドル高、日経は企業業績改善で上昇、S&Pは成長株が牽引",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.0,
+     "nikkei": -16.11,
+     "tnx": -7.11,
+     "usdjpy": -0.34
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    }
+   },
+   "judge": {
+    "verdict": "外れ",
+    "reason": "全ての予想方向と実績が逆転、特に金利・日経の動向は根本矛盾",
+    "judge_model": "Mistral (open-mistral-nemo)"
+   }
   },
   {
    "id": "2026-10-09-mistral",
@@ -1822,7 +1952,33 @@
     "tnx": "down",
     "usdjpy": "up"
    },
-   "scenario": "Fed利上げペース鈍化の可能性高まり（インフレ減速、金融緩和期待）で米長期金利低下。米景気減速懸念からリスク資産売り込み、日米株安。ドル円は米利下げ期待と日本金融緩和継続で円安維持。"
+   "scenario": "Fed利上げペース鈍化の可能性高まり（インフレ減速、金融緩和期待）で米長期金利低下。米景気減速懸念からリスク資産売り込み、日米株安。ドル円は米利下げ期待と日本金融緩和継続で円安維持。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.0,
+     "nikkei": -16.11,
+     "tnx": -7.11,
+     "usdjpy": -0.34
+    },
+    "hits": {
+     "sp500": true,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": false
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    }
+   },
+   "judge": {
+    "verdict": "一部当たり",
+    "reason": "米10年金利・株価は予想通り下がったが、ドル円は円高で逆転",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-09-nvidia",
@@ -1856,7 +2012,33 @@
     "tnx": "down",
     "usdjpy": "down"
    },
-   "scenario": "米長期金利ピークアウトでドル円反落、円高が日経を圧迫。米株は金利低下恩恵で上昇。"
+   "scenario": "米長期金利ピークアウトでドル円反落、円高が日経を圧迫。米株は金利低下恩恵で上昇。",
+   "grade": {
+    "graded_on": "2026-11-07",
+    "actual_chg_pct": {
+     "sp500": -5.0,
+     "nikkei": -16.11,
+     "tnx": -7.11,
+     "usdjpy": -0.34
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    }
+   },
+   "judge": {
+    "verdict": "一部当たり",
+    "reason": "米10年利回り・ドル円は予想と一致、S&Pは逆転",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-10-gemini",
@@ -3931,7 +4113,109 @@
     "usdjpy": "down"
    },
    "scenario": "米金融緩和観測とリスク離れで株が下落、金利は低下、円高に振れる"
+  },
+  {
+   "id": "2026-11-07-groq",
+   "date": "2026-11-07",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7376.86,
+     "chg20_pct": -5.56,
+     "date": "2026-11-06"
+    },
+    "nikkei": {
+     "value": 57434.77,
+     "chg20_pct": -17.99,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.859,
+     "chg20_pct": -7.34,
+     "date": "2026-11-06"
+    },
+    "usdjpy": {
+     "value": 157.498,
+     "chg20_pct": -0.36,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米国景気回復期待と日銀金融緩和継続で株価上昇、金利低下、円高へ"
+  },
+  {
+   "id": "2026-11-07-mistral",
+   "date": "2026-11-07",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7376.86,
+     "chg20_pct": -5.56,
+     "date": "2026-11-06"
+    },
+    "nikkei": {
+     "value": 57434.77,
+     "chg20_pct": -17.99,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.859,
+     "chg20_pct": -7.34,
+     "date": "2026-11-06"
+    },
+    "usdjpy": {
+     "value": 157.498,
+     "chg20_pct": -0.36,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米FRB利上げペース鈍化期待（6月FOMC）と米景気回復、日米金利差縮小でリスク資産回復。日経は企業業績改善と円安相場で上昇。米10年債利回りはインフレ減速とリスクオンで低下。"
+  },
+  {
+   "id": "2026-11-07-openrouter",
+   "date": "2026-11-07",
+   "model": "OpenRouter (xingchen-agi/xing4.0-29b-a4b:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7376.86,
+     "chg20_pct": -5.56,
+     "date": "2026-11-06"
+    },
+    "nikkei": {
+     "value": 57434.77,
+     "chg20_pct": -17.99,
+     "date": "2026-11-06"
+    },
+    "tnx": {
+     "value": 4.859,
+     "chg20_pct": -7.34,
+     "date": "2026-11-06"
+    },
+    "usdjpy": {
+     "value": 157.498,
+     "chg20_pct": -0.36,
+     "date": "2026-11-06"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "急激な下落後の反発局面と仮定し、米国景気持続とFRB利下げ期待で株価は上昇、債券利回りは低下、ドル円は小幅下落が続くと予想。"
   }
  ],
- "updated_at": "2026-11-06T02:46:30Z"
+ "updated_at": "2026-11-07T02:16:46Z"
 }
