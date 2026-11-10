@@ -114,13 +114,18 @@
    "title": "425 Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
    "url": "https://www.sec.gov/Archives/edgar/data/1633978/000119312526453776/",
    "date": "2026-11-09"
+  },
+  "0001628280-26-072484": {
+   "title": "S-1/A Anthropic, PBC  (ANT)  (CIK 0002130357)",
+   "url": "https://www.sec.gov/Archives/edgar/data/2130357/000162828026072484/",
+   "date": "2026-11-10"
   }
  },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-09T22:23:03Z",
+ "last_check": "2026-11-10T19:45:11Z",
  "diag": [
-  "fts:Anthropic:200:5",
+  "fts:Anthropic:200:15",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0",
