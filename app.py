@@ -21410,6 +21410,61 @@ def _render_rsi_overview():
                "ただし事例は13回で、差は偶然の範囲かもしれません。RSIが30前後では目立った優位はなく、25以下で傾向がはっきりしました。将来の保証ではありません。")
 
 
+_FEAR_CONFIRM_LABELS = (
+    "RSIが売られ過ぎ圏（30以下）に入った", "RSIが30を回復した（直近10日に30割れ→今は30超）",
+    "VIXがピーク（25以上）から15%以上低下した", "ボリンジャーバンド下限（-2σ）を直近10日で割り込んだ",
+    "↑割り込み後、バンドの内側へ戻った（売られ過ぎからの回復）",
+    "キーリバーサル（寄りで-1%以上売られ、日中+1%以上戻した日が直近3日にある）", "金利が上げ止まった（20日高値から0.15pt以上低下）",
+)
+
+
+def _fear_signal_level(fg_score: float, fg_prev: float | None, res: dict) -> dict:
+    """Fear & Greed（CNN）の水準と、反転チェックリストの確認項目から、『恐怖局面の買い検討サイン』の段階を決める（純粋関数）。
+    CNNの区分: 25未満=極度の恐怖、25〜45未満=恐怖。確認項目は、SMH・光通信のどちらか多いほうで数える。
+    段階: 0=サインなし／1=恐怖圏（まだ確認なし）／2=極度の恐怖（確認なし）／3=恐怖圏＋確認2つ以上／4=極度の恐怖＋確認2つ以上。"""
+    state = ("極度の恐怖" if fg_score < 25 else "恐怖" if fg_score < 45 else "中立" if fg_score <= 55 else "強欲" if fg_score <= 75 else "極度の強欲")
+    best, best_name = 0, ""
+    for name, m in (res or {}).items():
+        n = sum(1 for lb in _FEAR_CONFIRM_LABELS if lb in m.get("checks", {}) and m["checks"][lb][0])
+        if n > best:
+            best, best_name = n, name
+    rising = fg_prev is not None and fg_score > fg_prev
+    if fg_score >= 45:
+        level = 0
+    elif fg_score < 25:
+        level = 4 if best >= 2 else 2
+    else:
+        level = 3 if best >= 2 else 1
+    return {"state": state, "level": level, "confirm": best, "confirm_name": best_name, "rising": rising}
+
+
+def _render_fear_signal(res: dict):
+    """😨 Fear & Greed と買い検討サイン（反転チェックリストの確認項目と合わせて判定）。"""
+    fg = fetch_fear_greed_index()
+    if not fg or fg.get("score") is None:
+        st.caption("Fear & Greed（CNN）を取得できませんでした。")
+        return
+    score, prev = float(fg["score"]), fg.get("previous_close")
+    sig = _fear_signal_level(score, prev, res)
+    titles = {0: ("⚪ サインなし（恐怖圏ではありません）", "#64748b"), 1: ("🟡 恐怖圏（確認項目はまだ少ない）", "#fbbf24"),
+              2: ("🟠 極度の恐怖（確認項目はまだ少ない）", "#fb923c"), 3: ("🟢 恐怖圏＋反転の確認がそろいつつある", "#4ade80"),
+              4: ("🟢🟢 極度の恐怖＋反転の確認がそろっている（買い検討ゾーン）", "#22c55e")}
+    ttl, col = titles[sig["level"]]
+    chg = "" if prev is None else f"（前日比 {score - float(prev):+.0f}）"
+    st.markdown(
+        f'<div style="background:#1e293b;border-left:5px solid {col};border-radius:6px;padding:10px 14px;margin-bottom:10px;color:#e2e8f0">'
+        f'<div style="font-size:12px;color:#94a3b8">😨 Fear & Greed（CNN）</div>'
+        f'<div style="font-size:22px;font-weight:900;color:{col}">{score:.0f}　{sig["state"]}<span style="font-size:12px;color:#94a3b8;font-weight:400">　{chg}</span></div>'
+        f'<div style="font-size:15px;font-weight:700;margin-top:2px">{ttl}</div>'
+        f'<div style="font-size:12px;color:#cbd5e1;margin-top:4px">反転の確認項目: {sig["confirm"]}/{len(_FEAR_CONFIRM_LABELS)}'
+        f'{"（" + sig["confirm_name"] + "）" if sig["confirm_name"] else ""}　F&Gは{"上向き" if sig["rising"] else "横ばい・下向き"}</div></div>',
+        unsafe_allow_html=True)
+    st.caption("※ 段階の基準: Fear&Greedが45未満（恐怖）・25未満（極度の恐怖）で、反転チェックリストの確認項目（RSI・VIX・ボリンジャー・キーリバーサル・金利）が2つ以上そろうと、"
+               "一段階上がります。『買い検討』は、過去の検証で、RSIが25前後以下・VIXが30以上のとき、数週間後の上昇が多かった傾向に基づく目安で、"
+               "Fear&Greed自体の過去成績は、このダッシュボードでは検証できていません（CNNのデータを自動取得できないため）。"
+               "再下落（20日内に-5%以上）は4〜5割ありました。売買の指示ではありません。")
+
+
 def render_reversal_checklist():
     """🧭 反転チェックリスト：下落局面で「反転のサイン」とされる項目を、今の値で自動判定する（過去の検証結果つき）。"""
     st.markdown('<a id="reversal-checklist"></a>', unsafe_allow_html=True)
@@ -21423,6 +21478,7 @@ def render_reversal_checklist():
     if not res:
         st.info("判定に必要なデータが足りません。")
         return
+    _render_fear_signal(res)
     names = list(res)
     labels = []
     for _n in res:
