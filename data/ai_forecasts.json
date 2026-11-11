@@ -2312,7 +2312,33 @@
     "tnx": "down",
     "usdjpy": "down"
    },
-   "scenario": "米国景気回復期待と金利引き下げ圧力で株価上昇、日経も同調。金利は緩和期待で低下、円は安全資産需要増で円高へ。"
+   "scenario": "米国景気回復期待と金利引き下げ圧力で株価上昇、日経も同調。金利は緩和期待で低下、円は安全資産需要増で円高へ。",
+   "grade": {
+    "graded_on": "2026-11-11",
+    "actual_chg_pct": {
+     "sp500": -3.67,
+     "nikkei": -10.15,
+     "tnx": -4.9,
+     "usdjpy": -0.18
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": true,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    }
+   },
+   "judge": {
+    "verdict": "一部当たり",
+    "reason": "金利低下は予想通りだったが、株高・円高は反転し矛盾",
+    "judge_model": "Mistral (open-mistral-nemo)"
+   }
   },
   {
    "id": "2026-10-13-mistral",
@@ -2346,7 +2372,33 @@
     "tnx": "down",
     "usdjpy": "up"
    },
-   "scenario": "Fedの利下げ期待が先延ばしとなり、米国株はリスクオフ、米長期金利は利下げ期待で低下。日経は米国株連動性強く下落。円安は米国株の下落でリスク回避円買いが一時発生するも、米国金利低下で再び円安傾向。"
+   "scenario": "Fedの利下げ期待が先延ばしとなり、米国株はリスクオフ、米長期金利は利下げ期待で低下。日経は米国株連動性強く下落。円安は米国株の下落でリスク回避円買いが一時発生するも、米国金利低下で再び円安傾向。",
+   "grade": {
+    "graded_on": "2026-11-11",
+    "actual_chg_pct": {
+     "sp500": -3.67,
+     "nikkei": -10.15,
+     "tnx": -4.9,
+     "usdjpy": -0.18
+    },
+    "hits": {
+     "sp500": true,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": false
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": false,
+     "usdjpy": false
+    }
+   },
+   "judge": {
+    "verdict": "一部当たり",
+    "reason": "米株・金利・日経は予想通りだが、円安は逆転した",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-14-groq",
@@ -4421,7 +4473,109 @@
     "usdjpy": "up"
    },
    "scenario": "金利急低下の行き過ぎ修正で長期金利上昇・ドル高進行。日米株は大幅下落後の自律反発狙い。"
+  },
+  {
+   "id": "2026-11-11-groq",
+   "date": "2026-11-11",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7520.93,
+     "chg20_pct": -3.65,
+     "date": "2026-11-10"
+    },
+    "nikkei": {
+     "value": 60992.949,
+     "chg20_pct": -10.01,
+     "date": "2026-11-11"
+    },
+    "tnx": {
+     "value": 4.983,
+     "chg20_pct": -4.49,
+     "date": "2026-11-10"
+    },
+    "usdjpy": {
+     "value": 158.85,
+     "chg20_pct": 0.33,
+     "date": "2026-11-11"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米国景気回復期待と金利低下で株価上昇、日経は輸出減速で下落。金利はインフレ圧力緩和で低下、円はドル高で円安進行。"
+  },
+  {
+   "id": "2026-11-11-mistral",
+   "date": "2026-11-11",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7520.93,
+     "chg20_pct": -3.65,
+     "date": "2026-11-10"
+    },
+    "nikkei": {
+     "value": 60992.949,
+     "chg20_pct": -10.01,
+     "date": "2026-11-11"
+    },
+    "tnx": {
+     "value": 4.983,
+     "chg20_pct": -4.49,
+     "date": "2026-11-10"
+    },
+    "usdjpy": {
+     "value": 158.85,
+     "chg20_pct": 0.33,
+     "date": "2026-11-11"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米FRB利上げペース鈍化期待（インフレ減速、金融緩和シグナル）で米債利回り低下、リスク資産回復。日米成長差拡大（日銀引き締め遅れ）で日経下落。ドル円は米利回り低下・日銀引き締め期待で円安維持。"
+  },
+  {
+   "id": "2026-11-11-nvidia",
+   "date": "2026-11-11",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7520.93,
+     "chg20_pct": -3.65,
+     "date": "2026-11-10"
+    },
+    "nikkei": {
+     "value": 60992.949,
+     "chg20_pct": -10.01,
+     "date": "2026-11-11"
+    },
+    "tnx": {
+     "value": 4.983,
+     "chg20_pct": -4.49,
+     "date": "2026-11-10"
+    },
+    "usdjpy": {
+     "value": 158.85,
+     "chg20_pct": 0.33,
+     "date": "2026-11-11"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "株価急落の売られすぎ修正で自律反発、利回り持ち直しも介入警戒で円高進行"
   }
  ],
- "updated_at": "2026-11-10T04:17:44Z"
+ "updated_at": "2026-11-11T02:09:37Z"
 }
