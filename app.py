@@ -20935,6 +20935,50 @@ def _fetch_jp_night() -> dict:
     return out
 
 
+def _adr_chart_series(tse: pd.Series, adr: pd.Series, fx: pd.Series, ratio: float, hours: int) -> dict:
+    """東証の5分足と、ADRの円換算（ADR×ドル円×株数比率）の5分足を、日本時間のそろった時間軸で返す（純粋関数）。
+    直近 hours 時間だけを残す。Returns: {"tse": Series, "adr_yen": Series, "tse_close": 東証の最後の値}。"""
+    def _jst(sr: pd.Series) -> pd.Series:
+        sr = sr.dropna()
+        sr.index = sr.index.tz_convert("Asia/Tokyo") if sr.index.tz is not None else sr.index.tz_localize("UTC").tz_convert("Asia/Tokyo")
+        return sr
+    tse, adr, fx = _jst(tse), _jst(adr), _jst(fx)
+    if tse.empty and adr.empty:
+        return {}
+    adr_yen = adr * fx.reindex(adr.index.union(fx.index)).ffill().reindex(adr.index) * ratio
+    end = max([x.index[-1] for x in (tse, adr_yen) if len(x)])
+    start = end - pd.Timedelta(hours=hours)
+    tse, adr_yen = tse[tse.index >= start], adr_yen[adr_yen.index >= start].dropna()
+    return {"tse": tse, "adr_yen": adr_yen, "tse_close": float(tse.iloc[-1]) if len(tse) else None}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_jp_night_chart(code: str, adr: str, ratio: float, hours: int) -> dict:
+    """日本株とそのADR・ドル円の5分足を取得して、チャート用に整える。失敗時は {}。"""
+    try:
+        raw = yf.download([code, adr, "JPY=X"], period="5d", interval="5m", auto_adjust=False, progress=False, group_by="column")
+        c = raw["Close"]
+        return _adr_chart_series(c[code], c[adr], c["JPY=X"], ratio, hours)
+    except Exception as e:
+        logger.warning(f"[jp_night_chart] 取得失敗: {e}")
+        return {}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_nikkei_fut_series(hours: int) -> pd.Series:
+    """日経225先物（円建て）の15分足を、日本時間で、直近 hours 時間分返す。失敗時は空。"""
+    try:
+        f = yf.download("NIY=F", period="5d", interval="15m", auto_adjust=False, progress=False)
+        fc = f["Close"]
+        fc = (fc["NIY=F"] if isinstance(fc, pd.DataFrame) else fc).dropna()
+        fc.index = fc.index.tz_convert("Asia/Tokyo") if fc.index.tz is not None else fc.index.tz_localize("UTC").tz_convert("Asia/Tokyo")
+        return fc[fc.index >= fc.index[-1] - pd.Timedelta(hours=hours)]
+    except Exception as e:
+        logger.warning(f"[nikkei_fut_series] 取得失敗: {e}")
+        return pd.Series(dtype=float)
+
+
+@st.fragment
 def render_jp_night_card():
     """🌙 日本株の夜間価格：米国のADR（円換算）と日経先物から、翌朝の東証の寄り付きの目安を見る。"""
     st.markdown('<a id="jp-night"></a>', unsafe_allow_html=True)
@@ -20963,6 +21007,43 @@ def render_jp_night_card():
         '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
         '<th style="padding:6px 8px">銘柄</th><th>東証の終値（円）</th><th>ADRの円換算</th><th>差</th><th>ADRの日付（米国）</th></tr></thead>'
         f'<tbody>{tr}</tbody></table>', unsafe_allow_html=True)
+    # ── チャート（東証の5分足 ＋ ADRの円換算）──
+    import plotly.graph_objects as go
+    by_name = {r["name"]: r for r in rows}
+    cc1, cc2 = st.columns([3, 2])
+    with cc1:
+        pick = st.selectbox("チャートで見る銘柄", list(by_name), index=0, key="jpn_pick")
+    with cc2:
+        span = st.radio("表示期間", ["直近1日", "直近2日"], horizontal=True, key="jpn_span")
+    r0 = by_name[pick]
+    ch = _fetch_jp_night_chart(r0["code"], r0["adr"], float(r0["ratio"]), 40 if span == "直近1日" else 76)
+    if ch and (len(ch.get("tse", [])) or len(ch.get("adr_yen", []))):
+        fig = go.Figure()
+        if len(ch["tse"]):
+            fig.add_trace(go.Scatter(x=ch["tse"].index.tz_localize(None), y=ch["tse"].values, name="東証（5分足）", line=dict(color="#f87171", width=2)))
+            fig.add_hline(y=float(r0["tse"]), line_dash="dot", line_color="#f87171", opacity=0.6, annotation_text=f"東証終値 {r0['tse']:,.0f}", annotation_font_color="#f87171")
+        if len(ch["adr_yen"]):
+            fig.add_trace(go.Scatter(x=ch["adr_yen"].index.tz_localize(None), y=ch["adr_yen"].values, name="ADR円換算（5分足）", line=dict(color="#38bdf8", width=2)))
+        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=330, margin=dict(l=10, r=10, t=20, b=10),
+                          yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="円", font=dict(color="#e2e8f0"))),
+                          xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", rangebreaks=[dict(bounds=["sat", "mon"])]),
+                          legend=dict(orientation="h", y=-0.2, font=dict(color="#e2e8f0")), hovermode="x unified",
+                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(fig, use_container_width=True, key=f"jpn_fig_{r0['code']}")
+        n_adr = len(ch.get("adr_yen", []))
+        st.caption(f"赤=東証（9:00〜15:30）、青=ADRの円換算（米国時間＝日本時間の夜〜早朝）。{r0['name']}のADRの5分足は{n_adr}本です"
+                   f"{'（取引が少なく、線が途切れがちです）' if n_adr < 40 else ''}。時間は日本時間です。")
+    else:
+        st.info("この銘柄の5分足を取得できませんでした。")
+    fs = _fetch_nikkei_fut_series(40 if span == "直近1日" else 76)
+    if len(fs) > 3:
+        figf = go.Figure(go.Scatter(x=fs.index.tz_localize(None), y=fs.values, name="日経225先物", line=dict(color="#fbbf24", width=2)))
+        figf.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=240, margin=dict(l=10, r=10, t=20, b=10),
+                           yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="円", font=dict(color="#e2e8f0"))),
+                           xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", rangebreaks=[dict(bounds=["sat", "mon"])]), showlegend=False,
+                           hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+        st.plotly_chart(figf, use_container_width=True, key="jpn_fig_fut")
+        st.caption("日経225先物（円建て・15分足、日本時間）。")
     st.caption(f"※ ADRの円換算 = ADRの直近値 × ドル円（{d.get('usdjpy', 0):.2f}）× 1枚あたりの株数。株数の比率は、直近の価格から自動で推定しています。"
                "差がプラスなら、翌朝の東証が、前日終値より高く始まる目安です（為替・ADRの流動性・時差で、ずれます）。"
                "夜間PTS（17:00〜23:59の私設取引）と、取引所外のDEX価格は、ここでは取得していません（無料で自動取得できないため）。売買の指示ではありません。")
