@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+sys.path.insert(0, os.path.dirname(__file__))
 from datetime import datetime, timezone
 
 import requests
@@ -81,10 +82,49 @@ def search_fts(name: str, forms: tuple = FORMS, startdt: str = "2026-01-01") -> 
                 acc = (h.get("_id") or "").split(":")[0]
                 cik = (src.get("ciks") or [""])[0].lstrip("0")
                 docs.append({"title": f"{src.get('form', '')} {names}", "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/" if cik and acc else "",
-                             "updated": src.get("file_date", ""), "acc": acc})
+                             "updated": src.get("file_date", ""), "acc": acc,
+                             "file": (h.get("_id") or "").split(":")[1] if ":" in (h.get("_id") or "") else "", "form": src.get("form", "")})
         except ValueError:
             pass
     return docs, r.status_code
+
+
+S1_OUT = os.path.join(os.path.dirname(__file__), "..", "data", "anthropic_s1_extract.json")
+
+
+def _main_doc_url(x: dict) -> str:
+    """書類の本文のURL。全文検索の結果にファイル名があればそれを使い、無ければ提出フォルダの一覧から最初のhtmを探す。"""
+    base = x.get("url", "")
+    if x.get("file") and base:
+        return base + x["file"]
+    try:
+        r = requests.get(base + "index.json", headers=_ua(), timeout=30)
+        for it in r.json().get("directory", {}).get("item", []):
+            if str(it.get("name", "")).lower().endswith((".htm", ".html")) and "index" not in it["name"].lower():
+                return base + it["name"]
+    except Exception:
+        pass
+    return ""
+
+
+def summarize_s1(new_docs: list) -> str:
+    """AnthropicのS-1系書類が新しく出たら、本文から該当箇所を抜き出して data/anthropic_s1_extract.json に保存する。通知に添える一文を返す。"""
+    targets = [x for x in new_docs if re.search("anthropic", x.get("title", ""), re.I) and x.get("form", "") in ("S-1", "S-1/A", "424B4")]
+    if not targets:
+        return ""
+    try:
+        import s1_extract
+        url = _main_doc_url(targets[0])
+        if not url:
+            return "（本文のURLを特定できず、該当箇所の抜き出しは未実施）"
+        res = s1_extract.fetch_and_extract(url, _ua())
+        res["form"], res["filed"] = targets[0].get("form", ""), targets[0].get("updated", "")
+        with open(S1_OUT, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, indent=1)
+        n = sum(len(v) for v in res["topics"].values())
+        return f"本文から該当箇所{n}件を抜き出しました（data/anthropic_s1_extract.json）。「S-1を要約して」とClaudeに送れば、すぐ要約します。"
+    except Exception as e:
+        return f"（該当箇所の抜き出しに失敗: {type(e).__name__}）"
 
 
 def main() -> None:
@@ -135,6 +175,9 @@ def main() -> None:
         lines = ["📄 SEC EDGAR: 監視中の会社の書類が新しく見つかりました"]
         for x in new_docs[:8]:
             lines.append(f"・{x['title']}（{x.get('updated', '')}）\n  {x['url']}")
+        note = summarize_s1(new_docs)
+        if note:
+            lines.append(note)
         lines.append("※ 内容の要約はこのあとClaudeに依頼してください（LITE合併の契約書・S-4など）。公開データのみ。")
         _post("\n".join(lines))
     elif new_docs:
