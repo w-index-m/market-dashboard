@@ -46,7 +46,7 @@ def sentences(text: str) -> list:
 
 def extract(raw: str) -> dict:
     """本文から項目ごとの該当文を取り出す。同じ文は1回だけ。数字を含む文を優先し、短く切って保存する。"""
-    sents = sentences(to_text(raw))
+    sents = list(dict.fromkeys(x for x in sentences(to_text(raw)) if len(re.findall(r"[\d,.]+", x)) <= 12))   # 重複と、数字だらけの表の行を除く
     res, used = {}, set()
     for topic, (pat, need_num) in TOPICS.items():
         rx = re.compile(pat, re.I)
