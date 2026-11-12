@@ -27805,6 +27805,19 @@ def _resolve_fund_ticker_alias(raw: str) -> str:
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
+def _constituent_name_index() -> dict:
+    """data/rising_candidates.json（S&P500・S&P600・日経225の全構成銘柄、約1,300社）の社名を {ティッカー: 社名} にする。
+    社名は古くならないので、生成から時間がたっていても使う。yfinanceのinfo（Streamlit Cloudで制限されやすい）に頼らず、社名を安定して出すため。"""
+    import json as _json_nm2
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "data", "rising_candidates.json"), encoding="utf-8") as f_:
+            items = _json_nm2.load(f_).get("items") or {}
+        return {t: str(v.get("name")).strip() for t, v in items.items() if isinstance(v, dict) and v.get("name")}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def _get_stock_display_name(ticker: str) -> str:
     """ティッカーから銘柄表示名を取得（既知マスタ→投信マスタ→yfinance shortName の順）。
     取得失敗時はティッカーをそのまま返す。TTL=24h。
@@ -27813,6 +27826,9 @@ def _get_stock_display_name(ticker: str) -> str:
         return _KNOWN_NAMES[ticker]
     if ticker in _JP_FUND_MAP:
         return _JP_FUND_MAP[ticker]
+    _nm_idx = _constituent_name_index().get(ticker)
+    if _nm_idx:
+        return _nm_idx
     try:
         info = yf.Ticker(ticker).info or {}
         name = (info.get("shortName") or info.get("longName") or "").strip()
