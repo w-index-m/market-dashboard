@@ -18,7 +18,7 @@ WORKFLOWS = {
     "precompute-sp600-candidates.yml": 36, "earnings-review.yml": 72, "ai-forecast-log.yml": 72,
     "marks-valuation.yml": 72, "rising-candidates.yml": 72, "mode-backtest.yml": 72, "options-cache.yml": 72,
     "fundamentals-cache.yml": 24 * 5, "holdings-alerts.yml": 72, "daily-portfolio-line.yml": 48,
-    "daily-asset-snapshot.yml": 48, "selloff-watch.yml": 96, "cot-positions.yml": 24 * 9, "tokyo-re-index.yml": 24 * 9, "longterm-returns.yml": 24 * 35, "marks-backtest.yml": 24 * 35,
+    "daily-asset-snapshot.yml": 48, "selloff-watch.yml": 96, "edgar-watch.yml": 24, "cot-positions.yml": 24 * 9, "tokyo-re-index.yml": 24 * 9, "longterm-returns.yml": 24 * 35, "marks-backtest.yml": 24 * 35,
 }
 # データファイル → 許容する古さ（時間）
 DATA_FILES = {
@@ -27,6 +27,53 @@ DATA_FILES = {
     "data/jp_tenbagger_raw.json": 48, "data/cot_positions.json": 24 * 10, "data/longterm_returns.json": 24 * 40,
     "data/tokyo_re_index.json": 24 * 10, "data/marks_backtest.json": 24 * 40, "data/selloff_log.json": 96,
 }
+
+
+def content_problems(now: datetime) -> list:
+    """データファイルの『中身』の異常を検査する（更新日時だけでは気づけない不具合: 値が空・古い扱い・前日と同じ値など）。"""
+    out = []
+    # ① 急落の記録（毎営業日の判定とRSI）
+    try:
+        with open("data/selloff_log.json", encoding="utf-8") as f:
+            ents = (json.load(f).get("entries") or [])
+        if not ents:
+            out.append("🧪 data/selloff_log.json: 記録が1件もありません")
+        else:
+            last = ents[-1]
+            last_d = datetime.strptime(last["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if (now - last_d).days > 5:
+                out.append(f"🧪 data/selloff_log.json: 最新の記録が古い（{last['date']}）")
+            recent = ents[-5:]
+            empty = [e["date"] for e in recent if not e.get("groups") or not e.get("rsi") or not e.get("indexes")]
+            if empty:
+                out.append(f"🧪 data/selloff_log.json: 主要な値（グループ別騰落・RSI・指数）が空の日があります: {', '.join(empty)}")
+            many_stale = [e["date"] for e in recent if len(e.get("stale_skipped") or []) >= 8]
+            if len(many_stale) >= 2:
+                out.append(f"🧪 data/selloff_log.json: 多数の銘柄が「古いデータ」として除外された日が続いています: {', '.join(many_stale)}")
+            if len(ents) >= 2 and ents[-1].get("indexes") and ents[-1].get("indexes") == ents[-2].get("indexes"):
+                out.append(f"🧪 data/selloff_log.json: {ents[-1]['date']} の指数の騰落が前日と全く同じです（取得が1日遅れた可能性）")
+    except FileNotFoundError:
+        out.append("🧪 data/selloff_log.json: ファイルがありません")
+    except Exception as e:
+        out.append(f"🧪 data/selloff_log.json: 検査エラー（{str(e)[:40]}）")
+    # ② 上昇銘柄スクリーナーの母集団（約1,300社のはず）
+    try:
+        with open("data/rising_candidates.json", encoding="utf-8") as f:
+            n = len(json.load(f).get("items") or {})
+        if n < 800:
+            out.append(f"🧪 data/rising_candidates.json: 銘柄数が少なすぎます（{n}社。通常は約1,300社）")
+    except Exception as e:
+        out.append(f"🧪 data/rising_candidates.json: 検査エラー（{str(e)[:40]}）")
+    # ③ ニュースメモ（手動更新）: 14日以上更新がなければ、お知らせ
+    try:
+        with open("data/news_memo.json", encoding="utf-8") as f:
+            u = json.load(f).get("updated_at", "")
+        age = (now - datetime.strptime(u, "%Y-%m-%d").replace(tzinfo=timezone.utc)).days
+        if age > 14:
+            out.append(f"📝 data/news_memo.json: {age}日間更新されていません（手動メモ。古い内容が表示されている可能性）")
+    except Exception:
+        pass
+    return out
 
 
 def _post(text: str) -> None:
@@ -81,6 +128,7 @@ def main() -> None:
             problems.append(f"🗂️ {path}: ファイルがありません")
         except Exception as e:
             problems.append(f"🗂️ {path}: 読み取りエラー（{str(e)[:40]}）")
+    problems += content_problems(now)
     stamp = now.astimezone(timezone(timedelta(hours=9))).strftime("%m/%d %H:%M")
     if problems:
         text = f"🩺 自動更新のヘルスチェック（{stamp} JST）：{len(problems)}件の問題\n\n" + "\n".join(problems) + \

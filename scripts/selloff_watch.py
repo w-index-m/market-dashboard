@@ -176,7 +176,8 @@ def build_entry(close: pd.DataFrame, vol: pd.DataFrame, syms: list) -> tuple:
 
 
 def _entry_is_empty(e: dict) -> bool:
-    return not e.get("groups") or not e.get("rsi")
+    """値が空、または多数の銘柄が『古いデータ』として除外された記録（あとから正しいデータが取れる可能性がある）。"""
+    return not e.get("groups") or not e.get("rsi") or len(e.get("stale_skipped") or []) >= 8
 
 
 def main() -> None:
@@ -204,7 +205,8 @@ def main() -> None:
             if len(sub_close) < 30:
                 continue
             e2, *_ = build_entry(sub_close, vol.loc[:d], syms)
-            if e2["date"] == d and not _entry_is_empty(e2):
+            _old = next((x for x in log.get("entries", []) if x.get("date") == d), {})
+            if e2["date"] == d and e2.get("groups") and e2.get("rsi") and len(e2.get("stale_skipped") or []) < len(_old.get("stale_skipped") or []) + (0 if _old.get("groups") else 99):
                 fixed[d] = e2
         except Exception as ex:
             print(f"redo {d} failed: {type(ex).__name__}")
