@@ -93,18 +93,18 @@ S1_OUT = os.path.join(os.path.dirname(__file__), "..", "data", "anthropic_s1_ext
 
 
 def _main_doc_url(x: dict) -> str:
-    """書類の本文のURL。全文検索の結果にファイル名があればそれを使い、無ければ提出フォルダの一覧から最初のhtmを探す。"""
+    """書類の本文のURL。提出フォルダの一覧から、一番大きいhtm（目論見書の本体。添付書類は小さい）を選ぶ。一覧が取れなければ全文検索のファイル名を使う。"""
     base = x.get("url", "")
-    if x.get("file") and base:
-        return base + x["file"]
     try:
         r = requests.get(base + "index.json", headers=_ua(), timeout=30)
-        for it in r.json().get("directory", {}).get("item", []):
-            if str(it.get("name", "")).lower().endswith((".htm", ".html")) and "index" not in it["name"].lower():
-                return base + it["name"]
+        items = [it for it in r.json().get("directory", {}).get("item", []) if str(it.get("name", "")).lower().endswith((".htm", ".html"))]
+        items = [it for it in items if "index" not in it["name"].lower()]
+        if items:
+            best = max(items, key=lambda it: int(re.sub(r"\D", "", str(it.get("size", "0"))) or 0))
+            return base + best["name"]
     except Exception:
         pass
-    return ""
+    return base + x["file"] if x.get("file") and base else ""
 
 
 def summarize_s1(new_docs: list) -> str:
