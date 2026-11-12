@@ -30921,6 +30921,83 @@ def _save_stoplines(username: str, items: dict) -> bool:
         return False
 
 
+def _stress_impact(closes: dict, vals: dict, bench: str = "SMH", n: int = 5) -> dict:
+    """過去の急落日（ベンチマークの下落が大きい日）を、今の保有の評価額に当てはめた損益を計算する（純粋関数）。
+    closes: {ティッカー: 日次終値の系列}、vals: {ティッカー: 今の評価額（円）}。
+    ・単日: ベンチマークの日次リターンが悪い順にn日。各日の保有の損益 = Σ 評価額 × その日の各銘柄のリターン。
+    ・5日: ベンチマークの5営業日リターンが最悪の日（終了日）。
+    データが無い銘柄は除外し、評価額ベースの対象率（coverage）を返す。"""
+    px = pd.DataFrame({t: s_.dropna() for t, s_ in closes.items() if s_ is not None and len(s_.dropna()) > 30}).sort_index()
+    held = [t for t in vals if t in px.columns and vals[t] > 0]
+    if bench not in px.columns or not held:
+        return {}
+    total = float(sum(vals.values()))
+    covered = float(sum(vals[t] for t in held))
+    r1 = px.pct_change()
+    r5 = px.pct_change(5)
+    w = pd.Series({t: vals[t] for t in held})
+
+    def _row(date, rets: pd.Series) -> dict:
+        rr = rets.reindex(held).fillna(0.0)
+        pnl = float((w * rr).sum())
+        return {"date": str(pd.Timestamp(date).date()), "bench": float(rets.get(bench, float("nan"))) * 100, "spy": float(rets.get("SPY", float("nan"))) * 100,
+                "pnl": pnl, "pnl_pct": pnl / covered * 100 if covered else 0.0,
+                "worst": min(((t, float(rets[t]) * 100) for t in held if t in rets.index and rets[t] == rets[t]), key=lambda x: x[1], default=("—", 0.0))}
+    days = r1[bench].dropna().nsmallest(n).index
+    out = {"covered_pct": covered / total * 100 if total else 0.0, "days": [_row(d, r1.loc[d]) for d in sorted(days)], "n_held": len(held)}
+    if r5[bench].notna().any():
+        d5 = r5[bench].idxmin()
+        out["five"] = _row(d5, r5.loc[d5])
+    return out
+
+
+@st.fragment
+def render_holdings_stress_test():
+    """🧯 保有ストレステスト：過去1年の急落日（半導体ETFの下落が大きかった日）が、今の保有に来たら、いくら減るかを表示する。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = {t: p for t, p in _get_open_positions(_u).items() if not t.endswith(".T") and t not in _JP_FUND_MAP}
+    with st.expander("🧯 保有ストレステスト（過去の急落日が、今の保有に来たら）", expanded=False):
+        if not pos:
+            st.info("米国の保有銘柄がありません。")
+            return
+        pr = _fetch_portfolio_prices(tuple(pos))
+        fx = float(pr.get("_usdjpy") or 150.0)
+        vals = {t: pos[t]["qty"] * float((pr.get(t) or {}).get("price") or 0) * fx for t in pos}
+        total = sum(vals.values())
+        if total <= 0:
+            st.info("評価額を計算できませんでした。")
+            return
+        try:
+            closes = _fetch_ticker_close_prices(list(pos) + ["SMH", "SPY"], period="1y")
+        except Exception as e:
+            logger.warning(f"[stress] 取得失敗: {e}")
+            closes = {}
+        res = _stress_impact(closes, vals, "SMH", 5)
+        if not res:
+            st.info("過去の価格データを取得できませんでした。")
+            return
+        fmt_m = lambda v: f"{v / 1e4:+,.0f}万円"   # noqa: E731
+        rows = []
+        for e in sorted(res["days"], key=lambda x: x["pnl"]):
+            wt = e["worst"]
+            rows.append(
+                f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">{e["date"]}</td>'
+                f'<td>{e["bench"]:+.1f}%</td><td>{e["spy"]:+.1f}%</td>'
+                f'<td style="color:#f87171;font-weight:700">{fmt_m(e["pnl"])}<div style="font-size:10px;color:#94a3b8">保有の{e["pnl_pct"]:+.1f}%</div></td>'
+                f'<td style="font-size:11px;color:#cbd5e1">{wt[0]} {wt[1]:+.1f}%</td></tr>')
+        st.markdown(
+            f'<div style="font-size:13px;color:#e2e8f0;margin-bottom:4px">過去1年で、半導体ETF（SMH）の下落が大きかった日が、<b>今の米国株の保有</b>に来た場合の概算です（対象 {res["n_held"]}銘柄・評価額の{res["covered_pct"]:.0f}%）。</div>'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+            '<th style="padding:6px 8px">日付</th><th>SMH</th><th>S&P500(SPY)</th><th>保有の損益（概算）</th><th>最も下がった保有</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+        f5 = res.get("five")
+        if f5:
+            st.markdown(f'<div style="margin-top:8px;font-size:13px;color:#e2e8f0">📉 <b>5営業日で最も下がった期間</b>（{f5["date"]}までの5日間、SMH {f5["bench"]:+.1f}%）: '
+                        f'保有は <b style="color:#f87171">{fmt_m(f5["pnl"])}（{f5["pnl_pct"]:+.1f}%）</b></div>', unsafe_allow_html=True)
+        st.caption("※ 各日の各銘柄の実際の騰落率を、今の評価額（円換算）に掛けた単純な概算です。日本株・投資信託・現金は含みません。"
+                   "過去の急落が、同じように再現するとは限りません。売買の指示ではありません。")
+
+
 @st.fragment
 def render_holdings_checklist():
     """📝 保有チェック：保有ごとに、①自分で決めた損切りラインまでの距離 ②保有比率と急落時の影響額 ③次の決算日 ④同じテーマの重なりを1表にまとめる。"""
@@ -41785,6 +41862,7 @@ def render_claude_trading_project():
                     render_goal_tracker()
                     render_portfolio_fundamentals()
                     render_holdings_checklist()
+                    render_holdings_stress_test()
                     render_holdings_selloff_overlap()
                     render_option_implied_moves()
                     render_insider_activity()
