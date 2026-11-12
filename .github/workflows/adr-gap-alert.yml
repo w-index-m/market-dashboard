@@ -1,0 +1,23 @@
+name: ADR gap alert (JP night prices)
+
+on:
+  schedule:
+    - cron: "45 21 * * 1-5"   # 21:45 UTC = 06:45 JST 火〜土朝（米国の引け後）。東証の寄り付き前の確認用
+  workflow_dispatch: {}
+
+# 日本株ADRの円換算が東証終値から大きくずれたとき、または日経先物の夜間の動きが大きいときだけ通知する（売買はしない）。
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q yfinance pandas numpy requests
+      - name: Check ADR gaps and notify
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python scripts/adr_gap_alert.py
