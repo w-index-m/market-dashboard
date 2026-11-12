@@ -1,0 +1,11 @@
+{
+ "updated_at": "2026-11-12",
+ "note": "発表済みの買収案件。株式交換は exchange_ratio（買収側の株を何株）、現金は cash_per_share を入れる。headline_value は発表時の1株あたり価値、premium は報道前の株価に対するプレミアム（例 0.239）。案件の追加は、Claudeに依頼するか、このファイルに追記する。",
+ "deals": [
+  {"id": "mrvl-lite", "name": "Marvell × Lumentum（全株式交換）", "target": "LITE", "acquirer": "MRVL", "exchange_ratio": 4.5, "cash_per_share": 0.0,
+   "announced": "2026-11-02", "unaffected_date": "2026-10-28", "headline_value": 1132.0, "premium": 0.239,
+   "close_scenarios": [["2028年6月末（会社の見込み＝2028年上半期の終わり）", "2028-06-30"], ["2028年8月1日（契約上の最長の期限）", "2028-08-01"]],
+   "terms": "解約違約金: Marvell側58億ドル／Lumentum側29億ドル、規制未承認による場合はMarvellが32億ドル。必要な承認: 両社の株主総会、HSR待機期間の終了ほか必要な規制承認、Form S-4の効力発生、MRVL株のNasdaq上場承認。",
+   "sources": ["https://www.sec.gov/Archives/edgar/data/1835632/000119312526442714/d147430d8k.htm"]}
+ ]
+}

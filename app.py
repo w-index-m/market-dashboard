@@ -20830,42 +20830,48 @@ def _news_memo_for_prompt(days: int = 7) -> str:
     return "\n".join(out)
 
 
-# Marvell×Lumentum 合併（2026-11-02発表、MarvellのForm 8-Kより）: 全株式交換・固定比率。発表時の「1株約1,132ドル・プレミアム23.9%」は10/28終値が基準
-_LITE_MRVL_RATIO = 4.5
-_LITE_MRVL_HEADLINE = 1132.0
-_LITE_MRVL_PREMIUM = 0.239
-_LITE_MRVL_CLOSE_SCENARIOS = (("2028年6月末（会社の見込み＝2028年上半期の終わり）", "2028-06-30"), ("2028年8月1日（契約上の最長の期限）", "2028-08-01"))
+def _load_merger_deals() -> list:
+    """data/merger_deals.json（発表済みの買収案件の条件）を読む。無ければ []。"""
+    import json as _json_md
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "data", "merger_deals.json"), encoding="utf-8") as f_:
+            return list(_json_md.load(f_).get("deals") or [])
+    except Exception:
+        return []
 
 
-def _lite_mrvl_spread_metrics(lite: float, mrvl: float, today) -> dict:
-    """LITEとMRVLの株価から、交換比率で決まる理論価値・スプレッド・完了までの年率換算を計算する（純粋関数）。
-    年率換算は『MRVL株価が今のままで、指定日に完了する』と仮定した、スプレッドが縮む分の年率。"""
-    implied = _LITE_MRVL_RATIO * mrvl
-    unaffected_lite = _LITE_MRVL_HEADLINE / (1 + _LITE_MRVL_PREMIUM)
-    unaffected_mrvl = _LITE_MRVL_HEADLINE / _LITE_MRVL_RATIO
-    out = {
-        "implied": implied, "spread": implied - lite, "spread_pct": (implied / lite - 1) * 100,
-        "premium_now_pct": (implied / unaffected_lite - 1) * 100,
-        "lite_vs_unaffected_pct": (lite / unaffected_lite - 1) * 100,
-        "mrvl_vs_unaffected_pct": (mrvl / unaffected_mrvl - 1) * 100,
-        "unaffected_lite": unaffected_lite, "unaffected_mrvl": unaffected_mrvl, "ann": [],
-    }
-    for label, d in _LITE_MRVL_CLOSE_SCENARIOS:
+def _deal_spread_metrics(deal: dict, target_px: float, acq_px: float | None, today) -> dict:
+    """買収案件の、理論価値・スプレッド・完了までの年率換算を計算する（純粋関数）。
+    株式交換: 理論価値 = 交換比率 × 買収側の株価 + 1株あたり現金。現金のみの案件は acq_px=None で、理論価値 = 現金。
+    年率換算は『買収側の株価が今のままで、指定日に完了する』と仮定した、スプレッドが縮む分の年率。"""
+    ratio, cash = float(deal.get("exchange_ratio") or 0), float(deal.get("cash_per_share") or 0)
+    implied = ratio * float(acq_px or 0) + cash
+    headline, prem = float(deal.get("headline_value") or 0), float(deal.get("premium") or 0)
+    unaff_t = headline / (1 + prem) if headline and prem > -1 else None
+    unaff_a = (headline - cash) / ratio if ratio and headline else None
+    out = {"implied": implied, "spread": implied - target_px, "spread_pct": (implied / target_px - 1) * 100 if target_px else 0.0,
+           "premium_now_pct": (implied / unaff_t - 1) * 100 if unaff_t else None,
+           "target_vs_unaffected_pct": (target_px / unaff_t - 1) * 100 if unaff_t else None,
+           "acq_vs_unaffected_pct": (float(acq_px) / unaff_a - 1) * 100 if (unaff_a and acq_px) else None,
+           "unaffected_target": unaff_t, "unaffected_acq": unaff_a, "ann": []}
+    for label, d in deal.get("close_scenarios") or []:
         days = (pd.Timestamp(d).date() - pd.Timestamp(today).date()).days
-        if days > 0 and implied > 0 and lite > 0:
-            out["ann"].append((label, days, ((implied / lite) ** (365 / days) - 1) * 100))
+        if days > 0 and implied > 0 and target_px > 0:
+            out["ann"].append((label, days, ((implied / target_px) ** (365 / days) - 1) * 100))
     return out
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_lite_mrvl_prices() -> dict:
-    """LITEとMRVLの日次終値（直近6か月）を取得する。失敗時は {}。"""
+def _fetch_deal_prices(tickers: tuple) -> dict:
+    """案件に関わる銘柄の日次終値（直近6か月）を取得する。失敗時は {}。"""
     try:
-        raw = yf.download(["LITE", "MRVL"], period="6mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
+        raw = yf.download(list(tickers), period="6mo", interval="1d", auto_adjust=True, progress=False, group_by="column")
         cl = raw["Close"].dropna(how="all")
-        return {"LITE": cl["LITE"].dropna(), "MRVL": cl["MRVL"].dropna()}
+        if len(tickers) == 1:
+            cl = cl.to_frame(tickers[0]) if not isinstance(cl, pd.DataFrame) else cl
+        return {t: cl[t].dropna() for t in tickers if t in cl.columns}
     except Exception as e:
-        logger.warning(f"[lite_mrvl] 取得失敗: {e}")
+        logger.warning(f"[merger] 取得失敗: {e}")
         return {}
 
 
@@ -21050,50 +21056,67 @@ def render_jp_night_card():
 
 
 def render_lite_merger_card():
-    """🔀 Marvell×Lumentum 合併スプレッド：LITEが、MRVL株価×4.5（理論価値）に対してどれだけ安く取引されているかを見る。"""
+    """🔀 買収スプレッド：発表済みの買収案件で、対象会社の株が、理論価値（交換比率×買収側株価＋現金）より、どれだけ安く取引されているかを見る。"""
     st.markdown('<a id="lite-merger"></a>', unsafe_allow_html=True)
-    st.markdown("### 🔀 LITE 買収スプレッド（Marvell×Lumentum）")
-    d = _fetch_lite_mrvl_prices()
-    if not d or len(d["LITE"]) < 3 or len(d["MRVL"]) < 3:
+    st.markdown("### 🔀 買収スプレッド（発表済みの買収案件）")
+    deals = _load_merger_deals()
+    if not deals:
+        st.info("登録された買収案件がありません。")
+        return
+    names = [d.get("name", d.get("id", "")) for d in deals]
+    deal = deals[names.index(st.selectbox("案件", names, key="merger_pick"))] if len(deals) > 1 else deals[0]
+    tkrs = tuple(x for x in (deal.get("target"), deal.get("acquirer")) if x)
+    px = _fetch_deal_prices(tkrs)
+    tgt = deal["target"]
+    acq = deal.get("acquirer")
+    if tgt not in px or len(px[tgt]) < 3 or (acq and (acq not in px or len(px[acq]) < 3)):
         st.info("株価データを取得できませんでした。")
         return
-    lite_s, mrvl_s = d["LITE"], d["MRVL"]
-    last_day = min(lite_s.index[-1], mrvl_s.index[-1])
-    lite, mrvl = float(lite_s.loc[:last_day].iloc[-1]), float(mrvl_s.loc[:last_day].iloc[-1])
-    m = _lite_mrvl_spread_metrics(lite, mrvl, datetime.now(JST).date())
+    last_day = min(px[t].index[-1] for t in tkrs if t in px)
+    tp = float(px[tgt].loc[:last_day].iloc[-1])
+    ap = float(px[acq].loc[:last_day].iloc[-1]) if acq else None
+    m = _deal_spread_metrics(deal, tp, ap, datetime.now(JST).date())
+    ratio = float(deal.get("exchange_ratio") or 0)
     sc = "#4ade80" if m["spread_pct"] >= 0 else "#f87171"
-    ann_html = "".join(f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">・{lb}に完了（MRVL株価が今のままなら）: スプレッドが縮む分は<b>年率{a:+.1f}%</b>（{dy}日後）</div>' for lb, dy, a in m["ann"])
+    ann_html = "".join(f'<div style="font-size:12px;color:#cbd5e1;margin-top:2px">・{lb}に完了（買収側の株価が今のままなら）: スプレッドが縮む分は<b>年率{a:+.1f}%</b>（{dy}日後）</div>' for lb, dy, a in m["ann"])
+    line = (f'{tgt} <b>${tp:,.2f}</b>　{acq} <b>${ap:,.2f}</b>　→　理論価値（{acq}×{ratio:g}'
+            f'{" ＋ 現金$" + format(float(deal.get("cash_per_share") or 0), ",.2f") if float(deal.get("cash_per_share") or 0) else ""}） <b>${m["implied"]:,.2f}</b>'
+            if acq else f'{tgt} <b>${tp:,.2f}</b>　→　買収価格（現金） <b>${m["implied"]:,.2f}</b>')
     st.markdown(
         f'<div style="background:#1e293b;border-left:4px solid #38bdf8;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
-        f'<div style="font-size:12px;color:#94a3b8">基準日 {last_day.date()}（終値。時間外は含みません）</div>'
-        f'<div style="font-size:15px;margin-top:4px">LITE <b>${lite:,.2f}</b>　MRVL <b>${mrvl:,.2f}</b>　→　理論価値（MRVL×{_LITE_MRVL_RATIO}） <b>${m["implied"]:,.2f}</b></div>'
+        f'<div style="font-size:12px;color:#94a3b8">基準日 {last_day.date()}（終値。時間外は含みません）　発表 {deal.get("announced", "")}</div>'
+        f'<div style="font-size:15px;margin-top:4px">{line}</div>'
         f'<div style="font-size:20px;font-weight:900;color:{sc};margin-top:4px">スプレッド {m["spread"]:+,.2f}ドル（{m["spread_pct"]:+.1f}%）'
-        f'<span style="font-size:11px;color:#94a3b8;font-weight:400">　＝LITEが理論価値より{"安い" if m["spread"] >= 0 else "高い"}</span></div>'
-        f'{ann_html}</div>'
-        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
-        '<th style="padding:6px 8px">項目</th><th>数値</th></tr></thead><tbody>'
-        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">発表時の1株あたり価値（10/28終値基準）</td><td>${_LITE_MRVL_HEADLINE:,.0f}（プレミアム{_LITE_MRVL_PREMIUM * 100:.1f}%）</td></tr>'
-        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">報道前（10/28）のLITE／MRVL（逆算）</td><td>${m["unaffected_lite"]:,.0f}／${m["unaffected_mrvl"]:,.0f}</td></tr>'
-        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">今の理論価値の、報道前LITEに対するプレミアム</td><td style="color:{"#4ade80" if m["premium_now_pct"] >= 0 else "#f87171"}">{m["premium_now_pct"]:+.1f}%</td></tr>'
-        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">LITEの、報道前に対する騰落</td><td>{m["lite_vs_unaffected_pct"]:+.1f}%</td></tr>'
-        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">MRVLの、報道前に対する騰落</td><td>{m["mrvl_vs_unaffected_pct"]:+.1f}%</td></tr>'
-        '</tbody></table>', unsafe_allow_html=True)
-    # 推移: LITE ÷ MRVL（理論は4.5）
-    both = pd.concat([lite_s.rename("LITE"), mrvl_s.rename("MRVL")], axis=1).dropna().tail(45)
-    if len(both) >= 3:
-        import plotly.graph_objects as go
-        ratio = both["LITE"] / both["MRVL"]
-        fig = go.Figure()
-        fig.add_scatter(x=ratio.index, y=ratio, name="LITE ÷ MRVL（実際）", line=dict(color="#38bdf8", width=3))
-        fig.add_hline(y=_LITE_MRVL_RATIO, line_dash="dash", line_color="#fbbf24", annotation_text="交換比率 4.5（スプレッド0）", annotation_font_color="#fbbf24")
-        fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=260, margin=dict(l=10, r=10, t=20, b=10),
-                          yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="LITE ÷ MRVL", font=dict(color="#e2e8f0"))),
-                          xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"), showlegend=False,
-                          hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
-        st.plotly_chart(fig, use_container_width=True, key="lite_mrvl_ratio")
-        st.caption("LITE÷MRVLが4.5より低いほど、LITEが理論価値より安い（スプレッドが大きい）状態です。発表（11/2）前は、買収の観測で、4.5より大きく離れていました。")
-    st.caption("※ 交換比率4.500、完了見込み2028年上半期、最長の期限2028年8月1日（MarvellのForm 8-Kより）。年率換算は、MRVL株価が変わらず、予定どおり完了し、"
-               "配当などを考えない単純な計算で、実際の損益や、破談のリスク、MRVL株価の変動は含みません。売買の指示ではありません。")
+        f'<span style="font-size:11px;color:#94a3b8;font-weight:400">　＝{tgt}が理論価値より{"安い" if m["spread"] >= 0 else "高い"}</span></div>'
+        f'{ann_html}</div>', unsafe_allow_html=True)
+    rows = [f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">発表時の1株あたり価値（{deal.get("unaffected_date", "")}の終値基準）</td>'
+            f'<td>${float(deal.get("headline_value") or 0):,.0f}（プレミアム{float(deal.get("premium") or 0) * 100:.1f}%）</td></tr>']
+    if m["unaffected_target"]:
+        rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">報道前の{tgt}{"／" + acq if acq else ""}（逆算）</td>'
+                    f'<td>${m["unaffected_target"]:,.0f}{"／$" + format(m["unaffected_acq"], ",.0f") if (acq and m["unaffected_acq"]) else ""}</td></tr>')
+    for lab, v in (("今の理論価値の、報道前の対象会社株に対するプレミアム", m["premium_now_pct"]), (f"{tgt}の、報道前に対する騰落", m["target_vs_unaffected_pct"]),
+                   (f"{acq}の、報道前に対する騰落", m["acq_vs_unaffected_pct"])):
+        if v is not None:
+            rows.append(f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">{lab}</td><td style="color:{"#4ade80" if v >= 0 else "#f87171"}">{v:+.1f}%</td></tr>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+                f'<th style="padding:6px 8px">項目</th><th>数値</th></tr></thead><tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+    if acq and ratio:
+        both = pd.concat([px[tgt].rename("T"), px[acq].rename("A")], axis=1, sort=True).dropna().tail(45)
+        if len(both) >= 3:
+            import plotly.graph_objects as go
+            rr = both["T"] / both["A"]
+            fig = go.Figure()
+            fig.add_scatter(x=rr.index, y=rr, name=f"{tgt} ÷ {acq}（実際）", line=dict(color="#38bdf8", width=3))
+            fig.add_hline(y=ratio, line_dash="dash", line_color="#fbbf24", annotation_text=f"交換比率 {ratio:g}（スプレッド0）", annotation_font_color="#fbbf24")
+            fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=260, margin=dict(l=10, r=10, t=20, b=10),
+                              yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text=f"{tgt} ÷ {acq}", font=dict(color="#e2e8f0"))),
+                              xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"), showlegend=False, hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+            st.plotly_chart(fig, use_container_width=True, key=f"deal_ratio_{deal.get('id', tgt)}")
+            st.caption(f"{tgt}÷{acq}が交換比率より低いほど、{tgt}が理論価値より安い（スプレッドが大きい）状態です。")
+    if deal.get("terms"):
+        st.caption("条件: " + str(deal["terms"]))
+    st.caption("※ 年率換算は、買収側の株価が変わらず、予定どおり完了し、配当などを考えない単純な計算で、破談のリスクや株価の変動は含みません。"
+               "案件の条件は data/merger_deals.json にあり、追加はClaudeに依頼できます。売買の指示ではありません。")
 
 
 def render_optical_brief():
