@@ -20869,6 +20869,105 @@ def _fetch_lite_mrvl_prices() -> dict:
         return {}
 
 
+# 日本株の夜間価格: 米国のADR（円換算）と日経先物から、翌朝の東証の動きの目安を見る。{東証コード: (社名, ADRティッカー)}
+_JP_ADR_PAIRS = {
+    "5803.T": ("フジクラ", "FJIKY"), "5801.T": ("古河電工", "FUWAY"), "5802.T": ("住友電工", "SMTOY"),
+    "9984.T": ("ソフトバンクG", "SFTBY"), "8035.T": ("東京エレクトロン", "TOELF"), "6857.T": ("アドバンテスト", "ATEYY"),
+    "285A.T": ("キオクシア", "KXIAY"), "7203.T": ("トヨタ", "TM"), "6758.T": ("ソニーG", "SONY"), "6501.T": ("日立", "HTHIY"),
+    "9983.T": ("ファストリ", "FRCOY"), "7974.T": ("任天堂", "NTDOY"), "8306.T": ("三菱UFJ", "MUFG"), "6861.T": ("キーエンス", "KYCCF"),
+}
+_ADR_SNAP_RATIOS = (0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 4, 5, 10, 20, 50)
+
+
+def _adr_yen_table(close: pd.DataFrame, pairs: dict, fx_col: str = "JPY=X") -> list:
+    """東証の終値と、ADRの直近値の円換算を比べる（純粋関数）。
+    ADRの比率（ADR1枚が何株か）は、直近の東証終値÷（ADR終値×ドル円）の中央値を、キリのよい比率に丸めて自動推定する（比率の登録ミスを避けるため）。
+    Returns: [{"code","name","adr","tse","adr_yen","diff_pct","ratio","adr_date"}, ...]"""
+    rows = []
+    fx = close[fx_col].dropna() if fx_col in close.columns else pd.Series(dtype=float)
+    if fx.empty:
+        return rows
+    for code, (name, adr) in pairs.items():
+        if code not in close.columns or adr not in close.columns:
+            continue
+        t, a = close[code].dropna(), close[adr].dropna()
+        j = pd.concat([t.rename("t"), a.rename("a"), fx.rename("fx")], axis=1, sort=True).dropna()
+        if len(j) < 15 or t.empty or a.empty:
+            continue
+        ratio = float((j["t"] / (j["a"] * j["fx"])).median())
+        snap = min(_ADR_SNAP_RATIOS, key=lambda x: abs(np.log(x / ratio)))
+        if abs(np.log(snap / ratio)) > 0.12:
+            continue   # 丸めた比率と実際が大きくずれる銘柄は、信頼できないので出さない
+        adr_yen = float(a.iloc[-1]) * float(fx.iloc[-1]) * snap
+        tse = float(t.iloc[-1])
+        rows.append({"code": code, "name": name, "adr": adr, "tse": tse, "adr_yen": adr_yen, "diff_pct": (adr_yen / tse - 1) * 100,
+                     "ratio": snap, "adr_date": str(a.index[-1].date()), "tse_date": str(t.index[-1].date())})
+    return rows
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_jp_night() -> dict:
+    """日本株の夜間価格に必要なデータ（東証終値・ADR・ドル円・日経先物）を取得する。失敗時は {}。"""
+    syms = list(_JP_ADR_PAIRS) + [v[1] for v in _JP_ADR_PAIRS.values()] + ["JPY=X"]
+    try:
+        raw = yf.download(syms, period="3mo", interval="1d", auto_adjust=False, progress=False, group_by="column")
+        close = raw["Close"].dropna(how="all")
+    except Exception as e:
+        logger.warning(f"[jp_night] 取得失敗: {e}")
+        return {}
+    out = {"rows": _adr_yen_table(close, _JP_ADR_PAIRS), "usdjpy": float(close["JPY=X"].dropna().iloc[-1]) if "JPY=X" in close.columns else None}
+    # 日経先物（円建て）: 東証の引け（15:30）から、今までの動き
+    try:
+        f = yf.download("NIY=F", period="5d", interval="15m", auto_adjust=False, progress=False)
+        fc = f["Close"]
+        fc = fc["NIY=F"] if isinstance(fc, pd.DataFrame) else fc
+        fc = fc.dropna()
+        fc.index = fc.index.tz_convert(JST) if fc.index.tz is not None else fc.index.tz_localize("UTC").tz_convert(JST)
+        last_ts = fc.index[-1]
+        cand = fc[(fc.index.hour == 15) & (fc.index.minute >= 15) & (fc.index.minute <= 30)]
+        cand = cand[cand.index < last_ts]
+        if len(cand):
+            ref = float(cand.iloc[-1])
+            out["fut"] = {"last": float(fc.iloc[-1]), "ref": ref, "pct": (float(fc.iloc[-1]) / ref - 1) * 100,
+                          "last_ts": last_ts.strftime("%m/%d %H:%M"), "ref_ts": cand.index[-1].strftime("%m/%d %H:%M")}
+    except Exception as e:
+        logger.warning(f"[jp_night] 先物取得失敗: {e}")
+    return out
+
+
+def render_jp_night_card():
+    """🌙 日本株の夜間価格：米国のADR（円換算）と日経先物から、翌朝の東証の寄り付きの目安を見る。"""
+    st.markdown('<a id="jp-night"></a>', unsafe_allow_html=True)
+    st.markdown("### 🌙 日本株の夜間価格（ADR・日経先物）")
+    d = _fetch_jp_night()
+    rows = d.get("rows") if d else None
+    if not rows:
+        st.info("夜間価格を取得できませんでした。")
+        return
+    fut = d.get("fut")
+    if fut:
+        col = "#4ade80" if fut["pct"] >= 0 else "#f87171"
+        st.markdown(
+            f'<div style="background:#1e293b;border-left:4px solid #38bdf8;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
+            f'<div style="font-size:12px;color:#94a3b8">日経225先物（円建て・夜間を含む）</div>'
+            f'<div style="font-size:20px;font-weight:900;color:{col}">{fut["last"]:,.0f}円　{fut["pct"]:+.2f}%'
+            f'<span style="font-size:11px;color:#94a3b8;font-weight:400">　（{fut["ref_ts"]}の東証引け前後 {fut["ref"]:,.0f}円 → {fut["last_ts"]}）</span></div></div>',
+            unsafe_allow_html=True)
+    rows = sorted(rows, key=lambda r: r["diff_pct"], reverse=True)
+    tr = "".join(
+        f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">{r["name"]}<div style="font-size:10px;color:#94a3b8">{r["code"]} ／ ADR {r["adr"]}</div></td>'
+        f'<td>{r["tse"]:,.0f}</td><td>{r["adr_yen"]:,.0f}</td>'
+        f'<td style="color:{"#4ade80" if r["diff_pct"] >= 0 else "#f87171"};font-weight:700">{r["diff_pct"]:+.1f}%</td>'
+        f'<td style="font-size:11px;color:#94a3b8">{r["adr_date"]}</td></tr>' for r in rows)
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+        '<th style="padding:6px 8px">銘柄</th><th>東証の終値（円）</th><th>ADRの円換算</th><th>差</th><th>ADRの日付（米国）</th></tr></thead>'
+        f'<tbody>{tr}</tbody></table>', unsafe_allow_html=True)
+    st.caption(f"※ ADRの円換算 = ADRの直近値 × ドル円（{d.get('usdjpy', 0):.2f}）× 1枚あたりの株数。株数の比率は、直近の価格から自動で推定しています。"
+               "差がプラスなら、翌朝の東証が、前日終値より高く始まる目安です（為替・ADRの流動性・時差で、ずれます）。"
+               "夜間PTS（17:00〜23:59の私設取引）と、取引所外のDEX価格は、ここでは取得していません（無料で自動取得できないため）。売買の指示ではありません。")
+
+
 def render_lite_merger_card():
     """🔀 Marvell×Lumentum 合併スプレッド：LITEが、MRVL株価×4.5（理論価値）に対してどれだけ安く取引されているかを見る。"""
     st.markdown('<a id="lite-merger"></a>', unsafe_allow_html=True)
@@ -43473,6 +43572,9 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # LITE買収スプレッド（MarvellによるLumentum買収。LITEの値段が、MRVL×4.5に連動する）
     render_lite_merger_card()
+
+    # 日本株の夜間価格（ADR・日経先物）
+    render_jp_night_card()
 
     # ===================================================
     # ★ 米国経済イベントカレンダー（バックグラウンド並列取得）
