@@ -21055,6 +21055,34 @@ def render_jp_night_card():
                "夜間PTS（17:00〜23:59の私設取引）と、取引所外のDEX価格は、ここでは取得していません（無料で自動取得できないため）。売買の指示ではありません。")
 
 
+def render_power_map():
+    """⚡ AIと電力の地図：地域ごとの電力の需給と、データセンターの需要（手作業メモ。data/power_map.json）。"""
+    import html as _h
+    import json as _j
+    st.markdown('<a id="power-map"></a>', unsafe_allow_html=True)
+    st.markdown("### ⚡ AIと電力の地図（手作業メモ）")
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "data", "power_map.json"), encoding="utf-8") as f_:
+            pm = _j.load(f_)
+    except Exception:
+        st.info("電力の地図のデータを読み込めませんでした。")
+        return
+    st.caption(f"更新: {pm.get('updated_at', '')}　{pm.get('note', '')}")
+    cards = []
+    for r in pm.get("regions", []):
+        pts = "".join(f'<li style="margin:2px 0">{_h.escape(p)}</li>' for p in r.get("points", []))
+        srcs = " ".join(f'<a href="{_h.escape(u)}" target="_blank" style="color:#38bdf8">出所{i + 1}</a>' for i, u in enumerate(r.get("sources", [])))
+        cards.append(
+            f'<div style="background:#1e293b;border-left:4px solid #fbbf24;border-radius:6px;padding:10px 14px;margin-bottom:8px;color:#e2e8f0">'
+            f'<div style="font-size:14px;font-weight:700">{_h.escape(r.get("name", ""))}</div>'
+            f'<div style="font-size:13px;color:#fbbf24;margin-top:2px">{_h.escape(r.get("headline", ""))}</div>'
+            f'<ul style="font-size:12px;color:#cbd5e1;margin:6px 0 4px 18px;padding:0">{pts}</ul>'
+            f'<div style="font-size:11px;color:#94a3b8">確認の度合い: {_h.escape(r.get("level", ""))}（{_h.escape(r.get("date", ""))}）　{srcs}</div></div>')
+    st.markdown("".join(cards), unsafe_allow_html=True)
+    if pm.get("gaps"):
+        st.caption("未調査・不明: " + " / ".join(pm["gaps"]) + "　地域は追加できます（Claudeに依頼）。投資判断の根拠にしないでください。")
+
+
 def render_lite_merger_card():
     """🔀 買収スプレッド：発表済みの買収案件で、対象会社の株が、理論価値（交換比率×買収側株価＋現金）より、どれだけ安く取引されているかを見る。"""
     st.markdown('<a id="lite-merger"></a>', unsafe_allow_html=True)
@@ -43770,6 +43798,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # LITE買収スプレッド（MarvellによるLumentum買収。LITEの値段が、MRVL×4.5に連動する）
     render_lite_merger_card()
+    render_power_map()
 
     # 日本株の夜間価格（ADR・日経先物）
     render_jp_night_card()
