@@ -2,7 +2,7 @@
 import pandas as pd
 import yfinance as yf
 
-SYMS = ["NVDA", "MU", "LITE", "AAOI"]
+SYMS = ["AAOI"]
 
 
 def pick(df, *names):
@@ -26,6 +26,9 @@ for s in SYMS:
         def g(x):
             return None if x is None or c not in x.index or pd.isna(x[c]) else float(x[c])
         r = g(rev)
+        if not r:
+            print(f"{c.date()} 売上データなし")
+            continue
         prev = [p for p in sorted(inc.columns) if (c - p).days > 330 and (c - p).days < 400]
         yoy = (r / g(rev.rename(None)) if False else None)
         if prev and rev is not None and not pd.isna(rev[prev[-1]]) and rev[prev[-1]]:
