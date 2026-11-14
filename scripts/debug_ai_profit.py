@@ -3,14 +3,9 @@ import pandas as pd
 import yfinance as yf
 
 G = {
- "半導体(GPU/ASIC/ファウンドリ)": ["NVDA", "AVGO", "AMD", "MRVL", "TSM"],
- "メモリ": ["MU"],
- "光・フォトニクス(米)": ["LITE", "COHR", "CIEN", "AAOI"],
- "ネットワーク機器": ["ANET"],
- "ハイパースケーラー": ["MSFT", "GOOGL", "AMZN", "META", "ORCL"],
- "ネオクラウド": ["CRWV"],
- "日本(光ファイバー・ケーブル)": ["5803.T", "5801.T", "5802.T"],
- "日本(製造装置)": ["6857.T", "8035.T", "6146.T"],
+ "データセンターREIT(貸す側)": ["EQIX", "DLR"],
+ "ネオクラウド(GPUを貸す側)": ["CRWV", "NBIS", "IREN", "APLD"],
+ "電力・冷却設備(納める側)": ["VRT", "ETN", "GEV"],
 }
 for g, syms in G.items():
     print("##", g)
