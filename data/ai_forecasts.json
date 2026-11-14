@@ -2792,7 +2792,33 @@
     "tnx": "up",
     "usdjpy": "up"
    },
-   "scenario": "米国金利上昇と企業収益改善で株価上昇、円安圧力が強まりドル高へ"
+   "scenario": "米国金利上昇と企業収益改善で株価上昇、円安圧力が強まりドル高へ",
+   "grade": {
+    "graded_on": "2026-11-14",
+    "actual_chg_pct": {
+     "sp500": -2.36,
+     "nikkei": -6.15,
+     "tnx": 1.28,
+     "usdjpy": 1.11
+    },
+    "hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": true,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": true,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "外れ",
+    "reason": "米利回り上昇は当たったが、株安・円高は予想と逆転。筋書き全体矛盾",
+    "judge_model": "Mistral (open-mistral-nemo)"
+   }
   },
   {
    "id": "2026-10-16-mistral",
@@ -2826,7 +2852,33 @@
     "tnx": "up",
     "usdjpy": "up"
    },
-   "scenario": "米FRB利上げペース見送りの可能性低く、インフレ圧力継続で長期金利上昇。米景気減速懸念からリスクオフ基調で株式下落。日米金利差拡大で円安加速。"
+   "scenario": "米FRB利上げペース見送りの可能性低く、インフレ圧力継続で長期金利上昇。米景気減速懸念からリスクオフ基調で株式下落。日米金利差拡大で円安加速。",
+   "grade": {
+    "graded_on": "2026-11-14",
+    "actual_chg_pct": {
+     "sp500": -2.36,
+     "nikkei": -6.15,
+     "tnx": 1.28,
+     "usdjpy": 1.11
+    },
+    "hits": {
+     "sp500": true,
+     "nikkei": true,
+     "tnx": true,
+     "usdjpy": true
+    },
+    "baseline_hits": {
+     "sp500": false,
+     "nikkei": false,
+     "tnx": true,
+     "usdjpy": true
+    }
+   },
+   "judge": {
+    "verdict": "当たり",
+    "reason": "シナリオと実際の動きが全方向で一致",
+    "judge_model": "Groq (openai/gpt-oss-20b)"
+   }
   },
   {
    "id": "2026-10-17-gemini",
@@ -4935,7 +4987,143 @@
     "usdjpy": "down"
    },
    "scenario": "米長期金利上昇で割高株価修正、160円台で介入警戒・日銀利上げ観測で円高進行、輸出関連売り優勢"
+  },
+  {
+   "id": "2026-11-14-groq",
+   "date": "2026-11-14",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7561.67,
+     "chg20_pct": -1.28,
+     "date": "2026-11-13"
+    },
+    "nikkei": {
+     "value": 61142.352,
+     "chg20_pct": -5.1,
+     "date": "2026-11-13"
+    },
+    "tnx": {
+     "value": 5.154,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    },
+    "usdjpy": {
+     "value": 159.875,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米国景気回復期待で金利上昇、ドル高圧力弱まり円高へ"
+  },
+  {
+   "id": "2026-11-14-mistral",
+   "date": "2026-11-14",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 7561.67,
+     "chg20_pct": -1.28,
+     "date": "2026-11-13"
+    },
+    "nikkei": {
+     "value": 61142.352,
+     "chg20_pct": -5.1,
+     "date": "2026-11-13"
+    },
+    "tnx": {
+     "value": 5.154,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    },
+    "usdjpy": {
+     "value": 159.875,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "down",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "米利下げ期待強まり（Fedのテーパリング懸念）、米国株安定、日経は成長不透明感・円高圧力強まるも米国株連動で押し上げ。米長期金利低下、ドル円はリスク回避で一時円高も、米株反発で再円安に"
+  },
+  {
+   "id": "2026-11-14-nvidia",
+   "date": "2026-11-14",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7561.67,
+     "chg20_pct": -1.28,
+     "date": "2026-11-13"
+    },
+    "nikkei": {
+     "value": 61142.352,
+     "chg20_pct": -5.1,
+     "date": "2026-11-13"
+    },
+    "tnx": {
+     "value": 5.154,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    },
+    "usdjpy": {
+     "value": 159.875,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "down",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "米長期金利上昇で株安継続。160円目前で日銀・財務省介入・利上げ観測で円高転換。"
+  },
+  {
+   "id": "2026-11-14-openrouter",
+   "date": "2026-11-14",
+   "model": "OpenRouter (inclusionai/ling-3.2-flash:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7561.67,
+     "chg20_pct": -1.28,
+     "date": "2026-11-13"
+    },
+    "nikkei": {
+     "value": 61142.352,
+     "chg20_pct": -5.1,
+     "date": "2026-11-13"
+    },
+    "tnx": {
+     "value": 5.154,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    },
+    "usdjpy": {
+     "value": 159.875,
+     "chg20_pct": 1.1,
+     "date": "2026-11-13"
+    }
+   },
+   "calls": {
+    "sp500": "down",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "up"
+   },
+   "scenario": "米インフレ粘着で長期金利が上昇、利ざや優位からドル高・円安が続き、円安支援で日経は反発する一方、高金利が米株を抑える。"
   }
  ],
- "updated_at": "2026-11-13T02:51:14Z"
+ "updated_at": "2026-11-14T02:39:02Z"
 }
