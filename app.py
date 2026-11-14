@@ -21055,6 +21055,58 @@ def render_jp_night_card():
                "夜間PTS（17:00〜23:59の私設取引）と、取引所外のDEX価格は、ここでは取得していません（無料で自動取得できないため）。売買の指示ではありません。")
 
 
+def render_ai_capital_card():
+    """💳 AI設備投資の資金繰り：大手の四半期の営業CF・設備投資・FCF・有利子負債（data/hyperscaler_finance.json、週1回更新）。"""
+    import json as _j
+    st.markdown('<a id="ai-capital"></a>', unsafe_allow_html=True)
+    st.markdown("### 💳 AI設備投資の資金繰り（営業CFで足りているか）")
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "data", "hyperscaler_finance.json"), encoding="utf-8") as f_:
+            hf = _j.load(f_)
+    except Exception:
+        st.info("財務データを読み込めませんでした。")
+        return
+    rows = []
+    for sym, c in (hf.get("companies") or {}).items():
+        qs = c.get("quarters") or []
+        if not qs or qs[0].get("ocf") is None or qs[0].get("capex") is None:
+            continue
+        q = qs[0]
+        cov = q["ocf"] / q["capex"] * 100 if q["capex"] else 0
+        fc = q.get("fcf")
+        net = (q["debt"] - q["cash"]) if (q.get("debt") is not None and q.get("cash") is not None) else None
+        prev = next((x for x in qs[1:] if x.get("debt") is not None and x.get("cash") is not None), None)
+        dnet = (net - (prev["debt"] - prev["cash"])) if (net is not None and prev) else None
+        col = "#f87171" if (fc is not None and fc < 0) else "#4ade80"
+        rows.append(
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">{c.get("name", sym)}（{sym}）<div style="font-size:10px;color:#64748b">{q["period"]}</div></td>'
+            f'<td>{q["ocf"]:,.1f}</td><td>{q["capex"]:,.1f}</td>'
+            f'<td style="color:{col};font-weight:700">{fc:+,.1f}</td>' if fc is not None else
+            f'<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">{c.get("name", sym)}（{sym}）</td><td>{q["ocf"]:,.1f}</td><td>{q["capex"]:,.1f}</td><td>-</td>')
+        rows[-1] += (f'<td>{cov:.0f}%</td><td>{"-" if q.get("debt") is None else format(q["debt"], ",.0f")}</td>'
+                     f'<td>{"-" if net is None else format(net, "+,.0f")}{"" if dnet is None else "（前期比" + format(dnet, "+,.0f") + "）"}</td></tr>')
+    if not rows:
+        st.info("表示できるデータがありません。")
+        return
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#cbd5e1;text-align:left">'
+                '<th style="padding:6px 8px">会社（直近の四半期）</th><th>営業CF</th><th>設備投資</th><th>FCF</th><th>営業CF÷設備投資</th><th>有利子負債</th><th>純債務（負債−現金）</th></tr></thead>'
+                f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+    st.caption(f"単位: 10億ドル。更新 {hf.get('updated_at', '')}。{hf.get('unit', '')}。営業CF÷設備投資が100%未満なら、その四半期の投資を営業CFだけでは賄えていません（不足分は社債・現金・リースなどで補う）。"
+               "有利子負債はリース債務を含む場合があり、会社の決算書の表示とずれることがあります。※ 売買の指示ではありません。")
+    import plotly.graph_objects as go
+    fig = go.Figure()
+    pal = ["#38bdf8", "#4ade80", "#fbbf24", "#f87171", "#a78bfa", "#fb923c"]
+    for i, (sym, c) in enumerate((hf.get("companies") or {}).items()):
+        qs = [x for x in (c.get("quarters") or []) if x.get("fcf") is not None][::-1]
+        if len(qs) >= 2:
+            fig.add_scatter(x=[x["period"] for x in qs], y=[x["fcf"] for x in qs], name=sym, mode="lines+markers", line=dict(color=pal[i % len(pal)], width=2))
+    fig.add_hline(y=0, line_dash="dash", line_color="#94a3b8")
+    fig.update_layout(paper_bgcolor="#0f172a", plot_bgcolor="#0f172a", font=dict(color="#e2e8f0"), height=300, margin=dict(l=10, r=10, t=20, b=10),
+                      yaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b", title=dict(text="FCF（10億ドル）", font=dict(color="#e2e8f0"))),
+                      xaxis=dict(tickfont=dict(color="#e2e8f0"), gridcolor="#1e293b"), legend=dict(font=dict(color="#e2e8f0")), hoverlabel=dict(bgcolor="#1e293b", font=dict(color="#e2e8f0")))
+    st.plotly_chart(fig, use_container_width=True, key="ai_capital_fcf")
+
+
 def render_power_map():
     """⚡ AIと電力の地図：地域ごとの電力の需給と、データセンターの需要（手作業メモ。data/power_map.json）。"""
     import html as _h
@@ -43798,6 +43850,7 @@ SENDGRID_FROM_EMAIL = "you@example.com"  # SendGridでSingle Sender Verification
 
     # LITE買収スプレッド（MarvellによるLumentum買収。LITEの値段が、MRVL×4.5に連動する）
     render_lite_merger_card()
+    render_ai_capital_card()
     render_power_map()
 
     # 日本株の夜間価格（ADR・日経先物）

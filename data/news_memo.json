@@ -1,7 +1,18 @@
 {
- "updated_at": "2026-11-11",
+ "updated_at": "2026-11-14",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
+  {
+   "date": "2026-11-14",
+   "title": "AI設備投資の資金源が営業CFから社債へ（SNS投稿の主張を、財務データで検証）",
+   "summary": "『大手の自己資金で足りている間はコールの数学は発動しない。社債に移り、債券市場が先に軋む』との投稿（出所不明）を検証。方向は確認：応募倍率が2026年2月の約5倍から7月に2倍未満へ（Apolloの分析の報道）、ハイパースケーラーのスプレッドが約60bpから110bp超へ（Oracleの寄与大）、S&PがOracleをBBB−へ格下げ（7月）、米投資適格債の発行は過去最高の約1.88兆ドル。数字は未確認：2026年上半期2,440億ドル、AI関連債が約18%、アルファベット100年債が額面の9割割れ。yfinanceの財務諸表では、アルファベット2026年7-9月期のFCFは約-91億ドル（営業CF423億、設備投資514億）、アマゾン同-348億ドル、オラクル6-8月期-54億ドル、メタ同-12億ドル。",
+   "status": "一部確認（方向は報道で確認、個別の数字はyfinance由来で決算資料で未確認）",
+   "sources": [
+    "https://tradersunion.com/news/financial-news/show/2787889-big-tech-bond-spreads-ai-capex/",
+    "https://tech-insider.org/big-tech-us-corporate-bond-record-1-88-trillion-2026/",
+    "https://thenextweb.com/news/alphabet-25-billion-bond-sale-ai-capex-twice-yearly"
+   ]
+  },
   {
    "date": "2026-10-14",
    "title": "米9月CPIが予想を上回る、金利・利上げ観測が上昇",
