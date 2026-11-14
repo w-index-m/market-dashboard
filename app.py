@@ -31309,6 +31309,98 @@ def render_option_implied_moves():
             f"データ更新: {_ts[:16].replace('T', ' ')} UTC。米国上場銘柄のみ。投資助言ではありません。")
 
 
+# 決算前チェックの、保有銘柄とは別に見る監視銘柄（AI・半導体・光関連の代表。公開してよい一般的な銘柄のみ）
+_EARN_WATCH = ("NVDA", "AVGO", "AMD", "MRVL", "LITE", "COHR", "MU", "ORCL", "CRWV", "MSFT", "GOOGL", "AMZN", "META", "ANET", "CIEN")
+
+
+def _earn_reactions(edates: pd.DataFrame, close: pd.Series, n: int = 8) -> list:
+    """過去の決算の発表後の値動き（％）を返す（純粋関数）。引け後(16時以降)の発表は翌営業日の終値÷発表日の終値、
+    寄り付き前の発表は発表日の終値÷前営業日の終値。edatesは get_earnings_dates の形（index=発表日時、'Reported EPS'列あり）。"""
+    out = []
+    if edates is None or edates.empty or "Reported EPS" not in edates.columns:
+        return out
+    cl = close.dropna()
+    for ts in edates[edates["Reported EPS"].notna()].sort_index().index[-n:]:
+        t = pd.Timestamp(ts)
+        after = t.hour >= 16
+        d = t.tz_localize(None).normalize() if t.tzinfo is not None else t.normalize()
+        pos = cl.index.searchsorted(d)
+        if pos >= len(cl) or cl.index[pos] != d:
+            continue
+        i0, i1 = (pos, pos + 1) if after else (pos - 1, pos)
+        if i0 < 0 or i1 >= len(cl):
+            continue
+        out.append({"date": str(d.date()), "pct": round((float(cl.iloc[i1]) / float(cl.iloc[i0]) - 1) * 100, 1)})
+    return out
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_earnings_precheck(ticker: str) -> dict:
+    """次の決算日と、過去8回の決算後の値動き。失敗時は {}。"""
+    try:
+        tk = yf.Ticker(ticker)
+        ed = tk.get_earnings_dates(limit=16)
+        if ed is None or ed.empty:
+            return {}
+        today = pd.Timestamp.now().normalize()
+        idx = ed.index.tz_localize(None) if getattr(ed.index, "tz", None) is not None else ed.index
+        fut = sorted(x for x, e in zip(idx, ed["Reported EPS"].isna()) if e and x >= today)
+        close = tk.history(period="3y", auto_adjust=False)["Close"].dropna()
+        if getattr(close.index, "tz", None) is not None:
+            close.index = close.index.tz_localize(None)
+        close.index = close.index.normalize()
+        return {"next": str(fut[0].date()) if fut else None, "react": _earn_reactions(ed, close, 8)}
+    except Exception as e:
+        logger.warning(f"[earn_precheck] {ticker}: {e}")
+        return {}
+
+
+def render_earnings_precheck():
+    """📅 決算前チェック：保有銘柄と代表的な監視銘柄のうち、決算が近い銘柄を、日付順に（オプションの想定変動幅と過去の決算後の動き付きで）表示する。"""
+    _u = st.session_state.get("_trading_user", "") or ""
+    pos = {t for t in _get_open_positions(_u) if not t.endswith(".T") and t not in _JP_FUND_MAP}
+    with st.expander("📅 決算前チェック（決算が近い銘柄：想定変動幅と過去の決算後の動き）", expanded=False):
+        days_lim = st.slider("何日以内の決算を表示", 3, 45, 21, 1, key="ep_days")
+        tickers = sorted(pos | set(_EARN_WATCH))
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            info = dict(zip(tickers, ex.map(_fetch_earnings_precheck, tickers)))
+        today = pd.Timestamp.now().normalize()
+        near = sorted(((pd.Timestamp(i["next"]), t) for t, i in info.items() if i.get("next") and 0 <= (pd.Timestamp(i["next"]) - today).days <= days_lim))
+        if not near:
+            st.info(f"{days_lim}日以内に決算を迎える銘柄はありません。")
+            return
+        cache = _load_options_cache_all()
+        miss = [t for _, t in near if t not in cache][:8]
+        live = {}
+        if miss:
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                live = {t: d for t, d in zip(miss, ex.map(_fetch_option_summary, miss)) if d}
+        rows = []
+        for dt, t in near:
+            i, o = info[t], (cache.get(t) or live.get(t) or {})
+            rx = [x["pct"] for x in i.get("react", [])]
+            avg = sum(abs(x) for x in rx) / len(rx) if rx else None
+            imp = o.get("earn_move_pct") if o.get("earn_move_pct") is not None else o.get("move_pct")
+            imp_note = "" if o.get("earn_move_pct") is not None else "（満期までの全体）" if imp is not None else ""
+            ratio = (imp / avg) if (imp is not None and avg and o.get("earn_move_pct") is not None) else None
+            judge = ("市場は過去より大きな動きを織り込み" if ratio and ratio >= 1.3 else "過去より小さめの織り込み" if ratio and ratio <= 0.75 else "過去並み" if ratio else "")
+            last = " ".join(f'<span style="color:{"#4ade80" if p >= 0 else "#f87171"}">{p:+.0f}</span>' for p in rx[-6:][::-1])
+            mark = "📌 " if t in pos else ""
+            rows.append(
+                f'<tr style="border-top:1px solid #1e293b;vertical-align:top"><td style="padding:6px 8px;font-weight:600">{mark}{_get_stock_display_name(t)}'
+                f'<div style="font-size:10px;color:#64748b">{t}</div></td><td>{dt.date()}<div style="font-size:10px;color:#94a3b8">あと{(dt - today).days}日</div></td>'
+                f'<td style="font-weight:700;color:#f59e0b">{("±" + str(imp) + "%") if imp is not None else "—"}<div style="font-size:10px;color:#94a3b8">{imp_note}</div></td>'
+                f'<td>{("±%.1f%%" % avg) if avg else "—"}<div style="font-size:10px;color:#64748b">過去{len(rx)}回の平均の絶対値</div></td>'
+                f'<td>{last or "—"}</td><td style="font-size:11px">{judge}</td></tr>')
+        st.markdown(
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#e2e8f0"><thead><tr style="color:#94a3b8;text-align:left">'
+            '<th style="padding:6px 8px">銘柄</th><th>決算日</th><th>オプションの<br>想定変動幅</th><th>過去の決算後の<br>平均の動き</th><th>直近の決算後の動き(%)<br>新しい順</th><th>見方</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>', unsafe_allow_html=True)
+        st.caption("📌は保有銘柄（この画面でのみ判定し、保存しません）。過去の動きは、決算発表の次の取引時間の終値の変化です（引け後の発表は翌営業日、寄り付き前は当日）。"
+                   "想定変動幅は、決算を含む満期のオプション価格から逆算した概算で、方向は示しません。決算日はYahooの予定で、変わることがあります。"
+                   "過去の動きの平均が小さくても、今回大きく動く可能性はあります。売買の指示ではありません。")
+
+
 @st.fragment
 def render_portfolio_fundamentals():
     """📊 保有銘柄の業績推移（EPS・BPS・設備投資）。利益と投資の裏付けがあって株価が上がってきたかを見る。
@@ -41968,6 +42060,7 @@ def render_claude_trading_project():
                     render_holdings_stress_test()
                     render_holdings_selloff_overlap()
                     render_option_implied_moves()
+                    render_earnings_precheck()
                     render_insider_activity()
                     render_ai_judgment_scoreboard()
 
