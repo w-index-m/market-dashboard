@@ -205,6 +205,9 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 | health-monitor.yml (daily) | health_monitor.py | LINE/Slack only when a workflow failed or data is stale | 🩺 Actions & data freshness monitor |
 | selloff-watch.yml (weekdays 22:45 UTC = 07:45 JST) | selloff_watch.py | selloff_log.json（1日1行: グループ別騰落・指数・米10年債・VIX・RSI・ボリンジャー%B・判定。公開データのみ） | 🔎 急落の広がり確認 / 📓 毎日の記録。条件（光通信-3%以下・SMH-3%以下・S&P-1.5%以下・±8%かつ出来高1.8倍・RSIが30/25を新たに下回る）でLINE/Slack通知 |
 | edgar-watch.yml (every 6h) | edgar_watch.py | edgar_watch.json（見つけた書類の一覧のみ） | SEC EDGARで Anthropic のS-1等が公開されたらLINE/Slack通知。**GitHub Secret `EDGAR_CONTACT`（連絡先メール）が必須**（SECはUser-Agentに連絡先が無いと403） |
+| adr-gap-alert.yml | adr_gap_alert.py | （保存なし） | 日本株ADRの円換算が東証終値と3%以上乖離、または日経先物の夜間の動きが1.5%以上でLINE/Slack通知 |
+| hyperscaler-finance.yml (weekly) | precompute_hyperscaler_finance.py | hyperscaler_finance.json（大手6社の四半期の営業CF・設備投資・FCF・債務。yfinance由来） | 💳 AI設備投資の資金繰り |
+| reversal-stats.yml (monthly, 1st) | precompute_reversal_stats.py | reversal_stats.json（SMH/QQQ/光通信バスケットのサイン別成績、個別株RSI検証） | 🧭 反転チェックリストの検証表（無ければ固定の数字にフォールバック） |
 | tokyo-re-index.yml (weekly) | precompute_tokyo_re_index.py | tokyo_re_index.json | MLIT Tokyo residential price index card |
 | longterm-returns.yml (monthly) | precompute_longterm_returns.py | longterm_returns.json | 長期の複利シミュレーション (US stocks/REIT/Treasuries, total return) |
 | fundamentals-cache.yml (Sun/Wed) | precompute_fundamentals.py | **Google Sheet** `fundamentals_cache` tab (private, merged over time so quarterly history grows) | 📊 portfolio fundamentals (EPS/BPS/investment) |
@@ -227,7 +230,7 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 ## Features added 2026-10-15/16 (where to look)
 
 - **ページ上部**: `render_optical_brief`（光通信・AIインフラ株 今日の背景。大きく動いた日だけAIが要約。`data/news_memo.json` の日付・確認状況・出所つきメモを表示し、直近7日分をAIの材料にも渡す。**メモは手動更新**）。
-- **急落まわり**: `render_selloff_breadth`（グループ: 光通信/AIインフラ/半導体大型/メモリ/AIの資金繰り。日韓メモリは参考表示で判定に含めない）、`render_reversal_checklist`（RSI・ボリンジャー・キーリバーサル・VIX・金利・安値からの距離。過去の検証結果は固定値で、`scripts/debug_*study*.py` の出力）、`render_pressure_card`（ギャップ/日中/終値の位置/CMFによる売り買い圧力の推定）、`render_memory_card`。
+- **急落まわり**: `render_selloff_breadth`（グループ: 光通信/AIインフラ/半導体大型/メモリ/AIの資金繰り。日韓メモリは参考表示で判定に含めない）、`render_reversal_checklist`（RSI・ボリンジャー・キーリバーサル・VIX・金利・安値からの距離。検証表は `data/reversal_stats.json` から表示（月1回自動再計算。無ければ固定値）。「下落のタイプ」「読み取れること」の文章は手動の所見で自動更新されない）、`render_pressure_card`（ギャップ/日中/終値の位置/CMFによる売り買い圧力の推定）、`render_memory_card`。
 - **保有まわり（非公開データ）**: `render_holdings_checklist`（自分で決めた損切りラインは非公開Sheet `claude_stoplines`、RSIは画面を開いたときに計算。**保有銘柄はリポジトリに保存しない**）、`render_holdings_selloff_overlap`。
 - **AI出力の検査**: `_grounding_note` / `_with_grounding`（材料に無い数字を警告）、個別株分析は `_check_trade_signal_text` も追加。個別株分析のプロンプトは計算済みの基準値とRSIの固定基準を渡す。Gemini 2.5は内部思考が出力枠を消費するため、`max_output_tokens` は大きめ（3000〜8000）。
 - **モード**: 🌐 `etf_core`（分散成長ETF: VT/VTI/VUG/VIG）を追加。
@@ -240,3 +243,14 @@ Streamlit Cloud's shared IP is throttled by Yahoo for bulk yfinance calls, so he
 - Mutual funds (`_JP_FUND_MAP`, NAV per 10,000 units, `_JP_FUND_NAV_UNIT`) have no daily series; the fund-name alias match is NFKC + casefold (`_normalize_fund_name`).
 - FRED can time out from Actions; CPI falls back to BLS.
 
+
+## Features added 2026-11 (where to look)
+
+- **買収スプレッド**: `render_lite_merger_card` は `data/merger_deals.json`（案件ごとに銘柄・交換比率・現金・発表時価値・プレミアム・完了の想定日）を読む。`_deal_spread_metrics`（純粋関数）で理論価値・スプレッド・年率換算。案件の追加はJSONに追記（最初はMarvell×Lumentum）。
+- **日本株の夜間価格**: `render_jp_night_card`（@st.fragment）。ADRの円換算 = ADR×USDJPY×比率。比率は東証終値から推定し、丸め値（`_ADR_SNAP_RATIOS`）に合わない銘柄は出さない。
+- **決算前チェック**: `render_earnings_precheck`（保有＋`_EARN_WATCH` の決算が近い銘柄。想定変動幅は options_cache、過去の決算後の動きは `_earn_reactions`。保有判定は画面上のみで保存しない）。
+- **AIと電力の地図**: `render_power_map` は `data/power_map.json`（手作業メモ。地域ごとに出所と確認の度合いを付ける）。未調査: SPP・CAISO・日本。
+- **AI設備投資の資金繰り**: `render_ai_capital_card`（`data/hyperscaler_finance.json`）。yfinanceの値は決算書の表示とずれることがあり、決算資料での確認が必要。
+- **EDGAR**: `edgar_watch.py` はAnthropicのS-1/S-1/A/424B4を見つけると、`scripts/s1_extract.py` で本文から該当箇所（売上・損益・取引先の集中・計算資源・資金・リスク）を抜き出して `data/anthropic_s1_extract.json` に保存（本文はフォルダ内で最大のhtm）。Lumentum・Marvellは合併関連書類（8-K/S-4/425/DEFM14A/SC 13D）を監視。
+- **ヘルス監視**: `health_monitor.py` の `content_problems`（急落ログの空・古さ・指数が全て同一・スクリーナー800未満・ニュースメモが14日超）。`edgar-watch.yml` も監視対象。
+- **保有のストレステスト**: `render_holdings_stress_test` / `_stress_impact`（非公開データは画面上でのみ計算）。
