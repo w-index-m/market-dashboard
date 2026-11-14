@@ -1,0 +1,36 @@
+name: Reversal stats (monthly)
+
+on:
+  schedule:
+    - cron: "10 22 1 * *"   # 毎月1日
+  workflow_dispatch:
+
+# 反転チェックリストの「過去の検証結果」を最新の価格で再計算し、data/reversal_stats.json に保存する（公開データ・汎用ティッカーのみ）。
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -q yfinance pandas numpy
+      - name: Recompute
+        run: python scripts/precompute_reversal_stats.py --write
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/reversal_stats.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Update reversal stats"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
