@@ -1,0 +1,351 @@
+{
+ "updated_at": "2026-11-14",
+ "unit": "10億ドル（yfinanceの財務諸表）",
+ "companies": {
+  "MSFT": {
+   "name": "マイクロソフト",
+   "quarters": [
+    {
+     "period": "2026-09-30",
+     "ocf": 58.0,
+     "capex": 39.37,
+     "fcf": 18.63,
+     "debt": 57.2,
+     "cash": 64.29,
+     "lease": 21.72
+    },
+    {
+     "period": "2026-06-30",
+     "ocf": 55.44,
+     "capex": 35.8,
+     "fcf": 19.64,
+     "debt": 56.83,
+     "cash": 76.65,
+     "lease": 16.53
+    },
+    {
+     "period": "2026-03-31",
+     "ocf": 46.68,
+     "capex": 30.88,
+     "fcf": 15.8,
+     "debt": 56.97,
+     "cash": 78.23,
+     "lease": 16.7
+    },
+    {
+     "period": "2025-12-31",
+     "ocf": 35.76,
+     "capex": 29.88,
+     "fcf": 5.88,
+     "debt": 57.61,
+     "cash": 89.46,
+     "lease": 17.34
+    },
+    {
+     "period": "2025-09-30",
+     "ocf": 45.06,
+     "capex": 19.39,
+     "fcf": 25.66,
+     "debt": 60.56,
+     "cash": 102.0,
+     "lease": 17.35
+    },
+    {
+     "period": "2025-06-30",
+     "ocf": null,
+     "capex": null,
+     "fcf": null,
+     "debt": null,
+     "cash": null,
+     "lease": null
+    }
+   ]
+  },
+  "GOOGL": {
+   "name": "アルファベット",
+   "quarters": [
+    {
+     "period": "2026-09-30",
+     "ocf": 42.29,
+     "capex": 51.35,
+     "fcf": -9.06,
+     "debt": 141.92,
+     "cash": 265.1,
+     "lease": 16.82
+    },
+    {
+     "period": "2026-06-30",
+     "ocf": 39.07,
+     "capex": 44.92,
+     "fcf": -5.86,
+     "debt": 112.76,
+     "cash": 242.47,
+     "lease": 14.59
+    },
+    {
+     "period": "2026-03-31",
+     "ocf": 45.79,
+     "capex": 35.67,
+     "fcf": 10.12,
+     "debt": null,
+     "cash": 126.84,
+     "lease": 12.98
+    },
+    {
+     "period": "2025-12-31",
+     "ocf": 52.4,
+     "capex": 27.85,
+     "fcf": 24.55,
+     "debt": null,
+     "cash": 126.84,
+     "lease": 12.74
+    },
+    {
+     "period": "2025-09-30",
+     "ocf": 48.41,
+     "capex": 23.95,
+     "fcf": 24.46,
+     "debt": null,
+     "cash": 98.5,
+     "lease": 12.11
+    },
+    {
+     "period": "2025-06-30",
+     "ocf": null,
+     "capex": null,
+     "fcf": null,
+     "debt": null,
+     "cash": null,
+     "lease": null
+    }
+   ]
+  },
+  "AMZN": {
+   "name": "アマゾン",
+   "quarters": [
+    {
+     "period": "2026-09-30",
+     "ocf": 42.42,
+     "capex": 77.26,
+     "fcf": -34.84,
+     "debt": 271.95,
+     "cash": 114.23,
+     "lease": 98.82
+    },
+    {
+     "period": "2026-03-31",
+     "ocf": 26.03,
+     "capex": 44.2,
+     "fcf": -18.17,
+     "debt": 209.89,
+     "cash": 143.09,
+     "lease": 90.81
+    },
+    {
+     "period": "2025-12-31",
+     "ocf": 54.46,
+     "capex": 39.52,
+     "fcf": 14.94,
+     "debt": 152.99,
+     "cash": 123.03,
+     "lease": 87.34
+    },
+    {
+     "period": "2025-09-30",
+     "ocf": 35.52,
+     "capex": 35.09,
+     "fcf": 0.43,
+     "debt": 135.42,
+     "cash": 94.2,
+     "lease": 84.68
+    },
+    {
+     "period": "2025-06-30",
+     "ocf": 32.52,
+     "capex": 32.18,
+     "fcf": 0.33,
+     "debt": 133.94,
+     "cash": 93.18,
+     "lease": 83.22
+    },
+    {
+     "period": "2025-03-31",
+     "ocf": null,
+     "capex": null,
+     "fcf": null,
+     "debt": null,
+     "cash": null,
+     "lease": null
+    }
+   ]
+  },
+  "META": {
+   "name": "メタ",
+   "quarters": [
+    {
+     "period": "2026-09-30",
+     "ocf": 32.78,
+     "capex": 33.94,
+     "fcf": -1.16,
+     "debt": 114.84,
+     "cash": 82.45,
+     "lease": 31.17
+    },
+    {
+     "period": "2026-06-30",
+     "ocf": 31.86,
+     "capex": 30.12,
+     "fcf": 1.75,
+     "debt": 112.32,
+     "cash": 90.26,
+     "lease": 28.65
+    },
+    {
+     "period": "2026-03-31",
+     "ocf": 32.23,
+     "capex": 19.0,
+     "fcf": 13.23,
+     "debt": 86.77,
+     "cash": 81.18,
+     "lease": 28.02
+    },
+    {
+     "period": "2025-12-31",
+     "ocf": 36.21,
+     "capex": 21.38,
+     "fcf": 14.83,
+     "debt": 83.9,
+     "cash": 81.59,
+     "lease": 25.15
+    },
+    {
+     "period": "2025-09-30",
+     "ocf": 30.0,
+     "capex": 18.83,
+     "fcf": 11.17,
+     "debt": 51.06,
+     "cash": 44.45,
+     "lease": 22.23
+    }
+   ]
+  },
+  "ORCL": {
+   "name": "オラクル",
+   "quarters": [
+    {
+     "period": "2026-08-31",
+     "ocf": 23.1,
+     "capex": 28.5,
+     "fcf": -5.4,
+     "debt": 155.93,
+     "cash": 37.08,
+     "lease": 30.59
+    },
+    {
+     "period": "2026-05-31",
+     "ocf": 14.62,
+     "capex": 16.49,
+     "fcf": -1.87,
+     "debt": 156.19,
+     "cash": 31.89,
+     "lease": 26.65
+    },
+    {
+     "period": "2026-02-28",
+     "ocf": 7.15,
+     "capex": 18.64,
+     "fcf": -11.48,
+     "debt": 153.12,
+     "cash": 39.13,
+     "lease": 18.51
+    },
+    {
+     "period": "2025-11-30",
+     "ocf": 2.07,
+     "capex": 12.03,
+     "fcf": -9.97,
+     "debt": 124.39,
+     "cash": 19.77,
+     "lease": 16.31
+    },
+    {
+     "period": "2025-08-31",
+     "ocf": 8.14,
+     "capex": 8.5,
+     "fcf": -0.36,
+     "debt": 105.41,
+     "cash": 11.01,
+     "lease": 14.09
+    },
+    {
+     "period": "2025-05-31",
+     "ocf": null,
+     "capex": null,
+     "fcf": null,
+     "debt": null,
+     "cash": null,
+     "lease": null
+    }
+   ]
+  },
+  "CRWV": {
+   "name": "コアウィーブ",
+   "quarters": [
+    {
+     "period": "2026-09-30",
+     "ocf": 1.98,
+     "capex": 9.44,
+     "fcf": -7.47,
+     "debt": 66.22,
+     "cash": 4.18,
+     "lease": 19.35
+    },
+    {
+     "period": "2026-06-30",
+     "ocf": 0.68,
+     "capex": 6.42,
+     "fcf": -5.74,
+     "debt": 51.61,
+     "cash": 5.54,
+     "lease": 16.54
+    },
+    {
+     "period": "2026-03-31",
+     "ocf": 2.98,
+     "capex": 7.7,
+     "fcf": -4.71,
+     "debt": 35.15,
+     "cash": 2.27,
+     "lease": 10.29
+    },
+    {
+     "period": "2025-12-31",
+     "ocf": 1.56,
+     "capex": 4.06,
+     "fcf": -2.5,
+     "debt": 29.82,
+     "cash": 3.16,
+     "lease": 8.45
+    },
+    {
+     "period": "2025-09-30",
+     "ocf": 1.69,
+     "capex": 2.39,
+     "fcf": -0.7,
+     "debt": 18.81,
+     "cash": 1.94,
+     "lease": 4.77
+    },
+    {
+     "period": "2025-06-30",
+     "ocf": null,
+     "capex": null,
+     "fcf": null,
+     "debt": null,
+     "cash": null,
+     "lease": null
+    }
+   ]
+  }
+ }
+}
