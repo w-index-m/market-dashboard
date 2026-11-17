@@ -1,0 +1,51 @@
+{
+ "source": "https://www.sec.gov/Archives/edgar/data/2130357/000162828026074338/anthropicpbc-sx1ax3.htm",
+ "extracted_at": "2026-11-17T20:57:21Z",
+ "length": 14896158,
+ "topics": {
+  "売上": [
+   "and our revenue increased from $197 million for the three months ended December 31, 2024 to $17.0 billion for",
+   "$1 million or more of revenue on a TTM basis and approximately 250 customers with $10 million or more of",
+   "Our revenue was $33.2 billion for the nine months ended September 30, 2026 , up from $2.5 billion for the nine",
+   "Consumption-based revenue increased from $288 million, or 75% of total revenue, for the year ended",
+   "30% of the Global 2000 were customers with $100,000 or more of revenue on a TTM basis as of September 30,"
+  ],
+  "損益": [
+   "Our operating loss was $1.3 billion for the nine months ended September",
+   "Our operating loss was $567 million for the three months ended September 30, 2026 , compared to an operating",
+   "We incurred an operating loss of $567",
+   "• Our operating margin was (3)% and operating loss was $567 million for the three months ended",
+   "September 30, 2026, compared to an operating margin of (224)% and operating loss of $3.1 billion for"
+  ],
+  "取引先の集中": [
+   "generated from sales to customers through CSP marketplaces represented approximately 11% , 32% , 47% , and",
+   "revenue from such customers represented approximately 5% to 7% of our revenue for the nine months ended",
+   "(unaudited), net accounts receivable from sales through CSP marketplaces to customers represented 42% , 60% ,",
+   "customers represented approximately 25% of our revenue for the nine months ended September 30, 2026.",
+   "No single customer represented more than 10% of our revenue for the nine"
+  ],
+  "計算資源・クラウド契約": [
+   "up to $77.0 billion in available financing capacity under our NPAs and up to $5.0 billion in equity commitments",
+   "Compute and infrastructure expenses for the year ended December 31, 2025 increased by $4.8 billion, or 190% ,",
+   "Compute and infrastructure expenses for the year ended December 31, 2024 increased by $2.1 billion, or 482%,",
+   "partially offset by the delivery of additional compute, including $5.0 billion of compute under short-term",
+   "additional compute, which includes $6.5 billion of compute under short-term commitments for the nine"
+  ],
+  "資金・株式": [
+   "exercise proceeds of approximately $5.2 billion are used to repurchase shares of Class A common stock at the assumed initial public offering price of $74.00 per share, which is the",
+   "Each $1.00 increase or decrease in the assumed initial public offering price of $74.00 per share, which is the",
+   "(1) Each $1.00 increase or decrease in the assumed initial public offering price of $74.00 per share, which is the midpoint of the",
+   "(2) Each $1.00 increase or decrease in the assumed initial public offering price of $74.00 per share, which is the midpoint of the",
+   "90.3% and our new investors would own 7.0% of the total number of shares of our Class A common stock and"
+  ],
+  "主なリスク": [
+   "We have incurred net losses in each year since our founding, including net losses of $1.5 billion , $8.3 billion ,",
+   "commenced, with an aggregate committed spend of a pproximately $900.9 billion , substantially all of which is",
+   "committed spend of approximately $900.9 billion , substantially all of which is related to compute and",
+   "commenced, with an aggregate committed spend of approximately $900.9 billion , substantially all of which is",
+   "incurred before December 31, 2030, and substantially all of the remainder is expected to be incurred between"
+  ]
+ },
+ "form": "S-1/A",
+ "filed": "2026-11-17"
+}
