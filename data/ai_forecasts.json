@@ -5849,7 +5849,143 @@
     "usdjpy": "down"
    },
    "scenario": "急落後の自律反発と長期金利の頭打ちで株は反発、日米金利差縮小で円高。"
+  },
+  {
+   "id": "2026-11-21-groq",
+   "date": "2026-11-21",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 6910.39,
+     "chg20_pct": -9.36,
+     "date": "2026-11-20"
+    },
+    "nikkei": {
+     "value": 56436.648,
+     "chg20_pct": -10.29,
+     "date": "2026-11-20"
+    },
+    "tnx": {
+     "value": 4.912,
+     "chg20_pct": -1.52,
+     "date": "2026-11-20"
+    },
+    "usdjpy": {
+     "value": 159.707,
+     "chg20_pct": 2.05,
+     "date": "2026-11-20"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "金利低下と企業収益回復で株価上昇、円は米国金利差縮小で弱含み。"
+  },
+  {
+   "id": "2026-11-21-mistral",
+   "date": "2026-11-21",
+   "model": "Mistral (open-mistral-nemo)",
+   "snapshot": {
+    "sp500": {
+     "value": 6910.39,
+     "chg20_pct": -9.36,
+     "date": "2026-11-20"
+    },
+    "nikkei": {
+     "value": 56436.648,
+     "chg20_pct": -10.29,
+     "date": "2026-11-20"
+    },
+    "tnx": {
+     "value": 4.912,
+     "chg20_pct": -1.52,
+     "date": "2026-11-20"
+    },
+    "usdjpy": {
+     "value": 159.707,
+     "chg20_pct": 2.05,
+     "date": "2026-11-20"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "up"
+   },
+   "scenario": "Fedの利下げ期待強まり、米景気減速懸念で長期金利低下。米株高、日経もリスクオン。ドル円は日銀の金融緩和継続と米利下げ先行で円安。"
+  },
+  {
+   "id": "2026-11-21-nvidia",
+   "date": "2026-11-21",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 6910.39,
+     "chg20_pct": -9.36,
+     "date": "2026-11-20"
+    },
+    "nikkei": {
+     "value": 56436.648,
+     "chg20_pct": -10.29,
+     "date": "2026-11-20"
+    },
+    "tnx": {
+     "value": 4.912,
+     "chg20_pct": -1.52,
+     "date": "2026-11-20"
+    },
+    "usdjpy": {
+     "value": 159.707,
+     "chg20_pct": 2.05,
+     "date": "2026-11-20"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "急落の反動で自律反発、米景気減速懸念で長期金利低下、日銀介入警戒・日米金利差縮小で円高進行"
+  },
+  {
+   "id": "2026-11-21-openrouter",
+   "date": "2026-11-21",
+   "model": "OpenRouter (inclusionai/ling-3.2-flash:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 6910.39,
+     "chg20_pct": -9.36,
+     "date": "2026-11-20"
+    },
+    "nikkei": {
+     "value": 56436.648,
+     "chg20_pct": -10.29,
+     "date": "2026-11-20"
+    },
+    "tnx": {
+     "value": 4.912,
+     "chg20_pct": -1.52,
+     "date": "2026-11-20"
+    },
+    "usdjpy": {
+     "value": 159.707,
+     "chg20_pct": 2.05,
+     "date": "2026-11-20"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "急落で過熱が解消され景気減速への利下げ期待が強まれば株はリバウンド。米債利回りは低下、円は対ドルでやや円高へ。"
   }
  ],
- "updated_at": "2026-11-20T03:41:41Z"
+ "updated_at": "2026-11-21T03:25:57Z"
 }
