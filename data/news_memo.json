@@ -1,7 +1,26 @@
 {
- "updated_at": "2026-11-15",
+ "updated_at": "2026-11-23",
  "note": "報道で確認できた内容を、日付と出所つきで手動でまとめたメモ。公開データのみ。数値は報道ごとに食い違うことがある。",
  "items": [
+  {
+   "date": "2026-11-23",
+   "title": "NVIDIAがフアン氏をCEOに復帰させ、株価が急騰（取引時間中に約+26〜33%）",
+   "summary": "取締役会がジェンセン・フアン氏を社長兼CEOに復帰させた（複数の報道）。トランプ大統領が取締役会に復帰を求めていたと報じられた。前週末（11/20）のNVIDIA終値は125.53ドル（前日比-14%、週間約-23%）で、半導体株は2001年以来最悪の週と報じられた。この日は半導体・光・ネオクラウド株が広く急反発。独立調査は継続中と報じられている。",
+   "status": "複数の報道で確認（会社の発表文・8-Kは未確認）",
+   "sources": [
+    "https://finance.yahoo.com/markets/live/stock-market-today-monday-november-23-dow-sp-500-nasdaq-nvidia-reinstates-jensen-huang-141511975.html",
+    "https://www.benzinga.com/trading-ideas/movers/26/11/63526761/nvidia-stock-soars-as-jensen-huang-returns-as-ceo"
+   ]
+  },
+  {
+   "date": "2026-11-17",
+   "title": "NVIDIA 2027年度第3四半期決算：売上1,158億ドル（+103%）、次の四半期の見通し1,300億ドル",
+   "summary": "会社発表：売上1,158億ドル（前年比+103%、市場予想約1,091億ドル）、データセンター1,076億ドル（+110%）、粗利率74.8%（GAAP）。第4四半期（1週間多い）の売上見通しは1,300億ドル±3%、中国向けデータセンター売上は見込まない。暫定CEOクレス氏は、2028年度の売上成長を約75%（従来70%）と説明（報道）。決算は良かったが、その後の週に株価は大きく下落した。",
+   "status": "会社の発表文で確認（2028年度の見通しは報道）",
+   "sources": [
+    "https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-Announces-Financial-Results-for-Third-Quarter-Fiscal-2027/default.aspx"
+   ]
+  },
   {
    "date": "2026-11-12",
    "title": "NVIDIAのジェンセン・フアンCEOが即日辞任、CFOのコレット・クレス氏が暫定CEOに",
