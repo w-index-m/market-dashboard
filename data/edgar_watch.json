@@ -144,17 +144,22 @@
    "title": "S-1/A Anthropic, PBC  (ANT)  (CIK 0002130357)",
    "url": "https://www.sec.gov/Archives/edgar/data/2130357/000162828026074338/",
    "date": "2026-11-17"
+  },
+  "0001628280-26-075535": {
+   "title": "8-K Lumentum Holdings Inc.  (LITE)  (CIK 0001633978)",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000162828026075535/",
+   "date": "2026-11-23"
   }
  },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-17T20:57:19Z",
+ "last_check": "2026-11-23T23:55:19Z",
  "diag": [
   "fts:Anthropic:200:19",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
   "atom:Anthropic:424B4:200:0",
-  "fts:Lumentum:200:25",
+  "fts:Lumentum:200:26",
   "fts:Marvell:200:20"
  ]
 }
