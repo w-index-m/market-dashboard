@@ -158,12 +158,12 @@
  },
  "log": [],
  "initialized": true,
- "last_check": "2026-11-24T22:28:55Z",
+ "last_check": "2026-11-26T21:35:03Z",
  "diag": [
   "fts:Anthropic:200:19",
   "atom:Anthropic:S-1:200:0",
   "atom:Anthropic:S-1/A:200:0",
-  "atom:Anthropic:424B4:200:0",
+  "atom:Anthropic:424B4:ERR:ReadTimeout",
   "fts:Lumentum:200:27",
   "fts:Marvell:200:20"
  ]
