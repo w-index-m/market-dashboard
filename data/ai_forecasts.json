@@ -6759,7 +6759,109 @@
     "usdjpy": "down"
    },
    "scenario": "景気後退懸念で株安・債券高進むも、売られすぎ感から反発。介入警戒と日米金利差縮小で円高進行。"
+  },
+  {
+   "id": "2026-11-27-groq",
+   "date": "2026-11-27",
+   "model": "Groq (openai/gpt-oss-20b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7182.78,
+     "chg20_pct": -7.25,
+     "date": "2026-11-25"
+    },
+    "nikkei": {
+     "value": 58536.488,
+     "chg20_pct": -8.47,
+     "date": "2026-11-27"
+    },
+    "tnx": {
+     "value": 4.848,
+     "chg20_pct": -3.9,
+     "date": "2026-11-25"
+    },
+    "usdjpy": {
+     "value": 159.219,
+     "chg20_pct": 0.9,
+     "date": "2026-11-27"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米国景気回復期待と金利引き下げで株価上昇、円安圧力緩和"
+  },
+  {
+   "id": "2026-11-27-nvidia",
+   "date": "2026-11-27",
+   "model": "NVIDIA (nvidia/nemotron-3-ultra-550b-a55b)",
+   "snapshot": {
+    "sp500": {
+     "value": 7182.78,
+     "chg20_pct": -7.25,
+     "date": "2026-11-25"
+    },
+    "nikkei": {
+     "value": 58536.488,
+     "chg20_pct": -8.47,
+     "date": "2026-11-27"
+    },
+    "tnx": {
+     "value": 4.848,
+     "chg20_pct": -3.9,
+     "date": "2026-11-25"
+    },
+    "usdjpy": {
+     "value": 159.219,
+     "chg20_pct": 0.9,
+     "date": "2026-11-27"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "down",
+    "usdjpy": "down"
+   },
+   "scenario": "米利下げ期待と日銀利上げ観測で日米金利差縮小。過売り修正で株高、円高進行。"
+  },
+  {
+   "id": "2026-11-27-openrouter",
+   "date": "2026-11-27",
+   "model": "OpenRouter (particle-ai/particle-1:free)",
+   "snapshot": {
+    "sp500": {
+     "value": 7182.78,
+     "chg20_pct": -7.25,
+     "date": "2026-11-25"
+    },
+    "nikkei": {
+     "value": 58536.488,
+     "chg20_pct": -8.47,
+     "date": "2026-11-27"
+    },
+    "tnx": {
+     "value": 4.848,
+     "chg20_pct": -3.9,
+     "date": "2026-11-25"
+    },
+    "usdjpy": {
+     "value": 159.219,
+     "chg20_pct": 0.9,
+     "date": "2026-11-27"
+    }
+   },
+   "calls": {
+    "sp500": "up",
+    "nikkei": "up",
+    "tnx": "up",
+    "usdjpy": "down"
+   },
+   "scenario": "株安と金利低下で過度なリスクオフが一巡し、株は反発、米金利は持ち直す。円は介入警戒でやや円高。"
   }
  ],
- "updated_at": "2026-11-26T04:19:26Z"
+ "updated_at": "2026-11-27T04:29:27Z"
 }
